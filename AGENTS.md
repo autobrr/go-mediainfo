@@ -16,6 +16,9 @@ Owner: soup
 - Stub core: parsing not implemented yet
 - Upstream C++ tree kept untracked via root .gitignore
 - Post-parity target: MediaInfo issue #760 (DVD IFO language/runtime regression)
+- `--output` without "=" treated as filename (matches upstream)
+- `--` alone is a no-op (ignored)
+- `--help` prints version line then usage
 
 ## Notes
 - Update this file as we learn more about CLI behavior, formats, and edge cases.

@@ -46,16 +46,16 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		case normalized == "--full" || normalized == "-f":
 			opts.Full = true
 		case normalized == "--help" || normalized == "-h":
-			Help(program, stdout)
+			HelpCommand(program, stdout)
 			return exitOK
 		case strings.HasPrefix(normalized, "--help-"):
 			return helpTopic(normalized, program, stdout)
 		case normalized == "--info-parameters":
 			fmt.Fprintln(stderr, "Info-Parameters not implemented yet")
-			return exitError
+			return exitOK
 		case normalized == "--info-canhandleurls":
 			fmt.Fprintln(stderr, "Info-CanHandleUrls not implemented yet")
-			return exitError
+			return exitOK
 		case strings.HasPrefix(normalized, "--language"):
 			if value, ok := valueAfterEqual(original); ok {
 				opts.Language = value
@@ -71,6 +71,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 				HelpOutput(program, stdout)
 				return exitError
 			}
+		case strings.HasPrefix(normalized, "--output"):
+			files = append(files, original)
 		case strings.HasPrefix(normalized, "--logfile"):
 			opts.LogFile = valueAfterLogfile(original)
 		case normalized == "--bom":
@@ -79,7 +81,13 @@ func Run(args []string, stdout, stderr io.Writer) int {
 			Version(stdout)
 			return exitOK
 		case strings.HasPrefix(normalized, "--"):
+			if normalized == "--" {
+				continue
+			}
 			name, value := parseCoreOption(normalized, original)
+			if name == "" {
+				continue
+			}
 			opts.CoreOptions = append(opts.CoreOptions, CoreOption{Name: name, Value: value})
 		default:
 			files = append(files, original)

@@ -6,6 +6,7 @@ import (
 )
 
 func Help(program string, stdout io.Writer) {
+	Version(stdout)
 	fmt.Fprintf(stdout, "Usage: \"%s [-Options...] FileName1 [Filename2...]\"\n", program)
 	fmt.Fprintln(stdout, "")
 	fmt.Fprintln(stdout, "Options:")
@@ -141,6 +142,10 @@ func Help(program string, stdout io.Writer) {
 	fmt.Fprintln(stdout, "                    Does not verify the authenticity of the peer")
 	fmt.Fprintln(stdout, "                    (you don't need to accept the key with ssh first)")
 	fmt.Fprintln(stdout, "                    Use it at your own risks")
+}
+
+func HelpCommand(program string, stdout io.Writer) {
+	Help(program, stdout)
 }
 
 func HelpNothing(program string, stdout io.Writer) {
