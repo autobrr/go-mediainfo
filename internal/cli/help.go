@@ -168,7 +168,7 @@ func HelpOutput(program string, stdout io.Writer) {
 	fmt.Fprintf(stdout, "Usage: \"%s --Output=file://Text.txt FileName\"\n", program)
 	fmt.Fprintln(stdout, "and Text.txt contains")
 	fmt.Fprintln(stdout, "\"Video;%DisplayAspectRatio%\"  for Video Aspect Ratio.")
-	fmt.Fprintln(stdout, "\"Audio;%Format%\"              for Audio Format.")
+	fmt.Fprintf(stdout, "\"Audio;%%Format%%\"              for Audio Format.\n")
 }
 
 func Usage(program string, stdout io.Writer) int {
