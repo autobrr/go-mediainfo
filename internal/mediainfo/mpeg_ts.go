@@ -12,6 +12,7 @@ type tsStream struct {
 	format string
 	frames uint64
 	bytes  uint64
+	pts    ptsTracker
 }
 
 func ParseMPEGTS(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, bool) {
@@ -23,12 +24,8 @@ func ParseMPEGTS(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, bool)
 
 	var pmtPID uint16
 	streams := map[uint16]tsStream{}
-	var firstPTSVideo uint64
-	var lastPTSVideo uint64
-	var hasPTSVideo bool
-	var firstPTSAny uint64
-	var lastPTSAny uint64
-	var hasPTSAny bool
+	var videoPTS ptsTracker
+	var anyPTS ptsTracker
 	videoPIDs := map[uint16]struct{}{}
 
 	packet := make([]byte, 188)
@@ -88,31 +85,20 @@ func ParseMPEGTS(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, bool)
 		if !ok {
 			continue
 		}
-		if !hasPTSAny {
-			firstPTSAny = pts
-			lastPTSAny = pts
-			hasPTSAny = true
-		} else {
-			lastPTSAny = pts
-		}
+		anyPTS.add(pts)
 
 		if _, ok := videoPIDs[pid]; ok {
 			entry := streams[pid]
 			entry.frames++
 			entry.bytes += uint64(len(payload))
+			entry.pts.add(pts)
 			streams[pid] = entry
-			if !hasPTSVideo {
-				firstPTSVideo = pts
-				lastPTSVideo = pts
-				hasPTSVideo = true
-			} else {
-				lastPTSVideo = pts
-			}
+			videoPTS.add(pts)
 		}
 	}
 
 	var streamsOut []Stream
-	videoDuration := durationFromPTS(firstPTSVideo, lastPTSVideo, hasPTSVideo)
+	videoDuration := videoPTS.duration()
 	for _, st := range streams {
 		fields := []Field{{Name: "ID", Value: formatStreamID(st.pid)}}
 		if st.format != "" {
@@ -131,13 +117,18 @@ func ParseMPEGTS(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, bool)
 				fields = append(fields, Field{Name: "Frame rate", Value: rate})
 			}
 		}
+		if st.kind != StreamVideo {
+			if duration := st.pts.duration(); duration > 0 {
+				fields = addStreamDuration(fields, duration)
+			}
+		}
 		streamsOut = append(streamsOut, Stream{Kind: st.kind, Fields: fields})
 	}
 
 	info := ContainerInfo{}
-	if duration := durationFromPTS(firstPTSVideo, lastPTSVideo, hasPTSVideo); duration > 0 {
+	if duration := videoPTS.duration(); duration > 0 {
 		info.DurationSeconds = duration
-	} else if duration := durationFromPTS(firstPTSAny, lastPTSAny, hasPTSAny); duration > 0 {
+	} else if duration := anyPTS.duration(); duration > 0 {
 		info.DurationSeconds = duration
 	}
 

@@ -6,4 +6,5 @@ type psStream struct {
 	format string
 	bytes  uint64
 	frames uint64
+	pts    ptsTracker
 }

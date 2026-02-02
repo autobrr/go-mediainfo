@@ -41,6 +41,7 @@ Owner: soup
 - MPEG-PS: per-stream IDs surfaced; JSON multi-file now outputs media list
 - MPEG-PS: estimate frame rate from video PTS count vs duration
 - Bit rate mode now emitted when bitrate is computed
+- TS/PS: per-stream PTS tracking for non-video durations
 
 ## Notes
 - Update this file as we learn more about CLI behavior, formats, and edge cases.
