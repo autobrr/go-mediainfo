@@ -68,6 +68,9 @@ func ParseMPEGPS(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, bool)
 					} else {
 						lastPTSVideo = pts
 					}
+					entry := streams[streamID]
+					entry.frames++
+					streams[streamID] = entry
 				}
 			}
 			if len(chunk) > 16 {
@@ -100,6 +103,11 @@ func ParseMPEGPS(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, bool)
 				if st, ok := findPSStreamByKind(streams, StreamVideo); ok && st.bytes > 0 {
 					bits := (float64(st.bytes) * 8) / duration
 					streamsOut[i].Fields = addStreamBitrate(streamsOut[i].Fields, bits)
+					if st.frames > 0 {
+						if rate := estimateTSFrameRate(st.frames, duration); rate != "" {
+							streamsOut[i].Fields = appendFieldUnique(streamsOut[i].Fields, Field{Name: "Frame rate", Value: rate})
+						}
+					}
 				}
 			}
 		}

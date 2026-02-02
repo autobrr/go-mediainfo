@@ -39,6 +39,7 @@ Owner: soup
 - MPEG-TS: estimate frame rate from video PES count vs PTS span
 - MPEG-TS/MPEG-PS: add video stream duration + bitrate (best-effort)
 - MPEG-PS: per-stream IDs surfaced; JSON multi-file now outputs media list
+- MPEG-PS: estimate frame rate from video PTS count vs duration
 
 ## Notes
 - Update this file as we learn more about CLI behavior, formats, and edge cases.

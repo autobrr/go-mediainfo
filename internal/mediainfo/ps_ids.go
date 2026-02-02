@@ -5,4 +5,5 @@ type psStream struct {
 	kind   StreamKind
 	format string
 	bytes  uint64
+	frames uint64
 }
