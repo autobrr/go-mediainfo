@@ -46,7 +46,11 @@ func AnalyzeFile(path string) (Report, error) {
 					fields = appendFieldUnique(fields, field)
 				}
 				if track.DurationSeconds > 0 && track.Kind != StreamVideo {
-					fields = addStreamDuration(fields, track.DurationSeconds)
+					bits := 0.0
+					if track.SampleBytes > 0 {
+						bits = (float64(track.SampleBytes) * 8) / track.DurationSeconds
+					}
+					fields = addStreamCommon(fields, track.DurationSeconds, bits)
 				}
 				if track.Kind == StreamVideo && track.SampleCount > 0 && track.DurationSeconds > 0 {
 					rate := float64(track.SampleCount) / track.DurationSeconds

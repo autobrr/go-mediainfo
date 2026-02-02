@@ -12,6 +12,7 @@ type MP4Track struct {
 	Format          string
 	Fields          []Field
 	SampleCount     uint64
+	SampleBytes     uint64
 	DurationSeconds float64
 }
 
@@ -229,6 +230,7 @@ func parseMdia(buf []byte) (MP4Track, bool) {
 		Format:          format,
 		Fields:          sampleInfo.Fields,
 		SampleCount:     sampleInfo.SampleCount,
+		SampleBytes:     sampleInfo.SampleBytes,
 		DurationSeconds: trackDuration,
 	}, true
 }
@@ -295,6 +297,12 @@ func parseStbl(buf []byte) (SampleInfo, bool) {
 			payload := sliceBox(buf, dataOffset, boxSize-headerSize)
 			if count, ok := parseStts(payload); ok {
 				info.SampleCount = count
+			}
+		}
+		if boxType == "stsz" {
+			payload := sliceBox(buf, dataOffset, boxSize-headerSize)
+			if total, ok := parseStsz(payload); ok {
+				info.SampleBytes = total
 			}
 		}
 		offset += boxSize

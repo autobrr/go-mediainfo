@@ -6,6 +6,7 @@ type SampleInfo struct {
 	Format      string
 	Fields      []Field
 	SampleCount uint64
+	SampleBytes uint64
 }
 
 func parseStsdForSample(buf []byte) (SampleInfo, bool) {

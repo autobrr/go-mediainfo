@@ -46,6 +46,7 @@ Owner: soup
 - JSON track ordering now stable; MP4/MKV audio durations added
 - Channel layout now emitted for common channel counts
 - JSON field ordering now matches CLI ordering
+- MP4 audio bitrate estimated from sample sizes + duration
 
 ## Notes
 - Update this file as we learn more about CLI behavior, formats, and edge cases.
