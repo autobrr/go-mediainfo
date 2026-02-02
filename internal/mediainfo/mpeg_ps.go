@@ -102,6 +102,9 @@ func ParseMPEGPS(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, bool)
 				streamsOut[i].Fields = addStreamDuration(streamsOut[i].Fields, duration)
 				if st, ok := findPSStreamByKind(streams, StreamVideo); ok && st.bytes > 0 {
 					bits := (float64(st.bytes) * 8) / duration
+					if mode := bitrateMode(bits); mode != "" {
+						streamsOut[i].Fields = appendFieldUnique(streamsOut[i].Fields, Field{Name: "Bit rate mode", Value: mode})
+					}
 					streamsOut[i].Fields = addStreamBitrate(streamsOut[i].Fields, bits)
 					if st.frames > 0 {
 						if rate := estimateTSFrameRate(st.frames, duration); rate != "" {

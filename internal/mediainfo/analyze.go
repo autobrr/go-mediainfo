@@ -75,6 +75,10 @@ func AnalyzeFile(path string) (Report, error) {
 		general.Fields = append(general.Fields, Field{Name: "Duration", Value: formatDuration(info.DurationSeconds)})
 		bitrate := float64(stat.Size()*8) / info.DurationSeconds
 		if bitrate > 0 {
+			mode := bitrateMode(bitrate)
+			if mode != "" {
+				general.Fields = append(general.Fields, Field{Name: "Overall bit rate mode", Value: mode})
+			}
 			general.Fields = append(general.Fields, Field{Name: "Overall bit rate", Value: formatBitrate(bitrate)})
 		}
 	}
