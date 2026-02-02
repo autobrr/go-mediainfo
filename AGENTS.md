@@ -48,6 +48,7 @@ Owner: soup
 - JSON field ordering now matches CLI ordering
 - MP4 audio bitrate estimated from sample sizes + duration
 - Matroska BitRate element parsed into stream Bit rate
+- XML/HTML output renderers added (basic)
 
 ## Notes
 - Update this file as we learn more about CLI behavior, formats, and edge cases.

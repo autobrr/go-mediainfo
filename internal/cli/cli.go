@@ -206,7 +206,7 @@ func writeLogFile(path, output string, includeBOM bool) error {
 }
 
 func runCore(opts Options, files []string) (string, int, error) {
-	if opts.Output != "" && !strings.EqualFold(opts.Output, "Text") && !strings.EqualFold(opts.Output, "JSON") {
+	if opts.Output != "" && !strings.EqualFold(opts.Output, "Text") && !strings.EqualFold(opts.Output, "JSON") && !strings.EqualFold(opts.Output, "XML") && !strings.EqualFold(opts.Output, "HTML") {
 		return "", 0, fmt.Errorf("output format not implemented: %s", opts.Output)
 	}
 
@@ -217,6 +217,12 @@ func runCore(opts Options, files []string) (string, int, error) {
 
 	if strings.EqualFold(opts.Output, "JSON") {
 		return mediainfo.RenderJSON(reports), count, nil
+	}
+	if strings.EqualFold(opts.Output, "XML") {
+		return mediainfo.RenderXML(reports), count, nil
+	}
+	if strings.EqualFold(opts.Output, "HTML") {
+		return mediainfo.RenderHTML(reports), count, nil
 	}
 	return mediainfo.RenderText(reports), count, nil
 }
