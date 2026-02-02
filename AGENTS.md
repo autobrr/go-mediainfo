@@ -56,6 +56,9 @@ Owner: soup
 - Graph DOT/SVG outputs added (empty)
 - CSV/XML/HTML now include stream numbering titles
 - XML field names sanitized for valid tags (spaces -> _)
+- Upstream build needs autoconf/automake/libtool/pkg-config; use PATH "/opt/homebrew/opt/libtool/libexec/gnubin" for glibtoolize
+- Built CLI binary at `~/github/oss/mediainfo-build/MediaInfo/Project/GNU/CLI/mediainfo`
+- `--info-canhandleurls` prints libcurl-disabled message when built without libcurl
 
 ## Notes
 - Update this file as we learn more about CLI behavior, formats, and edge cases.
