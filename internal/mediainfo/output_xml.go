@@ -41,18 +41,18 @@ func RenderXML(reports []Report) string {
 
 func buildXMLReport(report Report) xmlReport {
 	tracks := make([]xmlTrack, 0, len(report.Streams)+1)
-	tracks = append(tracks, buildXMLTrack(report.General))
-	for _, stream := range orderTracks(report.Streams) {
-		tracks = append(tracks, buildXMLTrack(stream))
+	tracks = append(tracks, buildXMLTrack("General", report.General))
+	for _, entry := range enumerateStreams(report.Streams) {
+		tracks = append(tracks, buildXMLTrack(entry.Title, entry.Stream))
 	}
 	return xmlReport{Ref: report.Ref, Track: tracks}
 }
 
-func buildXMLTrack(stream Stream) xmlTrack {
+func buildXMLTrack(title string, stream Stream) xmlTrack {
 	fields := orderFieldsForJSON(stream.Kind, stream.Fields)
 	xmlFields := make([]xmlField, 0, len(fields))
 	for _, field := range fields {
 		xmlFields = append(xmlFields, xmlField{XMLName: xml.Name{Local: field.Name}, Value: field.Value})
 	}
-	return xmlTrack{Type: string(stream.Kind), Fields: xmlFields}
+	return xmlTrack{Type: title, Fields: xmlFields}
 }
