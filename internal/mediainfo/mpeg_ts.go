@@ -105,14 +105,11 @@ func ParseMPEGTS(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, bool)
 			fields = append(fields, Field{Name: "Format", Value: st.format})
 		}
 		if st.kind == StreamVideo && videoDuration > 0 {
-			fields = addStreamDuration(fields, videoDuration)
+			bits := 0.0
 			if st.bytes > 0 {
-				bits := (float64(st.bytes) * 8) / videoDuration
-				if mode := bitrateMode(bits); mode != "" {
-					fields = appendFieldUnique(fields, Field{Name: "Bit rate mode", Value: mode})
-				}
-				fields = addStreamBitrate(fields, bits)
+				bits = (float64(st.bytes) * 8) / videoDuration
 			}
+			fields = addStreamCommon(fields, videoDuration, bits)
 			if rate := estimateTSFrameRate(st.frames, videoDuration); rate != "" {
 				fields = append(fields, Field{Name: "Frame rate", Value: rate})
 			}

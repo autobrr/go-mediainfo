@@ -42,6 +42,7 @@ Owner: soup
 - MPEG-PS: estimate frame rate from video PTS count vs duration
 - Bit rate mode now emitted when bitrate is computed
 - TS/PS: per-stream PTS tracking for non-video durations
+- Stream common helper added for duration/bitrate fields
 
 ## Notes
 - Update this file as we learn more about CLI behavior, formats, and edge cases.
