@@ -22,6 +22,8 @@ Owner: soup
 - Core analyzer implemented (General stream only): format sniff + file size
 - Text output aligns with MediaInfo-style label/value columns
 - JSON output implemented (minimal MediaInfo-like shape)
+- MP4/MOV: parse `moov/mvhd` for duration; compute overall bitrate
+- Matroska: parse Segment/Info for duration using TimecodeScale
 
 ## Notes
 - Update this file as we learn more about CLI behavior, formats, and edge cases.

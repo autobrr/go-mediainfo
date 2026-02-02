@@ -31,6 +31,26 @@ func AnalyzeFile(path string) (Report, error) {
 		Field{Name: "File size", Value: formatBytes(stat.Size())},
 	)
 
+	info := ContainerInfo{}
+	switch format {
+	case "MPEG-4", "QuickTime":
+		if parsed, ok := ParseMP4(file, stat.Size()); ok {
+			info = parsed
+		}
+	case "Matroska":
+		if parsed, ok := ParseMatroska(file, stat.Size()); ok {
+			info = parsed
+		}
+	}
+
+	if info.HasDuration() {
+		general.Fields = append(general.Fields, Field{Name: "Duration", Value: formatDuration(info.DurationSeconds)})
+		bitrate := float64(stat.Size()*8) / info.DurationSeconds
+		if bitrate > 0 {
+			general.Fields = append(general.Fields, Field{Name: "Overall bit rate", Value: formatBitrate(bitrate)})
+		}
+	}
+
 	return Report{
 		Ref:     path,
 		General: general,
