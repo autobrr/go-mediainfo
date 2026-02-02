@@ -32,6 +32,7 @@ func AnalyzeFile(path string) (Report, error) {
 	)
 
 	info := ContainerInfo{}
+	streams := []Stream{}
 	switch format {
 	case "MPEG-4", "QuickTime":
 		if parsed, ok := ParseMP4(file, stat.Size()); ok {
@@ -40,6 +41,16 @@ func AnalyzeFile(path string) (Report, error) {
 	case "Matroska":
 		if parsed, ok := ParseMatroska(file, stat.Size()); ok {
 			info = parsed
+		}
+	case "MPEG-TS":
+		if parsedInfo, parsedStreams, ok := ParseMPEGTS(file, stat.Size()); ok {
+			info = parsedInfo
+			streams = parsedStreams
+		}
+	case "MPEG-PS":
+		if parsedInfo, parsedStreams, ok := ParseMPEGPS(file, stat.Size()); ok {
+			info = parsedInfo
+			streams = parsedStreams
 		}
 	}
 
@@ -54,6 +65,7 @@ func AnalyzeFile(path string) (Report, error) {
 	return Report{
 		Ref:     path,
 		General: general,
+		Streams: streams,
 	}, nil
 }
 

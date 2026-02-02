@@ -24,6 +24,9 @@ Owner: soup
 - JSON output implemented (minimal MediaInfo-like shape)
 - MP4/MOV: parse `moov/mvhd` for duration; compute overall bitrate
 - Matroska: parse Segment/Info for duration using TimecodeScale
+- MPEG-TS: parse PAT/PMT, map stream types, PTS-based duration
+- MPEG-PS: scan PES for stream types + PTS-based duration
+- Text output now numbers stream groups (e.g., Audio #1)
 
 ## Notes
 - Update this file as we learn more about CLI behavior, formats, and edge cases.
