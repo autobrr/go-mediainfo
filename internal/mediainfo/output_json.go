@@ -20,10 +20,11 @@ func RenderJSON(reports []Report) string {
 
 	tracks := make([]map[string]string, 0)
 	for _, report := range reports {
-		tracks = append(tracks, streamToJSON(report.General))
-		for _, stream := range report.Streams {
-			tracks = append(tracks, streamToJSON(stream))
+		entry := map[string]string{"@type": "General", "@ref": report.Ref}
+		for _, field := range report.General.Fields {
+			entry[field.Name] = field.Value
 		}
+		tracks = append(tracks, entry)
 	}
 
 	payload := jsonMedia{Media: jsonMediaBody{Track: tracks}}

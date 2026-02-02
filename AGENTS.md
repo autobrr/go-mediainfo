@@ -27,6 +27,8 @@ Owner: soup
 - MPEG-TS: parse PAT/PMT, map stream types, PTS-based duration
 - MPEG-PS: scan PES for stream types + PTS-based duration
 - Text output now numbers stream groups (e.g., Audio #1)
+- MP4: track detection via `trak/mdia/hdlr` (vide/soun/text)
+- Matroska: track detection via Tracks/TrackEntry/TrackType
 
 ## Notes
 - Update this file as we learn more about CLI behavior, formats, and edge cases.

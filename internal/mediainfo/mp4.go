@@ -7,7 +7,17 @@ import (
 
 const maxMoovSize = int64(16 << 20)
 
-func ParseMP4(r io.ReaderAt, size int64) (ContainerInfo, bool) {
+type MP4Track struct {
+	Kind   StreamKind
+	Format string
+}
+
+type MP4Info struct {
+	Container ContainerInfo
+	Tracks    []MP4Track
+}
+
+func ParseMP4(r io.ReaderAt, size int64) (MP4Info, bool) {
 	var offset int64
 	for offset+8 <= size {
 		boxSize, boxType, headerSize, ok := readMP4BoxHeader(r, offset, size)
@@ -18,11 +28,11 @@ func ParseMP4(r io.ReaderAt, size int64) (ContainerInfo, bool) {
 		if boxType == "moov" {
 			moovSize := boxSize - headerSize
 			if moovSize > maxMoovSize {
-				return ContainerInfo{}, false
+				return MP4Info{}, false
 			}
 			buf := make([]byte, moovSize)
 			if _, err := r.ReadAt(buf, dataOffset); err != nil && err != io.EOF {
-				return ContainerInfo{}, false
+				return MP4Info{}, false
 			}
 			if info, ok := parseMoov(buf); ok {
 				return info, true
@@ -30,7 +40,7 @@ func ParseMP4(r io.ReaderAt, size int64) (ContainerInfo, bool) {
 		}
 		offset += boxSize
 	}
-	return ContainerInfo{}, false
+	return MP4Info{}, false
 }
 
 func readMP4BoxHeader(r io.ReaderAt, offset, fileSize int64) (boxSize int64, boxType string, headerSize int64, ok bool) {
@@ -61,8 +71,9 @@ func readMP4BoxHeader(r io.ReaderAt, offset, fileSize int64) (boxSize int64, box
 	return int64(size32), boxType, 8, true
 }
 
-func parseMoov(buf []byte) (ContainerInfo, bool) {
+func parseMoov(buf []byte) (MP4Info, bool) {
 	var offset int64
+	info := MP4Info{}
 	for offset+8 <= int64(len(buf)) {
 		boxSize, boxType, headerSize := readMP4BoxHeaderFrom(buf, offset)
 		if boxSize <= 0 {
@@ -72,12 +83,21 @@ func parseMoov(buf []byte) (ContainerInfo, bool) {
 		if boxType == "mvhd" {
 			payload := sliceBox(buf, dataOffset, boxSize-headerSize)
 			if duration, ok := parseMvhd(payload); ok {
-				return ContainerInfo{DurationSeconds: duration}, true
+				info.Container.DurationSeconds = duration
+			}
+		}
+		if boxType == "trak" {
+			payload := sliceBox(buf, dataOffset, boxSize-headerSize)
+			if track, ok := parseTrak(payload); ok {
+				info.Tracks = append(info.Tracks, track)
 			}
 		}
 		offset += boxSize
 	}
-	return ContainerInfo{}, false
+	if info.Container.HasDuration() || len(info.Tracks) > 0 {
+		return info, true
+	}
+	return MP4Info{}, false
 }
 
 func readMP4BoxHeaderFrom(buf []byte, offset int64) (boxSize int64, boxType string, headerSize int64) {
@@ -141,4 +161,68 @@ func parseMvhd(payload []byte) (float64, bool) {
 		return float64(duration) / float64(timescale), true
 	}
 	return 0, false
+}
+
+func parseTrak(buf []byte) (MP4Track, bool) {
+	var offset int64
+	for offset+8 <= int64(len(buf)) {
+		boxSize, boxType, headerSize := readMP4BoxHeaderFrom(buf, offset)
+		if boxSize <= 0 {
+			break
+		}
+		dataOffset := offset + headerSize
+		if boxType == "mdia" {
+			payload := sliceBox(buf, dataOffset, boxSize-headerSize)
+			if track, ok := parseMdia(payload); ok {
+				return track, true
+			}
+		}
+		offset += boxSize
+	}
+	return MP4Track{}, false
+}
+
+func parseMdia(buf []byte) (MP4Track, bool) {
+	var offset int64
+	var handler string
+	for offset+8 <= int64(len(buf)) {
+		boxSize, boxType, headerSize := readMP4BoxHeaderFrom(buf, offset)
+		if boxSize <= 0 {
+			break
+		}
+		dataOffset := offset + headerSize
+		if boxType == "hdlr" {
+			payload := sliceBox(buf, dataOffset, boxSize-headerSize)
+			handler = parseHdlr(payload)
+		}
+		offset += boxSize
+	}
+	if handler == "" {
+		return MP4Track{}, false
+	}
+	kind, format := mapHandlerType(handler)
+	if kind == "" {
+		return MP4Track{}, false
+	}
+	return MP4Track{Kind: kind, Format: format}, true
+}
+
+func parseHdlr(payload []byte) string {
+	if len(payload) < 20 {
+		return ""
+	}
+	return string(payload[8:12])
+}
+
+func mapHandlerType(handler string) (StreamKind, string) {
+	switch handler {
+	case "vide":
+		return StreamVideo, "AVC"
+	case "soun":
+		return StreamAudio, "AAC"
+	case "text", "sbtl", "subt":
+		return StreamText, "Text"
+	default:
+		return "", ""
+	}
 }

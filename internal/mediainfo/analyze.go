@@ -36,11 +36,18 @@ func AnalyzeFile(path string) (Report, error) {
 	switch format {
 	case "MPEG-4", "QuickTime":
 		if parsed, ok := ParseMP4(file, stat.Size()); ok {
-			info = parsed
+			info = parsed.Container
+			for _, track := range parsed.Tracks {
+				streams = append(streams, Stream{
+					Kind:   track.Kind,
+					Fields: []Field{{Name: "Format", Value: track.Format}},
+				})
+			}
 		}
 	case "Matroska":
 		if parsed, ok := ParseMatroska(file, stat.Size()); ok {
-			info = parsed
+			info = parsed.Container
+			streams = append(streams, parsed.Tracks...)
 		}
 	case "MPEG-TS":
 		if parsedInfo, parsedStreams, ok := ParseMPEGTS(file, stat.Size()); ok {
@@ -62,6 +69,7 @@ func AnalyzeFile(path string) (Report, error) {
 		}
 	}
 
+	sortStreams(streams)
 	return Report{
 		Ref:     path,
 		General: general,

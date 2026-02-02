@@ -11,31 +11,39 @@ const (
 	mkvIDInfo          = 0x1549A966
 	mkvIDTimecodeScale = 0x2AD7B1
 	mkvIDDuration      = 0x4489
+	mkvIDTracks        = 0x1654AE6B
+	mkvIDTrackEntry    = 0xAE
+	mkvIDTrackType     = 0x83
 	mkvMaxScan         = int64(4 << 20)
 )
 
-func ParseMatroska(r io.ReaderAt, size int64) (ContainerInfo, bool) {
+type MatroskaInfo struct {
+	Container ContainerInfo
+	Tracks    []Stream
+}
+
+func ParseMatroska(r io.ReaderAt, size int64) (MatroskaInfo, bool) {
 	scanSize := size
 	if scanSize > mkvMaxScan {
 		scanSize = mkvMaxScan
 	}
 	if scanSize <= 0 {
-		return ContainerInfo{}, false
+		return MatroskaInfo{}, false
 	}
 
 	buf := make([]byte, scanSize)
 	if _, err := r.ReadAt(buf, 0); err != nil && err != io.EOF {
-		return ContainerInfo{}, false
+		return MatroskaInfo{}, false
 	}
 
-	duration, ok := parseMatroska(buf)
+	info, ok := parseMatroska(buf)
 	if !ok {
-		return ContainerInfo{}, false
+		return MatroskaInfo{}, false
 	}
-	return ContainerInfo{DurationSeconds: duration}, true
+	return info, true
 }
 
-func parseMatroska(buf []byte) (float64, bool) {
+func parseMatroska(buf []byte) (MatroskaInfo, bool) {
 	pos := 0
 	for pos < len(buf) {
 		id, idLen, ok := readVintID(buf, pos)
@@ -52,16 +60,17 @@ func parseMatroska(buf []byte) (float64, bool) {
 			dataEnd = len(buf)
 		}
 		if id == mkvIDSegment {
-			if duration, ok := parseMatroskaSegment(buf[dataStart:dataEnd]); ok {
-				return duration, true
+			if info, ok := parseMatroskaSegment(buf[dataStart:dataEnd]); ok {
+				return info, true
 			}
 		}
 		pos = dataEnd
 	}
-	return 0, false
+	return MatroskaInfo{}, false
 }
 
-func parseMatroskaSegment(buf []byte) (float64, bool) {
+func parseMatroskaSegment(buf []byte) (MatroskaInfo, bool) {
+	info := MatroskaInfo{}
 	pos := 0
 	for pos < len(buf) {
 		id, idLen, ok := readVintID(buf, pos)
@@ -79,12 +88,20 @@ func parseMatroskaSegment(buf []byte) (float64, bool) {
 		}
 		if id == mkvIDInfo {
 			if duration, ok := parseMatroskaInfo(buf[dataStart:dataEnd]); ok {
-				return duration, true
+				info.Container.DurationSeconds = duration
+			}
+		}
+		if id == mkvIDTracks {
+			if tracks, ok := parseMatroskaTracks(buf[dataStart:dataEnd]); ok {
+				info.Tracks = append(info.Tracks, tracks...)
 			}
 		}
 		pos = dataEnd
 	}
-	return 0, false
+	if info.Container.HasDuration() || len(info.Tracks) > 0 {
+		return info, true
+	}
+	return MatroskaInfo{}, false
 }
 
 func parseMatroskaInfo(buf []byte) (float64, bool) {
@@ -130,6 +147,77 @@ func parseMatroskaInfo(buf []byte) (float64, bool) {
 		return 0, false
 	}
 	return seconds, true
+}
+
+func parseMatroskaTracks(buf []byte) ([]Stream, bool) {
+	entries := []Stream{}
+	pos := 0
+	for pos < len(buf) {
+		id, idLen, ok := readVintID(buf, pos)
+		if !ok {
+			break
+		}
+		size, sizeLen, ok := readVintSize(buf, pos+idLen)
+		if !ok {
+			break
+		}
+		dataStart := pos + idLen + sizeLen
+		dataEnd := dataStart + int(size)
+		if size == unknownVintSize || dataEnd > len(buf) {
+			dataEnd = len(buf)
+		}
+		if id == mkvIDTrackEntry {
+			if stream, ok := parseMatroskaTrackEntry(buf[dataStart:dataEnd]); ok {
+				entries = append(entries, stream)
+			}
+		}
+		pos = dataEnd
+	}
+	return entries, len(entries) > 0
+}
+
+func parseMatroskaTrackEntry(buf []byte) (Stream, bool) {
+	pos := 0
+	var trackType uint64
+	for pos < len(buf) {
+		id, idLen, ok := readVintID(buf, pos)
+		if !ok {
+			break
+		}
+		size, sizeLen, ok := readVintSize(buf, pos+idLen)
+		if !ok {
+			break
+		}
+		dataStart := pos + idLen + sizeLen
+		dataEnd := dataStart + int(size)
+		if size == unknownVintSize || dataEnd > len(buf) {
+			dataEnd = len(buf)
+		}
+		if id == mkvIDTrackType {
+			if value, ok := readUnsigned(buf[dataStart:dataEnd]); ok {
+				trackType = value
+			}
+		}
+		pos = dataEnd
+	}
+	kind, format := mapMatroskaTrackType(trackType)
+	if kind == "" {
+		return Stream{}, false
+	}
+	return Stream{Kind: kind, Fields: []Field{{Name: "Format", Value: format}}}, true
+}
+
+func mapMatroskaTrackType(trackType uint64) (StreamKind, string) {
+	switch trackType {
+	case 1:
+		return StreamVideo, "AVC"
+	case 2:
+		return StreamAudio, "AAC"
+	case 17:
+		return StreamText, "Text"
+	default:
+		return "", ""
+	}
 }
 
 const unknownVintSize = ^uint64(0)
