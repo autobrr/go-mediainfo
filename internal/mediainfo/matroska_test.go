@@ -38,6 +38,7 @@ func buildMatroskaInfo() []byte {
 
 func buildMatroskaTracks() []byte {
 	trackEntry := buildMatroskaElement(mkvIDTrackType, []byte{0x01})
+	trackEntry = append(trackEntry, buildMatroskaElement(mkvIDCodecID, []byte("V_MPEG4/ISO/AVC"))...)
 	trackEntry = buildMatroskaElement(mkvIDTrackEntry, trackEntry)
 	return buildMatroskaElement(mkvIDTracks, trackEntry)
 }

@@ -185,6 +185,7 @@ func parseTrak(buf []byte) (MP4Track, bool) {
 func parseMdia(buf []byte) (MP4Track, bool) {
 	var offset int64
 	var handler string
+	var sampleFormat string
 	for offset+8 <= int64(len(buf)) {
 		boxSize, boxType, headerSize := readMP4BoxHeaderFrom(buf, offset)
 		if boxSize <= 0 {
@@ -195,6 +196,12 @@ func parseMdia(buf []byte) (MP4Track, bool) {
 			payload := sliceBox(buf, dataOffset, boxSize-headerSize)
 			handler = parseHdlr(payload)
 		}
+		if boxType == "minf" {
+			payload := sliceBox(buf, dataOffset, boxSize-headerSize)
+			if format := parseMinfSample(payload); format != "" {
+				sampleFormat = format
+			}
+		}
 		offset += boxSize
 	}
 	if handler == "" {
@@ -203,6 +210,9 @@ func parseMdia(buf []byte) (MP4Track, bool) {
 	kind, format := mapHandlerType(handler)
 	if kind == "" {
 		return MP4Track{}, false
+	}
+	if sampleFormat != "" {
+		format = sampleFormat
 	}
 	return MP4Track{Kind: kind, Format: format}, true
 }
@@ -217,12 +227,50 @@ func parseHdlr(payload []byte) string {
 func mapHandlerType(handler string) (StreamKind, string) {
 	switch handler {
 	case "vide":
-		return StreamVideo, "AVC"
+		return StreamVideo, "Video"
 	case "soun":
-		return StreamAudio, "AAC"
+		return StreamAudio, "Audio"
 	case "text", "sbtl", "subt":
 		return StreamText, "Text"
 	default:
 		return "", ""
 	}
+}
+
+func parseMinfSample(buf []byte) string {
+	var offset int64
+	for offset+8 <= int64(len(buf)) {
+		boxSize, boxType, headerSize := readMP4BoxHeaderFrom(buf, offset)
+		if boxSize <= 0 {
+			break
+		}
+		dataOffset := offset + headerSize
+		if boxType == "stbl" {
+			payload := sliceBox(buf, dataOffset, boxSize-headerSize)
+			if format := parseStbl(payload); format != "" {
+				return format
+			}
+		}
+		offset += boxSize
+	}
+	return ""
+}
+
+func parseStbl(buf []byte) string {
+	var offset int64
+	for offset+8 <= int64(len(buf)) {
+		boxSize, boxType, headerSize := readMP4BoxHeaderFrom(buf, offset)
+		if boxSize <= 0 {
+			break
+		}
+		dataOffset := offset + headerSize
+		if boxType == "stsd" {
+			payload := sliceBox(buf, dataOffset, boxSize-headerSize)
+			if format := parseStsdForFormat(payload); format != "" {
+				return format
+			}
+		}
+		offset += boxSize
+	}
+	return ""
 }

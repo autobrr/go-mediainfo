@@ -14,6 +14,7 @@ const (
 	mkvIDTracks        = 0x1654AE6B
 	mkvIDTrackEntry    = 0xAE
 	mkvIDTrackType     = 0x83
+	mkvIDCodecID       = 0x86
 	mkvMaxScan         = int64(4 << 20)
 )
 
@@ -179,6 +180,7 @@ func parseMatroskaTracks(buf []byte) ([]Stream, bool) {
 func parseMatroskaTrackEntry(buf []byte) (Stream, bool) {
 	pos := 0
 	var trackType uint64
+	var codecID string
 	for pos < len(buf) {
 		id, idLen, ok := readVintID(buf, pos)
 		if !ok {
@@ -198,26 +200,16 @@ func parseMatroskaTrackEntry(buf []byte) (Stream, bool) {
 				trackType = value
 			}
 		}
+		if id == mkvIDCodecID {
+			codecID = string(buf[dataStart:dataEnd])
+		}
 		pos = dataEnd
 	}
-	kind, format := mapMatroskaTrackType(trackType)
+	kind, format := mapMatroskaCodecID(codecID, trackType)
 	if kind == "" {
 		return Stream{}, false
 	}
 	return Stream{Kind: kind, Fields: []Field{{Name: "Format", Value: format}}}, true
-}
-
-func mapMatroskaTrackType(trackType uint64) (StreamKind, string) {
-	switch trackType {
-	case 1:
-		return StreamVideo, "AVC"
-	case 2:
-		return StreamAudio, "AAC"
-	case 17:
-		return StreamText, "Text"
-	default:
-		return "", ""
-	}
 }
 
 const unknownVintSize = ^uint64(0)

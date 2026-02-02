@@ -1,0 +1,34 @@
+package mediainfo
+
+func mapMatroskaCodecID(codecID string, trackType uint64) (StreamKind, string) {
+	switch codecID {
+	case "V_MPEG4/ISO/AVC":
+		return StreamVideo, "AVC"
+	case "V_MPEGH/ISO/HEVC":
+		return StreamVideo, "HEVC"
+	case "V_VP9":
+		return StreamVideo, "VP9"
+	case "V_VP8":
+		return StreamVideo, "VP8"
+	case "A_AAC":
+		return StreamAudio, "AAC"
+	case "A_AC3":
+		return StreamAudio, "AC-3"
+	case "A_EAC3":
+		return StreamAudio, "E-AC-3"
+	case "A_OPUS":
+		return StreamAudio, "Opus"
+	case "A_FLAC":
+		return StreamAudio, "FLAC"
+	case "A_MPEG/L2":
+		return StreamAudio, "MPEG Audio"
+	case "S_TEXT/UTF8":
+		return StreamText, "UTF-8"
+	case "S_TEXT/ASS":
+		return StreamText, "ASS"
+	case "S_HDMV/PGS":
+		return StreamText, "PGS"
+	default:
+		return fallbackMatroskaTrackType(trackType)
+	}
+}

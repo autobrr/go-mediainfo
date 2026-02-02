@@ -29,6 +29,8 @@ Owner: soup
 - Text output now numbers stream groups (e.g., Audio #1)
 - MP4: track detection via `trak/mdia/hdlr` (vide/soun/text)
 - Matroska: track detection via Tracks/TrackEntry/TrackType
+- MP4: sample entry parsing (`stsd`) for codec format
+- Matroska: codec mapping via CodecID
 
 ## Notes
 - Update this file as we learn more about CLI behavior, formats, and edge cases.
