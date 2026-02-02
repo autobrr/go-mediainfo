@@ -264,6 +264,10 @@ func parseMatroskaTrackEntry(buf []byte) (Stream, bool) {
 		if audioSampleRate > 0 {
 			fields = append(fields, Field{Name: "Sampling rate", Value: formatSampleRate(audioSampleRate)})
 		}
+		if defaultDuration > 0 {
+			duration := float64(defaultDuration) / 1e9
+			fields = addStreamDuration(fields, duration)
+		}
 	}
 	return Stream{Kind: kind, Fields: fields}, true
 }

@@ -52,8 +52,8 @@ func buildJSONMedia(report Report) jsonMediaBody {
 		general["@ref"] = report.Ref
 	}
 	tracks = append(tracks, general)
-	for _, stream := range report.Streams {
-		tracks = append(tracks, streamToJSON(stream))
+	for _, stream := range orderTracks(report.Streams) {
+		tracks = append(tracks, orderedJSONTrack(stream))
 	}
 	return jsonMediaBody{Ref: report.Ref, Track: tracks}
 }

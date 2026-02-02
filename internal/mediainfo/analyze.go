@@ -45,6 +45,9 @@ func AnalyzeFile(path string) (Report, error) {
 				for _, field := range track.Fields {
 					fields = appendFieldUnique(fields, field)
 				}
+				if track.DurationSeconds > 0 && track.Kind != StreamVideo {
+					fields = addStreamDuration(fields, track.DurationSeconds)
+				}
 				if track.Kind == StreamVideo && track.SampleCount > 0 && track.DurationSeconds > 0 {
 					rate := float64(track.SampleCount) / track.DurationSeconds
 					if rate > 0 {
