@@ -284,6 +284,7 @@ func parseH264AnnexB(payload []byte) ([]Field, uint64, uint64, float64) {
 	var spsInfo h264SPSInfo
 	var hasSPS bool
 	var ppsCABAC *bool
+	var hasSlice bool
 	start := 0
 	for start+4 <= len(payload) {
 		sc, scLen := findAnnexBStartCode(payload, start)
@@ -299,6 +300,13 @@ func parseH264AnnexB(payload []byte) ([]Field, uint64, uint64, float64) {
 		if nalStart < nalEnd {
 			nal := payload[nalStart:nalEnd]
 			if len(nal) > 0 {
+				if nal[0]&0x80 != 0 {
+					if next == -1 {
+						break
+					}
+					start = next
+					continue
+				}
 				nalType := nal[0] & 0x1F
 				if nalType == 7 {
 					spsInfo = parseH264SPS(nal)
@@ -309,6 +317,9 @@ func parseH264AnnexB(payload []byte) ([]Field, uint64, uint64, float64) {
 						ppsCABAC = &cabac
 					}
 				}
+				if nalType == 1 || nalType == 5 {
+					hasSlice = true
+				}
 			}
 		}
 		if next == -1 {
@@ -317,59 +328,64 @@ func parseH264AnnexB(payload []byte) ([]Field, uint64, uint64, float64) {
 		start = next
 	}
 
-	if !hasSPS && ppsCABAC == nil {
+	if !hasSPS || ppsCABAC == nil || !hasSlice {
+		return nil, 0, 0, 0
+	}
+
+	profile := mapAVCProfile(spsInfo.ProfileID)
+	if profile == "" || spsInfo.Width == 0 || spsInfo.Height == 0 {
+		return nil, 0, 0, 0
+	}
+	if !isValidAVCLevel(spsInfo.LevelID) {
+		return nil, 0, 0, 0
+	}
+	if (profile == "Baseline" || profile == "Extended") && *ppsCABAC {
 		return nil, 0, 0, 0
 	}
 
 	fields := []Field{}
-	if hasSPS {
-		if profile := mapAVCProfile(spsInfo.ProfileID); profile != "" {
-			if level := formatAVCLevel(spsInfo.LevelID); level != "" {
-				fields = append(fields, Field{Name: "Format profile", Value: fmt.Sprintf("%s@%s", profile, level)})
-			} else {
-				fields = append(fields, Field{Name: "Format profile", Value: profile})
-			}
-		}
-		if spsInfo.ChromaFormat != "" {
-			fields = append(fields, Field{Name: "Chroma subsampling", Value: spsInfo.ChromaFormat})
-		}
-		if spsInfo.BitDepth > 0 {
-			fields = append(fields, Field{Name: "Bit depth", Value: formatBitDepth(uint8(spsInfo.BitDepth))})
-		}
-		if spsInfo.HasScanType {
-			if spsInfo.Progressive {
-				fields = append(fields, Field{Name: "Scan type", Value: "Progressive"})
-			} else {
-				fields = append(fields, Field{Name: "Scan type", Value: "Interlaced"})
-			}
-		}
-		if spsInfo.HasVideoFmt {
-			if standard := mapH264VideoFormat(spsInfo.VideoFormat); standard != "" {
-				fields = append(fields, Field{Name: "Standard", Value: standard})
-			}
-		}
-		if spsInfo.HasColorRange {
-			fields = append(fields, Field{Name: "Color range", Value: spsInfo.ColorRange})
-		}
-		if spsInfo.RefFrames > 0 {
-			fields = append(fields, Field{Name: "Format settings, Reference frames", Value: fmt.Sprintf("%d frames", spsInfo.RefFrames)})
+	if level := formatAVCLevel(spsInfo.LevelID); level != "" {
+		fields = append(fields, Field{Name: "Format profile", Value: fmt.Sprintf("%s@%s", profile, level)})
+	} else {
+		fields = append(fields, Field{Name: "Format profile", Value: profile})
+	}
+	if spsInfo.ChromaFormat != "" {
+		fields = append(fields, Field{Name: "Chroma subsampling", Value: spsInfo.ChromaFormat})
+	}
+	if spsInfo.BitDepth > 0 {
+		fields = append(fields, Field{Name: "Bit depth", Value: formatBitDepth(uint8(spsInfo.BitDepth))})
+	}
+	if spsInfo.HasScanType {
+		if spsInfo.Progressive {
+			fields = append(fields, Field{Name: "Scan type", Value: "Progressive"})
+		} else {
+			fields = append(fields, Field{Name: "Scan type", Value: "Interlaced"})
 		}
 	}
-	if ppsCABAC != nil {
+	if spsInfo.HasVideoFmt {
+		if standard := mapH264VideoFormat(spsInfo.VideoFormat); standard != "" {
+			fields = append(fields, Field{Name: "Standard", Value: standard})
+		}
+	}
+	if spsInfo.HasColorRange {
+		fields = append(fields, Field{Name: "Color range", Value: spsInfo.ColorRange})
+	}
+	if spsInfo.RefFrames > 0 {
+		fields = append(fields, Field{Name: "Format settings, Reference frames", Value: fmt.Sprintf("%d frames", spsInfo.RefFrames)})
+	}
+	if *ppsCABAC {
+		fields = append(fields, Field{Name: "Format settings, CABAC", Value: "Yes"})
+	} else {
+		fields = append(fields, Field{Name: "Format settings, CABAC", Value: "No"})
+	}
+	if spsInfo.RefFrames > 0 {
 		if *ppsCABAC {
-			fields = append(fields, Field{Name: "Format settings, CABAC", Value: "Yes"})
+			fields = append(fields, Field{Name: "Format settings", Value: fmt.Sprintf("CABAC / %d Ref Frames", spsInfo.RefFrames)})
 		} else {
-			fields = append(fields, Field{Name: "Format settings, CABAC", Value: "No"})
+			fields = append(fields, Field{Name: "Format settings", Value: fmt.Sprintf("%d Ref Frames", spsInfo.RefFrames)})
 		}
-		if hasSPS && spsInfo.RefFrames > 0 {
-			if *ppsCABAC {
-				fields = append(fields, Field{Name: "Format settings", Value: fmt.Sprintf("CABAC / %d Ref Frames", spsInfo.RefFrames)})
-			} else {
-				fields = append(fields, Field{Name: "Format settings", Value: fmt.Sprintf("%d Ref Frames", spsInfo.RefFrames)})
-			}
-		} else if *ppsCABAC {
-			fields = append(fields, Field{Name: "Format settings", Value: "CABAC"})
-		}
+	} else if *ppsCABAC {
+		fields = append(fields, Field{Name: "Format settings", Value: "CABAC"})
 	}
 	width := uint64(0)
 	height := uint64(0)
@@ -499,6 +515,15 @@ func mapH264VideoFormat(id int) string {
 		return "MAC"
 	default:
 		return ""
+	}
+}
+
+func isValidAVCLevel(levelID byte) bool {
+	switch levelID {
+	case 9, 10, 11, 12, 13, 20, 21, 22, 30, 31, 32, 40, 41, 42, 50, 51, 52, 60, 61, 62:
+		return true
+	default:
+		return false
 	}
 }
 

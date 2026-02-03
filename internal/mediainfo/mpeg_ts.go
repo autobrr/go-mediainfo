@@ -560,11 +560,7 @@ func formatTSCodecID(streamType byte) string {
 }
 
 func parseH264FromPES(data []byte) ([]Field, uint64, uint64, float64) {
-	fields, width, height, fps := parseH264AnnexB(data)
-	if count := h264SliceCountAnnexB(data); count > 0 {
-		fields = append(fields, Field{Name: "Format settings, Slice count", Value: fmt.Sprintf("%d slices per frame", count)})
-	}
-	return fields, width, height, fps
+	return parseH264AnnexB(data)
 }
 
 func processPES(entry *tsStream) {
@@ -827,9 +823,6 @@ func scanTSForH264(file io.ReadSeeker, pid uint16, size int64) ([]Field, uint64,
 		if payloadStart && len(payload) >= 9 && payload[0] == 0x00 && payload[1] == 0x00 && payload[2] == 0x01 {
 			if len(pesData) > 0 {
 				if fields, width, height, fps := parseH264AnnexB(pesData); len(fields) > 0 {
-					if count := h264SliceCountAnnexB(pesData); count > 0 {
-						fields = append(fields, Field{Name: "Format settings, Slice count", Value: fmt.Sprintf("%d slices per frame", count)})
-					}
 					return fields, width, height, fps
 				}
 			}
@@ -847,9 +840,6 @@ func scanTSForH264(file io.ReadSeeker, pid uint16, size int64) ([]Field, uint64,
 	}
 	if len(pesData) > 0 {
 		if fields, width, height, fps := parseH264AnnexB(pesData); len(fields) > 0 {
-			if count := h264SliceCountAnnexB(pesData); count > 0 {
-				fields = append(fields, Field{Name: "Format settings, Slice count", Value: fmt.Sprintf("%d slices per frame", count)})
-			}
 			return fields, width, height, fps
 		}
 	}

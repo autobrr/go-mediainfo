@@ -39,7 +39,7 @@ func formatBitrate(bitsPerSecond float64) string {
 	if bitsPerSecond <= 0 {
 		return ""
 	}
-	if bitsPerSecond >= 1_000_000 {
+	if bitsPerSecond >= 10_000_000 {
 		mbps := bitsPerSecond / 1_000_000
 		return fmt.Sprintf("%.1f Mb/s", mbps)
 	}

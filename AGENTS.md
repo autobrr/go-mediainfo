@@ -88,6 +88,8 @@ Owner: soup
 - H.264 SPS: parse video_format for Standard (PAL/NTSC/SECAM/MAC) + full-range flag for Color range
 - AAC in PS: duration from PTS span + 3 AAC frames (1024 samples) to match CLI
 - MPEG-PS AVC: slice count from Annex B first_mb_in_slice; probe after buffer grows (avoid early 1-slice false positives)
+- MPEG-TS: do not emit slice count (CLI sample output omits it)
+- H.264 Annex B: require SPS+PPS, valid profile, width/height; skip NALs with forbidden_zero_bit to avoid false AVC detection
 - MPEG-PS AAC delay: adjust by 3 video frames for AVC to match CLI delay output; format delay as signed duration
 - Bitrate formatting: use Mb/s when >= 1,000,000 bps in `formatBitrate`
 - MPEG-PS AC-3: buffer across PES payloads; use AC-3 frame size table + next-sync validation; parse dialog normalization/compr/cmixlev/surmixlev/mixlevel/roomtyp + dialnorm stats
