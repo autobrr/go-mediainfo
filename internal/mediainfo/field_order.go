@@ -18,6 +18,9 @@ var generalFieldOrder = map[string]int{
 	"Writing application":   12,
 	"Writing library":       13,
 	"ErrorDetectionType":    14,
+	"FileExtension_Invalid": 15,
+	"Conformance warnings":  16,
+	" General compliance":   17,
 }
 
 var streamFieldOrder = map[string]int{
@@ -25,6 +28,7 @@ var streamFieldOrder = map[string]int{
 	"Menu ID":                           1,
 	"Format":                            2,
 	"Format/Info":                       3,
+	"Commercial name":                   4,
 	"Format version":                    4,
 	"Muxing mode":                       5,
 	"Format profile":                    6,
@@ -53,6 +57,7 @@ var streamFieldOrder = map[string]int{
 	"Sampling rate":                     29,
 	"Frame rate mode":                   30,
 	"Frame rate":                        31,
+	"Standard":                          32,
 	"Color space":                       32,
 	"Chroma subsampling":                33,
 	"Bit depth":                         34,
@@ -66,6 +71,7 @@ var streamFieldOrder = map[string]int{
 	"Delay relative to video":           42,
 	"Stream size":                       43,
 	"Source stream size":                44,
+	"Service kind":                      44,
 	"Writing library":                   45,
 	"Encoding settings":                 46,
 	"Default":                           47,

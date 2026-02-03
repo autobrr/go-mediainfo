@@ -17,6 +17,11 @@ func formatDuration(seconds float64) string {
 
 	totalSec := totalMs / 1000
 	remMs := totalMs % 1000
+	if totalSec == 59 && remMs >= 500 {
+		totalSec = 60
+		remMs = 0
+		totalMs = totalSec * 1000
+	}
 	if totalSec < 60 {
 		return fmt.Sprintf("%d s %d ms", totalSec, remMs)
 	}

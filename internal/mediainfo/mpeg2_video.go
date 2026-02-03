@@ -1,6 +1,9 @@
 package mediainfo
 
-import "fmt"
+import (
+	"fmt"
+	"math"
+)
 
 type mpeg2VideoInfo struct {
 	Width             uint64
@@ -11,6 +14,8 @@ type mpeg2VideoInfo struct {
 	FrameRateDenom    uint32
 	Profile           string
 	Version           string
+	BitRateMode       string
+	MaxBitRateKbps    int64
 	BVOP              *bool
 	Matrix            string
 	GOPLength         int
@@ -112,8 +117,13 @@ func (p *mpeg2VideoParser) parseSequenceHeader(data []byte) {
 	if p.info.BitDepth == "" {
 		p.info.BitDepth = "8 bits"
 	}
-	if bitRateValue == 0x3FFFF {
-		// variable
+	if bitRateValue != 0x3FFFF {
+		p.info.MaxBitRateKbps = int64(bitRateValue*400) / 1000
+		if p.info.BitRateMode == "" {
+			p.info.BitRateMode = "Constant"
+		}
+	} else if p.info.BitRateMode == "" {
+		p.info.BitRateMode = "Variable"
 	}
 }
 
@@ -164,6 +174,9 @@ func (p *mpeg2VideoParser) parseGOPHeader(data []byte) {
 
 	if p.info.TimeCode == "" {
 		p.info.TimeCode = fmt.Sprintf("%02d:%02d:%02d:%02d", hours, minutes, seconds, pictures)
+		p.info.TimeCodeSource = "Group of pictures header"
+	}
+	if p.info.TimeCodeSource == "" {
 		p.info.TimeCodeSource = "Group of pictures header"
 	}
 	closedBool := closed == 1
@@ -245,6 +258,19 @@ func mapMPEG2AspectRatio(code uint64) string {
 		return "16:9"
 	case 4:
 		return "2.21:1"
+	default:
+		return ""
+	}
+}
+
+func mapMPEG2Standard(frameRate float64) string {
+	switch {
+	case frameRate > 0 && math.Abs(frameRate-29.97) < 0.01:
+		return "NTSC"
+	case frameRate > 0 && math.Abs(frameRate-30.0) < 0.01:
+		return "NTSC"
+	case frameRate > 0 && math.Abs(frameRate-25.0) < 0.01:
+		return "PAL"
 	default:
 		return ""
 	}
