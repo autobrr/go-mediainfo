@@ -20,6 +20,11 @@ type psStream struct {
 	hasAC3           bool
 	videoHeaderBytes uint64
 	videoHeaderCarry []byte
+	videoStartZeroRun int
+	videoExtraZeros   uint64
+	videoTotalBytes   uint64
+	videoLastStartPos int64
+	videoNoPTSPackets uint64
 	videoFields      []Field
 	hasVideoFields   bool
 	videoWidth       uint64
@@ -29,4 +34,5 @@ type psStream struct {
 	videoSliceProbed bool
 	videoIsH264      bool
 	videoBuffer      []byte
+	firstPacketOrder int
 }

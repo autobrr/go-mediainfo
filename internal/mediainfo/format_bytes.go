@@ -5,7 +5,7 @@ import "fmt"
 func formatBytes(size int64) string {
 	const unit = 1024
 	if size < unit {
-		return fmt.Sprintf("%d B", size)
+		return fmt.Sprintf("%d Bytes", size)
 	}
 	div := float64(size)
 	exp := 0

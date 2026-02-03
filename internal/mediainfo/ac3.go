@@ -19,23 +19,22 @@ type ac3Info struct {
 	spf         int
 
 	dialnorm      int
-	dialnormSum   int64
+	dialnormSum   float64
 	dialnormCount int
 	dialnormMin   int
 	dialnormMax   int
 	hasDialnorm   bool
 	comprDB       float64
-	comprSum      float64
 	comprCount    int
+	comprSum      float64
 	comprMin      float64
 	comprMax      float64
 	hasCompr      bool
-	dynrngDB      float64
-	dynrngSum     float64
 	dynrngCount   int
+	dynrngSum     float64
 	dynrngMin     float64
 	dynrngMax     float64
-	hasDynrng     bool
+	dynrngeSeen   bool
 	cmixlevDB     float64
 	hasCmixlev    bool
 	surmixlevDB   float64
@@ -141,7 +140,7 @@ func parseAC3Frame(payload []byte) (ac3Info, int, bool) {
 	info.hasDialnorm = true
 	info.dialnorm = ac3DialnormDB(dialnorm)
 	info.dialnormCount = 1
-	info.dialnormSum = int64(info.dialnorm)
+	info.dialnormSum = math.Pow(10.0, float64(info.dialnorm)/10.0)
 	info.dialnormMin = info.dialnorm
 	info.dialnormMax = info.dialnorm
 	compre, ok := br.readBits(1)
@@ -153,11 +152,13 @@ func parseAC3Frame(payload []byte) (ac3Info, int, bool) {
 		if !ok {
 			return info, 0, false
 		}
-		info.comprDB = ac3HeavyCompressionDB(compr)
-		info.comprSum = info.comprDB
-		info.comprCount = 1
-		info.comprMin = info.comprDB
-		info.comprMax = info.comprDB
+		info.comprDB = ac3ComprDB(uint8(compr))
+		if compr != 0xFF {
+			info.comprSum = math.Pow(10.0, info.comprDB/10.0)
+			info.comprCount = 1
+			info.comprMin = info.comprDB
+			info.comprMax = info.comprDB
+		}
 		info.hasCompr = true
 	}
 	langcode, ok := br.readBits(1)
@@ -228,13 +229,22 @@ func parseAC3Frame(payload []byte) (ac3Info, int, bool) {
 			}
 		}
 	}
-	if dynrng, ok := parseAC3Dynrng(&br, int(acmod)); ok {
-		info.dynrngDB = dynrng
-		info.dynrngSum = dynrng
-		info.dynrngCount = 1
-		info.dynrngMin = dynrng
-		info.dynrngMax = dynrng
-		info.hasDynrng = true
+	if dynrnge, code, ok := parseAC3Dynrng(&br, int(acmod)); ok {
+		if dynrnge {
+			info.dynrngeSeen = true
+			if code != 0xFF {
+				value := ac3DynrngDB(code)
+				info.dynrngSum = math.Pow(10.0, value/10.0)
+				info.dynrngCount = 1
+				info.dynrngMin = value
+				info.dynrngMax = value
+			}
+		} else {
+			info.dynrngSum = 1
+			info.dynrngCount = 1
+			info.dynrngMin = 0
+			info.dynrngMax = 0
+		}
 	}
 
 	sampleRate := ac3SampleRate(int(fscod))
@@ -265,17 +275,16 @@ func parseAC3Frame(payload []byte) (ac3Info, int, bool) {
 		dialnormMax:   info.dialnormMax,
 		hasDialnorm:   info.hasDialnorm,
 		comprDB:       info.comprDB,
-		comprSum:      info.comprSum,
 		comprCount:    info.comprCount,
+		comprSum:      info.comprSum,
 		comprMin:      info.comprMin,
 		comprMax:      info.comprMax,
 		hasCompr:      info.hasCompr,
-		dynrngDB:      info.dynrngDB,
 		dynrngSum:     info.dynrngSum,
 		dynrngCount:   info.dynrngCount,
 		dynrngMin:     info.dynrngMin,
 		dynrngMax:     info.dynrngMax,
-		hasDynrng:     info.hasDynrng,
+		dynrngeSeen:   info.dynrngeSeen,
 		cmixlevDB:     info.cmixlevDB,
 		hasCmixlev:    info.hasCmixlev,
 		surmixlevDB:   info.surmixlevDB,
@@ -334,13 +343,12 @@ func (info *ac3Info) mergeFrame(frame ac3Info) {
 		info.comprDB = frame.comprDB
 		info.hasCompr = true
 	}
-	if frame.hasCompr {
+	if frame.comprCount > 0 {
 		if info.comprCount == 0 {
 			info.comprSum = frame.comprSum
 			info.comprCount = frame.comprCount
 			info.comprMin = frame.comprMin
 			info.comprMax = frame.comprMax
-			info.hasCompr = true
 		} else {
 			info.comprSum += frame.comprSum
 			info.comprCount += frame.comprCount
@@ -360,14 +368,15 @@ func (info *ac3Info) mergeFrame(frame ac3Info) {
 		info.roomtyp = frame.roomtyp
 		info.hasRoomtyp = true
 	}
-	if frame.hasDynrng {
+	if frame.dynrngeSeen {
+		info.dynrngeSeen = true
+	}
+	if frame.dynrngCount > 0 {
 		if info.dynrngCount == 0 {
 			info.dynrngSum = frame.dynrngSum
 			info.dynrngCount = frame.dynrngCount
 			info.dynrngMin = frame.dynrngMin
 			info.dynrngMax = frame.dynrngMax
-			info.dynrngDB = frame.dynrngDB
-			info.hasDynrng = true
 		} else {
 			info.dynrngSum += frame.dynrngSum
 			info.dynrngCount += frame.dynrngCount
@@ -405,7 +414,7 @@ func (info ac3Info) dialnormStats() (int, int, int, bool) {
 	if info.dialnormCount == 0 {
 		return 0, 0, 0, false
 	}
-	avg := int(math.Round(float64(info.dialnormSum) / float64(info.dialnormCount)))
+	avg := int(math.Round(10.0 * math.Log10(info.dialnormSum/float64(info.dialnormCount))))
 	return avg, info.dialnormMin, info.dialnormMax, true
 }
 
@@ -413,15 +422,15 @@ func (info ac3Info) comprStats() (float64, float64, float64, int, bool) {
 	if info.comprCount == 0 {
 		return 0, 0, 0, 0, false
 	}
-	avg := info.comprSum / float64(info.comprCount)
+	avg := 10.0 * math.Log10(info.comprSum/float64(info.comprCount))
 	return avg, info.comprMin, info.comprMax, info.comprCount, true
 }
 
 func (info ac3Info) dynrngStats() (float64, float64, float64, int, bool) {
-	if info.dynrngCount == 0 {
+	if info.dynrngCount == 0 || !info.dynrngeSeen {
 		return 0, 0, 0, 0, false
 	}
-	avg := info.dynrngSum / float64(info.dynrngCount)
+	avg := 10.0 * math.Log10(info.dynrngSum/float64(info.dynrngCount))
 	return avg, info.dynrngMin, info.dynrngMax, info.dynrngCount, true
 }
 
@@ -505,10 +514,52 @@ func ac3DialnormDB(code uint32) int {
 	return -int(code)
 }
 
-func ac3HeavyCompressionDB(code uint32) float64 {
-	v := float64(int(code>>4) - int((code>>7)<<4) - 4)
-	scale := math.Pow(2.0, v) * float64((code&0x0F)|0x10)
-	return 20.0 * math.Log10(scale)
+var ac3DynrngBase = []float64{
+	6.02,
+	12.04,
+	18.06,
+	24.08,
+	-18.06,
+	-12.04,
+	-6.02,
+	0.00,
+}
+
+var ac3ComprBase = []float64{
+	6.02,
+	12.04,
+	18.06,
+	24.08,
+	30.10,
+	36.12,
+	42.14,
+	48.16,
+	-42.14,
+	-36.12,
+	-30.10,
+	-24.08,
+	-18.06,
+	-12.04,
+	-6.02,
+	0.00,
+}
+
+func ac3DynrngDB(code uint8) float64 {
+	if code == 0 {
+		return 0
+	}
+	base := ac3DynrngBase[code>>5]
+	fine := 20.0 * math.Log10(float64(0x20+int(code&0x1F))/64.0)
+	return base + fine
+}
+
+func ac3ComprDB(code uint8) float64 {
+	if code == 0 {
+		return 0
+	}
+	base := ac3ComprBase[code>>4]
+	fine := 20.0 * math.Log10(float64(0x10+int(code&0x0F))/32.0)
+	return base + fine
 }
 
 func ac3CenterMixLevelDB(code uint32) (float64, bool) {
@@ -573,30 +624,33 @@ func ac3FullBandwidthChannels(acmod int) int {
 	}
 }
 
-func parseAC3Dynrng(br *ac3BitReader, acmod int) (float64, bool) {
+func parseAC3Dynrng(br *ac3BitReader, acmod int) (bool, byte, bool) {
 	nfchans := ac3FullBandwidthChannels(acmod)
 	if nfchans <= 0 {
-		return 0, false
+		return false, 0, false
 	}
 	for i := 0; i < nfchans; i++ {
 		if _, ok := br.readBits(1); !ok {
-			return 0, false
+			return false, 0, false
 		}
 	}
 	for i := 0; i < nfchans; i++ {
 		if _, ok := br.readBits(1); !ok {
-			return 0, false
+			return false, 0, false
 		}
 	}
 	dynrnge, ok := br.readBits(1)
-	if !ok || dynrnge == 0 {
-		return 0, false
+	if !ok {
+		return false, 0, false
+	}
+	if dynrnge == 0 {
+		return false, 0, true
 	}
 	dynrng, ok := br.readBits(8)
 	if !ok {
-		return 0, false
+		return false, 0, false
 	}
-	return ac3HeavyCompressionDB(dynrng), true
+	return true, byte(dynrng), true
 }
 
 func ac3ChannelLayout(acmod int, lfeon bool) (uint64, string) {

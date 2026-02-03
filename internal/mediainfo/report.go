@@ -17,10 +17,11 @@ type Field struct {
 }
 
 type Stream struct {
-	Kind    StreamKind
-	Fields  []Field
-	JSON    map[string]string
-	JSONRaw map[string]string
+	Kind                StreamKind
+	Fields              []Field
+	JSON                map[string]string
+	JSONRaw             map[string]string
+	JSONSkipStreamOrder bool
 }
 
 type Report struct {

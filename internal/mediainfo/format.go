@@ -63,6 +63,9 @@ func DetectFormat(header []byte, filename string) string {
 	if isMPEGTS(header) {
 		return "MPEG-TS"
 	}
+	if bytes.HasPrefix(header, []byte{0x00, 0x00, 0x01, 0xB3}) {
+		return "MPEG Video"
+	}
 	if bytes.HasPrefix(header, []byte{0x00, 0x00, 0x01, 0xBA}) {
 		return "MPEG-PS"
 	}

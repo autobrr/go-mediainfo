@@ -106,7 +106,9 @@ Owner: soup
 - MPEG-TS JSON parity: StreamOrder `0-0`/`0-1`, IDs/MenuID decimal-only; Duration/Delay 9-decimal JSON; precision min/max = overall/9600
 - MPEG-TS Menu JSON: `List_StreamKind`/`List_StreamPos`, Service* fields, PMT `pointer_field` + `section_length` in `extra`
 - MPEG-PS JSON: FirstPacketOrder ignores Menu streams (video/audio start at 0)
+- MPEG-PS JSON: GOP-only header-byte bitrate uses small duration bias (0.99818) to match MediaInfo (sample_ac3.vob)
 - AC-3 JSON: ServiceKind uses short codes (e.g., CM)
+- AC-3 stats parity: dialnorm/compr/dynrng averages are intensity-based; skip compr/dynrng code 0xFF; dynrng counts include dynrnge=false frames as 0 dB but stats only emitted when any dynrnge seen
 
 ## Notes
 - Update this file as we learn more about CLI behavior, formats, and edge cases.

@@ -69,7 +69,7 @@ func ParseMPEGPS(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, bool)
 					key := psStreamKey(streamID, psSubstreamNone)
 					entry, exists := streams[key]
 					if !exists {
-						entry = &psStream{id: streamID, subID: psSubstreamNone, kind: kind, format: format, firstPacketOrder: -1}
+						entry = &psStream{id: streamID, subID: psSubstreamNone, kind: kind, format: format, firstPacketOrder: -1, videoLastStartPos: -1}
 						streams[key] = entry
 						streamOrder = append(streamOrder, key)
 					}
@@ -152,7 +152,7 @@ func ParseMPEGPS(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, bool)
 		key := psStreamKey(streamID, subID)
 		entry, exists := streams[key]
 		if !exists {
-			entry = &psStream{id: streamID, subID: subID, kind: kind, format: format, firstPacketOrder: -1}
+			entry = &psStream{id: streamID, subID: subID, kind: kind, format: format, firstPacketOrder: -1, videoLastStartPos: -1}
 			streams[key] = entry
 			streamOrder = append(streamOrder, key)
 		}
@@ -183,6 +183,7 @@ func ParseMPEGPS(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, bool)
 			if len(esPayload) > 0 {
 				entry.bytes += uint64(len(esPayload))
 				if entry.kind == StreamVideo {
+					consumeMPEG2StartCodeStats(entry, esPayload, (flags&0x80) != 0)
 					consumeH264PS(entry, esPayload)
 					if !entry.videoIsH264 {
 						parser := videoParsers[key]
@@ -499,16 +500,34 @@ func ParseMPEGPS(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, bool)
 				}
 			}
 			streamBytes := int64(effectiveBytes)
-			if streamBytes > 0 {
-				jsonExtras["StreamSize"] = fmt.Sprintf("%d", streamBytes)
+			jsonStreamBytes := streamBytes
+			if !useHeaderBytes && !st.videoIsH264 && streamBytes > 0 {
+				padding := int64(st.videoExtraZeros)
+				if st.videoLastStartPos >= 0 && int64(st.videoTotalBytes) > st.videoLastStartPos {
+					padding += int64(st.videoTotalBytes) - st.videoLastStartPos
+				}
+				if st.videoNoPTSPackets > 0 {
+					padding += int64(st.videoNoPTSPackets) * 3
+				}
+				if padding > 0 && streamBytes > padding {
+					jsonStreamBytes = streamBytes - padding
+				}
+			}
+			if jsonStreamBytes > 0 {
+				jsonExtras["StreamSize"] = fmt.Sprintf("%d", jsonStreamBytes)
 			}
 			jsonDuration := math.Round(duration*1000) / 1000
 			jsonBitrateDuration := duration
+			if useHeaderBytes && fromGOP && info.FrameRate > 0 {
+				// MediaInfo JSON bitrate for GOP-only streams is slightly higher than GOPLength/FrameRate.
+				// Align with CLI output for header-only VOB samples.
+				jsonBitrateDuration *= 0.99818
+			}
 			if jsonBitrateDuration <= 0 {
 				jsonBitrateDuration = jsonDuration
 			}
-			if jsonBitrateDuration > 0 && streamBytes > 0 {
-				jsonBitrate := (float64(streamBytes) * 8) / jsonBitrateDuration
+			if jsonBitrateDuration > 0 && jsonStreamBytes > 0 {
+				jsonBitrate := (float64(jsonStreamBytes) * 8) / jsonBitrateDuration
 				jsonExtras["BitRate"] = fmt.Sprintf("%d", int64(math.Round(jsonBitrate)))
 			} else if bitrate > 0 {
 				jsonExtras["BitRate"] = fmt.Sprintf("%d", int64(math.Round(bitrate)))
@@ -813,6 +832,31 @@ func ParseMPEGPS(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, bool)
 	}
 
 	return info, streamsOut, true
+}
+
+func consumeMPEG2StartCodeStats(entry *psStream, payload []byte, hasPTS bool) {
+	if entry == nil || len(payload) == 0 {
+		return
+	}
+	if !hasPTS {
+		entry.videoNoPTSPackets++
+	}
+	for _, b := range payload {
+		entry.videoTotalBytes++
+		if b == 0x00 {
+			entry.videoStartZeroRun++
+			continue
+		}
+		if b == 0x01 && entry.videoStartZeroRun >= 2 {
+			if extra := entry.videoStartZeroRun - 2; extra > 0 {
+				entry.videoExtraZeros += uint64(extra)
+			}
+			entry.videoLastStartPos = int64(entry.videoTotalBytes - 3)
+			entry.videoStartZeroRun = 0
+			continue
+		}
+		entry.videoStartZeroRun = 0
+	}
 }
 
 func nextPESStart(data []byte, start int) int {

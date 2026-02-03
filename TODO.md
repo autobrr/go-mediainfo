@@ -8,7 +8,7 @@
 - Remaining diffs: JSON/XML/CSV parity audit, broader sample sweep for edge cases
 - Implement MediaInfo JSON/XML/CSV schema parity (raw field names/values, missing fields, exact formatting)
 - JSON parity: MP4 + MKV + TS done; VOB/AVI remaining (UniqueID, delays, colors, streamable, raw sizes)
-- MPEG-PS/VOB JSON: video-only VOB StreamSize/BitRate mismatch (sample.vob), AC-3 VOB video BitRate, AC-3 compr/dynrng stats counts/avg
+- MPEG-PS/VOB JSON: expand VOB parity sweep beyond samples (sample.vob + sample_ac3.vob match)
 
 ## Post-parity
 - Investigate MediaInfo issue #760: DVD IFO language/runtime regression (23.07 vs 23.06). https://github.com/MediaArea/MediaInfo/issues/760

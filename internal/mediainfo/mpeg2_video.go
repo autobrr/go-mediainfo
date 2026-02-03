@@ -3,6 +3,7 @@ package mediainfo
 import (
 	"fmt"
 	"math"
+	"strings"
 )
 
 type mpeg2VideoInfo struct {
@@ -27,6 +28,9 @@ type mpeg2VideoInfo struct {
 	ChromaSubsampling string
 	BitDepth          string
 	ScanType          string
+	MatrixData        string
+	BufferSize        int64
+	IntraDCPrecision  int
 }
 
 type mpeg2VideoParser struct {
@@ -75,12 +79,24 @@ func (p *mpeg2VideoParser) parseSequenceHeader(data []byte) {
 	frameRateCode := br.readBitsValue(4)
 	bitRateValue := br.readBitsValue(18)
 	_ = br.readBitsValue(1)
-	_ = br.readBitsValue(10)
+	bufferSize := br.readBitsValue(10)
 	_ = br.readBitsValue(1)
 	loadIntra := br.readBitsValue(1)
 	if loadIntra == 1 {
+		matrix := make([]byte, 0, 64)
 		for i := 0; i < 64; i++ {
-			_ = br.readBitsValue(8)
+			value := br.readBitsValue(8)
+			if len(matrix) < 64 {
+				matrix = append(matrix, byte(value))
+			}
+		}
+		if p.info.MatrixData == "" && len(matrix) == 64 {
+			var builder strings.Builder
+			builder.Grow(128)
+			for _, b := range matrix {
+				fmt.Fprintf(&builder, "%02X", b)
+			}
+			p.info.MatrixData = builder.String()
 		}
 	}
 	loadNonIntra := br.readBitsValue(1)
@@ -111,6 +127,9 @@ func (p *mpeg2VideoParser) parseSequenceHeader(data []byte) {
 			p.info.Matrix = "Default"
 		}
 	}
+	if bufferSize > 0 && p.info.BufferSize == 0 {
+		p.info.BufferSize = int64(bufferSize) * 2048
+	}
 	if p.info.ColorSpace == "" {
 		p.info.ColorSpace = "YUV"
 	}
@@ -133,29 +152,37 @@ func (p *mpeg2VideoParser) parseExtension(data []byte) {
 	}
 	br := newBitReader(data)
 	extID := br.readBitsValue(4)
-	if extID != 1 {
+	switch extID {
+	case 1:
+		profileLevel := br.readBitsValue(8)
+		progressive := br.readBitsValue(1)
+		chromaFormat := br.readBitsValue(2)
+		_ = br.readBitsValue(2)
+		_ = br.readBitsValue(2)
+		_ = br.readBitsValue(12)
+		_ = br.readBitsValue(1)
+		_ = br.readBitsValue(8)
+		_ = br.readBitsValue(1)
+		_ = br.readBitsValue(2)
+		_ = br.readBitsValue(5)
+		p.info.Profile = mapMPEG2Profile(profileLevel)
+		p.info.Version = "Version 2"
+		if progressive == 1 {
+			p.info.ScanType = "Progressive"
+		} else {
+			p.info.ScanType = "Interlaced"
+		}
+		p.info.ChromaSubsampling = mapMPEG2Chroma(chromaFormat)
+		p.gotSeqExt = true
+	case 8:
+		_ = br.readBitsValue(16) // f_code
+		intra := br.readBitsValue(2)
+		if p.info.IntraDCPrecision == 0 {
+			p.info.IntraDCPrecision = int(8 + intra)
+		}
+	default:
 		return
 	}
-	profileLevel := br.readBitsValue(8)
-	progressive := br.readBitsValue(1)
-	chromaFormat := br.readBitsValue(2)
-	_ = br.readBitsValue(2)
-	_ = br.readBitsValue(2)
-	_ = br.readBitsValue(12)
-	_ = br.readBitsValue(1)
-	_ = br.readBitsValue(8)
-	_ = br.readBitsValue(1)
-	_ = br.readBitsValue(2)
-	_ = br.readBitsValue(5)
-	p.info.Profile = mapMPEG2Profile(profileLevel)
-	p.info.Version = "Version 2"
-	if progressive == 1 {
-		p.info.ScanType = "Progressive"
-	} else {
-		p.info.ScanType = "Interlaced"
-	}
-	p.info.ChromaSubsampling = mapMPEG2Chroma(chromaFormat)
-	p.gotSeqExt = true
 }
 
 func (p *mpeg2VideoParser) parseGOPHeader(data []byte) {

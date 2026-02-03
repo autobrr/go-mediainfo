@@ -65,7 +65,9 @@ func buildJSONGeneralFields(report Report) []jsonKV {
 
 func buildJSONStreamFields(stream Stream, order int) []jsonKV {
 	fields := []jsonKV{{Key: "@type", Val: string(stream.Kind)}}
-	fields = append(fields, jsonKV{Key: "StreamOrder", Val: strconv.Itoa(order)})
+	if !stream.JSONSkipStreamOrder {
+		fields = append(fields, jsonKV{Key: "StreamOrder", Val: strconv.Itoa(order)})
+	}
 	fields = append(fields, mapStreamFieldsToJSON(stream.Kind, stream.Fields)...)
 	fields = append(fields, buildJSONComputedFields(stream.Kind, fields)...)
 	fields = applyJSONExtras(fields, stream.JSON, stream.JSONRaw)
@@ -107,6 +109,12 @@ func mapStreamFieldsToJSON(kind StreamKind, fields []Field) []jsonKV {
 			}
 		case "Format settings, CABAC":
 			out = append(out, jsonKV{Key: "Format_Settings_CABAC", Val: field.Value})
+		case "Format settings, BVOP":
+			out = append(out, jsonKV{Key: "Format_Settings_BVOP", Val: field.Value})
+		case "Format settings, Matrix":
+			out = append(out, jsonKV{Key: "Format_Settings_Matrix", Val: field.Value})
+		case "Format settings, GOP":
+			out = append(out, jsonKV{Key: "Format_Settings_GOP", Val: field.Value})
 		case "Format settings, Reference frames":
 			out = append(out, jsonKV{Key: "Format_Settings_RefFrames", Val: extractLeadingNumber(field.Value)})
 		case "Codec ID":
@@ -115,6 +123,8 @@ func mapStreamFieldsToJSON(kind StreamKind, fields []Field) []jsonKV {
 			if compat != "" && kind == StreamGeneral {
 				out = append(out, jsonKV{Key: "CodecID_Compatible", Val: compat})
 			}
+		case "Commercial name":
+			out = append(out, jsonKV{Key: "Format_Commercial_IfAny", Val: field.Value})
 		case "Muxing mode":
 			out = append(out, jsonKV{Key: "MuxingMode", Val: field.Value})
 		case "Codec configuration box":
@@ -167,6 +177,8 @@ func mapStreamFieldsToJSON(kind StreamKind, fields []Field) []jsonKV {
 			}
 		case "Chroma subsampling":
 			out = append(out, jsonKV{Key: "ChromaSubsampling", Val: field.Value})
+		case "Color space":
+			out = append(out, jsonKV{Key: "ColorSpace", Val: field.Value})
 		case "Bit depth":
 			out = append(out, jsonKV{Key: "BitDepth", Val: extractLeadingNumber(field.Value)})
 		case "Scan type":
@@ -205,6 +217,16 @@ func mapStreamFieldsToJSON(kind StreamKind, fields []Field) []jsonKV {
 			}
 		case "Compression mode":
 			out = append(out, jsonKV{Key: "Compression_Mode", Val: field.Value})
+		case "Time code of first frame":
+			out = append(out, jsonKV{Key: "TimeCode_FirstFrame", Val: field.Value})
+		case "Time code source":
+			out = append(out, jsonKV{Key: "TimeCode_Source", Val: field.Value})
+		case "GOP, Open/Closed":
+			out = append(out, jsonKV{Key: "Gop_OpenClosed", Val: field.Value})
+		case "GOP, Open/Closed of first frame":
+			out = append(out, jsonKV{Key: "Gop_OpenClosed_FirstFrame", Val: field.Value})
+		case "Standard":
+			out = append(out, jsonKV{Key: "Standard", Val: field.Value})
 		case "Default":
 			out = append(out, jsonKV{Key: "Default", Val: field.Value})
 		case "Forced":
@@ -213,6 +235,8 @@ func mapStreamFieldsToJSON(kind StreamKind, fields []Field) []jsonKV {
 			out = append(out, jsonKV{Key: "AlternateGroup", Val: field.Value})
 		case "ErrorDetectionType":
 			extras = append(extras, jsonKV{Key: "ErrorDetectionType", Val: field.Value})
+		case "Service kind":
+			out = append(out, jsonKV{Key: "ServiceKind", Val: field.Value})
 		case "Service name":
 			out = append(out, jsonKV{Key: "ServiceName", Val: field.Value})
 		case "Service provider":
