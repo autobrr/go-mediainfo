@@ -10,30 +10,31 @@ import (
 )
 
 type tsStream struct {
-	pid            uint16
-	programNumber  uint16
-	streamType     byte
-	kind           StreamKind
-	format         string
-	frames         uint64
-	bytes          uint64
-	pts            ptsTracker
-	width          uint64
-	height         uint64
-	videoFields    []Field
-	hasVideoFields bool
-	audioProfile   string
-	audioObject    int
-	audioRate      float64
-	audioChannels  uint64
-	hasAudioInfo   bool
-	audioFrames    uint64
-	videoFrameRate float64
-	pesData        []byte
-	audioBuffer    []byte
-	audioStarted   bool
-	writingLibrary string
-	encoding       string
+	pid              uint16
+	programNumber    uint16
+	streamType       byte
+	kind             StreamKind
+	format           string
+	frames           uint64
+	bytes            uint64
+	pts              ptsTracker
+	width            uint64
+	height           uint64
+	videoFields      []Field
+	hasVideoFields   bool
+	audioProfile     string
+	audioObject      int
+	audioMPEGVersion int
+	audioRate        float64
+	audioChannels    uint64
+	hasAudioInfo     bool
+	audioFrames      uint64
+	videoFrameRate   float64
+	pesData          []byte
+	audioBuffer      []byte
+	audioStarted     bool
+	writingLibrary   string
+	encoding         string
 }
 
 func ParseMPEGTS(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, []Field, bool) {
@@ -299,7 +300,7 @@ func ParseMPEGTS(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, []Fie
 		if st.kind == StreamAudio {
 			if st.audioProfile == "LC" {
 				fields = append(fields, Field{Name: "Format/Info", Value: "Advanced Audio Codec Low Complexity"})
-				fields = append(fields, Field{Name: "Format version", Value: "Version 4"})
+				fields = append(fields, Field{Name: "Format version", Value: formatAACVersion(st.audioMPEGVersion)})
 				fields = append(fields, Field{Name: "Muxing mode", Value: "ADTS"})
 			} else if info := mapMatroskaFormatInfo(st.format); info != "" {
 				fields = append(fields, Field{Name: "Format/Info", Value: info})
@@ -601,6 +602,7 @@ func consumeADTS(entry *tsStream, payload []byte) {
 			i++
 			continue
 		}
+		mpegID := (entry.audioBuffer[i+1] >> 3) & 0x01
 		protectionAbsent := entry.audioBuffer[i+1] & 0x01
 		profile := (entry.audioBuffer[i+2] >> 6) & 0x03
 		samplingIndex := (entry.audioBuffer[i+2] >> 2) & 0x0F
@@ -630,6 +632,7 @@ func consumeADTS(entry *tsStream, payload []byte) {
 			if sampleRate > 0 {
 				entry.audioProfile = mapAACProfile(objType)
 				entry.audioObject = objType
+				entry.audioMPEGVersion = adtsMPEGVersion(mpegID)
 				entry.audioRate = sampleRate
 				entry.audioChannels = uint64(channelConfig)
 				entry.hasAudioInfo = true

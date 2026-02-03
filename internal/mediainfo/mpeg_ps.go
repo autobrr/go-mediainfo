@@ -254,8 +254,11 @@ func ParseMPEGPS(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, bool)
 				fields = append(fields, Field{Name: "Muxing mode", Value: "DVD-Video"})
 			} else if st.audioProfile == "LC" {
 				fields = append(fields, Field{Name: "Format/Info", Value: "Advanced Audio Codec Low Complexity"})
-				fields = append(fields, Field{Name: "Format version", Value: "Version 4"})
+				fields = append(fields, Field{Name: "Format version", Value: formatAACVersion(st.audioMPEGVersion)})
 				fields = append(fields, Field{Name: "Muxing mode", Value: "ADTS"})
+				if st.audioObject > 0 {
+					fields = append(fields, Field{Name: "Codec ID", Value: fmt.Sprintf("%d", st.audioObject)})
+				}
 			} else if info := mapMatroskaFormatInfo(st.format); info != "" {
 				fields = append(fields, Field{Name: "Format/Info", Value: info})
 			}
@@ -488,16 +491,20 @@ func ParseMPEGPS(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, bool)
 				frameRate := st.audioRate / 1024.0
 				fields = append(fields, Field{Name: "Frame rate", Value: formatAudioFrameRate(frameRate, 1024)})
 				fields = append(fields, Field{Name: "Compression mode", Value: "Lossy"})
-				if duration > 0 && st.bytes > 0 {
+				if duration > 0 && st.bytes > 0 && st.audioProfile == "" {
 					bitrate := (float64(st.bytes) * 8) / duration
 					if value := formatBitrate(bitrate); value != "" {
 						fields = append(fields, Field{Name: "Bit rate", Value: value})
 					}
 				}
-				if st.bytes > 0 {
+				if st.bytes > 0 && st.audioProfile == "" {
 					if streamSize := formatStreamSize(int64(st.bytes), size); streamSize != "" {
 						fields = append(fields, Field{Name: "Stream size", Value: streamSize})
 					}
+				}
+				if st.audioProfile != "" && videoPTS.has() && st.pts.has() {
+					delay := float64(int64(st.pts.min)-int64(videoPTS.min)) * 1000 / 90000.0
+					fields = append(fields, Field{Name: "Delay relative to video", Value: fmt.Sprintf("%d ms", int64(math.Round(delay)))})
 				}
 			}
 		} else if st.kind != StreamVideo {
@@ -656,6 +663,7 @@ func consumeADTSPS(entry *psStream, payload []byte) {
 			i++
 			continue
 		}
+		mpegID := (entry.audioBuffer[i+1] >> 3) & 0x01
 		protectionAbsent := entry.audioBuffer[i+1] & 0x01
 		profile := (entry.audioBuffer[i+2] >> 6) & 0x03
 		samplingIndex := (entry.audioBuffer[i+2] >> 2) & 0x0F
@@ -685,6 +693,7 @@ func consumeADTSPS(entry *psStream, payload []byte) {
 			if sampleRate > 0 {
 				entry.audioProfile = mapAACProfile(objType)
 				entry.audioObject = objType
+				entry.audioMPEGVersion = adtsMPEGVersion(mpegID)
 				entry.audioRate = sampleRate
 				entry.audioChannels = uint64(channelConfig)
 				entry.hasAudioInfo = true
