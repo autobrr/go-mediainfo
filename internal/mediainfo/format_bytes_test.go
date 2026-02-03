@@ -10,6 +10,8 @@ func TestFormatBytes(t *testing.T) {
 		{size: 0, want: "0 B"},
 		{size: 512, want: "512 B"},
 		{size: 1024, want: "1.00 KiB"},
+		{size: 1024 * 10, want: "10.0 KiB"},
+		{size: 1024 * 100, want: "100 KiB"},
 		{size: 1024 * 1024, want: "1.00 MiB"},
 	}
 

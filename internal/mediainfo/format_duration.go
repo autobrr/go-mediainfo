@@ -18,10 +18,7 @@ func formatDuration(seconds float64) string {
 	totalSec := totalMs / 1000
 	remMs := totalMs % 1000
 	if totalSec < 60 {
-		if remMs == 0 {
-			return fmt.Sprintf("%d s", totalSec)
-		}
-		return fmt.Sprintf("%.3f s", float64(totalSec)+float64(remMs)/1000)
+		return fmt.Sprintf("%d s %d ms", totalSec, remMs)
 	}
 
 	hours := totalSec / 3600

@@ -16,6 +16,12 @@ func mergeSampleInfo(a, b SampleInfo) SampleInfo {
 	if b.SampleBytes > 0 {
 		info.SampleBytes = b.SampleBytes
 	}
+	if b.Width > 0 {
+		info.Width = b.Width
+	}
+	if b.Height > 0 {
+		info.Height = b.Height
+	}
 	return info
 }
 

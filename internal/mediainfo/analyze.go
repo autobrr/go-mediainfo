@@ -58,11 +58,22 @@ func AnalyzeFile(path string) (Report, error) {
 					}
 					fields = addStreamCommon(fields, track.DurationSeconds, bits)
 				}
+				if track.SampleBytes > 0 {
+					if streamSize := formatStreamSize(int64(track.SampleBytes), stat.Size()); streamSize != "" {
+						fields = appendFieldUnique(fields, Field{Name: "Stream size", Value: streamSize})
+					}
+				}
 				if track.Kind == StreamVideo && track.SampleCount > 0 && track.DurationSeconds > 0 {
 					fields = appendFieldUnique(fields, Field{Name: "Frame rate mode", Value: "Constant"})
 					rate := float64(track.SampleCount) / track.DurationSeconds
 					if rate > 0 {
 						fields = appendFieldUnique(fields, Field{Name: "Frame rate", Value: formatFrameRate(rate)})
+					}
+					if track.Width > 0 && track.Height > 0 && track.SampleBytes > 0 {
+						bitrate := (float64(track.SampleBytes) * 8) / track.DurationSeconds
+						if bits := formatBitsPerPixelFrame(bitrate, track.Width, track.Height, rate); bits != "" {
+							fields = appendFieldUnique(fields, Field{Name: "Bits/(Pixel*Frame)", Value: bits})
+						}
 					}
 				}
 				streams = append(streams, Stream{Kind: track.Kind, Fields: fields})

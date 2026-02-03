@@ -15,6 +15,8 @@ type MP4Track struct {
 	SampleCount     uint64
 	SampleBytes     uint64
 	DurationSeconds float64
+	Width           uint64
+	Height          uint64
 }
 
 type MP4Info struct {
@@ -262,6 +264,8 @@ func parseMdia(buf []byte) (MP4Track, bool) {
 		SampleCount:     sampleInfo.SampleCount,
 		SampleBytes:     sampleInfo.SampleBytes,
 		DurationSeconds: trackDuration,
+		Width:           sampleInfo.Width,
+		Height:          sampleInfo.Height,
 	}, true
 }
 

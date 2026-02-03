@@ -11,11 +11,15 @@ type SampleInfo struct {
 	Fields      []Field
 	SampleCount uint64
 	SampleBytes uint64
+	Width       uint64
+	Height      uint64
 }
 
 type sampleEntryResult struct {
 	Fields []Field
 	Format string
+	Width  uint64
+	Height uint64
 }
 
 func parseStsdForSample(buf []byte) (SampleInfo, bool) {
@@ -41,6 +45,12 @@ func parseStsdForSample(buf []byte) (SampleInfo, bool) {
 			info.Fields = append(info.Fields, result.Fields...)
 			if result.Format != "" {
 				info.Format = result.Format
+			}
+			if result.Width > 0 {
+				info.Width = result.Width
+			}
+			if result.Height > 0 {
+				info.Height = result.Height
 			}
 		}
 		if isAudioSampleEntry(typ) {
@@ -139,15 +149,21 @@ func parseVisualSampleEntry(entry []byte, sampleType string) sampleEntryResult {
 			fields = append(fields, avcFields...)
 		}
 	}
-	if avg, max, ok := parseBtrt(entry, mp4VisualSampleEntryHeaderSize); ok {
-		if avg > 0 {
+	if info := mapVideoFormatInfo(sampleType); info != "" {
+		fields = append(fields, Field{Name: "Codec ID/Info", Value: info})
+	}
+	if sampleType == "avc1" || sampleType == "avc3" || sampleType == "hvc1" || sampleType == "hev1" || sampleType == "mp4v" {
+		fields = append(fields, Field{Name: "Compression mode", Value: "Lossy"})
+	}
+	if _, max, avg, ok := parseBtrt(entry, mp4VisualSampleEntryHeaderSize); ok {
+		if max > 0 {
+			fields = append(fields, Field{Name: "Nominal bit rate", Value: formatBitrate(float64(max))})
+			fields = append(fields, Field{Name: "Maximum bit rate", Value: formatBitrate(float64(max))})
+		} else if avg > 0 {
 			fields = append(fields, Field{Name: "Nominal bit rate", Value: formatBitrate(float64(avg))})
 		}
-		if max > 0 {
-			fields = append(fields, Field{Name: "Maximum bit rate", Value: formatBitrate(float64(max))})
-		}
 	}
-	return sampleEntryResult{Fields: fields}
+	return sampleEntryResult{Fields: fields, Width: uint64(width), Height: uint64(height)}
 }
 
 func parseAudioSampleEntry(entry []byte, sampleType string) sampleEntryResult {
@@ -167,6 +183,10 @@ func parseAudioSampleEntry(entry []byte, sampleType string) sampleEntryResult {
 	if sampleRate > 0 {
 		rate := float64(sampleRate) / 65536
 		fields = append(fields, Field{Name: "Sampling rate", Value: formatSampleRate(rate)})
+		if sampleType == "mp4a" {
+			frameRate := rate / 1024.0
+			fields = append(fields, Field{Name: "Frame rate", Value: fmt.Sprintf("%.3f FPS (1024 SPF)", frameRate)})
+		}
 	}
 	format := ""
 	if sampleType == "mp4a" {
@@ -185,12 +205,14 @@ func parseAudioSampleEntry(entry []byte, sampleType string) sampleEntryResult {
 	} else if info := mapAudioFormatInfo(sampleType); info != "" {
 		fields = append(fields, Field{Name: "Format/Info", Value: info})
 	}
-	if avg, max, ok := parseBtrt(entry, mp4AudioSampleEntryHeaderSize); ok {
-		if avg > 0 {
-			fields = append(fields, Field{Name: "Nominal bit rate", Value: formatBitrate(float64(avg))})
-		}
+	if sampleType == "mp4a" {
+		fields = append(fields, Field{Name: "Compression mode", Value: "Lossy"})
+	}
+	if _, max, avg, ok := parseBtrt(entry, mp4AudioSampleEntryHeaderSize); ok {
 		if max > 0 {
 			fields = append(fields, Field{Name: "Maximum bit rate", Value: formatBitrate(float64(max))})
+		} else if avg > 0 {
+			fields = append(fields, Field{Name: "Maximum bit rate", Value: formatBitrate(float64(avg))})
 		}
 	}
 	fields = append(fields, Field{Name: "Codec ID", Value: codecID})
@@ -346,17 +368,18 @@ func findMP4ChildBox(entry []byte, start int, name string) ([]byte, bool) {
 	return nil, false
 }
 
-func parseBtrt(entry []byte, start int) (uint32, uint32, bool) {
+func parseBtrt(entry []byte, start int) (uint32, uint32, uint32, bool) {
 	payload, ok := findMP4ChildBox(entry, start, "btrt")
 	if !ok {
 		payload, ok = findMP4BoxByName(entry, "btrt")
 	}
 	if !ok || len(payload) < 12 {
-		return 0, 0, false
+		return 0, 0, 0, false
 	}
+	bufferSize := binary.BigEndian.Uint32(payload[0:4])
 	maxBitrate := binary.BigEndian.Uint32(payload[4:8])
 	avgBitrate := binary.BigEndian.Uint32(payload[8:12])
-	return avgBitrate, maxBitrate, true
+	return bufferSize, maxBitrate, avgBitrate, true
 }
 
 func mapVideoFormatInfo(sampleType string) string {

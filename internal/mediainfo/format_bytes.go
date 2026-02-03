@@ -17,5 +17,16 @@ func formatBytes(size int64) string {
 	if exp == 0 {
 		return fmt.Sprintf("%.2f %s", div, units[0])
 	}
-	return fmt.Sprintf("%.2f %s", div, units[exp-1])
+	return fmt.Sprintf("%s %s", formatByteValue(div), units[exp-1])
+}
+
+func formatByteValue(value float64) string {
+	switch {
+	case value >= 100:
+		return fmt.Sprintf("%.0f", value)
+	case value >= 10:
+		return fmt.Sprintf("%.1f", value)
+	default:
+		return fmt.Sprintf("%.2f", value)
+	}
 }

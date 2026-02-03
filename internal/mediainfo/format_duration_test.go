@@ -9,8 +9,8 @@ func TestFormatDuration(t *testing.T) {
 	}{
 		{seconds: 0, want: ""},
 		{seconds: 0.25, want: "250 ms"},
-		{seconds: 1, want: "1 s"},
-		{seconds: 1.5, want: "1.500 s"},
+		{seconds: 1, want: "1 s 0 ms"},
+		{seconds: 1.5, want: "1 s 500 ms"},
 		{seconds: 61, want: "1 min 1 s"},
 		{seconds: 3661, want: "1 h 1 min 1 s"},
 	}

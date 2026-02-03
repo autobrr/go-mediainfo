@@ -1,6 +1,9 @@
 package mediainfo
 
-import "fmt"
+import (
+	"fmt"
+	"math"
+)
 
 func formatPixels(value uint64) string {
 	if value == 0 {
@@ -49,4 +52,20 @@ func gcd(a, b uint64) uint64 {
 		a, b = b, a%b
 	}
 	return a
+}
+
+func formatBitsPerPixelFrame(bitrate float64, width, height uint64, fps float64) string {
+	if bitrate <= 0 || width == 0 || height == 0 || fps <= 0 {
+		return ""
+	}
+	value := bitrate / (float64(width) * float64(height) * fps)
+	return fmt.Sprintf("%.3f", value)
+}
+
+func formatStreamSize(bytes int64, total int64) string {
+	if bytes <= 0 || total <= 0 {
+		return ""
+	}
+	percent := int(math.Round(float64(bytes) * 100 / float64(total)))
+	return fmt.Sprintf("%s (%d%%)", formatBytes(bytes), percent)
 }
