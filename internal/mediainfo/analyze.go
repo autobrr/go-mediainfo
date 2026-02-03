@@ -252,6 +252,14 @@ func AnalyzeFile(path string) (Report, error) {
 			info = parsedInfo
 			streams = parsedStreams
 		}
+	case "AVI":
+		if parsedInfo, parsedStreams, generalFields, ok := ParseAVI(file, stat.Size()); ok {
+			info = parsedInfo
+			for _, field := range generalFields {
+				general.Fields = appendFieldUnique(general.Fields, field)
+			}
+			streams = parsedStreams
+		}
 	}
 
 	for _, stream := range streams {
@@ -269,10 +277,10 @@ func AnalyzeFile(path string) (Report, error) {
 		bitrate := float64(stat.Size()*8) / info.DurationSeconds
 		if bitrate > 0 {
 			mode := info.BitrateMode
-			if mode != "" && format != "Matroska" {
+			if mode != "" && format != "Matroska" && format != "AVI" {
 				general.Fields = append(general.Fields, Field{Name: "Overall bit rate mode", Value: mode})
 			}
-			if mode == "" && format != "Matroska" {
+			if mode == "" && format != "Matroska" && format != "AVI" {
 				if inferred := bitrateMode(bitrate); inferred != "" {
 					general.Fields = append(general.Fields, Field{Name: "Overall bit rate mode", Value: inferred})
 				}
