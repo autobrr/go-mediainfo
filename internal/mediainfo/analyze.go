@@ -5,6 +5,8 @@ import (
 	"io"
 	"math"
 	"os"
+	"strconv"
+	"strings"
 )
 
 func AnalyzeFile(path string) (Report, error) {
@@ -162,6 +164,36 @@ func AnalyzeFile(path string) (Report, error) {
 				general.Fields = appendFieldUnique(general.Fields, field)
 			}
 			streams = append(streams, parsed.Tracks...)
+			if _, err := file.Seek(0, io.SeekStart); err == nil {
+				sniff := make([]byte, 1<<20)
+				n, _ := io.ReadFull(file, sniff)
+				writingLib, encoding := findX264Info(sniff[:n])
+				if writingLib != "" || encoding != "" {
+					for i := range streams {
+						if streams[i].Kind != StreamVideo || findField(streams[i].Fields, "Format") != "AVC" {
+							continue
+						}
+						if writingLib != "" && findField(streams[i].Fields, "Writing library") == "" {
+							streams[i].Fields = appendFieldUnique(streams[i].Fields, Field{Name: "Writing library", Value: writingLib})
+						}
+						if encoding != "" && findField(streams[i].Fields, "Encoding settings") == "" {
+							streams[i].Fields = appendFieldUnique(streams[i].Fields, Field{Name: "Encoding settings", Value: encoding})
+						}
+						if encoding != "" && findField(streams[i].Fields, "Nominal bit rate") == "" {
+							if bitrate, ok := findX264Bitrate(encoding); ok {
+								streams[i].Fields = appendFieldUnique(streams[i].Fields, Field{Name: "Nominal bit rate", Value: formatBitrate(bitrate)})
+								width, _ := parsePixels(findField(streams[i].Fields, "Width"))
+								height, _ := parsePixels(findField(streams[i].Fields, "Height"))
+								fps, _ := parseFPS(findField(streams[i].Fields, "Frame rate"))
+								if bits := formatBitsPerPixelFrame(bitrate, width, height, fps); bits != "" {
+									streams[i].Fields = appendFieldUnique(streams[i].Fields, Field{Name: "Bits/(Pixel*Frame)", Value: bits})
+								}
+							}
+						}
+						break
+					}
+				}
+			}
 		}
 	case "MPEG-TS":
 		if parsedInfo, parsedStreams, ok := ParseMPEGTS(file, stat.Size()); ok {
@@ -210,11 +242,13 @@ func AnalyzeFile(path string) (Report, error) {
 		bitrate := float64(stat.Size()*8) / info.DurationSeconds
 		if bitrate > 0 {
 			mode := info.BitrateMode
-			if mode == "" {
-				mode = bitrateMode(bitrate)
-			}
-			if mode != "" {
+			if mode != "" && format != "Matroska" {
 				general.Fields = append(general.Fields, Field{Name: "Overall bit rate mode", Value: mode})
+			}
+			if mode == "" && format != "Matroska" {
+				if inferred := bitrateMode(bitrate); inferred != "" {
+					general.Fields = append(general.Fields, Field{Name: "Overall bit rate mode", Value: inferred})
+				}
 			}
 			general.Fields = append(general.Fields, Field{Name: "Overall bit rate", Value: formatBitrate(bitrate)})
 		}
@@ -242,4 +276,28 @@ func AnalyzeFiles(paths []string) ([]Report, int, error) {
 		reports = append(reports, report)
 	}
 	return reports, len(reports), nil
+}
+
+func parsePixels(value string) (uint64, bool) {
+	parts := strings.Fields(value)
+	if len(parts) == 0 {
+		return 0, false
+	}
+	parsed, err := strconv.ParseUint(parts[0], 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	return parsed, true
+}
+
+func parseFPS(value string) (float64, bool) {
+	parts := strings.Fields(value)
+	if len(parts) == 0 {
+		return 0, false
+	}
+	parsed, err := strconv.ParseFloat(parts[0], 64)
+	if err != nil {
+		return 0, false
+	}
+	return parsed, true
 }

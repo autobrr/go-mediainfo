@@ -23,8 +23,8 @@ func TestParseMatroskaTracks(t *testing.T) {
 	if findField(info.Tracks[0].Fields, "Frame rate") == "" {
 		t.Fatalf("missing frame rate")
 	}
-	if findField(info.Tracks[0].Fields, "Bit rate") == "" {
-		t.Fatalf("missing bit rate")
+	if findField(info.Tracks[0].Fields, "Nominal bit rate") == "" {
+		t.Fatalf("missing nominal bit rate")
 	}
 }
 

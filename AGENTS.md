@@ -69,6 +69,9 @@ Owner: soup
 - MP4: honor edit list (`edts/elst`) for display duration, add Source duration + Source_Duration_LastFrame; stream size scales via sample delta
 - Formatting: file size now rounds like MediaInfo; sub-minute durations show `X s Y ms`
 - Matroska: parse EBML DocTypeVersion, SegmentUID, Writing/Muxing app; track number mapped to ID; add Format/Info
+- Matroska: AVC codec private -> profile/settings/chroma/bit depth/scan; AAC ASC -> AAC LC + Codec ID A_AAC-2
+- Matroska: tags ENCODER -> audio Writing library; x264 settings -> Nominal bit rate + Bits/(Pixel*Frame)
+- Matroska: track flags Default/Forced; video color range; ErrorDetectionType defaulted to Per level 1
 
 ## Notes
 - Update this file as we learn more about CLI behavior, formats, and edge cases.

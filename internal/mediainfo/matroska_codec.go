@@ -12,6 +12,8 @@ func mapMatroskaCodecID(codecID string, trackType uint64) (StreamKind, string) {
 		return StreamVideo, "VP8"
 	case "A_AAC":
 		return StreamAudio, "AAC"
+	case "A_AAC-2":
+		return StreamAudio, "AAC"
 	case "A_AC3":
 		return StreamAudio, "AC-3"
 	case "A_EAC3":

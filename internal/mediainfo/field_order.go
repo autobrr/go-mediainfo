@@ -1,19 +1,20 @@
 package mediainfo
 
 var generalFieldOrder = map[string]int{
+	"Unique ID":             -1,
 	"Complete name":         0,
 	"Format":                1,
 	"Format profile":        2,
 	"Format version":        3,
 	"Codec ID":              4,
-	"Unique ID":             5,
-	"File size":             6,
-	"Duration":              7,
-	"Overall bit rate mode": 8,
-	"Overall bit rate":      9,
-	"Frame rate":            10,
-	"Writing application":   11,
-	"Writing library":       12,
+	"File size":             5,
+	"Duration":              6,
+	"Overall bit rate mode": 7,
+	"Overall bit rate":      8,
+	"Frame rate":            9,
+	"Writing application":   10,
+	"Writing library":       11,
+	"ErrorDetectionType":    12,
 }
 
 var streamFieldOrder = map[string]int{
@@ -51,6 +52,8 @@ var streamFieldOrder = map[string]int{
 	"Writing library":                   31,
 	"Encoding settings":                 32,
 	"Default":                           33,
-	"Alternate group":                   34,
-	"Codec configuration box":           35,
+	"Forced":                            34,
+	"Color range":                       35,
+	"Alternate group":                   36,
+	"Codec configuration box":           37,
 }
