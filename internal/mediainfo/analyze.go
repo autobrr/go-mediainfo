@@ -3,6 +3,7 @@ package mediainfo
 import (
 	"fmt"
 	"io"
+	"math"
 	"os"
 )
 
@@ -42,8 +43,16 @@ func AnalyzeFile(path string) (Report, error) {
 			}
 			for _, track := range parsed.Tracks {
 				fields := []Field{}
+				displayDuration := track.DurationSeconds
+				sourceDuration := 0.0
+				if track.EditDuration > 0 && track.DurationSeconds > 0 {
+					if math.Abs(track.EditDuration-track.DurationSeconds) > 0.0005 {
+						displayDuration = track.EditDuration
+						sourceDuration = track.DurationSeconds
+					}
+				}
 				if track.ID > 0 {
-					fields = appendFieldUnique(fields, Field{Name: "ID", Value: formatID(uint64(track.ID))})
+					fields = appendFieldUnique(fields, Field{Name: "ID", Value: fmt.Sprintf("%d", track.ID)})
 				}
 				if track.Format != "" {
 					fields = appendFieldUnique(fields, Field{Name: "Format", Value: track.Format})
@@ -51,32 +60,99 @@ func AnalyzeFile(path string) (Report, error) {
 				for _, field := range track.Fields {
 					fields = appendFieldUnique(fields, field)
 				}
-				if track.DurationSeconds > 0 {
-					bits := 0.0
+				var bitrate float64
+				if displayDuration > 0 {
 					if track.SampleBytes > 0 {
-						bits = (float64(track.SampleBytes) * 8) / track.DurationSeconds
+						durationForBitrate := displayDuration
+						if sourceDuration > 0 {
+							durationForBitrate = sourceDuration
+						}
+						bitrate = (float64(track.SampleBytes) * 8) / durationForBitrate
 					}
-					fields = addStreamCommon(fields, track.DurationSeconds, bits)
+					fields = addStreamDuration(fields, displayDuration)
+					if sourceDuration > 0 {
+						fields = appendFieldUnique(fields, Field{Name: "Source duration", Value: formatDuration(sourceDuration)})
+						if track.SampleDelta > 0 && track.LastSampleDelta > 0 && track.Timescale > 0 {
+							if track.LastSampleDelta != track.SampleDelta {
+								diffSamples := int64(track.LastSampleDelta) - int64(track.SampleDelta)
+								diffMs := int64(math.Round(float64(diffSamples) * 1000 / float64(track.Timescale)))
+								if diffMs != 0 {
+									fields = appendFieldUnique(fields, Field{Name: "Source_Duration_LastFrame", Value: fmt.Sprintf("%d ms", diffMs)})
+								}
+							}
+						}
+					}
+					if bitrate > 0 {
+						if track.Kind != StreamVideo {
+							if mode := bitrateMode(bitrate); mode != "" {
+								fields = appendFieldUnique(fields, Field{Name: "Bit rate mode", Value: mode})
+							}
+						}
+						fields = addStreamBitrate(fields, bitrate)
+					}
 				}
 				if track.SampleBytes > 0 {
-					if streamSize := formatStreamSize(int64(track.SampleBytes), stat.Size()); streamSize != "" {
+					streamBytes := int64(track.SampleBytes)
+					if sourceDuration > 0 && displayDuration > 0 {
+						if track.SampleDelta > 0 && track.SampleCount > 0 && track.Timescale > 0 {
+							displaySamples := (displayDuration * float64(track.Timescale)) / float64(track.SampleDelta)
+							if displaySamples > 0 {
+								streamBytes = int64(math.Round(float64(track.SampleBytes) * displaySamples / float64(track.SampleCount)))
+							} else if bitrate > 0 {
+								streamBytes = int64(math.Round((bitrate * displayDuration) / 8))
+							}
+						} else if bitrate > 0 {
+							streamBytes = int64(math.Round((bitrate * displayDuration) / 8))
+						}
+					}
+					if streamSize := formatStreamSize(streamBytes, stat.Size()); streamSize != "" {
 						fields = appendFieldUnique(fields, Field{Name: "Stream size", Value: streamSize})
 					}
+					if sourceDuration > 0 {
+						if sourceSize := formatStreamSize(int64(track.SampleBytes), stat.Size()); sourceSize != "" {
+							fields = appendFieldUnique(fields, Field{Name: "Source stream size", Value: sourceSize})
+						}
+					}
 				}
-				if track.Kind == StreamVideo && track.SampleCount > 0 && track.DurationSeconds > 0 {
+				if track.Kind == StreamVideo && track.SampleCount > 0 && displayDuration > 0 {
 					fields = appendFieldUnique(fields, Field{Name: "Frame rate mode", Value: "Constant"})
-					rate := float64(track.SampleCount) / track.DurationSeconds
+					rate := float64(track.SampleCount) / displayDuration
 					if rate > 0 {
 						fields = appendFieldUnique(fields, Field{Name: "Frame rate", Value: formatFrameRate(rate)})
 					}
 					if track.Width > 0 && track.Height > 0 && track.SampleBytes > 0 {
-						bitrate := (float64(track.SampleBytes) * 8) / track.DurationSeconds
-						if bits := formatBitsPerPixelFrame(bitrate, track.Width, track.Height, rate); bits != "" {
+						pixelBitrate := (float64(track.SampleBytes) * 8) / displayDuration
+						if bits := formatBitsPerPixelFrame(pixelBitrate, track.Width, track.Height, rate); bits != "" {
 							fields = appendFieldUnique(fields, Field{Name: "Bits/(Pixel*Frame)", Value: bits})
 						}
 					}
 				}
+				if track.Default && track.Kind != StreamVideo {
+					fields = appendFieldUnique(fields, Field{Name: "Default", Value: "Yes"})
+				}
+				if track.AlternateGroup > 0 {
+					fields = appendFieldUnique(fields, Field{Name: "Alternate group", Value: fmt.Sprintf("%d", track.AlternateGroup)})
+				}
 				streams = append(streams, Stream{Kind: track.Kind, Fields: fields})
+			}
+			if _, err := file.Seek(0, io.SeekStart); err == nil {
+				sniff := make([]byte, 1<<20)
+				n, _ := io.ReadFull(file, sniff)
+				writingLib, encoding := findX264Info(sniff[:n])
+				if writingLib != "" || encoding != "" {
+					for i := range streams {
+						if streams[i].Kind != StreamVideo || findField(streams[i].Fields, "Format") != "AVC" {
+							continue
+						}
+						if writingLib != "" {
+							streams[i].Fields = appendFieldUnique(streams[i].Fields, Field{Name: "Writing library", Value: writingLib})
+						}
+						if encoding != "" {
+							streams[i].Fields = appendFieldUnique(streams[i].Fields, Field{Name: "Encoding settings", Value: encoding})
+						}
+						break
+					}
+				}
 			}
 		}
 	case "Matroska":

@@ -66,6 +66,7 @@ Owner: soup
 - MP4: track IDs from `tkhd`, AAC profile from `esds`, bitrate from `btrt`
 - MP4 AVC: parse `avcC` SPS/PPS for profile, chroma subsampling, bit depth, scan type, CABAC, ref frames, aspect ratio
 - MP4: add stream size, bits/(pixel*frame), compression mode, frame rate mode, AAC frame rate
+- MP4: honor edit list (`edts/elst`) for display duration, add Source duration + Source_Duration_LastFrame; stream size scales via sample delta
 - Formatting: file size now rounds like MediaInfo; sub-minute durations show `X s Y ms`
 - Matroska: parse EBML DocTypeVersion, SegmentUID, Writing/Muxing app; track number mapped to ID; add Format/Info
 

@@ -7,12 +7,14 @@ import (
 )
 
 type SampleInfo struct {
-	Format      string
-	Fields      []Field
-	SampleCount uint64
-	SampleBytes uint64
-	Width       uint64
-	Height      uint64
+	Format          string
+	Fields          []Field
+	SampleCount     uint64
+	SampleBytes     uint64
+	SampleDelta     uint32
+	LastSampleDelta uint32
+	Width           uint64
+	Height          uint64
 }
 
 type sampleEntryResult struct {
@@ -144,12 +146,14 @@ func parseVisualSampleEntry(entry []byte, sampleType string) sampleEntryResult {
 		if payload, ok := findMP4ChildBox(entry, mp4VisualSampleEntryHeaderSize, "avcC"); ok {
 			_, avcFields := parseAVCConfig(payload)
 			fields = append(fields, avcFields...)
+			fields = append(fields, Field{Name: "Codec configuration box", Value: "avcC"})
 		} else if payload, ok := findMP4BoxByName(entry, "avcC"); ok {
 			_, avcFields := parseAVCConfig(payload)
 			fields = append(fields, avcFields...)
+			fields = append(fields, Field{Name: "Codec configuration box", Value: "avcC"})
 		}
 	}
-	if info := mapVideoFormatInfo(sampleType); info != "" {
+	if info := mapVideoCodecIDInfo(sampleType); info != "" {
 		fields = append(fields, Field{Name: "Codec ID/Info", Value: info})
 	}
 	if sampleType == "avc1" || sampleType == "avc3" || sampleType == "hvc1" || sampleType == "hev1" || sampleType == "mp4v" {
@@ -191,7 +195,6 @@ func parseAudioSampleEntry(entry []byte, sampleType string) sampleEntryResult {
 	format := ""
 	if sampleType == "mp4a" {
 		if profile, codecIDValue, info := parseESDSProfile(entry); profile != "" {
-			fields = append(fields, Field{Name: "Format profile", Value: profile})
 			if info != "" {
 				fields = append(fields, Field{Name: "Format/Info", Value: info})
 			}
@@ -386,6 +389,19 @@ func mapVideoFormatInfo(sampleType string) string {
 	switch sampleType {
 	case "avc1", "avc3":
 		return "Advanced Video Codec"
+	case "hvc1", "hev1":
+		return "High Efficiency Video Coding"
+	case "mp4v":
+		return "MPEG-4 Visual"
+	default:
+		return ""
+	}
+}
+
+func mapVideoCodecIDInfo(sampleType string) string {
+	switch sampleType {
+	case "avc1", "avc3":
+		return "Advanced Video Coding"
 	case "hvc1", "hev1":
 		return "High Efficiency Video Coding"
 	case "mp4v":
