@@ -4,6 +4,7 @@ import "sort"
 
 var jsonGeneralFieldOrder = map[string]int{
 	"@type":                    0,
+	"ID":                       1,
 	"UniqueID":                 1,
 	"VideoCount":               2,
 	"AudioCount":               3,
@@ -40,6 +41,7 @@ var jsonVideoFieldOrder = map[string]int{
 	"@type":                             0,
 	"StreamOrder":                       1,
 	"ID":                                2,
+	"MenuID":                            3,
 	"UniqueID":                          3,
 	"Format":                            4,
 	"Format_Profile":                    5,
@@ -80,17 +82,25 @@ var jsonVideoFieldOrder = map[string]int{
 	"colour_description_present_Source": 40,
 	"colour_range":                      41,
 	"colour_range_Source":               42,
-	"extra":                             43,
+	"List_StreamKind":                   43,
+	"List_StreamPos":                    44,
+	"ServiceName":                       45,
+	"ServiceProvider":                   46,
+	"ServiceType":                       47,
+	"extra":                             48,
 }
 
 var jsonAudioFieldOrder = map[string]int{
 	"@type":                     0,
 	"StreamOrder":               1,
 	"ID":                        2,
+	"MenuID":                    3,
 	"UniqueID":                  3,
 	"Format":                    4,
+	"Format_Version":            5,
 	"Format_Settings_SBR":       5,
 	"Format_AdditionalFeatures": 6,
+	"MuxingMode":                7,
 	"CodecID":                   7,
 	"Duration":                  8,
 	"Source_Duration":           9,

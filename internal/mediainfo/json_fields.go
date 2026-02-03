@@ -91,6 +91,8 @@ func mapStreamFieldsToJSON(kind StreamKind, fields []Field) []jsonKV {
 			}
 		case "ID":
 			out = append(out, jsonKV{Key: "ID", Val: field.Value})
+		case "Menu ID":
+			out = append(out, jsonKV{Key: "MenuID", Val: field.Value})
 		case "Unique ID":
 			value := strings.TrimSpace(field.Value)
 			if idx := strings.IndexAny(value, " ("); idx >= 0 {
@@ -113,6 +115,8 @@ func mapStreamFieldsToJSON(kind StreamKind, fields []Field) []jsonKV {
 			if compat != "" && kind == StreamGeneral {
 				out = append(out, jsonKV{Key: "CodecID_Compatible", Val: compat})
 			}
+		case "Muxing mode":
+			out = append(out, jsonKV{Key: "MuxingMode", Val: field.Value})
 		case "Codec configuration box":
 			extras = append(extras, jsonKV{Key: "CodecConfigurationBox", Val: field.Value})
 		case "Duration":
@@ -209,6 +213,12 @@ func mapStreamFieldsToJSON(kind StreamKind, fields []Field) []jsonKV {
 			out = append(out, jsonKV{Key: "AlternateGroup", Val: field.Value})
 		case "ErrorDetectionType":
 			extras = append(extras, jsonKV{Key: "ErrorDetectionType", Val: field.Value})
+		case "Service name":
+			out = append(out, jsonKV{Key: "ServiceName", Val: field.Value})
+		case "Service provider":
+			out = append(out, jsonKV{Key: "ServiceProvider", Val: field.Value})
+		case "Service type":
+			out = append(out, jsonKV{Key: "ServiceType", Val: field.Value})
 		}
 	}
 	if len(extras) > 0 {
@@ -247,7 +257,7 @@ func buildJSONComputedFields(kind StreamKind, fields []jsonKV) []jsonKV {
 			}
 		}
 		if strings.EqualFold(format, "AAC") {
-			if jsonFieldValue(fields, "Format_Settings_SBR") == "" {
+			if jsonFieldValue(fields, "Format_Settings_SBR") == "" && (strings.HasPrefix(codecID, "mp4a") || strings.HasPrefix(codecID, "a_aac")) {
 				out = append(out, jsonKV{Key: "Format_Settings_SBR", Val: "No (Explicit)"})
 			}
 			if jsonFieldValue(fields, "SamplesPerFrame") == "" {

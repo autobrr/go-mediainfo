@@ -62,6 +62,8 @@ func ParseMPEGTS(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, []Fie
 	var hasPCR bool
 	var pcrBits float64
 	var pcrSeconds float64
+	var pmtPointer int
+	var pmtSectionLen int
 
 	packet := make([]byte, 188)
 	var packetIndex int64
@@ -128,9 +130,13 @@ func ParseMPEGTS(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, []Fie
 			continue
 		}
 		if pmtPID != 0 && pid == pmtPID && payloadStart {
-			parsed, pcr := parsePMT(payload, programNumber)
+			parsed, pcr, pointer, sectionLen := parsePMT(payload, programNumber)
 			if pcr != 0 {
 				pcrPID = pcr
+			}
+			if sectionLen > 0 {
+				pmtPointer = pointer
+				pmtSectionLen = sectionLen
 			}
 			for _, st := range parsed {
 				if existing, exists := streams[st.pid]; exists {
@@ -270,10 +276,25 @@ func ParseMPEGTS(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, []Fie
 
 	var streamsOut []Stream
 	videoDuration := videoPTS.duration()
-	for _, pid := range streamOrder {
+	for i, pid := range streamOrder {
 		st, ok := streams[pid]
 		if !ok {
 			continue
+		}
+		jsonExtras := map[string]string{}
+		jsonExtras["ID"] = fmt.Sprintf("%d", st.pid)
+		jsonExtras["StreamOrder"] = fmt.Sprintf("0-%d", i)
+		if st.programNumber > 0 {
+			jsonExtras["MenuID"] = fmt.Sprintf("%d", st.programNumber)
+		}
+		if st.pts.has() {
+			delay := float64(st.pts.min) / 90000.0
+			jsonExtras["Delay"] = fmt.Sprintf("%.9f", delay)
+			jsonExtras["Delay_Source"] = "Container"
+		}
+		if st.kind == StreamAudio && videoPTS.has() && st.pts.has() {
+			videoDelay := float64(int64(st.pts.min)-int64(videoPTS.min)) / 90000.0
+			jsonExtras["Video_Delay"] = fmt.Sprintf("%.3f", videoDelay)
 		}
 		fields := []Field{{Name: "ID", Value: formatStreamID(st.pid)}}
 		if st.programNumber > 0 {
@@ -375,7 +396,7 @@ func ParseMPEGTS(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, []Fie
 				}
 			}
 		}
-		streamsOut = append(streamsOut, Stream{Kind: st.kind, Fields: fields})
+		streamsOut = append(streamsOut, Stream{Kind: st.kind, Fields: fields, JSON: jsonExtras})
 	}
 
 	info := ContainerInfo{}
@@ -383,6 +404,9 @@ func ParseMPEGTS(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, []Fie
 		overallBitrate := pcrBits / pcrSeconds
 		if overallBitrate > 0 {
 			info.DurationSeconds = float64(size*8) / overallBitrate
+			precision := overallBitrate / 9600.0
+			info.OverallBitrateMin = overallBitrate - precision
+			info.OverallBitrateMax = overallBitrate + precision
 		}
 	}
 	if info.DurationSeconds == 0 {
@@ -408,6 +432,10 @@ func ParseMPEGTS(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, []Fie
 		}
 		var formats []string
 		var list []string
+		var listKinds []string
+		var listPositions []string
+		videoIndex := 0
+		audioIndex := 0
 		for _, pid := range streamOrder {
 			st, ok := streams[pid]
 			if !ok {
@@ -418,6 +446,16 @@ func ParseMPEGTS(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, []Fie
 			}
 			formats = append(formats, st.format)
 			list = append(list, fmt.Sprintf("%s (%s)", formatStreamID(st.pid), st.format))
+			switch st.kind {
+			case StreamVideo:
+				listKinds = append(listKinds, "1")
+				listPositions = append(listPositions, fmt.Sprintf("%d", videoIndex))
+				videoIndex++
+			case StreamAudio:
+				listKinds = append(listKinds, "2")
+				listPositions = append(listPositions, fmt.Sprintf("%d", audioIndex))
+				audioIndex++
+			}
 		}
 		if len(formats) > 0 {
 			menuFields = append(menuFields, Field{Name: "Format", Value: strings.Join(formats, " / ")})
@@ -437,7 +475,31 @@ func ParseMPEGTS(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, []Fie
 		if serviceType != "" {
 			menuFields = append(menuFields, Field{Name: "Service type", Value: serviceType})
 		}
-		streamsOut = append(streamsOut, Stream{Kind: StreamMenu, Fields: menuFields})
+		menuJSON := map[string]string{
+			"StreamOrder": "0",
+			"ID":          fmt.Sprintf("%d", pmtPID),
+		}
+		if programNumber > 0 {
+			menuJSON["MenuID"] = fmt.Sprintf("%d", programNumber)
+		}
+		if duration := pcrPTS.duration(); duration > 0 {
+			menuJSON["Duration"] = fmt.Sprintf("%.9f", duration)
+		}
+		if pcrPTS.has() {
+			delay := float64(pcrPTS.min) / 90000.0
+			menuJSON["Delay"] = fmt.Sprintf("%.9f", delay)
+		}
+		if len(listKinds) > 0 {
+			menuJSON["List_StreamKind"] = strings.Join(listKinds, " / ")
+		}
+		if len(listPositions) > 0 {
+			menuJSON["List_StreamPos"] = strings.Join(listPositions, " / ")
+		}
+		menuRaw := map[string]string{}
+		if pmtSectionLen > 0 {
+			menuRaw["extra"] = fmt.Sprintf("{\"pointer_field\":\"%d\",\"section_length\":\"%d\"}", pmtPointer, pmtSectionLen)
+		}
+		streamsOut = append(streamsOut, Stream{Kind: StreamMenu, Fields: menuFields, JSON: menuJSON, JSONRaw: menuRaw})
 	}
 
 	return info, streamsOut, generalFields, true
@@ -470,28 +532,28 @@ func parsePAT(payload []byte) (uint16, uint16) {
 	return 0, 0
 }
 
-func parsePMT(payload []byte, programNumber uint16) ([]tsStream, uint16) {
+func parsePMT(payload []byte, programNumber uint16) ([]tsStream, uint16, int, int) {
 	if len(payload) < 12 {
-		return nil, 0
+		return nil, 0, 0, 0
 	}
 	pointer := int(payload[0])
 	if pointer+12 > len(payload) {
-		return nil, 0
+		return nil, 0, 0, 0
 	}
 	section := payload[1+pointer:]
 	if len(section) < 12 {
-		return nil, 0
+		return nil, 0, 0, 0
 	}
 	sectionLen := int(binary.BigEndian.Uint16(section[1:3]) & 0x0FFF)
 	if sectionLen+3 > len(section) {
-		return nil, 0
+		return nil, 0, 0, 0
 	}
 	pcrPID := binary.BigEndian.Uint16(section[8:10]) & 0x1FFF
 	programInfoLen := int(binary.BigEndian.Uint16(section[10:12]) & 0x0FFF)
 	pos := 12 + programInfoLen
 	end := 3 + sectionLen - 4
 	if pos > end {
-		return nil, pcrPID
+		return nil, pcrPID, pointer, sectionLen
 	}
 	streams := make([]tsStream, 0)
 	for pos+5 <= end {
@@ -504,7 +566,7 @@ func parsePMT(payload []byte, programNumber uint16) ([]tsStream, uint16) {
 		}
 		pos += 5 + esInfoLen
 	}
-	return streams, pcrPID
+	return streams, pcrPID, pointer, sectionLen
 }
 
 func mapTSStream(streamType byte) (StreamKind, string) {

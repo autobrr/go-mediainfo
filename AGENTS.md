@@ -102,6 +102,8 @@ Owner: soup
 - Matroska JSON parity: TrackUID -> `UniqueID`, TrackOffset -> `Delay`/`Video_Delay` (Container); video Duration uses frameCount*DefaultDuration with 9-decimal JSON
 - Matroska JSON adds `colour_*` fields when Color range present; `ErrorDetectionType` lives under `extra`
 - JSON Rotation should be injected for MP4 video only; AAC `FrameCount` only for `mp4a*` codec IDs
+- MPEG-TS JSON parity: StreamOrder `0-0`/`0-1`, IDs/MenuID decimal-only; Duration/Delay 9-decimal JSON; precision min/max = overall/9600
+- MPEG-TS Menu JSON: `List_StreamKind`/`List_StreamPos`, Service* fields, PMT `pointer_field` + `section_length` in `extra`
 
 ## Notes
 - Update this file as we learn more about CLI behavior, formats, and edge cases.

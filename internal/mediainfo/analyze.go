@@ -272,10 +272,27 @@ func AnalyzeFile(path string) (Report, error) {
 	case "MPEG-TS":
 		if parsedInfo, parsedStreams, generalFields, ok := ParseMPEGTS(file, stat.Size()); ok {
 			info = parsedInfo
+			general.JSON = map[string]string{}
+			general.JSONRaw = map[string]string{}
 			for _, field := range generalFields {
 				general.Fields = appendFieldUnique(general.Fields, field)
 			}
 			streams = parsedStreams
+			if id := findField(general.Fields, "ID"); id != "" {
+				if value := extractLeadingNumber(id); value != "" {
+					general.JSON["ID"] = value
+				}
+			}
+			if info.DurationSeconds > 0 {
+				general.JSON["Duration"] = fmt.Sprintf("%.9f", info.DurationSeconds)
+				overall := (float64(stat.Size()) * 8) / info.DurationSeconds
+				general.JSON["OverallBitRate"] = fmt.Sprintf("%d", int64(math.Round(overall)))
+			}
+			if info.OverallBitrateMin > 0 && info.OverallBitrateMax > 0 {
+				min := int64(math.Round(info.OverallBitrateMin))
+				max := int64(math.Round(info.OverallBitrateMax))
+				general.JSONRaw["extra"] = fmt.Sprintf("{\"OverallBitRate_Precision_Min\":\"%d\",\"OverallBitRate_Precision_Max\":\"%d\"}", min, max)
+			}
 			if _, err := file.Seek(0, io.SeekStart); err == nil {
 				sniff := make([]byte, 1<<20)
 				n, _ := io.ReadFull(file, sniff)
