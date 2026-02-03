@@ -10,6 +10,11 @@ type h264SPSInfo struct {
 	RefFrames    int
 	Progressive  bool
 	HasScanType  bool
+	ProfileID    byte
+	LevelID      byte
+	Width        uint64
+	Height       uint64
+	FrameRate    float64
 }
 
 func parseAVCConfig(payload []byte) (string, []Field) {
@@ -96,16 +101,17 @@ func parseH264SPS(nal []byte) h264SPSInfo {
 	br := newBitReader(rbsp)
 	profileID := br.readBitsValue(8)
 	_ = br.readBitsValue(8) // constraint flags + reserved
-	_ = br.readBitsValue(8) // level_idc
+	levelID := br.readBitsValue(8)
 	_ = br.readUE()
 
 	chromaFormat := 1
 	bitDepth := 8
+	separateColourPlane := 0
 
 	if isHighProfile(profileID) {
 		chromaFormat = br.readUE()
 		if chromaFormat == 3 {
-			br.readBitsValue(1)
+			separateColourPlane = int(br.readBitsValue(1))
 		}
 		bitDepthLuma := br.readUE() + 8
 		_ = br.readUE()
@@ -136,20 +142,95 @@ func parseH264SPS(nal []byte) h264SPSInfo {
 
 	refFrames := br.readUE()
 	_ = br.readBitsValue(1)
-	_ = br.readUE()
-	_ = br.readUE()
+	picWidthMbsMinus1 := br.readUE()
+	picHeightMapUnitsMinus1 := br.readUE()
 	frameMbsOnly := br.readBitsValue(1)
 	progressive := frameMbsOnly == 1
+	frameMbsOnlyInt := 0
+	if frameMbsOnly != 0 {
+		frameMbsOnlyInt = 1
+	}
 	if frameMbsOnly == 0 {
 		_ = br.readBitsValue(1)
 	}
 	_ = br.readBitsValue(1)
 	cropFlag := br.readBitsValue(1)
+	var cropLeft, cropRight, cropTop, cropBottom int
 	if cropFlag == 1 {
-		_ = br.readUE()
-		_ = br.readUE()
-		_ = br.readUE()
-		_ = br.readUE()
+		cropLeft = br.readUE()
+		cropRight = br.readUE()
+		cropTop = br.readUE()
+		cropBottom = br.readUE()
+	}
+
+	width := (picWidthMbsMinus1 + 1) * 16
+	height := (picHeightMapUnitsMinus1 + 1) * 16
+	if frameMbsOnly == 0 {
+		height *= 2
+	}
+	if cropFlag == 1 {
+		subWidthC := 1
+		subHeightC := 1
+		if chromaFormat == 1 || chromaFormat == 2 {
+			subWidthC = 2
+		}
+		if chromaFormat == 1 {
+			subHeightC = 2
+		}
+		if chromaFormat == 0 {
+			subWidthC = 1
+			subHeightC = 2 - frameMbsOnlyInt
+		}
+		if chromaFormat == 3 && separateColourPlane == 0 {
+			subWidthC = 1
+			subHeightC = 1
+		}
+		cropUnitX := subWidthC
+		cropUnitY := subHeightC
+		if frameMbsOnlyInt == 0 {
+			cropUnitY *= 2
+		}
+		if width > (cropLeft+cropRight)*cropUnitX {
+			width -= (cropLeft + cropRight) * cropUnitX
+		}
+		if height > (cropTop+cropBottom)*cropUnitY {
+			height -= (cropTop + cropBottom) * cropUnitY
+		}
+	}
+
+	frameRate := 0.0
+	if br.readBitsValue(1) == 1 {
+		if br.readBitsValue(1) == 1 {
+			aspectRatioIDC := br.readBitsValue(8)
+			if aspectRatioIDC == 255 {
+				_ = br.readBitsValue(16)
+				_ = br.readBitsValue(16)
+			}
+		}
+		if br.readBitsValue(1) == 1 {
+			_ = br.readBitsValue(1)
+		}
+		if br.readBitsValue(1) == 1 {
+			_ = br.readBitsValue(3)
+			_ = br.readBitsValue(1)
+			if br.readBitsValue(1) == 1 {
+				_ = br.readBitsValue(8)
+				_ = br.readBitsValue(8)
+				_ = br.readBitsValue(8)
+			}
+		}
+		if br.readBitsValue(1) == 1 {
+			_ = br.readUE()
+			_ = br.readUE()
+		}
+		if br.readBitsValue(1) == 1 {
+			numUnitsInTick := br.readBitsValue(32)
+			timeScale := br.readBitsValue(32)
+			_ = br.readBitsValue(1)
+			if numUnitsInTick > 0 {
+				frameRate = float64(timeScale) / (2.0 * float64(numUnitsInTick))
+			}
+		}
 	}
 
 	info := h264SPSInfo{
@@ -157,6 +238,11 @@ func parseH264SPS(nal []byte) h264SPSInfo {
 		RefFrames:   refFrames,
 		Progressive: progressive,
 		HasScanType: true,
+		ProfileID:   byte(profileID),
+		LevelID:     byte(levelID),
+		Width:       uint64(width),
+		Height:      uint64(height),
+		FrameRate:   frameRate,
 	}
 	info.ChromaFormat = chromaFormatString(chromaFormat)
 	return info
@@ -169,6 +255,111 @@ func parseH264PPSCabac(nal []byte) (bool, bool) {
 	_ = br.readUE()
 	flag := br.readBitsValue(1)
 	return flag == 1, true
+}
+
+func parseH264AnnexB(payload []byte) ([]Field, uint64, uint64, float64) {
+	var spsInfo h264SPSInfo
+	var hasSPS bool
+	var ppsCABAC *bool
+
+	start := 0
+	for start+4 <= len(payload) {
+		sc, scLen := findAnnexBStartCode(payload, start)
+		if sc == -1 {
+			break
+		}
+		nalStart := sc + scLen
+		next, _ := findAnnexBStartCode(payload, nalStart)
+		nalEnd := next
+		if nalEnd == -1 {
+			nalEnd = len(payload)
+		}
+		if nalStart < nalEnd {
+			nal := payload[nalStart:nalEnd]
+			if len(nal) > 0 {
+				nalType := nal[0] & 0x1F
+				if nalType == 7 {
+					spsInfo = parseH264SPS(nal)
+					hasSPS = true
+				}
+				if nalType == 8 {
+					if cabac, ok := parseH264PPSCabac(nal); ok {
+						ppsCABAC = &cabac
+					}
+				}
+			}
+		}
+		if next == -1 {
+			break
+		}
+		start = next
+	}
+
+	if !hasSPS && ppsCABAC == nil {
+		return nil, 0, 0, 0
+	}
+
+	fields := []Field{}
+	if hasSPS {
+		if profile := mapAVCProfile(spsInfo.ProfileID); profile != "" {
+			if level := formatAVCLevel(spsInfo.LevelID); level != "" {
+				fields = append(fields, Field{Name: "Format profile", Value: fmt.Sprintf("%s@%s", profile, level)})
+			} else {
+				fields = append(fields, Field{Name: "Format profile", Value: profile})
+			}
+		}
+		if spsInfo.ChromaFormat != "" {
+			fields = append(fields, Field{Name: "Chroma subsampling", Value: spsInfo.ChromaFormat})
+		}
+		if spsInfo.BitDepth > 0 {
+			fields = append(fields, Field{Name: "Bit depth", Value: formatBitDepth(uint8(spsInfo.BitDepth))})
+		}
+		if spsInfo.HasScanType {
+			if spsInfo.Progressive {
+				fields = append(fields, Field{Name: "Scan type", Value: "Progressive"})
+			} else {
+				fields = append(fields, Field{Name: "Scan type", Value: "Interlaced"})
+			}
+		}
+		if spsInfo.RefFrames > 0 {
+			fields = append(fields, Field{Name: "Format settings, Reference frames", Value: fmt.Sprintf("%d frames", spsInfo.RefFrames)})
+		}
+	}
+	if ppsCABAC != nil {
+		if *ppsCABAC {
+			fields = append(fields, Field{Name: "Format settings, CABAC", Value: "Yes"})
+		} else {
+			fields = append(fields, Field{Name: "Format settings, CABAC", Value: "No"})
+		}
+		if hasSPS && spsInfo.RefFrames > 0 {
+			fields = append(fields, Field{Name: "Format settings", Value: fmt.Sprintf("CABAC / %d Ref Frames", spsInfo.RefFrames)})
+		} else if *ppsCABAC {
+			fields = append(fields, Field{Name: "Format settings", Value: "CABAC"})
+		}
+	}
+	width := uint64(0)
+	height := uint64(0)
+	frameRate := 0.0
+	if hasSPS {
+		width = spsInfo.Width
+		height = spsInfo.Height
+		frameRate = spsInfo.FrameRate
+	}
+	return fields, width, height, frameRate
+}
+
+func findAnnexBStartCode(data []byte, start int) (int, int) {
+	for i := start; i+3 < len(data); i++ {
+		if data[i] == 0x00 && data[i+1] == 0x00 {
+			if data[i+2] == 0x01 {
+				return i, 3
+			}
+			if i+3 < len(data) && data[i+2] == 0x00 && data[i+3] == 0x01 {
+				return i, 4
+			}
+		}
+	}
+	return -1, 0
 }
 
 func isHighProfile(profileID uint64) bool {

@@ -196,9 +196,36 @@ func AnalyzeFile(path string) (Report, error) {
 			}
 		}
 	case "MPEG-TS":
-		if parsedInfo, parsedStreams, ok := ParseMPEGTS(file, stat.Size()); ok {
+		if parsedInfo, parsedStreams, generalFields, ok := ParseMPEGTS(file, stat.Size()); ok {
 			info = parsedInfo
+			for _, field := range generalFields {
+				general.Fields = appendFieldUnique(general.Fields, field)
+			}
 			streams = parsedStreams
+			if _, err := file.Seek(0, io.SeekStart); err == nil {
+				sniff := make([]byte, 1<<20)
+				n, _ := io.ReadFull(file, sniff)
+				writingLib, encoding := findX264Info(sniff[:n])
+				if writingLib != "" || encoding != "" {
+					for i := range streams {
+						if streams[i].Kind != StreamVideo || findField(streams[i].Fields, "Format") != "AVC" {
+							continue
+						}
+						if writingLib != "" {
+							streams[i].Fields = appendFieldUnique(streams[i].Fields, Field{Name: "Writing library", Value: writingLib})
+						}
+						if encoding != "" {
+							streams[i].Fields = appendFieldUnique(streams[i].Fields, Field{Name: "Encoding settings", Value: encoding})
+							if findField(streams[i].Fields, "Nominal bit rate") == "" {
+								if bitrate, ok := findX264Bitrate(encoding); ok {
+									streams[i].Fields = appendFieldUnique(streams[i].Fields, Field{Name: "Nominal bit rate", Value: formatBitrate(bitrate)})
+								}
+							}
+						}
+						break
+					}
+				}
+			}
 		}
 	case "MPEG-PS":
 		if parsedInfo, parsedStreams, ok := ParseMPEGPS(file, stat.Size()); ok {

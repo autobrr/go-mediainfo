@@ -25,14 +25,15 @@ func RenderText(reports []Report) string {
 			writeStream(&buf, title, stream)
 		}
 	}
-	return strings.TrimRight(buf.String(), "\n")
+	output := strings.TrimRight(buf.String(), "\n")
+	return output + "\n\n"
 }
 
 func writeStream(buf *bytes.Buffer, title string, stream Stream) {
 	buf.WriteString(title)
 	buf.WriteString("\n")
 	for _, field := range stream.Fields {
-		buf.WriteString(padRight(field.Name, 36))
+		buf.WriteString(padRight(field.Name, 41))
 		buf.WriteString(": ")
 		buf.WriteString(field.Value)
 		buf.WriteString("\n")

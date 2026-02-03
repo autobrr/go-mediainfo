@@ -3,27 +3,32 @@ package mediainfo
 import "math"
 
 type ptsTracker struct {
-	first uint64
-	last  uint64
-	ok    bool
+	min uint64
+	max uint64
+	ok  bool
 }
 
 func (t *ptsTracker) add(pts uint64) {
 	if !t.ok {
-		t.first = pts
-		t.last = pts
+		t.min = pts
+		t.max = pts
 		t.ok = true
 		return
 	}
-	t.last = pts
+	if pts < t.min {
+		t.min = pts
+	}
+	if pts > t.max {
+		t.max = pts
+	}
 }
 
 func (t ptsTracker) duration() float64 {
 	if !t.ok {
 		return 0
 	}
-	first := t.first
-	last := t.last
+	first := t.min
+	last := t.max
 	if last < first {
 		last += 1 << 33
 	}

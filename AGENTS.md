@@ -72,6 +72,11 @@ Owner: soup
 - Matroska: AVC codec private -> profile/settings/chroma/bit depth/scan; AAC ASC -> AAC LC + Codec ID A_AAC-2
 - Matroska: tags ENCODER -> audio Writing library; x264 settings -> Nominal bit rate + Bits/(Pixel*Frame)
 - Matroska: track flags Default/Forced; video color range; ErrorDetectionType defaulted to Per level 1
+- MPEG-TS: overall duration/bitrate derived from PCR interval average (packets between PCRs) to match CLI
+- MPEG-TS: handle PCR PID payload (don't skip PES when PCR PID == video PID)
+- MPEG-TS: parse x264 writing library + encoding settings from video PES (Annex B), add Nominal bit rate
+- MPEG-TS: audio ADTS parsing needs int-cast shifts + next-sync validation; duration uses integer ms floor
+- Text output: label column width 41 + ends with 2 blank lines (Fprintln adds 1) to match CLI
 
 ## Notes
 - Update this file as we learn more about CLI behavior, formats, and edge cases.

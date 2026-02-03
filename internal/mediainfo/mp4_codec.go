@@ -156,9 +156,6 @@ func parseVisualSampleEntry(entry []byte, sampleType string) sampleEntryResult {
 	if info := mapVideoCodecIDInfo(sampleType); info != "" {
 		fields = append(fields, Field{Name: "Codec ID/Info", Value: info})
 	}
-	if sampleType == "avc1" || sampleType == "avc3" || sampleType == "hvc1" || sampleType == "hev1" || sampleType == "mp4v" {
-		fields = append(fields, Field{Name: "Compression mode", Value: "Lossy"})
-	}
 	if _, max, avg, ok := parseBtrt(entry, mp4VisualSampleEntryHeaderSize); ok {
 		if max > 0 {
 			fields = append(fields, Field{Name: "Nominal bit rate", Value: formatBitrate(float64(max))})
