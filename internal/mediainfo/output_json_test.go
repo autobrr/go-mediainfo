@@ -16,13 +16,16 @@ func TestRenderJSONSingle(t *testing.T) {
 	}
 
 	output := RenderJSON([]Report{report})
-	if !strings.Contains(output, "\"@ref\": \"file.mp4\"") {
+	if !strings.Contains(output, "\"creatingLibrary\"") {
+		t.Fatalf("missing creating library: %s", output)
+	}
+	if !strings.Contains(output, "\"@ref\":\"file.mp4\"") {
 		t.Fatalf("missing ref: %s", output)
 	}
-	if !strings.Contains(output, "\"@type\": \"General\"") {
+	if !strings.Contains(output, "\"@type\":\"General\"") {
 		t.Fatalf("missing general type: %s", output)
 	}
-	if !strings.Contains(output, "\"@type\": \"Video\"") {
+	if !strings.Contains(output, "\"@type\":\"Video\"") {
 		t.Fatalf("missing video type: %s", output)
 	}
 }
@@ -37,8 +40,8 @@ func TestRenderJSONMultiple(t *testing.T) {
 	}
 
 	output := RenderJSON([]Report{report, report})
-	if strings.Count(output, "\"media\"") != 1 {
-		t.Fatalf("expected media list")
+	if !strings.HasPrefix(strings.TrimSpace(output), "[") {
+		t.Fatalf("expected array")
 	}
 	if strings.Count(output, "\"@ref\"") < 2 {
 		t.Fatalf("expected refs in list")

@@ -46,6 +46,7 @@ Owner: soup
 - JSON track ordering now stable; MP4/MKV audio durations added
 - Channel layout now emitted for common channel counts
 - JSON field ordering now matches CLI ordering
+- JSON output now uses MediaInfoLib creatingLibrary + 26.01 version, with best-effort key mapping/values (still missing many raw fields)
 - MP4 audio bitrate estimated from sample sizes + duration
 - Matroska BitRate element parsed into stream Bit rate
 - XML/HTML output renderers added (basic)

@@ -1,59 +1,121 @@
 package mediainfo
 
 import (
+	"bytes"
 	"encoding/json"
 )
 
-type jsonMedia struct {
-	Media jsonMediaBody `json:"media"`
+type jsonMediaOut struct {
+	Ref    string
+	Tracks []jsonTrackOut
 }
 
-type jsonMediaBody struct {
-	Ref   string              `json:"@ref,omitempty"`
-	Track []map[string]string `json:"track"`
-}
-
-type jsonMediaList struct {
-	Media []jsonMediaBody `json:"media"`
+type jsonTrackOut struct {
+	Fields []jsonKV
 }
 
 func RenderJSON(reports []Report) string {
 	if len(reports) == 1 {
-		return renderJSONSingle(reports[0])
+		return renderJSONPayload(buildJSONPayload(reports[0]))
 	}
-
-	media := make([]jsonMediaBody, 0, len(reports))
+	payloads := make([]jsonPayloadOut, 0, len(reports))
 	for _, report := range reports {
-		media = append(media, buildJSONMedia(report))
+		payloads = append(payloads, buildJSONPayload(report))
 	}
-	payload := jsonMediaList{Media: media}
-	data, _ := json.MarshalIndent(payload, "", "  ")
+	return renderJSONPayloads(payloads)
+}
+
+type jsonPayloadOut struct {
+	CreatingLibrary []jsonKV
+	Media           jsonMediaOut
+}
+
+func buildJSONPayload(report Report) jsonPayloadOut {
+	return jsonPayloadOut{
+		CreatingLibrary: jsonCreatingLibraryFields(),
+		Media:           buildJSONMedia(report),
+	}
+}
+
+func jsonCreatingLibraryFields() []jsonKV {
+	return []jsonKV{
+		{Key: "name", Val: "MediaInfoLib"},
+		{Key: "version", Val: MediaInfoLibVersion},
+		{Key: "url", Val: MediaInfoLibURL},
+	}
+}
+
+func renderJSONPayload(payload jsonPayloadOut) string {
+	var buf bytes.Buffer
+	buf.WriteString("{\n")
+	writeJSONField(&buf, "creatingLibrary", renderJSONObject(payload.CreatingLibrary), true)
+	buf.WriteString(",\n")
+	writeJSONField(&buf, "media", renderJSONMedia(payload.Media), true)
+	buf.WriteString("\n}")
+	return buf.String()
+}
+
+func renderJSONPayloads(payloads []jsonPayloadOut) string {
+	var buf bytes.Buffer
+	buf.WriteString("[\n")
+	for i, payload := range payloads {
+		if i > 0 {
+			buf.WriteString(",\n")
+		}
+		buf.WriteString(renderJSONPayload(payload))
+	}
+	buf.WriteString("\n]")
+	return buf.String()
+}
+
+func renderJSONMedia(media jsonMediaOut) string {
+	fields := []jsonKV{{Key: "@ref", Val: media.Ref}}
+	tracks := make([]string, 0, len(media.Tracks))
+	for _, track := range media.Tracks {
+		tracks = append(tracks, renderJSONObject(track.Fields))
+	}
+	fields = append(fields, jsonKV{Key: "track", Val: renderJSONArray(tracks), Raw: true})
+	return renderJSONObject(fields)
+}
+
+func renderJSONObject(fields []jsonKV) string {
+	var buf bytes.Buffer
+	buf.WriteString("{")
+	for i, field := range fields {
+		if i > 0 {
+			buf.WriteString(",\n")
+		}
+		writeJSONField(&buf, field.Key, field.Val, field.Raw)
+	}
+	buf.WriteString("}")
+	return buf.String()
+}
+
+func renderJSONArray(items []string) string {
+	var buf bytes.Buffer
+	buf.WriteString("[")
+	for i, item := range items {
+		if i > 0 {
+			buf.WriteString(",\n")
+		}
+		buf.WriteString(item)
+	}
+	buf.WriteString("]")
+	return buf.String()
+}
+
+func writeJSONField(buf *bytes.Buffer, key, value string, raw bool) {
+	buf.WriteString("\"")
+	buf.WriteString(key)
+	buf.WriteString("\":")
+	if raw {
+		buf.WriteString(value)
+		return
+	}
+	buf.WriteString(renderJSONString(value))
+}
+
+func renderJSONString(value string) string {
+	data, _ := json.Marshal(value)
 	return string(data)
-}
-
-func renderJSONSingle(report Report) string {
-	payload := jsonMedia{Media: buildJSONMedia(report)}
-	data, _ := json.MarshalIndent(payload, "", "  ")
-	return string(data)
-}
-
-func streamToJSON(stream Stream) map[string]string {
-	entry := map[string]string{"@type": string(stream.Kind)}
-	for _, field := range stream.Fields {
-		entry[field.Name] = field.Value
-	}
-	return entry
-}
-
-func buildJSONMedia(report Report) jsonMediaBody {
-	tracks := make([]map[string]string, 0, len(report.Streams)+1)
-	general := orderedJSONTrack(report.General)
-	if report.Ref != "" {
-		general["@ref"] = report.Ref
-	}
-	tracks = append(tracks, general)
-	for _, stream := range orderTracks(report.Streams) {
-		tracks = append(tracks, orderedJSONTrack(stream))
-	}
-	return jsonMediaBody{Ref: report.Ref, Track: tracks}
 }
