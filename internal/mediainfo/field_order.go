@@ -21,4 +21,5 @@ var streamFieldOrder = map[string]int{
 	"Channel(s)":     8,
 	"Channel layout": 9,
 	"Sampling rate":  10,
+	"Bit depth":      11,
 }

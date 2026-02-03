@@ -76,13 +76,36 @@ func AnalyzeFile(path string) (Report, error) {
 			info = parsedInfo
 			streams = parsedStreams
 		}
+	case "MPEG Audio":
+		if parsedInfo, parsedStreams, ok := ParseMP3(file, stat.Size()); ok {
+			info = parsedInfo
+			streams = parsedStreams
+		}
+	case "FLAC":
+		if parsedInfo, parsedStreams, ok := ParseFLAC(file, stat.Size()); ok {
+			info = parsedInfo
+			streams = parsedStreams
+		}
+	case "Wave":
+		if parsedInfo, parsedStreams, ok := ParseWAV(file, stat.Size()); ok {
+			info = parsedInfo
+			streams = parsedStreams
+		}
+	case "Ogg":
+		if parsedInfo, parsedStreams, ok := ParseOgg(file, stat.Size()); ok {
+			info = parsedInfo
+			streams = parsedStreams
+		}
 	}
 
 	if info.HasDuration() {
 		general.Fields = append(general.Fields, Field{Name: "Duration", Value: formatDuration(info.DurationSeconds)})
 		bitrate := float64(stat.Size()*8) / info.DurationSeconds
 		if bitrate > 0 {
-			mode := bitrateMode(bitrate)
+			mode := info.BitrateMode
+			if mode == "" {
+				mode = bitrateMode(bitrate)
+			}
 			if mode != "" {
 				general.Fields = append(general.Fields, Field{Name: "Overall bit rate mode", Value: mode})
 			}

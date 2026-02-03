@@ -10,9 +10,12 @@ func formatBytes(size int64) string {
 	div := float64(size)
 	exp := 0
 	units := []string{"KiB", "MiB", "GiB", "TiB", "PiB"}
-	for div >= unit && exp < len(units)-1 {
+	for div >= unit && exp < len(units) {
 		div /= unit
 		exp++
 	}
-	return fmt.Sprintf("%.2f %s", div, units[exp])
+	if exp == 0 {
+		return fmt.Sprintf("%.2f %s", div, units[0])
+	}
+	return fmt.Sprintf("%.2f %s", div, units[exp-1])
 }

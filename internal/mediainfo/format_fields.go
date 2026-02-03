@@ -28,3 +28,10 @@ func formatSampleRate(rate float64) string {
 	}
 	return fmt.Sprintf("%.0f Hz", rate)
 }
+
+func formatBitDepth(bits uint8) string {
+	if bits == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%d bits", bits)
+}

@@ -59,6 +59,9 @@ Owner: soup
 - Upstream build needs autoconf/automake/libtool/pkg-config; use PATH "/opt/homebrew/opt/libtool/libexec/gnubin" for glibtoolize
 - Built CLI binary at `~/github/oss/mediainfo-build/MediaInfo/Project/GNU/CLI/mediainfo`
 - `--info-canhandleurls` prints libcurl-disabled message when built without libcurl
+- Fixed file size units (KiB/MiB bug) + added formatBytes tests
+- Added pure-Go parsers for MP3/FLAC/WAV/Ogg (duration/bitrate/channels/sample rate/bit depth)
+- Audio-only general bitrate mode now set from parse (constant for PCM/CBR)
 
 ## Notes
 - Update this file as we learn more about CLI behavior, formats, and edge cases.
