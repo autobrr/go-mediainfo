@@ -174,13 +174,18 @@ func ParseMPEGPS(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, bool)
 			if len(esPayload) > 0 {
 				entry.bytes += uint64(len(esPayload))
 				if entry.kind == StreamVideo {
-					parser := videoParsers[key]
-					if parser == nil {
-						parser = &mpeg2VideoParser{}
-						videoParsers[key] = parser
+					if !entry.videoIsH264 {
+						consumeH264PS(entry, esPayload)
 					}
-					parser.consume(esPayload)
-					consumeMPEG2HeaderBytes(entry, esPayload)
+					if !entry.videoIsH264 {
+						parser := videoParsers[key]
+						if parser == nil {
+							parser = &mpeg2VideoParser{}
+							videoParsers[key] = parser
+						}
+						parser.consume(esPayload)
+						consumeMPEG2HeaderBytes(entry, esPayload)
+					}
 				}
 				if entry.kind == StreamAudio {
 					if entry.format == "AC-3" {
@@ -206,9 +211,15 @@ func ParseMPEGPS(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, bool)
 	var videoFrameRate float64
 	for _, key := range streamOrder {
 		if st := streams[key]; st != nil && st.kind == StreamVideo {
-			if parser := videoParsers[key]; parser != nil {
-				info := parser.finalize()
-				videoFrameRate = info.FrameRate
+			if st.videoIsH264 {
+				if st.videoFrameRate > 0 {
+					videoFrameRate = st.videoFrameRate
+				}
+			} else {
+				if parser := videoParsers[key]; parser != nil {
+					info := parser.finalize()
+					videoFrameRate = info.FrameRate
+				}
 			}
 			break
 		}
@@ -219,7 +230,7 @@ func ParseMPEGPS(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, bool)
 			continue
 		}
 		info := mpeg2VideoInfo{}
-		if st.kind == StreamVideo {
+		if st.kind == StreamVideo && !st.videoIsH264 {
 			if parser := videoParsers[key]; parser != nil {
 				info = parser.finalize()
 			}
@@ -263,7 +274,52 @@ func ParseMPEGPS(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, bool)
 				fields = append(fields, Field{Name: "Format/Info", Value: info})
 			}
 		}
-		if st.kind == StreamVideo {
+		if st.kind == StreamVideo && st.videoIsH264 {
+			if info := mapMatroskaFormatInfo(st.format); info != "" {
+				fields = append(fields, Field{Name: "Format/Info", Value: info})
+			}
+			if len(st.videoFields) > 0 {
+				fields = append(fields, st.videoFields...)
+			}
+			duration := st.pts.duration()
+			if duration == 0 {
+				duration = videoPTS.duration()
+			}
+			if duration > 0 {
+				if st.videoFrameRate > 0 {
+					duration += 2.0 / st.videoFrameRate
+				}
+				fields = addStreamDuration(fields, duration)
+			}
+			mode := "Constant"
+			fields = append(fields, Field{Name: "Bit rate mode", Value: mode})
+			bitrate := 0.0
+			if duration > 0 && st.bytes > 0 {
+				bitrate = (float64(st.bytes) * 8) / duration
+				if value := formatBitrate(bitrate); value != "" {
+					fields = append(fields, Field{Name: "Nominal bit rate", Value: value})
+				}
+			}
+			width := st.videoWidth
+			height := st.videoHeight
+			if width > 0 {
+				fields = append(fields, Field{Name: "Width", Value: formatPixels(width)})
+			}
+			if height > 0 {
+				fields = append(fields, Field{Name: "Height", Value: formatPixels(height)})
+			}
+			if ar := formatAspectRatio(width, height); ar != "" {
+				fields = append(fields, Field{Name: "Display aspect ratio", Value: ar})
+			}
+			if st.videoFrameRate > 0 {
+				fields = append(fields, Field{Name: "Frame rate", Value: formatFrameRate(st.videoFrameRate)})
+			}
+			fields = append(fields, Field{Name: "Color space", Value: "YUV"})
+			if bitrate > 0 && width > 0 && height > 0 && st.videoFrameRate > 0 {
+				bits := bitrate / (float64(width) * float64(height) * st.videoFrameRate)
+				fields = append(fields, Field{Name: "Bits/(Pixel*Frame)", Value: fmt.Sprintf("%.3f", bits)})
+			}
+		} else if st.kind == StreamVideo {
 			if info.Version != "" {
 				fields = append(fields, Field{Name: "Format version", Value: info.Version})
 			}
@@ -420,7 +476,11 @@ func ParseMPEGPS(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, bool)
 			}
 		} else if st.kind == StreamAudio {
 			duration := st.pts.duration()
-			if st.audioRate > 0 && st.audioFrames > 0 {
+			if st.audioProfile != "" {
+				if value := aacDurationPS(st); value > 0 {
+					duration = value
+				}
+			} else if st.audioRate > 0 && st.audioFrames > 0 {
 				rate := int64(st.audioRate)
 				if rate > 0 {
 					samples := st.audioFrames * 1024
@@ -551,11 +611,42 @@ func ParseMPEGPS(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, bool)
 			info.BitrateMode = "Variable"
 		}
 	}
+	videoDuration := 0.0
 	if duration := videoPTS.duration(); duration > 0 {
 		if videoFrameRate > 0 {
 			duration += 2.0 / videoFrameRate
 		}
-		info.DurationSeconds = duration
+		videoDuration = duration
+	}
+	maxDuration := 0.0
+	for _, st := range streams {
+		if st == nil || st.kind == StreamMenu {
+			continue
+		}
+		duration := st.pts.duration()
+		if st.kind == StreamAudio {
+			if st.audioProfile != "" {
+				if value := aacDurationPS(st); value > 0 {
+					duration = value
+				}
+			} else if st.audioRate > 0 && st.audioFrames > 0 {
+				rate := int64(st.audioRate)
+				if rate > 0 {
+					samples := st.audioFrames * 1024
+					durationMs := int64((samples * 1000) / uint64(rate))
+					duration = float64(durationMs) / 1000.0
+				}
+			}
+		}
+		if duration > maxDuration {
+			maxDuration = duration
+		}
+	}
+	if videoDuration > maxDuration {
+		maxDuration = videoDuration
+	}
+	if maxDuration > 0 {
+		info.DurationSeconds = maxDuration
 	} else if duration := anyPTS.duration(); duration > 0 {
 		info.DurationSeconds = duration
 	}
@@ -648,6 +739,29 @@ func consumeAC3PS(entry *psStream, payload []byte) {
 	}
 }
 
+func consumeH264PS(entry *psStream, payload []byte) {
+	if entry.videoIsH264 || len(payload) == 0 {
+		return
+	}
+	entry.videoBuffer = append(entry.videoBuffer, payload...)
+	const maxProbe = 256 * 1024
+	if len(entry.videoBuffer) > maxProbe {
+		entry.videoBuffer = append(entry.videoBuffer[:0], entry.videoBuffer[len(entry.videoBuffer)-maxProbe:]...)
+	}
+	if fields, width, height, fps := parseH264AnnexB(entry.videoBuffer); len(fields) > 0 {
+		entry.videoFields = fields
+		entry.hasVideoFields = true
+		entry.videoWidth = width
+		entry.videoHeight = height
+		if fps > 0 {
+			entry.videoFrameRate = fps
+		}
+		entry.videoIsH264 = true
+		entry.format = "AVC"
+		entry.videoBuffer = nil
+	}
+}
+
 func consumeADTSPS(entry *psStream, payload []byte) {
 	if len(payload) == 0 {
 		return
@@ -704,6 +818,20 @@ func consumeADTSPS(entry *psStream, payload []byte) {
 	if i > 0 {
 		entry.audioBuffer = append(entry.audioBuffer[:0], entry.audioBuffer[i:]...)
 	}
+}
+
+func aacDurationPS(entry *psStream) float64 {
+	if entry.audioRate <= 0 {
+		return 0
+	}
+	frameDuration := 1024.0 / entry.audioRate
+	if entry.pts.has() {
+		return entry.pts.duration() + 3*frameDuration
+	}
+	if entry.audioFrames > 0 {
+		return float64(entry.audioFrames) * frameDuration
+	}
+	return 0
 }
 
 func formatAudioFrameRate(rate float64, spf int) string {

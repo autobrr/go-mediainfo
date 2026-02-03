@@ -84,6 +84,10 @@ Owner: soup
 - MPEG-PS: pack/system/padding headers (0xBA/0xBB/0xBE) need explicit skip; PTS parsing now checks marker bits; NTSC/PAL standard only when 720x480/576
 - MPEG-PS: private stream 2 (0xBF) carries DVD menu/navigation; no PES header, payload is length-only; emit Menu stream with Format "DVD-Video" (no ID)
 - ADTS: ID bit drives AAC Format version (MPEG-2 -> Version 2, MPEG-4 -> Version 4); expose Codec ID from AAC audio object in PS
+- MPEG-PS: detect AVC in PES via Annex B SPS/PPS, switch format to AVC, parse profile/ref frames/CABAC + width/height/framerate
+- H.264 SPS: parse video_format for Standard (PAL/NTSC/SECAM/MAC) + full-range flag for Color range
+- AAC in PS: duration from PTS span + 3 AAC frames (1024 samples) to match CLI
+- Bitrate formatting: use Mb/s when >= 1,000,000 bps in `formatBitrate`
 - MPEG-PS AC-3: buffer across PES payloads; use AC-3 frame size table + next-sync validation; parse dialog normalization/compr/cmixlev/surmixlev/mixlevel/roomtyp + dialnorm stats
 - AC-3 `compr` dB uses heavy dynamic range scale `pow(2, v) * ((code & 0xF) | 0x10)` with `v = (code>>4) - ((code>>7)<<4) - 4`, then `20*log10(scale)`
 

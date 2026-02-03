@@ -5,16 +5,20 @@ import (
 )
 
 type h264SPSInfo struct {
-	ChromaFormat string
-	BitDepth     int
-	RefFrames    int
-	Progressive  bool
-	HasScanType  bool
-	ProfileID    byte
-	LevelID      byte
-	Width        uint64
-	Height       uint64
-	FrameRate    float64
+	ChromaFormat  string
+	BitDepth      int
+	RefFrames     int
+	Progressive   bool
+	HasScanType   bool
+	VideoFormat   int
+	HasVideoFmt   bool
+	ColorRange    string
+	HasColorRange bool
+	ProfileID     byte
+	LevelID       byte
+	Width         uint64
+	Height        uint64
+	FrameRate     float64
 }
 
 func parseAVCConfig(payload []byte) (string, []Field) {
@@ -87,7 +91,11 @@ func parseAVCConfig(payload []byte) (string, []Field) {
 			fields = append(fields, Field{Name: "Format settings, CABAC", Value: "No"})
 		}
 		if spsInfo.RefFrames > 0 {
-			fields = append(fields, Field{Name: "Format settings", Value: fmt.Sprintf("CABAC / %d Ref Frames", spsInfo.RefFrames)})
+			if *ppsCABAC {
+				fields = append(fields, Field{Name: "Format settings", Value: fmt.Sprintf("CABAC / %d Ref Frames", spsInfo.RefFrames)})
+			} else {
+				fields = append(fields, Field{Name: "Format settings", Value: fmt.Sprintf("%d Ref Frames", spsInfo.RefFrames)})
+			}
 		} else {
 			fields = append(fields, Field{Name: "Format settings", Value: "CABAC"})
 		}
@@ -107,6 +115,10 @@ func parseH264SPS(nal []byte) h264SPSInfo {
 	chromaFormat := 1
 	bitDepth := 8
 	separateColourPlane := 0
+	videoFormat := 0
+	hasVideoFormat := false
+	colorRange := ""
+	hasColorRange := false
 
 	if isHighProfile(profileID) {
 		chromaFormat = br.readUE()
@@ -211,8 +223,15 @@ func parseH264SPS(nal []byte) h264SPSInfo {
 			_ = br.readBitsValue(1)
 		}
 		if br.readBitsValue(1) == 1 {
-			_ = br.readBitsValue(3)
-			_ = br.readBitsValue(1)
+			videoFormat = int(br.readBitsValue(3))
+			fullRange := br.readBitsValue(1) == 1
+			hasVideoFormat = true
+			if fullRange {
+				colorRange = "Full"
+			} else {
+				colorRange = "Limited"
+			}
+			hasColorRange = true
 			if br.readBitsValue(1) == 1 {
 				_ = br.readBitsValue(8)
 				_ = br.readBitsValue(8)
@@ -234,15 +253,19 @@ func parseH264SPS(nal []byte) h264SPSInfo {
 	}
 
 	info := h264SPSInfo{
-		BitDepth:    bitDepth,
-		RefFrames:   refFrames,
-		Progressive: progressive,
-		HasScanType: true,
-		ProfileID:   byte(profileID),
-		LevelID:     byte(levelID),
-		Width:       uint64(width),
-		Height:      uint64(height),
-		FrameRate:   frameRate,
+		BitDepth:      bitDepth,
+		RefFrames:     refFrames,
+		Progressive:   progressive,
+		HasScanType:   true,
+		VideoFormat:   videoFormat,
+		HasVideoFmt:   hasVideoFormat,
+		ColorRange:    colorRange,
+		HasColorRange: hasColorRange,
+		ProfileID:     byte(profileID),
+		LevelID:       byte(levelID),
+		Width:         uint64(width),
+		Height:        uint64(height),
+		FrameRate:     frameRate,
 	}
 	info.ChromaFormat = chromaFormatString(chromaFormat)
 	return info
@@ -321,6 +344,14 @@ func parseH264AnnexB(payload []byte) ([]Field, uint64, uint64, float64) {
 				fields = append(fields, Field{Name: "Scan type", Value: "Interlaced"})
 			}
 		}
+		if spsInfo.HasVideoFmt {
+			if standard := mapH264VideoFormat(spsInfo.VideoFormat); standard != "" {
+				fields = append(fields, Field{Name: "Standard", Value: standard})
+			}
+		}
+		if spsInfo.HasColorRange {
+			fields = append(fields, Field{Name: "Color range", Value: spsInfo.ColorRange})
+		}
 		if spsInfo.RefFrames > 0 {
 			fields = append(fields, Field{Name: "Format settings, Reference frames", Value: fmt.Sprintf("%d frames", spsInfo.RefFrames)})
 		}
@@ -332,7 +363,11 @@ func parseH264AnnexB(payload []byte) ([]Field, uint64, uint64, float64) {
 			fields = append(fields, Field{Name: "Format settings, CABAC", Value: "No"})
 		}
 		if hasSPS && spsInfo.RefFrames > 0 {
-			fields = append(fields, Field{Name: "Format settings", Value: fmt.Sprintf("CABAC / %d Ref Frames", spsInfo.RefFrames)})
+			if *ppsCABAC {
+				fields = append(fields, Field{Name: "Format settings", Value: fmt.Sprintf("CABAC / %d Ref Frames", spsInfo.RefFrames)})
+			} else {
+				fields = append(fields, Field{Name: "Format settings", Value: fmt.Sprintf("%d Ref Frames", spsInfo.RefFrames)})
+			}
 		} else if *ppsCABAC {
 			fields = append(fields, Field{Name: "Format settings", Value: "CABAC"})
 		}
@@ -381,6 +416,21 @@ func chromaFormatString(id int) string {
 		return "4:2:2"
 	case 3:
 		return "4:4:4"
+	default:
+		return ""
+	}
+}
+
+func mapH264VideoFormat(id int) string {
+	switch id {
+	case 1:
+		return "PAL"
+	case 2:
+		return "NTSC"
+	case 3:
+		return "SECAM"
+	case 4:
+		return "MAC"
 	default:
 		return ""
 	}

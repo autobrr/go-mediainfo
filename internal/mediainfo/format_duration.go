@@ -39,6 +39,10 @@ func formatBitrate(bitsPerSecond float64) string {
 	if bitsPerSecond <= 0 {
 		return ""
 	}
+	if bitsPerSecond >= 1_000_000 {
+		mbps := bitsPerSecond / 1_000_000
+		return fmt.Sprintf("%.1f Mb/s", mbps)
+	}
 	kbps := int64(math.Round(bitsPerSecond / 1000))
 	return fmt.Sprintf("%s kb/s", formatThousands(kbps))
 }
@@ -48,6 +52,17 @@ func formatBitrateKbps(kbps int64) string {
 		return ""
 	}
 	return fmt.Sprintf("%s kb/s", formatThousands(kbps))
+}
+
+func formatBitratePrecise(bitsPerSecond float64) string {
+	if bitsPerSecond <= 0 {
+		return ""
+	}
+	kbps := bitsPerSecond / 1000
+	if kbps < 100 {
+		return fmt.Sprintf("%.1f kb/s", kbps)
+	}
+	return fmt.Sprintf("%s kb/s", formatThousands(int64(math.Round(kbps))))
 }
 
 func formatThousands(value int64) string {

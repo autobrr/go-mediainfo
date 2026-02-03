@@ -20,4 +20,11 @@ type psStream struct {
 	hasAC3           bool
 	videoHeaderBytes uint64
 	videoHeaderCarry []byte
+	videoFields      []Field
+	hasVideoFields   bool
+	videoWidth       uint64
+	videoHeight      uint64
+	videoFrameRate   float64
+	videoIsH264      bool
+	videoBuffer      []byte
 }
