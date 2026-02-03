@@ -82,6 +82,7 @@ Owner: soup
 - MPEG Video (MPG): detect elementary stream; parse MPEG-2 headers for profile/GOP/timecode; add extension warning fields and general Format version
 - MPEG-PS: private stream 0xBD substream IDs map AC-3 (0x80-0x87) / RLE subs (0x20-0x3F); AC-3 payload skips 4-byte DVD header; parse AC-3 header for bitrate/channels/sample rate/service kind; AAC ADTS probing for PS audio
 - MPEG-PS: pack/system/padding headers (0xBA/0xBB/0xBE) need explicit skip; PTS parsing now checks marker bits; NTSC/PAL standard only when 720x480/576
+- MPEG-PS: private stream 2 (0xBF) carries DVD menu/navigation; no PES header, payload is length-only; emit Menu stream with Format "DVD-Video" (no ID)
 - MPEG-PS AC-3: buffer across PES payloads; use AC-3 frame size table + next-sync validation; parse dialog normalization/compr/cmixlev/surmixlev/mixlevel/roomtyp + dialnorm stats
 - AC-3 `compr` dB uses heavy dynamic range scale `pow(2, v) * ((code & 0xF) | 0x10)` with `v = (code>>4) - ((code>>7)<<4) - 4`, then `20*log10(scale)`
 

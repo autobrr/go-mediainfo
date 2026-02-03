@@ -47,10 +47,39 @@ func ParseMPEGPS(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, bool)
 				i += 4
 			}
 			continue
-		case 0xBB, 0xBC, 0xBE, 0xBF: // system/program/padding/private stream 2
+		case 0xBB, 0xBC, 0xBE: // system/program/padding
 			if i+6 <= len(data) {
 				length := int(binary.BigEndian.Uint16(data[i+4 : i+6]))
 				i += 6 + length
+			} else {
+				i += 4
+			}
+			continue
+		case 0xBF: // private stream 2 (DVD menu/navigation)
+			if i+6 <= len(data) {
+				length := int(binary.BigEndian.Uint16(data[i+4 : i+6]))
+				payloadStart := i + 6
+				payloadEnd := payloadStart + length
+				if payloadEnd > len(data) {
+					payloadEnd = len(data)
+				}
+				kind, format := mapPSStream(streamID, psSubstreamNone)
+				if kind != "" {
+					key := psStreamKey(streamID, psSubstreamNone)
+					entry, exists := streams[key]
+					if !exists {
+						entry = &psStream{id: streamID, subID: psSubstreamNone, kind: kind, format: format}
+						streams[key] = entry
+						streamOrder = append(streamOrder, key)
+					}
+					if payloadStart < payloadEnd {
+						entry.bytes += uint64(payloadEnd - payloadStart)
+					}
+				}
+				i = payloadEnd
+				if i <= payloadStart {
+					i = payloadStart + 1
+				}
 			} else {
 				i += 4
 			}
@@ -205,7 +234,10 @@ func ParseMPEGPS(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, bool)
 		if st.subID != psSubstreamNone {
 			idValue = formatIDPair(uint64(st.id), uint64(st.subID))
 		}
-		fields := []Field{{Name: "ID", Value: idValue}}
+		fields := []Field{}
+		if st.kind != StreamMenu {
+			fields = append(fields, Field{Name: "ID", Value: idValue})
+		}
 		format := st.format
 		if st.kind == StreamAudio && st.audioProfile != "" {
 			format = "AAC " + st.audioProfile
@@ -564,6 +596,8 @@ func mapPSStream(streamID byte, subID byte) (StreamKind, string) {
 		}
 	}
 	switch {
+	case streamID == 0xBF:
+		return StreamMenu, "DVD-Video"
 	case streamID >= 0xE0 && streamID <= 0xEF:
 		return StreamVideo, "MPEG Video"
 	case streamID >= 0xC0 && streamID <= 0xDF:
