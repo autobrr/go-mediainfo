@@ -62,6 +62,10 @@ Owner: soup
 - Fixed file size units (KiB/MiB bug) + added formatBytes tests
 - Added pure-Go parsers for MP3/FLAC/WAV/Ogg (duration/bitrate/channels/sample rate/bit depth)
 - Audio-only general bitrate mode now set from parse (constant for PCM/CBR)
+- MP4: parse `ftyp` for Format profile + Codec ID; `udta/meta/ilst/©too` for Writing application
+- MP4: track IDs from `tkhd`, AAC profile from `esds`, bitrate from `btrt`
+- MP4 AVC: parse `avcC` SPS/PPS for profile, chroma subsampling, bit depth, scan type, CABAC, ref frames, aspect ratio
+- Matroska: parse EBML DocTypeVersion, SegmentUID, Writing/Muxing app; track number mapped to ID; add Format/Info
 
 ## Notes
 - Update this file as we learn more about CLI behavior, formats, and edge cases.

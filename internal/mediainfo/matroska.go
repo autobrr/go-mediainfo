@@ -2,17 +2,24 @@ package mediainfo
 
 import (
 	"encoding/binary"
+	"fmt"
 	"io"
 	"math"
+	"math/big"
 )
 
 const (
+	mkvIDEBML            = 0x1A45DFA3
 	mkvIDSegment         = 0x18538067
 	mkvIDInfo            = 0x1549A966
+	mkvIDSegmentUID      = 0x73A4
 	mkvIDTimecodeScale   = 0x2AD7B1
 	mkvIDDuration        = 0x4489
+	mkvIDMuxingApp       = 0x4D80
+	mkvIDWritingApp      = 0x5741
 	mkvIDTracks          = 0x1654AE6B
 	mkvIDTrackEntry      = 0xAE
+	mkvIDTrackNumber     = 0xD7
 	mkvIDTrackType       = 0x83
 	mkvIDCodecID         = 0x86
 	mkvIDDefaultDuration = 0x23E383
@@ -23,11 +30,14 @@ const (
 	mkvIDPixelHeight     = 0xBA
 	mkvIDSamplingRate    = 0xB5
 	mkvIDChannels        = 0x9F
+	mkvIDDocType         = 0x4282
+	mkvIDDocTypeVersion  = 0x4287
 	mkvMaxScan           = int64(4 << 20)
 )
 
 type MatroskaInfo struct {
 	Container ContainerInfo
+	General   []Field
 	Tracks    []Stream
 }
 
@@ -54,6 +64,7 @@ func ParseMatroska(r io.ReaderAt, size int64) (MatroskaInfo, bool) {
 
 func parseMatroska(buf []byte) (MatroskaInfo, bool) {
 	pos := 0
+	var headerFields []Field
 	for pos < len(buf) {
 		id, idLen, ok := readVintID(buf, pos)
 		if !ok {
@@ -68,8 +79,14 @@ func parseMatroska(buf []byte) (MatroskaInfo, bool) {
 		if size == unknownVintSize || dataEnd > len(buf) {
 			dataEnd = len(buf)
 		}
+		if id == mkvIDEBML {
+			headerFields = parseMatroskaHeader(buf[dataStart:dataEnd])
+		}
 		if id == mkvIDSegment {
 			if info, ok := parseMatroskaSegment(buf[dataStart:dataEnd]); ok {
+				if len(headerFields) > 0 {
+					info.General = append(headerFields, info.General...)
+				}
 				return info, true
 			}
 		}
@@ -96,8 +113,9 @@ func parseMatroskaSegment(buf []byte) (MatroskaInfo, bool) {
 			dataEnd = len(buf)
 		}
 		if id == mkvIDInfo {
-			if duration, ok := parseMatroskaInfo(buf[dataStart:dataEnd]); ok {
-				info.Container.DurationSeconds = duration
+			if segInfo, ok := parseMatroskaInfo(buf[dataStart:dataEnd]); ok {
+				info.Container.DurationSeconds = segInfo.Duration
+				info.General = append(info.General, segInfo.Fields...)
 			}
 		}
 		if id == mkvIDTracks {
@@ -113,10 +131,56 @@ func parseMatroskaSegment(buf []byte) (MatroskaInfo, bool) {
 	return MatroskaInfo{}, false
 }
 
-func parseMatroskaInfo(buf []byte) (float64, bool) {
+func parseMatroskaHeader(buf []byte) []Field {
+	pos := 0
+	var fields []Field
+	var docTypeVersion uint64
+	for pos < len(buf) {
+		id, idLen, ok := readVintID(buf, pos)
+		if !ok {
+			break
+		}
+		size, sizeLen, ok := readVintSize(buf, pos+idLen)
+		if !ok {
+			break
+		}
+		dataStart := pos + idLen + sizeLen
+		dataEnd := dataStart + int(size)
+		if size == unknownVintSize || dataEnd > len(buf) {
+			dataEnd = len(buf)
+		}
+		if id == mkvIDDocTypeVersion {
+			if value, ok := readUnsigned(buf[dataStart:dataEnd]); ok {
+				docTypeVersion = value
+			}
+		}
+		pos = dataEnd
+	}
+	if docTypeVersion > 0 {
+		fields = append(fields, Field{Name: "Format version", Value: fmt.Sprintf("Version %d", docTypeVersion)})
+	}
+	return fields
+}
+
+func formatSegmentUID(payload []byte) string {
+	if len(payload) == 0 {
+		return ""
+	}
+	value := new(big.Int).SetBytes(payload)
+	hex := fmt.Sprintf("%X", payload)
+	return fmt.Sprintf("%s (0x%s)", value.String(), hex)
+}
+
+type matroskaSegmentInfo struct {
+	Duration float64
+	Fields   []Field
+}
+
+func parseMatroskaInfo(buf []byte) (matroskaSegmentInfo, bool) {
 	timecodeScale := uint64(1000000)
 	var durationValue float64
 	var hasDuration bool
+	var fields []Field
 
 	pos := 0
 	for pos < len(buf) {
@@ -144,18 +208,30 @@ func parseMatroskaInfo(buf []byte) (float64, bool) {
 				durationValue = value
 				hasDuration = true
 			}
+		case mkvIDSegmentUID:
+			if len(payload) > 0 {
+				fields = append(fields, Field{Name: "Unique ID", Value: formatSegmentUID(payload)})
+			}
+		case mkvIDWritingApp:
+			if len(payload) > 0 {
+				fields = append(fields, Field{Name: "Writing application", Value: string(payload)})
+			}
+		case mkvIDMuxingApp:
+			if len(payload) > 0 {
+				fields = append(fields, Field{Name: "Writing library", Value: string(payload)})
+			}
 		}
 		pos = dataEnd
 	}
 
 	if !hasDuration {
-		return 0, false
+		return matroskaSegmentInfo{}, false
 	}
 	seconds := durationValue * float64(timecodeScale) / 1e9
 	if seconds <= 0 {
-		return 0, false
+		return matroskaSegmentInfo{}, false
 	}
-	return seconds, true
+	return matroskaSegmentInfo{Duration: seconds, Fields: fields}, true
 }
 
 func parseMatroskaTracks(buf []byte) ([]Stream, bool) {
@@ -188,6 +264,7 @@ func parseMatroskaTracks(buf []byte) ([]Stream, bool) {
 func parseMatroskaTrackEntry(buf []byte) (Stream, bool) {
 	pos := 0
 	var trackType uint64
+	var trackNumber uint64
 	var codecID string
 	var videoWidth uint64
 	var videoHeight uint64
@@ -212,6 +289,11 @@ func parseMatroskaTrackEntry(buf []byte) (Stream, bool) {
 		if id == mkvIDTrackType {
 			if value, ok := readUnsigned(buf[dataStart:dataEnd]); ok {
 				trackType = value
+			}
+		}
+		if id == mkvIDTrackNumber {
+			if value, ok := readUnsigned(buf[dataStart:dataEnd]); ok {
+				trackNumber = value
 			}
 		}
 		if id == mkvIDCodecID {
@@ -252,6 +334,15 @@ func parseMatroskaTrackEntry(buf []byte) (Stream, bool) {
 		return Stream{}, false
 	}
 	fields := []Field{{Name: "Format", Value: format}}
+	if trackNumber > 0 {
+		fields = append(fields, Field{Name: "ID", Value: formatID(trackNumber)})
+	}
+	if codecID != "" {
+		fields = append(fields, Field{Name: "Codec ID", Value: codecID})
+	}
+	if info := mapMatroskaFormatInfo(format); info != "" {
+		fields = append(fields, Field{Name: "Format/Info", Value: info})
+	}
 	if kind == StreamVideo {
 		if videoWidth > 0 {
 			fields = append(fields, Field{Name: "Width", Value: formatPixels(videoWidth)})

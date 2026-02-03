@@ -32,3 +32,30 @@ func mapMatroskaCodecID(codecID string, trackType uint64) (StreamKind, string) {
 		return fallbackMatroskaTrackType(trackType)
 	}
 }
+
+func mapMatroskaFormatInfo(format string) string {
+	switch format {
+	case "AVC":
+		return "Advanced Video Codec"
+	case "HEVC":
+		return "High Efficiency Video Coding"
+	case "VP9":
+		return "Google VP9"
+	case "VP8":
+		return "Google VP8"
+	case "AAC":
+		return "Advanced Audio Codec"
+	case "AC-3":
+		return "Audio Coding 3"
+	case "E-AC-3":
+		return "Enhanced AC-3"
+	case "Opus":
+		return "Opus"
+	case "FLAC":
+		return "Free Lossless Audio Codec"
+	case "MPEG Audio":
+		return "MPEG Audio"
+	default:
+		return ""
+	}
+}

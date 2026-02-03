@@ -3,7 +3,7 @@ package mediainfo
 func channelLayout(channels uint64) string {
 	switch channels {
 	case 1:
-		return "C"
+		return "M"
 	case 2:
 		return "L R"
 	case 3:

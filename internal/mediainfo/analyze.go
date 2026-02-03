@@ -37,15 +37,21 @@ func AnalyzeFile(path string) (Report, error) {
 	case "MPEG-4", "QuickTime":
 		if parsed, ok := ParseMP4(file, stat.Size()); ok {
 			info = parsed.Container
+			for _, field := range parsed.General {
+				general.Fields = appendFieldUnique(general.Fields, field)
+			}
 			for _, track := range parsed.Tracks {
 				fields := []Field{}
+				if track.ID > 0 {
+					fields = appendFieldUnique(fields, Field{Name: "ID", Value: formatID(uint64(track.ID))})
+				}
 				if track.Format != "" {
 					fields = appendFieldUnique(fields, Field{Name: "Format", Value: track.Format})
 				}
 				for _, field := range track.Fields {
 					fields = appendFieldUnique(fields, field)
 				}
-				if track.DurationSeconds > 0 && track.Kind != StreamVideo {
+				if track.DurationSeconds > 0 {
 					bits := 0.0
 					if track.SampleBytes > 0 {
 						bits = (float64(track.SampleBytes) * 8) / track.DurationSeconds
@@ -53,6 +59,7 @@ func AnalyzeFile(path string) (Report, error) {
 					fields = addStreamCommon(fields, track.DurationSeconds, bits)
 				}
 				if track.Kind == StreamVideo && track.SampleCount > 0 && track.DurationSeconds > 0 {
+					fields = appendFieldUnique(fields, Field{Name: "Frame rate mode", Value: "Constant"})
 					rate := float64(track.SampleCount) / track.DurationSeconds
 					if rate > 0 {
 						fields = appendFieldUnique(fields, Field{Name: "Frame rate", Value: formatFrameRate(rate)})
@@ -64,6 +71,9 @@ func AnalyzeFile(path string) (Report, error) {
 	case "Matroska":
 		if parsed, ok := ParseMatroska(file, stat.Size()); ok {
 			info = parsed.Container
+			for _, field := range parsed.General {
+				general.Fields = appendFieldUnique(general.Fields, field)
+			}
 			streams = append(streams, parsed.Tracks...)
 		}
 	case "MPEG-TS":
@@ -95,6 +105,16 @@ func AnalyzeFile(path string) (Report, error) {
 		if parsedInfo, parsedStreams, ok := ParseOgg(file, stat.Size()); ok {
 			info = parsedInfo
 			streams = parsedStreams
+		}
+	}
+
+	for _, stream := range streams {
+		if stream.Kind != StreamVideo {
+			continue
+		}
+		if rate := findField(stream.Fields, "Frame rate"); rate != "" {
+			general.Fields = appendFieldUnique(general.Fields, Field{Name: "Frame rate", Value: rate})
+			break
 		}
 	}
 

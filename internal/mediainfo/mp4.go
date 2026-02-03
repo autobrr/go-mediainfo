@@ -8,6 +8,7 @@ import (
 const maxMoovSize = int64(16 << 20)
 
 type MP4Track struct {
+	ID              uint32
 	Kind            StreamKind
 	Format          string
 	Fields          []Field
@@ -18,10 +19,12 @@ type MP4Track struct {
 
 type MP4Info struct {
 	Container ContainerInfo
+	General   []Field
 	Tracks    []MP4Track
 }
 
 func ParseMP4(r io.ReaderAt, size int64) (MP4Info, bool) {
+	info := MP4Info{}
 	var offset int64
 	for offset+8 <= size {
 		boxSize, boxType, headerSize, ok := readMP4BoxHeader(r, offset, size)
@@ -29,6 +32,14 @@ func ParseMP4(r io.ReaderAt, size int64) (MP4Info, bool) {
 			break
 		}
 		dataOffset := offset + headerSize
+		if boxType == "ftyp" {
+			payload := make([]byte, boxSize-headerSize)
+			if _, err := r.ReadAt(payload, dataOffset); err == nil || err == io.EOF {
+				if fields := parseFtyp(payload); len(fields) > 0 {
+					info.General = append(info.General, fields...)
+				}
+			}
+		}
 		if boxType == "moov" {
 			moovSize := boxSize - headerSize
 			if moovSize > maxMoovSize {
@@ -38,8 +49,11 @@ func ParseMP4(r io.ReaderAt, size int64) (MP4Info, bool) {
 			if _, err := r.ReadAt(buf, dataOffset); err != nil && err != io.EOF {
 				return MP4Info{}, false
 			}
-			if info, ok := parseMoov(buf); ok {
-				return info, true
+			if moovInfo, ok := parseMoov(buf); ok {
+				if len(info.General) > 0 {
+					moovInfo.General = append(info.General, moovInfo.General...)
+				}
+				return moovInfo, true
 			}
 		}
 		offset += boxSize
@@ -88,6 +102,12 @@ func parseMoov(buf []byte) (MP4Info, bool) {
 			payload := sliceBox(buf, dataOffset, boxSize-headerSize)
 			if duration, ok := parseMvhd(payload); ok {
 				info.Container.DurationSeconds = duration
+			}
+		}
+		if boxType == "udta" {
+			payload := sliceBox(buf, dataOffset, boxSize-headerSize)
+			if app := parseMP4WritingApp(payload); app != "" {
+				info.General = append(info.General, Field{Name: "Writing application", Value: app})
 			}
 		}
 		if boxType == "trak" {
@@ -169,15 +189,25 @@ func parseMvhd(payload []byte) (float64, bool) {
 
 func parseTrak(buf []byte) (MP4Track, bool) {
 	var offset int64
+	var trackID uint32
 	for offset+8 <= int64(len(buf)) {
 		boxSize, boxType, headerSize := readMP4BoxHeaderFrom(buf, offset)
 		if boxSize <= 0 {
 			break
 		}
 		dataOffset := offset + headerSize
+		if boxType == "tkhd" {
+			payload := sliceBox(buf, dataOffset, boxSize-headerSize)
+			if id, ok := parseTkhd(payload); ok {
+				trackID = id
+			}
+		}
 		if boxType == "mdia" {
 			payload := sliceBox(buf, dataOffset, boxSize-headerSize)
 			if track, ok := parseMdia(payload); ok {
+				if trackID > 0 {
+					track.ID = trackID
+				}
 				return track, true
 			}
 		}
@@ -240,6 +270,26 @@ func parseHdlr(payload []byte) string {
 		return ""
 	}
 	return string(payload[8:12])
+}
+
+func parseTkhd(payload []byte) (uint32, bool) {
+	if len(payload) < 20 {
+		return 0, false
+	}
+	version := payload[0]
+	if version == 0 {
+		if len(payload) < 20 {
+			return 0, false
+		}
+		return binary.BigEndian.Uint32(payload[12:16]), true
+	}
+	if version == 1 {
+		if len(payload) < 32 {
+			return 0, false
+		}
+		return binary.BigEndian.Uint32(payload[20:24]), true
+	}
+	return 0, false
 }
 
 func mapHandlerType(handler string) (StreamKind, string) {

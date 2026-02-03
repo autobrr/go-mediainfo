@@ -35,3 +35,18 @@ func formatBitDepth(bits uint8) string {
 	}
 	return fmt.Sprintf("%d bits", bits)
 }
+
+func formatAspectRatio(width, height uint64) string {
+	if width == 0 || height == 0 {
+		return ""
+	}
+	g := gcd(width, height)
+	return fmt.Sprintf("%d:%d", width/g, height/g)
+}
+
+func gcd(a, b uint64) uint64 {
+	for b != 0 {
+		a, b = b, a%b
+	}
+	return a
+}
