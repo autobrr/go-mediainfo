@@ -68,6 +68,7 @@ const (
 	mkvIDBlockGroup        = 0xA0
 	mkvIDBlock             = 0xA1
 	mkvIDBlockDuration     = 0x9B
+	mkvIDCRC32             = 0xBF
 	mkvMaxScan             = int64(4 << 20)
 )
 
@@ -129,9 +130,15 @@ func ParseMatroskaWithOptions(r io.ReaderAt, size int64, opts AnalyzeOptions) (M
 				probes[id] = probe
 			}
 		}
-		if stats, ok := scanMatroskaClusters(r, info.SegmentOffset, info.SegmentSize, info.TimecodeScale, probes); ok {
-			applyMatroskaStats(&info, stats, size)
-			applyMatroskaAudioProbes(&info, probes)
+		applyStats := opts.ParseSpeed >= 1 || size > mkvMaxScan
+		needsScan := applyStats || len(probes) > 0
+		if needsScan {
+			if stats, ok := scanMatroskaClusters(r, info.SegmentOffset, info.SegmentSize, info.TimecodeScale, probes); ok {
+				if applyStats {
+					applyMatroskaStats(&info, stats, size)
+				}
+				applyMatroskaAudioProbes(&info, probes)
+			}
 		}
 	}
 	return info, true
@@ -177,6 +184,7 @@ func parseMatroska(buf []byte) (MatroskaInfo, bool) {
 func parseMatroskaSegment(buf []byte) (MatroskaInfo, bool) {
 	info := MatroskaInfo{}
 	var encoders []string
+	var segmentFields []Field
 	pos := 0
 	for pos < len(buf) {
 		id, idLen, ok := readVintID(buf, pos)
@@ -199,6 +207,11 @@ func parseMatroskaSegment(buf []byte) (MatroskaInfo, bool) {
 				info.General = append(info.General, segInfo.Fields...)
 			}
 		}
+		if id == mkvIDErrorDetection {
+			if label := matroskaErrorDetectionLabel(buf[dataStart:dataEnd]); label != "" {
+				segmentFields = append(segmentFields, Field{Name: "ErrorDetectionType", Value: label})
+			}
+		}
 		if id == mkvIDTracks {
 			if tracks, ok := parseMatroskaTracks(buf[dataStart:dataEnd], info.Container.DurationSeconds); ok {
 				info.Tracks = append(info.Tracks, tracks...)
@@ -211,6 +224,12 @@ func parseMatroskaSegment(buf []byte) (MatroskaInfo, bool) {
 	}
 	if len(encoders) > 0 && len(info.Tracks) > 0 {
 		applyMatroskaEncoders(info.Tracks, encoders)
+	}
+	if len(segmentFields) > 0 {
+		info.General = append(info.General, segmentFields...)
+	}
+	if findField(info.General, "ErrorDetectionType") == "" && matroskaHasCRC(buf) {
+		info.General = append(info.General, Field{Name: "ErrorDetectionType", Value: "Per level 1"})
 	}
 	if info.Container.HasDuration() || len(info.Tracks) > 0 {
 		return info, true
@@ -307,6 +326,10 @@ func parseMatroskaInfo(buf []byte) (matroskaSegmentInfo, bool) {
 		case mkvIDMuxingApp:
 			if len(payload) > 0 {
 				fields = append(fields, Field{Name: "Writing library", Value: string(payload)})
+			}
+		case mkvIDErrorDetection:
+			if label := matroskaErrorDetectionLabel(payload); label != "" {
+				fields = append(fields, Field{Name: "ErrorDetectionType", Value: label})
 			}
 		}
 		pos = dataEnd
@@ -511,15 +534,19 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64) (Stream, bool)
 	}
 	if videoInfo.colorRange == "" && spsInfo.HasColorRange {
 		videoInfo.colorRange = spsInfo.ColorRange
+		videoInfo.colorRangeSource = "Stream"
 	}
 	if videoInfo.colorPrimaries == "" && spsInfo.ColorPrimaries != "" {
 		videoInfo.colorPrimaries = spsInfo.ColorPrimaries
+		videoInfo.colorPrimariesSource = "Stream"
 	}
 	if videoInfo.transferCharacteristics == "" && spsInfo.TransferCharacteristics != "" {
 		videoInfo.transferCharacteristics = spsInfo.TransferCharacteristics
+		videoInfo.transferSource = "Stream"
 	}
 	if videoInfo.matrixCoefficients == "" && spsInfo.MatrixCoefficients != "" {
 		videoInfo.matrixCoefficients = spsInfo.MatrixCoefficients
+		videoInfo.matrixSource = "Stream"
 	}
 	if bitRate == 0 && spsInfo.HasBitRate && spsInfo.BitRate > 0 {
 		bitRate = uint64(spsInfo.BitRate)
@@ -603,7 +630,9 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64) (Stream, bool)
 			fields = append(fields, Field{Name: "Matrix coefficients", Value: videoInfo.matrixCoefficients})
 		}
 		if findField(fields, "Color space") == "" && (videoInfo.colorRange != "" || videoInfo.colorPrimaries != "" || videoInfo.transferCharacteristics != "" || videoInfo.matrixCoefficients != "") {
-			fields = append(fields, Field{Name: "Color space", Value: "YUV"})
+			if matroskaHasStreamColor(videoInfo) {
+				fields = append(fields, Field{Name: "Color space", Value: "YUV"})
+			}
 		}
 	}
 	if kind == StreamAudio {
@@ -714,24 +743,33 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64) (Stream, bool)
 		if storedHeight > 0 && displayHeight > 0 && storedHeight != displayHeight {
 			jsonExtras["Stored_Height"] = fmt.Sprintf("%d", storedHeight)
 		}
+		if spsInfo.HasFixedFrameRate && !spsInfo.FixedFrameRate {
+			if findField(fields, "Frame rate mode") == "Constant" {
+				jsonExtras["FrameRate_Mode_Original"] = "VFR"
+			}
+		}
 		if videoInfo.colorRange != "" || videoInfo.colorPrimaries != "" || videoInfo.transferCharacteristics != "" || videoInfo.matrixCoefficients != "" {
+			colorSource := "Container"
+			if matroskaHasStreamColor(videoInfo) {
+				colorSource = "Stream"
+			}
 			jsonExtras["colour_description_present"] = "Yes"
-			jsonExtras["colour_description_present_Source"] = "Stream"
+			jsonExtras["colour_description_present_Source"] = colorSource
 			if videoInfo.colorRange != "" {
 				jsonExtras["colour_range"] = videoInfo.colorRange
-				jsonExtras["colour_range_Source"] = "Stream"
+				jsonExtras["colour_range_Source"] = matroskaColorSource(videoInfo.colorRangeSource, colorSource)
 			}
 			if videoInfo.colorPrimaries != "" {
 				jsonExtras["colour_primaries"] = videoInfo.colorPrimaries
-				jsonExtras["colour_primaries_Source"] = "Stream"
+				jsonExtras["colour_primaries_Source"] = matroskaColorSource(videoInfo.colorPrimariesSource, colorSource)
 			}
 			if videoInfo.transferCharacteristics != "" {
 				jsonExtras["transfer_characteristics"] = videoInfo.transferCharacteristics
-				jsonExtras["transfer_characteristics_Source"] = "Stream"
+				jsonExtras["transfer_characteristics_Source"] = matroskaColorSource(videoInfo.transferSource, colorSource)
 			}
 			if videoInfo.matrixCoefficients != "" {
 				jsonExtras["matrix_coefficients"] = videoInfo.matrixCoefficients
-				jsonExtras["matrix_coefficients_Source"] = "Stream"
+				jsonExtras["matrix_coefficients_Source"] = matroskaColorSource(videoInfo.matrixSource, colorSource)
 			}
 		}
 		if spsInfo.HasBufferSize && spsInfo.BufferSize > 0 {
@@ -775,9 +813,13 @@ type matroskaVideoInfo struct {
 	cropLeft                uint64
 	cropRight               uint64
 	colorRange              string
+	colorRangeSource        string
 	colorPrimaries          string
+	colorPrimariesSource    string
 	transferCharacteristics string
+	transferSource          string
 	matrixCoefficients      string
+	matrixSource            string
 }
 
 func parseMatroskaVideo(buf []byte) matroskaVideoInfo {
@@ -834,15 +876,19 @@ func parseMatroskaVideo(buf []byte) matroskaVideoInfo {
 			rangeValue, primaries, transfer, matrix := parseMatroskaColour(buf[dataStart:dataEnd])
 			if rangeValue != "" {
 				info.colorRange = rangeValue
+				info.colorRangeSource = "Container"
 			}
 			if primaries != "" {
 				info.colorPrimaries = primaries
+				info.colorPrimariesSource = "Container"
 			}
 			if transfer != "" {
 				info.transferCharacteristics = transfer
+				info.transferSource = "Container"
 			}
 			if matrix != "" {
 				info.matrixCoefficients = matrix
+				info.matrixSource = "Container"
 			}
 		}
 		pos = dataEnd
@@ -940,6 +986,88 @@ func matroskaColorName(value uint64) string {
 	default:
 		return ""
 	}
+}
+
+func matroskaErrorDetectionType(value uint64) string {
+	switch value {
+	case 1:
+		return "Per level 1"
+	case 2:
+		return "Per level 2"
+	case 3:
+		return "Per level 3"
+	default:
+		return ""
+	}
+}
+
+func matroskaErrorDetectionLabel(payload []byte) string {
+	if value, ok := readUnsigned(payload); ok {
+		if label := matroskaErrorDetectionType(value); label != "" {
+			return label
+		}
+	}
+	if len(payload) > 0 {
+		return string(payload)
+	}
+	return ""
+}
+
+func matroskaHasCRC(buf []byte) bool {
+	return matroskaScanForCRC(buf, 0, len(buf))
+}
+
+func matroskaScanForCRC(buf []byte, start int, end int) bool {
+	pos := start
+	for pos < end {
+		id, idLen, ok := readVintID(buf, pos)
+		if !ok {
+			return false
+		}
+		size, sizeLen, ok := readVintSize(buf, pos+idLen)
+		if !ok {
+			return false
+		}
+		dataStart := pos + idLen + sizeLen
+		dataEnd := dataStart + int(size)
+		if size == unknownVintSize || dataEnd > len(buf) {
+			dataEnd = len(buf)
+		}
+		if id == mkvIDCRC32 {
+			return true
+		}
+		if matroskaIsMasterID(id) {
+			if matroskaScanForCRC(buf, dataStart, dataEnd) {
+				return true
+			}
+		}
+		pos = dataEnd
+	}
+	return false
+}
+
+func matroskaIsMasterID(id uint64) bool {
+	switch id {
+	case mkvIDSegment, mkvIDInfo, mkvIDTracks, mkvIDTags, mkvIDTag, mkvIDSimpleTag,
+		mkvIDTrackEntry, mkvIDTrackVideo, mkvIDTrackAudio, mkvIDColour, mkvIDCluster, mkvIDBlockGroup:
+		return true
+	default:
+		return false
+	}
+}
+
+func matroskaHasStreamColor(info matroskaVideoInfo) bool {
+	return info.colorRangeSource == "Stream" ||
+		info.colorPrimariesSource == "Stream" ||
+		info.transferSource == "Stream" ||
+		info.matrixSource == "Stream"
+}
+
+func matroskaColorSource(value string, fallback string) string {
+	if value != "" {
+		return value
+	}
+	return fallback
 }
 
 func parseMatroskaEncoders(buf []byte) []string {

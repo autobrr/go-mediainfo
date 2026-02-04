@@ -81,7 +81,10 @@ Owner: soup
 - Matroska: parse EBML DocTypeVersion, SegmentUID, Writing/Muxing app; track number mapped to ID; add Format/Info
 - Matroska: AVC codec private -> profile/settings/chroma/bit depth/scan; AAC ASC -> AAC LC + Codec ID A_AAC-2
 - Matroska: tags ENCODER -> audio Writing library; x264 settings -> Nominal bit rate + Bits/(Pixel*Frame)
-- Matroska: track flags Default/Forced; video color range; ErrorDetectionType defaulted to Per level 1
+- Matroska: track flags Default/Forced; video color range; ErrorDetectionType set when CRC-32 elements present in header/segment (Per level 1)
+- Matroska: ParseSpeed <1 skips cluster stats for small files (<=4 MiB) but still runs AC-3 probes; avoids bitrate/duration overrides
+- Matroska: color source tracked (Container vs Stream); Color space only when stream color; JSON colour_* sources follow origin
+- Matroska: FrameRate_Mode_Original=VFR when H.264 SPS fixed_frame_rate_flag is false (CFR derived from DefaultDuration)
 - MPEG-TS: overall duration/bitrate derived from PCR interval average (packets between PCRs) to match CLI
 - MPEG-TS: handle PCR PID payload (don't skip PES when PCR PID == video PID)
 - MPEG-TS: parse x264 writing library + encoding settings from video PES (Annex B), add Nominal bit rate
@@ -116,6 +119,7 @@ Owner: soup
 - JSON field order: Delay_Settings between Delay and Delay_DropFrame; Format_Settings only for General
 - AC-3 JSON: ServiceKind uses short codes (e.g., CM)
 - AC-3 stats parity: dialnorm/compr/dynrng averages are intensity-based; skip compr/dynrng code 0xFF; dynrng counts include dynrnge=false frames as 0 dB but stats only emitted when any dynrnge seen
+- AC-3 compr average uses linear mean (log10 of average), not dB mean
 - ParseSpeed default is 0.5; ParseSpeed>=1 enables full E-AC-3 probe, <1 limits compr stats sample (target 1113 frames)
 - Matroska E-AC-3: parse laced frames per-frame for probe stats
 - E-AC-3 compr field uses 0xFF mapping (ac3ComprDB(0xFF)) even when stats exclude 0xFF

@@ -234,7 +234,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			streams = append(streams, parsed.Tracks...)
 			if rawWritingApp != "" {
 				general.JSON["Encoded_Application"] = rawWritingApp
-				if name, version, _ := splitWritingApplication(rawWritingApp); name != "" {
+				if name, version, rawVersion := splitWritingApplication(rawWritingApp); name != "" && rawVersion != "" {
 					general.JSON["Encoded_Application_Name"] = name
 					if version != "" {
 						general.JSON["Encoded_Application_Version"] = version

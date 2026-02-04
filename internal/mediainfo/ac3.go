@@ -151,18 +151,17 @@ func parseAC3Frame(payload []byte) (ac3Info, int, bool) {
 	if !ok {
 		return info, 0, false
 	}
-	compr, ok := br.readBits(8)
-	if !ok {
-		return info, 0, false
-	}
-	info.comprFieldDB = ac3ComprDB(uint8(compr))
-	info.hasComprField = true
-	info.hasCompr = true
 	if compre == 1 {
+		compr, ok := br.readBits(8)
+		if !ok {
+			return info, 0, false
+		}
+		info.comprFieldDB = ac3ComprDB(uint8(compr))
+		info.hasComprField = true
+		info.hasCompr = true
 		info.comprDB = info.comprFieldDB
 		if compr != 0xFF {
-			info.comprSumDB = info.comprDB
-			info.comprIsDB = true
+			info.comprSum = math.Pow(10.0, info.comprDB/10.0)
 			info.comprCount = 1
 			info.comprMin = info.comprDB
 			info.comprMax = info.comprDB
@@ -284,9 +283,13 @@ func parseAC3Frame(payload []byte) (ac3Info, int, bool) {
 		comprDB:       info.comprDB,
 		comprCount:    info.comprCount,
 		comprSum:      info.comprSum,
+		comprSumDB:    info.comprSumDB,
 		comprMin:      info.comprMin,
 		comprMax:      info.comprMax,
+		comprIsDB:     info.comprIsDB,
+		comprFieldDB:  info.comprFieldDB,
 		hasCompr:      info.hasCompr,
+		hasComprField: info.hasComprField,
 		dynrngSum:     info.dynrngSum,
 		dynrngCount:   info.dynrngCount,
 		dynrngMin:     info.dynrngMin,

@@ -25,6 +25,8 @@ type h264SPSInfo struct {
 	CodedWidth              uint64
 	CodedHeight             uint64
 	FrameRate               float64
+	FixedFrameRate          bool
+	HasFixedFrameRate       bool
 	BitRate                 int64
 	HasBitRate              bool
 	BufferSize              int64
@@ -250,6 +252,8 @@ func parseH264SPS(nal []byte) h264SPSInfo {
 	}
 
 	frameRate := 0.0
+	fixedFrameRate := false
+	hasFixedFrameRate := false
 	if br.readBitsValue(1) == 1 {
 		if br.readBitsValue(1) == 1 {
 			aspectRatioIDC := br.readBitsValue(8)
@@ -288,7 +292,8 @@ func parseH264SPS(nal []byte) h264SPSInfo {
 		if br.readBitsValue(1) == 1 {
 			numUnitsInTick := br.readBitsValue(32)
 			timeScale := br.readBitsValue(32)
-			_ = br.readBitsValue(1)
+			fixedFrameRate = br.readBitsValue(1) == 1
+			hasFixedFrameRate = true
 			if numUnitsInTick > 0 {
 				frameRate = float64(timeScale) / (2.0 * float64(numUnitsInTick))
 			}
@@ -344,6 +349,8 @@ func parseH264SPS(nal []byte) h264SPSInfo {
 		CodedWidth:              uint64(codedWidth),
 		CodedHeight:             uint64(codedHeight),
 		FrameRate:               frameRate,
+		FixedFrameRate:          fixedFrameRate,
+		HasFixedFrameRate:       hasFixedFrameRate,
 		BitRate:                 bitRate,
 		HasBitRate:              hasBitRate,
 		BufferSize:              bufferSize,
