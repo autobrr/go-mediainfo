@@ -32,6 +32,7 @@ Owner: soup
 - DVD CC mapping: DVD user_data odd-field captions map to CC3 (matches MediaInfo)
 - DVD CC timing: Start_Command uses -1 CC frame, Start/End use -4 CC frames for PopOn (frame rate 29.97 when video 23.976)
 - DVD CC visible duration: Duration_Start2End rounds to 0.5 ms (2000 Hz) before JSON formatting
+- Amelie PAL DVD set (Disc 1/2) has no EIA-608 Text tracks (no CC timing to validate)
 - DVD AC-3 text: add numeric+dB duplicate lines + dialnorm/compr counts in aggregate mode
 - `--output` without "=" treated as filename (matches upstream)
 - `--` alone is a no-op (ignored)
