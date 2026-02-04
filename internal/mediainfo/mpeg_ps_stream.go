@@ -20,6 +20,8 @@ type psPending struct {
 	entry      *psStream
 	key        uint16
 	flags      byte
+	pts        uint64
+	hasPTS     bool
 	payloadPos int
 	skip       int
 }
@@ -92,7 +94,7 @@ func (p *psStreamParser) parseReader(r io.Reader) bool {
 			next := findPESStart(buf, pending.payloadPos)
 			if next >= 0 {
 				if next > pending.payloadPos {
-					p.consumePayload(pending.entry, pending.key, pending.flags, buf[pending.payloadPos:next])
+					p.consumePayload(pending.entry, pending.key, pending.flags, pending.pts, pending.hasPTS, buf[pending.payloadPos:next])
 					found = true
 				}
 				pos = next
@@ -101,13 +103,13 @@ func (p *psStreamParser) parseReader(r io.Reader) bool {
 			}
 			safeEnd := len(buf) - 2
 			if safeEnd > pending.payloadPos {
-				p.consumePayload(pending.entry, pending.key, pending.flags, buf[pending.payloadPos:safeEnd])
+				p.consumePayload(pending.entry, pending.key, pending.flags, pending.pts, pending.hasPTS, buf[pending.payloadPos:safeEnd])
 				found = true
 				pending.payloadPos = safeEnd
 			}
 			if !readMore() {
 				if pending.payloadPos < len(buf) {
-					p.consumePayload(pending.entry, pending.key, pending.flags, buf[pending.payloadPos:])
+					p.consumePayload(pending.entry, pending.key, pending.flags, pending.pts, pending.hasPTS, buf[pending.payloadPos:])
 					found = true
 				}
 				return found
@@ -267,8 +269,12 @@ func (p *psStreamParser) parseReader(r io.Reader) bool {
 					entry.firstPacketOrder = p.packetOrder
 					p.packetOrder++
 				}
+				var currentPTS uint64
+				var hasPTS bool
 				if (flags&0x80) != 0 && pos+9+headerLen <= len(buf) {
 					if pts, ok := parsePTS(buf[pos+9:]); ok {
+						currentPTS = pts
+						hasPTS = true
 						p.anyPTS.add(pts)
 						entry.pts.add(pts)
 						if entry.kind == StreamVideo {
@@ -277,7 +283,7 @@ func (p *psStreamParser) parseReader(r io.Reader) bool {
 					}
 				}
 				if payloadOffset < len(payload) {
-					p.consumePayload(entry, psStreamKey(streamID, subID), flags, payload[payloadOffset:])
+					p.consumePayload(entry, psStreamKey(streamID, subID), flags, currentPTS, hasPTS, payload[payloadOffset:])
 					found = true
 				}
 			}
@@ -314,8 +320,12 @@ func (p *psStreamParser) parseReader(r io.Reader) bool {
 			entry.firstPacketOrder = p.packetOrder
 			p.packetOrder++
 		}
+		var streamPTS uint64
+		var streamHasPTS bool
 		if (flags&0x80) != 0 && pos+9+headerLen <= len(buf) {
 			if pts, ok := parsePTS(buf[pos+9:]); ok {
+				streamPTS = pts
+				streamHasPTS = true
 				p.anyPTS.add(pts)
 				entry.pts.add(pts)
 				if entry.kind == StreamVideo {
@@ -327,6 +337,8 @@ func (p *psStreamParser) parseReader(r io.Reader) bool {
 			entry:      entry,
 			key:        psStreamKey(streamID, subID),
 			flags:      flags,
+			pts:        streamPTS,
+			hasPTS:     streamHasPTS,
 			payloadPos: payloadStart,
 			skip:       payloadOffset,
 		}
@@ -345,12 +357,13 @@ func (p *psStreamParser) ensureStream(streamID byte, subID byte, kind StreamKind
 	return entry
 }
 
-func (p *psStreamParser) consumePayload(entry *psStream, key uint16, flags byte, payload []byte) {
+func (p *psStreamParser) consumePayload(entry *psStream, key uint16, flags byte, pts uint64, hasPTS bool, payload []byte) {
 	if entry == nil || len(payload) == 0 {
 		return
 	}
 	entry.bytes += uint64(len(payload))
 	if entry.kind == StreamVideo {
+		consumeMPEG2Captions(entry, payload, pts, hasPTS)
 		consumeMPEG2StartCodeStats(entry, payload, (flags&0x80) != 0)
 		consumeH264PS(entry, payload)
 		if !entry.videoIsH264 {

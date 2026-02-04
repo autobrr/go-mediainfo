@@ -151,6 +151,8 @@ func mapStreamFieldsToJSON(kind StreamKind, fields []Field) []jsonKV {
 			out = append(out, jsonKV{Key: "Format_Commercial_IfAny", Val: field.Value})
 		case "Muxing mode":
 			out = append(out, jsonKV{Key: "MuxingMode", Val: field.Value})
+		case "Muxing mode, more info":
+			out = append(out, jsonKV{Key: "MuxingMode_MoreInfo", Val: field.Value})
 		case "Codec configuration box":
 			extras = append(extras, jsonKV{Key: "CodecConfigurationBox", Val: field.Value})
 		case "Duration":

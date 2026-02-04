@@ -161,8 +161,12 @@ func ParseMPEGPS(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, bool)
 			packetOrder++
 		}
 
+		var currentPTS uint64
+		var hasPTS bool
 		if (flags&0x80) != 0 && i+9+headerLen <= len(data) {
 			if pts, ok := parsePTS(data[i+9:]); ok {
+				currentPTS = pts
+				hasPTS = true
 				anyPTS.add(pts)
 				entry.pts.add(pts)
 				if entry.kind == StreamVideo {
@@ -183,6 +187,7 @@ func ParseMPEGPS(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, bool)
 			if len(esPayload) > 0 {
 				entry.bytes += uint64(len(esPayload))
 				if entry.kind == StreamVideo {
+					consumeMPEG2Captions(entry, esPayload, currentPTS, hasPTS)
 					consumeMPEG2StartCodeStats(entry, esPayload, (flags&0x80) != 0)
 					consumeH264PS(entry, esPayload)
 					if !entry.videoIsH264 {
@@ -226,6 +231,7 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 	sort.Slice(streamOrder, func(i, j int) bool { return streamOrder[i] < streamOrder[j] })
 	var videoFrameRate float64
 	var videoIsH264 bool
+	var ccEntry *psStream
 	for _, key := range streamOrder {
 		if st := streams[key]; st != nil && st.kind == StreamVideo {
 			if st.videoIsH264 {
@@ -238,6 +244,9 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 					info := parser.finalize()
 					videoFrameRate = info.FrameRate
 				}
+			}
+			if st.ccFound && ccEntry == nil {
+				ccEntry = st
 			}
 			break
 		}
@@ -598,15 +607,27 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 					fields = append(fields, Field{Name: "Service kind", Value: st.ac3Info.serviceKind})
 				}
 				if st.ac3Info.hasDialnorm {
+					if opts.dvdExtras {
+						fields = append(fields, Field{Name: "Dialog Normalization", Value: fmt.Sprintf("%d", st.ac3Info.dialnorm)})
+					}
 					fields = append(fields, Field{Name: "Dialog Normalization", Value: fmt.Sprintf("%d dB", st.ac3Info.dialnorm)})
 				}
 				if st.ac3Info.hasCompr {
+					if opts.dvdExtras {
+						fields = append(fields, Field{Name: "compr", Value: fmt.Sprintf("%.2f", st.ac3Info.comprDB)})
+					}
 					fields = append(fields, Field{Name: "compr", Value: fmt.Sprintf("%.2f dB", st.ac3Info.comprDB)})
 				}
 				if st.ac3Info.hasCmixlev {
+					if opts.dvdExtras {
+						fields = append(fields, Field{Name: "cmixlev", Value: fmt.Sprintf("%.1f", st.ac3Info.cmixlevDB)})
+					}
 					fields = append(fields, Field{Name: "cmixlev", Value: fmt.Sprintf("%.1f dB", st.ac3Info.cmixlevDB)})
 				}
 				if st.ac3Info.hasSurmixlev {
+					if opts.dvdExtras {
+						fields = append(fields, Field{Name: "surmixlev", Value: fmt.Sprintf("%.0f", st.ac3Info.surmixlevDB)})
+					}
 					fields = append(fields, Field{Name: "surmixlev", Value: fmt.Sprintf("%.0f dB", st.ac3Info.surmixlevDB)})
 				}
 				if st.ac3Info.hasMixlevel {
@@ -615,10 +636,27 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 				if st.ac3Info.hasRoomtyp {
 					fields = append(fields, Field{Name: "roomtyp", Value: st.ac3Info.roomtyp})
 				}
-				if avg, min, max, ok := st.ac3Info.dialnormStats(); ok {
-					fields = append(fields, Field{Name: "dialnorm_Average", Value: fmt.Sprintf("%d dB", avg)})
-					fields = append(fields, Field{Name: "dialnorm_Minimum", Value: fmt.Sprintf("%d dB", min)})
-					fields = append(fields, Field{Name: "dialnorm_Maximum", Value: fmt.Sprintf("%d dB", max)})
+				if opts.dvdExtras {
+					if avg, min, max, ok := st.ac3Info.dialnormStats(); ok {
+						fields = append(fields, Field{Name: "dialnorm_Average", Value: fmt.Sprintf("%d", avg)})
+						fields = append(fields, Field{Name: "dialnorm_Minimum", Value: fmt.Sprintf("%d", min)})
+						fields = append(fields, Field{Name: "dialnorm_Maximum", Value: fmt.Sprintf("%d", max)})
+						fields = append(fields, Field{Name: "dialnorm_Average", Value: fmt.Sprintf("%d dB", avg)})
+						fields = append(fields, Field{Name: "dialnorm_Minimum", Value: fmt.Sprintf("%d dB", min)})
+						fields = append(fields, Field{Name: "dialnorm_Maximum", Value: fmt.Sprintf("%d dB", max)})
+						if st.ac3Info.dialnormCount > 0 {
+							fields = append(fields, Field{Name: "dialnorm_Count", Value: fmt.Sprintf("%d", st.ac3Info.dialnormCount)})
+						}
+					}
+					if avg, min, max, count, ok := st.ac3Info.comprStats(); ok {
+						fields = append(fields, Field{Name: "compr_Average", Value: fmt.Sprintf("%.2f", avg)})
+						fields = append(fields, Field{Name: "compr_Minimum", Value: fmt.Sprintf("%.2f", min)})
+						fields = append(fields, Field{Name: "compr_Maximum", Value: fmt.Sprintf("%.2f", max)})
+						fields = append(fields, Field{Name: "compr_Count", Value: fmt.Sprintf("%d", count)})
+						fields = append(fields, Field{Name: "compr_Average", Value: fmt.Sprintf("%.2f dB", avg)})
+						fields = append(fields, Field{Name: "compr_Minimum", Value: fmt.Sprintf("%.2f dB", min)})
+						fields = append(fields, Field{Name: "compr_Maximum", Value: fmt.Sprintf("%.2f dB", max)})
+					}
 				}
 			} else if st.audioRate > 0 {
 				fields = append(fields, Field{Name: "Bit rate mode", Value: "Variable"})
@@ -861,6 +899,37 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 		info.DurationSeconds = maxDuration
 	} else if duration := anyPTS.duration(); duration > 0 {
 		info.DurationSeconds = duration
+	}
+
+	if ccEntry != nil {
+		videoDelay := 0.0
+		if videoPTS.has() {
+			videoDelay = float64(videoPTS.min) / 90000.0
+		}
+		if ccStream := buildCCTextStream(ccEntry, videoDelay, videoDuration, videoFrameRate); ccStream != nil {
+			insertAt := -1
+			for i := len(streamsOut) - 1; i >= 0; i-- {
+				if streamsOut[i].Kind == StreamAudio {
+					insertAt = i + 1
+					break
+				}
+			}
+			if insertAt == -1 {
+				for i := len(streamsOut) - 1; i >= 0; i-- {
+					if streamsOut[i].Kind == StreamVideo {
+						insertAt = i + 1
+						break
+					}
+				}
+			}
+			if insertAt >= 0 && insertAt < len(streamsOut) {
+				streamsOut = append(streamsOut, Stream{})
+				copy(streamsOut[insertAt+1:], streamsOut[insertAt:])
+				streamsOut[insertAt] = *ccStream
+			} else {
+				streamsOut = append(streamsOut, *ccStream)
+			}
+		}
 	}
 
 	return info, streamsOut, true
