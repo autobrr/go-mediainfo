@@ -11,7 +11,8 @@
 - JSON parity: sample set complete (MP4/MKV/TS/AVI/MPEG Video/VOB)
 - MPEG-PS/VOB JSON: expand VOB parity sweep beyond samples (sample.vob + sample_ac3.vob match)
 - MKV (The.Rookie... WEB-DL) parity complete across text/JSON/XML/CSV
-- DVD: aggregated VTS_XX_0.IFO inside VIDEO_TS still lacks VOB-derived stream details (bitrate/settings/etc); need VOB scan/streaming MPEG-PS parse across title-set VOBs
+- DVD: add EIA-608 caption parsing in MPEG-PS (Text stream + JSON fields) for VTS_XX_0.IFO aggregate parity
+- DVD: IFO aggregate text output still missing numeric + dB duplicate lines (Dialog Normalization/compr/cmixlev/etc) vs MediaInfo
 
 ## Post-parity
 - Investigate MediaInfo issue #760: DVD IFO language/runtime regression (23.07 vs 23.06). https://github.com/MediaArea/MediaInfo/issues/760
