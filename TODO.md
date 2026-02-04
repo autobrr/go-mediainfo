@@ -11,7 +11,7 @@
 - JSON parity: sample set complete (MP4/MKV/TS/AVI/MPEG Video/VOB)
 - MPEG-PS/VOB JSON: expand VOB parity sweep beyond samples (sample.vob + sample_ac3.vob match)
 - MKV (The.Rookie... WEB-DL) parity complete across text/JSON/XML/CSV
-- DVD: EIA-608 timing fields still off (Start ~+0.133s, Start_Command ~+0.033s vs MediaInfo); investigate PTS alignment for first EOC/control
+- DVD: verify EIA-608 timing on more samples (now matches Ask.Me.to.Dance IFO)
 - DVD: verify CC frames-before-first-event count vs MediaInfo (currently derived from MPEG-2 picture count)
 
 ## Post-parity

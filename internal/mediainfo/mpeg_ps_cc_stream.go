@@ -27,6 +27,31 @@ func buildCCTextStream(entry *psStream, videoDelay float64, videoDuration float6
 		start = float64(track.firstFrame) / frameRate
 	}
 	end := ccPTSSeconds(track.lastPTS)
+	firstType := track.firstType
+	if firstType == "" {
+		firstType = "PopOn"
+	}
+	ccRate := ccFrameRateForVideo(frameRate)
+	commandOffset := 0.0
+	displayOffset := 0.0
+	if ccRate > 0 {
+		commandOffset = 1.0 / ccRate
+		if firstType == "PopOn" {
+			displayOffset = 4.0 / ccRate
+		}
+	}
+	if start > 0 && displayOffset > 0 {
+		start -= displayOffset
+		if start < 0 {
+			start = 0
+		}
+	}
+	if end > 0 && displayOffset > 0 {
+		end -= displayOffset
+		if end < 0 {
+			end = 0
+		}
+	}
 	if end == 0 {
 		end = start
 	}
@@ -50,10 +75,6 @@ func buildCCTextStream(entry *psStream, videoDelay float64, videoDuration float6
 		framesBefore = 0
 	}
 	fields = append(fields, Field{Name: "Count of frames before first event", Value: fmt.Sprintf("%d", framesBefore)})
-	firstType := track.firstType
-	if firstType == "" {
-		firstType = "PopOn"
-	}
 	fields = append(fields, Field{Name: "Type of the first event", Value: firstType})
 	fields = append(fields, Field{Name: "Caption service name", Value: service})
 
@@ -76,6 +97,12 @@ func buildCCTextStream(entry *psStream, videoDelay float64, videoDuration float6
 		stream.JSON["Duration_Start2End"] = formatJSONSeconds6(visible)
 	}
 	startCommand := ccPTSSeconds(track.firstCommandPTS)
+	if startCommand > 0 && commandOffset > 0 {
+		startCommand -= commandOffset
+		if startCommand < 0 {
+			startCommand = 0
+		}
+	}
 	if startCommand == 0 {
 		startCommand = start
 	}
@@ -119,4 +146,20 @@ func ccPTSSeconds(value uint64) float64 {
 		return 0
 	}
 	return float64(value) / 90000.0
+}
+
+func ccFrameRateForVideo(frameRate float64) float64 {
+	if frameRate <= 0 {
+		return 0
+	}
+	if frameRate > 23 && frameRate < 24.5 {
+		return 30000.0 / 1001.0
+	}
+	if frameRate > 29 && frameRate < 30.5 {
+		return 30000.0 / 1001.0
+	}
+	if frameRate > 24.5 && frameRate < 25.5 {
+		return 25.0
+	}
+	return frameRate
 }

@@ -30,6 +30,7 @@ Owner: soup
 - DVD CC (DVD-Video): user_data header is "CC" (0x4343), type 0x01, caption_block_size 0xF8; caption blocks carry odd/even field flag for CC1/CC3
 - DVD MPEG-PS sampling: when ParseSpeed < 1 and dvdExtras, sample includes middle chunk and min 16 MiB window to capture CC
 - DVD CC mapping: DVD user_data odd-field captions map to CC3 (matches MediaInfo)
+- DVD CC timing: Start_Command uses -1 CC frame, Start/End use -4 CC frames for PopOn (frame rate 29.97 when video 23.976)
 - DVD AC-3 text: add numeric+dB duplicate lines + dialnorm/compr counts in aggregate mode
 - `--output` without "=" treated as filename (matches upstream)
 - `--` alone is a no-op (ignored)
