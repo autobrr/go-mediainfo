@@ -192,6 +192,28 @@ var jsonTextFieldOrder = map[string]int{
 	"Forced":       16,
 }
 
+var jsonMenuFieldOrder = map[string]int{
+	"@type":            0,
+	"@typeorder":       1,
+	"StreamOrder":      2,
+	"FirstPacketOrder": 3,
+	"ID":               4,
+	"MenuID":           5,
+	"Format":           6,
+	"Duration":         7,
+	"Delay":            8,
+	"FrameRate":        9,
+	"FrameRate_Num":    10,
+	"FrameRate_Den":    11,
+	"FrameCount":       12,
+	"List_StreamKind":  13,
+	"List_StreamPos":   14,
+	"ServiceName":      15,
+	"ServiceProvider":  16,
+	"ServiceType":      17,
+	"extra":            18,
+}
+
 func sortJSONFields(kind StreamKind, fields []jsonKV) []jsonKV {
 	order := jsonVideoFieldOrder
 	switch kind {
@@ -203,6 +225,8 @@ func sortJSONFields(kind StreamKind, fields []jsonKV) []jsonKV {
 		order = jsonVideoFieldOrder
 	case StreamText:
 		order = jsonTextFieldOrder
+	case StreamMenu:
+		order = jsonMenuFieldOrder
 	}
 	positions := map[string]int{}
 	for i, field := range fields {

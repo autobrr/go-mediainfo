@@ -58,9 +58,7 @@ func buildJSONGeneralFields(report Report) []jsonKV {
 		if size := fileSizeBytes(report.Ref); size > 0 {
 			fields = append(fields, jsonKV{Key: "FileSize", Val: strconv.FormatInt(size, 10)})
 		}
-		if createdUTC, createdLocal, modifiedUTC, modifiedLocal, ok := fileTimes(report.Ref); ok {
-			fields = append(fields, jsonKV{Key: "File_Created_Date", Val: createdUTC})
-			fields = append(fields, jsonKV{Key: "File_Created_Date_Local", Val: createdLocal})
+		if _, _, modifiedUTC, modifiedLocal, ok := fileTimes(report.Ref); ok {
 			fields = append(fields, jsonKV{Key: "File_Modified_Date", Val: modifiedUTC})
 			fields = append(fields, jsonKV{Key: "File_Modified_Date_Local", Val: modifiedLocal})
 		}
@@ -79,7 +77,9 @@ func buildJSONStreamFields(stream Stream, order int, typeOrder int) []jsonKV {
 		fields = append(fields, jsonKV{Key: "StreamOrder", Val: strconv.Itoa(order)})
 	}
 	fields = append(fields, mapStreamFieldsToJSON(stream.Kind, stream.Fields)...)
-	fields = append(fields, buildJSONComputedFields(stream.Kind, fields)...)
+	if !stream.JSONSkipComputed {
+		fields = append(fields, buildJSONComputedFields(stream.Kind, fields)...)
+	}
 	fields = applyJSONExtras(fields, stream.JSON, stream.JSONRaw)
 	return sortJSONFields(stream.Kind, fields)
 }

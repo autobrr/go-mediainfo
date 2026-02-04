@@ -536,6 +536,37 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 				}
 			}
 		}
+	case "DVD Video":
+		if parsed, ok := ParseDVDVideo(path, file, stat.Size()); ok {
+			info = parsed.Container
+			if parsed.FileSize > 0 {
+				general.Fields = setFieldValue(general.Fields, "File size", formatBytes(parsed.FileSize))
+			}
+			for _, field := range parsed.General {
+				general.Fields = appendFieldUnique(general.Fields, field)
+			}
+			streams = append(streams, parsed.Streams...)
+			if parsed.GeneralJSON != nil {
+				general.JSON = parsed.GeneralJSON
+			} else {
+				general.JSON = map[string]string{}
+			}
+			if parsed.GeneralJSONRaw != nil {
+				general.JSONRaw = parsed.GeneralJSONRaw
+			}
+			if parsed.FileSize > 0 {
+				general.JSON["FileSize"] = fmt.Sprintf("%d", parsed.FileSize)
+			}
+			if info.DurationSeconds > 0 {
+				general.JSON["Duration"] = formatJSONSeconds(info.DurationSeconds)
+			}
+			if value := extractLeadingNumber(findField(general.Fields, "Frame rate")); value != "" {
+				general.JSON["FrameRate"] = value
+			}
+			if mode := findField(general.Fields, "Overall bit rate mode"); mode != "" {
+				general.JSON["OverallBitRate_Mode"] = mapBitrateMode(mode)
+			}
+		}
 	}
 
 	for _, stream := range streams {
@@ -555,7 +586,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 		}
 	}
 
-	if info.HasDuration() {
+	if info.HasDuration() && format != "DVD Video" {
 		general.Fields = append(general.Fields, Field{Name: "Duration", Value: formatDuration(info.DurationSeconds)})
 		bitrate := float64(stat.Size()*8) / info.DurationSeconds
 		if bitrate > 0 {

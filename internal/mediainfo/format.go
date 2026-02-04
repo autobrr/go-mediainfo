@@ -14,7 +14,7 @@ func DetectFormat(header []byte, filename string) string {
 	}
 
 	ext := strings.ToLower(filepath.Ext(filename))
-	if ext == ".ifo" {
+	if ext == ".ifo" || ext == ".bup" {
 		return "DVD Video"
 	}
 	if ext == ".vob" {
