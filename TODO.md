@@ -14,6 +14,7 @@
 - MKV (The.Rookie... WEB-DL) parity complete across text/JSON/XML/CSV
 - DVD: verify EIA-608 timing on more samples (Ask.Me.to.Dance IFO matched)
 - DVD: verify CC frames-before-first-event count vs MediaInfo (currently derived from MPEG-2 picture count)
+- DVD: run full directory parity on large DVD sets (long-running scan)
 
 ## Post-parity
 - Investigate MediaInfo issue #760: DVD IFO language/runtime regression (23.07 vs 23.06). https://github.com/MediaArea/MediaInfo/issues/760

@@ -26,6 +26,12 @@ Owner: soup
 - JSON: FileExtension preserves filename case; File_Created_Date/Local emitted when available
 - DVD aggregate (VTS_XX_0.IFO): parse title-set VOBs via streaming MPEG-PS; file size = sum VTS_XX_1..n + IFO (exclude VTS_XX_0.VOB)
 - DVD aggregate JSON: add AC-3 *_String extras + dialnorm_Count; add Source in stream extra
+- DVD IFO/BUP: audio/subpic counts are 16-bit; subpic attrs are 6 bytes, audio attrs 8 bytes
+- DVD IFO/BUP: emit all audio/subpic streams; VMG (VIDEO_TS) shows Audio/Text without IDs
+- DVD Menu lists: List (Audio) uses index list; Subtitles 4/3 + Pan&Scan are zero lists; Wide + Letterbox use index list
+- DVD Menu JSON extra includes List_Subtitles_4_3/Wide/Letterbox/PanScan
+- DVD chapter start times use tick sums (avoid per-cell rounding drift)
+- Directory input: expand to sorted file list before analysis (CLI parity)
 - DVD CC: detect GA94 user_data in MPEG-2, emit EIA-608 Text stream + JSON fields (MuxingMode_MoreInfo, Duration_* timing, FirstDisplay_*), CC3 for field 2
 - DVD CC (DVD-Video): user_data header is "CC" (0x4343), type 0x01, caption_block_size 0xF8; caption blocks carry odd/even field flag for CC1/CC3
 - DVD MPEG-PS sampling: when ParseSpeed < 1 and dvdExtras, sample includes middle chunk and min 16 MiB window to capture CC
