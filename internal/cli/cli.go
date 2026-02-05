@@ -55,9 +55,6 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		case normalized == "--info-parameters":
 			fmt.Fprintln(stdout, mediainfo.InfoParameters())
 			return exitOK
-		case normalized == "--info-canhandleurls":
-			fmt.Fprintln(stdout, mediainfo.InfoCanHandleUrls())
-			return exitOK
 		case strings.HasPrefix(normalized, "--language"):
 			if value, ok := valueAfterEqual(original); ok {
 				opts.Language = value

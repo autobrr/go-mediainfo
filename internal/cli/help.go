@@ -27,8 +27,6 @@ func Help(program string, stdout io.Writer) {
 	fmt.Fprintln(stdout, "                    Byte order mark for UTF-8 output (Windows only)")
 	fmt.Fprintln(stdout, "--info-parameters")
 	fmt.Fprintln(stdout, "                    Display list of inform= parameters")
-	fmt.Fprintln(stdout, "--info-canhandleurls")
-	fmt.Fprintln(stdout, "                    Display URL handling information and exit")
 	fmt.Fprintln(stdout, "")
 	fmt.Fprintln(stdout, "Commands:")
 	fmt.Fprintln(stdout, "version              Print MediaInfo version information")
