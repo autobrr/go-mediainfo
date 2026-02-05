@@ -10,8 +10,8 @@ func ParseWAV(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, bool) {
 		return ContainerInfo{}, nil, false
 	}
 
-	header := make([]byte, 12)
-	if _, err := io.ReadFull(file, header); err != nil {
+	var header [12]byte
+	if _, err := io.ReadFull(file, header[:]); err != nil {
 		return ContainerInfo{}, nil, false
 	}
 	if string(header[0:4]) != "RIFF" || string(header[8:12]) != "WAVE" {
@@ -29,8 +29,8 @@ func ParseWAV(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, bool) {
 	)
 
 	for {
-		chunkHeader := make([]byte, 8)
-		if _, err := io.ReadFull(file, chunkHeader); err != nil {
+		var chunkHeader [8]byte
+		if _, err := io.ReadFull(file, chunkHeader[:]); err != nil {
 			break
 		}
 		chunkID := string(chunkHeader[0:4])
@@ -41,15 +41,20 @@ func ParseWAV(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, bool) {
 			if chunkSize < 16 {
 				return ContainerInfo{}, nil, false
 			}
-			data := make([]byte, chunkSize)
-			if _, err := io.ReadFull(file, data); err != nil {
+			var fmtData [16]byte
+			if _, err := io.ReadFull(file, fmtData[:]); err != nil {
 				return ContainerInfo{}, nil, false
 			}
-			audioFormat = binary.LittleEndian.Uint16(data[0:2])
-			channels = binary.LittleEndian.Uint16(data[2:4])
-			sampleRate = binary.LittleEndian.Uint32(data[4:8])
-			byteRate = binary.LittleEndian.Uint32(data[8:12])
-			bitsPerSample = binary.LittleEndian.Uint16(data[14:16])
+			audioFormat = binary.LittleEndian.Uint16(fmtData[0:2])
+			channels = binary.LittleEndian.Uint16(fmtData[2:4])
+			sampleRate = binary.LittleEndian.Uint32(fmtData[4:8])
+			byteRate = binary.LittleEndian.Uint32(fmtData[8:12])
+			bitsPerSample = binary.LittleEndian.Uint16(fmtData[14:16])
+			if chunkSize > 16 {
+				if _, err := file.Seek(int64(chunkSize-16), io.SeekCurrent); err != nil {
+					return ContainerInfo{}, nil, false
+				}
+			}
 			fmtFound = true
 		case "data":
 			dataSize = chunkSize
