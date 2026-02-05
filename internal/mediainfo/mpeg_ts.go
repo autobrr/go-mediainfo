@@ -43,7 +43,7 @@ func ParseMPEGTS(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, []Fie
 		return ContainerInfo{}, nil, nil, false
 	}
 
-	reader := bufio.NewReaderSize(file, 188*200)
+	reader := bufio.NewReaderSize(file, 1<<20)
 
 	var pmtPID uint16
 	var programNumber uint16
@@ -66,189 +66,203 @@ func ParseMPEGTS(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, []Fie
 	var pmtPointer int
 	var pmtSectionLen int
 
-	packet := make([]byte, 188)
+	const tsPacketSize = 188
+	buf := make([]byte, tsPacketSize*2048)
 	var packetIndex int64
+	var carry int
 	for {
-		_, err := io.ReadFull(reader, packet)
-		if err != nil {
+		n, err := reader.Read(buf[carry:])
+		if n == 0 && err != nil {
 			break
 		}
-		packetIndex++
-		if packet[0] != 0x47 {
-			continue
-		}
-		pid := uint16(packet[1]&0x1F)<<8 | uint16(packet[2])
-		payloadStart := packet[1]&0x40 != 0
-		adaptation := (packet[3] & 0x30) >> 4
-		payloadIndex := 4
-		if adaptation == 2 || adaptation == 3 {
-			adaptationLen := int(packet[4])
-			payloadIndex += 1 + adaptationLen
-		}
-		if pid == pcrPID {
-			if pcr, ok := parsePCR(packet); ok {
-				pcrPTS.add(pcr)
-				if hasPCR && pcr > lastPCR && packetIndex > lastPCRPacket {
-					delta := pcr - lastPCR
-					seconds := float64(delta) / 90000.0
-					if seconds > 0 {
-						bytesBetween := (packetIndex - lastPCRPacket) * 188
-						pcrBits += float64(bytesBetween * 8)
-						pcrSeconds += seconds
-					}
-				}
-				lastPCR = pcr
-				lastPCRPacket = packetIndex
-				hasPCR = true
-			}
-		}
-		if adaptation == 2 {
-			continue
-		}
-		if payloadIndex >= len(packet) {
-			continue
-		}
-		payload := packet[payloadIndex:]
-
-		if pid == 0 && payloadStart {
-			if program, pmt := parsePAT(payload); program != 0 {
-				programNumber = program
-				pmtPID = pmt
-			}
-			continue
-		}
-		if pid == 0x11 && payloadStart {
-			name, provider, svcType := parseSDT(payload, programNumber)
-			if name != "" {
-				serviceName = name
-			}
-			if provider != "" {
-				serviceProvider = provider
-			}
-			if svcType != "" {
-				serviceType = svcType
-			}
-			continue
-		}
-		if pmtPID != 0 && pid == pmtPID && payloadStart {
-			parsed, pcr, pointer, sectionLen := parsePMT(payload, programNumber)
-			if pcr != 0 {
-				pcrPID = pcr
-			}
-			if sectionLen > 0 {
-				pmtPointer = pointer
-				pmtSectionLen = sectionLen
-			}
-			for _, st := range parsed {
-				if existing, exists := streams[st.pid]; exists {
-					existing.kind = st.kind
-					existing.format = st.format
-					existing.streamType = st.streamType
-					existing.programNumber = st.programNumber
-					if pending, ok := pendingPTS[st.pid]; ok {
-						existing.pts = *pending
-						if st.kind == StreamVideo {
-							videoPTS.add(pending.min)
-							videoPTS.add(pending.max)
-						}
-						delete(pendingPTS, st.pid)
-					}
-				} else {
-					entry := st
-					if pending, ok := pendingPTS[st.pid]; ok {
-						entry.pts = *pending
-						if st.kind == StreamVideo {
-							videoPTS.add(pending.min)
-							videoPTS.add(pending.max)
-						}
-						delete(pendingPTS, st.pid)
-					}
-					streams[st.pid] = &entry
-					streamOrder = append(streamOrder, st.pid)
-				}
-				if st.kind == StreamVideo {
-					videoPIDs[st.pid] = struct{}{}
-				}
-			}
-			continue
-		}
-
-		pesStart := payloadStart && len(payload) >= 9 && payload[0] == 0x00 && payload[1] == 0x00 && payload[2] == 0x01
-		if pesStart {
-			flags := payload[7]
-			headerLen := int(payload[8])
-			if len(payload) < 9+headerLen {
+		n += carry
+		packetCount := n / tsPacketSize
+		for i := 0; i < packetCount; i++ {
+			packet := buf[i*tsPacketSize : (i+1)*tsPacketSize]
+			packetIndex++
+			if packet[0] != 0x47 {
 				continue
 			}
-			if flags&0x80 != 0 {
-				if pts, ok := parsePTS(payload[9:]); ok {
-					anyPTS.add(pts)
-					if entry, ok := streams[pid]; ok {
-						entry.pts.add(pts)
-						if _, ok := videoPIDs[pid]; ok {
-							videoPTS.add(pts)
+			pid := uint16(packet[1]&0x1F)<<8 | uint16(packet[2])
+			payloadStart := packet[1]&0x40 != 0
+			adaptation := (packet[3] & 0x30) >> 4
+			payloadIndex := 4
+			if adaptation == 2 || adaptation == 3 {
+				adaptationLen := int(packet[4])
+				payloadIndex += 1 + adaptationLen
+			}
+			if pid == pcrPID {
+				if pcr, ok := parsePCR(packet); ok {
+					pcrPTS.add(pcr)
+					if hasPCR && pcr > lastPCR && packetIndex > lastPCRPacket {
+						delta := pcr - lastPCR
+						seconds := float64(delta) / 90000.0
+						if seconds > 0 {
+							bytesBetween := (packetIndex - lastPCRPacket) * tsPacketSize
+							pcrBits += float64(bytesBetween * 8)
+							pcrSeconds += seconds
+						}
+					}
+					lastPCR = pcr
+					lastPCRPacket = packetIndex
+					hasPCR = true
+				}
+			}
+			if adaptation == 2 {
+				continue
+			}
+			if payloadIndex >= len(packet) {
+				continue
+			}
+			payload := packet[payloadIndex:]
+
+			if pid == 0 && payloadStart {
+				if program, pmt := parsePAT(payload); program != 0 {
+					programNumber = program
+					pmtPID = pmt
+				}
+				continue
+			}
+			if pid == 0x11 && payloadStart {
+				name, provider, svcType := parseSDT(payload, programNumber)
+				if name != "" {
+					serviceName = name
+				}
+				if provider != "" {
+					serviceProvider = provider
+				}
+				if svcType != "" {
+					serviceType = svcType
+				}
+				continue
+			}
+			if pmtPID != 0 && pid == pmtPID && payloadStart {
+				parsed, pcr, pointer, sectionLen := parsePMT(payload, programNumber)
+				if pcr != 0 {
+					pcrPID = pcr
+				}
+				if sectionLen > 0 {
+					pmtPointer = pointer
+					pmtSectionLen = sectionLen
+				}
+				for _, st := range parsed {
+					if existing, exists := streams[st.pid]; exists {
+						existing.kind = st.kind
+						existing.format = st.format
+						existing.streamType = st.streamType
+						existing.programNumber = st.programNumber
+						if pending, ok := pendingPTS[st.pid]; ok {
+							existing.pts = *pending
+							if st.kind == StreamVideo {
+								videoPTS.add(pending.min)
+								videoPTS.add(pending.max)
+							}
+							delete(pendingPTS, st.pid)
 						}
 					} else {
-						pending := pendingPTS[pid]
-						if pending == nil {
-							pending = &ptsTracker{}
-							pendingPTS[pid] = pending
+						entry := st
+						if pending, ok := pendingPTS[st.pid]; ok {
+							entry.pts = *pending
+							if st.kind == StreamVideo {
+								videoPTS.add(pending.min)
+								videoPTS.add(pending.max)
+							}
+							delete(pendingPTS, st.pid)
 						}
-						pending.add(pts)
+						streams[st.pid] = &entry
+						streamOrder = append(streamOrder, st.pid)
+					}
+					if st.kind == StreamVideo {
+						videoPIDs[st.pid] = struct{}{}
+					}
+				}
+				continue
+			}
+
+			pesStart := payloadStart && len(payload) >= 9 && payload[0] == 0x00 && payload[1] == 0x00 && payload[2] == 0x01
+			if pesStart {
+				flags := payload[7]
+				headerLen := int(payload[8])
+				if len(payload) < 9+headerLen {
+					continue
+				}
+				if flags&0x80 != 0 {
+					if pts, ok := parsePTS(payload[9:]); ok {
+						anyPTS.add(pts)
+						if entry, ok := streams[pid]; ok {
+							entry.pts.add(pts)
+							if _, ok := videoPIDs[pid]; ok {
+								videoPTS.add(pts)
+							}
+						} else {
+							pending := pendingPTS[pid]
+							if pending == nil {
+								pending = &ptsTracker{}
+								pendingPTS[pid] = pending
+							}
+							pending.add(pts)
+						}
 					}
 				}
 			}
-		}
 
-		entry, ok := streams[pid]
-		if !ok {
-			continue
-		}
-
-		if pesStart {
-			if len(entry.pesData) > 0 {
-				processPES(entry)
-			}
-			headerLen := int(payload[8])
-			dataStart := min(9+headerLen, len(payload))
-			data := payload[dataStart:]
-			if entry.kind == StreamVideo && len(data) > 0 {
-				entry.pesData = append(entry.pesData[:0], data...)
+			entry, ok := streams[pid]
+			if !ok {
+				continue
 			}
 
-			if entry.kind == StreamVideo && !entry.hasVideoFields && len(data) > 0 {
-				if fields, width, height, fps := parseH264FromPES(data); len(fields) > 0 {
-					entry.videoFields = fields
-					entry.hasVideoFields = true
-					entry.width = width
-					entry.height = height
-					if fps > 0 {
-						entry.videoFrameRate = fps
+			if pesStart {
+				if len(entry.pesData) > 0 {
+					processPES(entry)
+				}
+				headerLen := int(payload[8])
+				dataStart := min(9+headerLen, len(payload))
+				data := payload[dataStart:]
+				if entry.kind == StreamVideo && len(data) > 0 {
+					entry.pesData = append(entry.pesData[:0], data...)
+				}
+
+				if entry.kind == StreamVideo && !entry.hasVideoFields && len(data) > 0 {
+					if fields, width, height, fps := parseH264FromPES(data); len(fields) > 0 {
+						entry.videoFields = fields
+						entry.hasVideoFields = true
+						entry.width = width
+						entry.height = height
+						if fps > 0 {
+							entry.videoFrameRate = fps
+						}
 					}
 				}
-			}
-			if entry.kind == StreamAudio {
-				if !entry.audioStarted {
-					entry.audioBuffer = entry.audioBuffer[:0]
-					entry.audioStarted = true
+				if entry.kind == StreamAudio {
+					if !entry.audioStarted {
+						entry.audioBuffer = entry.audioBuffer[:0]
+						entry.audioStarted = true
+					}
+					if len(data) > 0 {
+						consumeADTS(entry, data)
+					}
 				}
-				if len(data) > 0 {
-					consumeADTS(entry, data)
+
+				if _, ok := videoPIDs[pid]; ok {
+					entry.frames++
+					entry.bytes += uint64(len(payload))
 				}
+				continue
 			}
 
-			if _, ok := videoPIDs[pid]; ok {
-				entry.frames++
-				entry.bytes += uint64(len(payload))
+			if entry.kind == StreamVideo && len(entry.pesData) > 0 {
+				entry.pesData = append(entry.pesData, payload...)
 			}
-			continue
+			if entry.kind == StreamAudio && entry.audioStarted && len(payload) > 0 {
+				consumeADTS(entry, payload)
+			}
 		}
-
-		if entry.kind == StreamVideo && len(entry.pesData) > 0 {
-			entry.pesData = append(entry.pesData, payload...)
+		carry = n - packetCount*tsPacketSize
+		if carry > 0 {
+			copy(buf, buf[packetCount*tsPacketSize:n])
 		}
-		if entry.kind == StreamAudio && entry.audioStarted && len(payload) > 0 {
-			consumeADTS(entry, payload)
+		if err != nil {
+			break
 		}
 	}
 
