@@ -1,6 +1,7 @@
 package mediainfo
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"math"
@@ -11,19 +12,12 @@ func ParseMPEGVideo(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, bo
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		return ContainerInfo{}, nil, false
 	}
-	data, err := io.ReadAll(file)
-	if err != nil || len(data) < 4 {
-		return ContainerInfo{}, nil, false
-	}
-	if data[0] != 0x00 || data[1] != 0x00 || data[2] != 0x01 || data[3] != 0xB3 {
-		return ContainerInfo{}, nil, false
-	}
-
 	parser := &mpeg2VideoParser{}
-	parser.consume(data)
+	frames, ok := parseMPEGVideoStream(file, parser)
+	if !ok {
+		return ContainerInfo{}, nil, false
+	}
 	info := parser.finalize()
-
-	frames := countMPEG2Pictures(data)
 	duration := 0.0
 	if info.FrameRate > 0 {
 		duration = float64(frames) / info.FrameRate
@@ -148,14 +142,45 @@ func ParseMPEGVideo(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, bo
 	return container, streams, true
 }
 
-func countMPEG2Pictures(data []byte) int {
-	count := 0
-	for i := 0; i+4 <= len(data); i++ {
-		if data[i] == 0x00 && data[i+1] == 0x00 && data[i+2] == 0x01 && data[i+3] == 0x00 {
-			count++
+func parseMPEGVideoStream(file io.Reader, parser *mpeg2VideoParser) (int, bool) {
+	reader := bufio.NewReaderSize(file, 1<<20)
+	first := make([]byte, 4)
+	if _, err := io.ReadFull(reader, first); err != nil {
+		return 0, false
+	}
+	if first[0] != 0x00 || first[1] != 0x00 || first[2] != 0x01 || first[3] != 0xB3 {
+		return 0, false
+	}
+
+	parser.consume(first)
+	frames := 0
+	window := [4]byte{first[0], first[1], first[2], first[3]}
+	if window[0] == 0x00 && window[1] == 0x00 && window[2] == 0x01 && window[3] == 0x00 {
+		frames++
+	}
+
+	buf := make([]byte, 1<<20)
+	for {
+		n, err := reader.Read(buf)
+		if n > 0 {
+			chunk := buf[:n]
+			parser.consume(chunk)
+			for _, b := range chunk {
+				window[0], window[1], window[2] = window[1], window[2], window[3]
+				window[3] = b
+				if window[0] == 0x00 && window[1] == 0x00 && window[2] == 0x01 && window[3] == 0x00 {
+					frames++
+				}
+			}
+		}
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return 0, false
 		}
 	}
-	return count
+	return frames, true
 }
 
 func formatGOPLength(length int) string {
