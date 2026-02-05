@@ -72,8 +72,8 @@ func ParseMP4(r io.ReaderAt, size int64) (MP4Info, bool) {
 }
 
 func readMP4BoxHeader(r io.ReaderAt, offset, fileSize int64) (boxSize int64, boxType string, headerSize int64, ok bool) {
-	header := make([]byte, 8)
-	if _, err := r.ReadAt(header, offset); err != nil {
+	var header [8]byte
+	if _, err := r.ReadAt(header[:], offset); err != nil {
 		return 0, "", 0, false
 	}
 
@@ -83,11 +83,11 @@ func readMP4BoxHeader(r io.ReaderAt, offset, fileSize int64) (boxSize int64, box
 		return fileSize - offset, boxType, 8, true
 	}
 	if size32 == 1 {
-		larger := make([]byte, 8)
-		if _, err := r.ReadAt(larger, offset+8); err != nil {
+		var larger [8]byte
+		if _, err := r.ReadAt(larger[:], offset+8); err != nil {
 			return 0, "", 0, false
 		}
-		size64 := binary.BigEndian.Uint64(larger)
+		size64 := binary.BigEndian.Uint64(larger[:])
 		if size64 < 16 {
 			return 0, "", 0, false
 		}
