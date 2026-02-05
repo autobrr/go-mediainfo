@@ -1,7 +1,6 @@
 package mediainfo
 
 import (
-	"bytes"
 	"encoding/binary"
 	"io"
 )
@@ -11,11 +10,11 @@ func ParseFLAC(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, bool) {
 		return ContainerInfo{}, nil, false
 	}
 
-	header := make([]byte, 4)
-	if _, err := io.ReadFull(file, header); err != nil {
+	var header [4]byte
+	if _, err := io.ReadFull(file, header[:]); err != nil {
 		return ContainerInfo{}, nil, false
 	}
-	if !bytes.Equal(header, []byte("fLaC")) {
+	if header[0] != 'f' || header[1] != 'L' || header[2] != 'a' || header[3] != 'C' {
 		return ContainerInfo{}, nil, false
 	}
 
@@ -25,8 +24,8 @@ func ParseFLAC(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, bool) {
 	var totalSamples uint64
 
 	for {
-		blockHeader := make([]byte, 4)
-		if _, err := io.ReadFull(file, blockHeader); err != nil {
+		var blockHeader [4]byte
+		if _, err := io.ReadFull(file, blockHeader[:]); err != nil {
 			break
 		}
 		isLast := (blockHeader[0] & 0x80) != 0
@@ -38,12 +37,27 @@ func ParseFLAC(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, bool) {
 			}
 			continue
 		}
-		blockData := make([]byte, blockLen)
-		if _, err := io.ReadFull(file, blockData); err != nil {
-			break
-		}
-		if blockType == 0 && blockLen >= 34 {
-			sampleRate, channels, bitsPerSample, totalSamples = parseFLACStreamInfo(blockData)
+		if blockType == 0 {
+			if blockLen < 34 {
+				if _, err := file.Seek(int64(blockLen), io.SeekCurrent); err != nil {
+					break
+				}
+			} else {
+				var streamInfo [34]byte
+				if _, err := io.ReadFull(file, streamInfo[:]); err != nil {
+					break
+				}
+				sampleRate, channels, bitsPerSample, totalSamples = parseFLACStreamInfo(streamInfo[:])
+				if blockLen > 34 {
+					if _, err := file.Seek(int64(blockLen-34), io.SeekCurrent); err != nil {
+						break
+					}
+				}
+			}
+		} else {
+			if _, err := file.Seek(int64(blockLen), io.SeekCurrent); err != nil {
+				break
+			}
 		}
 		if isLast {
 			break
