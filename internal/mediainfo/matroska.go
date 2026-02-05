@@ -175,7 +175,7 @@ func ParseMatroskaWithOptions(r io.ReaderAt, size int64, opts AnalyzeOptions) (M
 		applyStats := opts.ParseSpeed >= 1 || size > mkvMaxScan
 		needsScan := applyStats || len(audioProbes) > 0 || len(videoProbes) > 0
 		if needsScan {
-			if stats, ok := scanMatroskaClusters(r, info.SegmentOffset, info.SegmentSize, info.TimecodeScale, audioProbes, videoProbes); ok {
+			if stats, ok := scanMatroskaClusters(r, info.SegmentOffset, info.SegmentSize, info.TimecodeScale, audioProbes, videoProbes, applyStats); ok {
 				if applyStats {
 					applyMatroskaStats(&info, stats, size)
 				}

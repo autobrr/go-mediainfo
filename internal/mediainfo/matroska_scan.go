@@ -3,7 +3,6 @@ package mediainfo
 import (
 	"bufio"
 	"bytes"
-	"encoding/binary"
 	"fmt"
 	"io"
 	"math"
@@ -67,7 +66,7 @@ type ebmlReader struct {
 }
 
 func newEBMLReader(r io.Reader) *ebmlReader {
-	return &ebmlReader{r: bufio.NewReaderSize(r, 256*1024)}
+	return &ebmlReader{r: bufio.NewReaderSize(r, 1024*1024)}
 }
 
 func (er *ebmlReader) readByte() (byte, error) {
@@ -95,10 +94,21 @@ func (er *ebmlReader) skip(n int64) error {
 	if n <= 0 {
 		return nil
 	}
-	if _, err := io.CopyN(io.Discard, er.r, n); err != nil {
-		return err
+	for n > 0 {
+		chunk := n
+		if chunk > int64(int(^uint(0)>>1)) {
+			chunk = int64(int(^uint(0) >> 1))
+		}
+		discarded, err := er.r.Discard(int(chunk))
+		er.pos += int64(discarded)
+		n -= int64(discarded)
+		if err != nil {
+			if err == bufio.ErrBufferFull {
+				continue
+			}
+			return err
+		}
 	}
-	er.pos += n
 	return nil
 }
 
@@ -167,7 +177,7 @@ func readMatroskaElementHeader(er *ebmlReader, size int64, start int64) (uint64,
 	return id, elemSize, nil
 }
 
-func scanMatroskaClusters(r io.ReaderAt, offset int64, size int64, timecodeScale uint64, audioProbes map[uint64]*matroskaAudioProbe, videoProbes map[uint64]*matroskaVideoProbe) (map[uint64]*matroskaTrackStats, bool) {
+func scanMatroskaClusters(r io.ReaderAt, offset int64, size int64, timecodeScale uint64, audioProbes map[uint64]*matroskaAudioProbe, videoProbes map[uint64]*matroskaVideoProbe, applyStats bool) (map[uint64]*matroskaTrackStats, bool) {
 	if size <= 0 {
 		return nil, false
 	}
@@ -185,6 +195,9 @@ func scanMatroskaClusters(r io.ReaderAt, offset int64, size int64, timecodeScale
 			if err := scanMatroskaCluster(er, int64(elemSize), int64(timecodeScale), stats, audioProbes, videoProbes); err != nil {
 				return stats, len(stats) > 0
 			}
+			if !applyStats && matroskaProbesComplete(audioProbes, videoProbes) {
+				return stats, len(stats) > 0
+			}
 		default:
 			if err := er.skip(int64(elemSize)); err != nil {
 				return stats, len(stats) > 0
@@ -192,6 +205,23 @@ func scanMatroskaClusters(r io.ReaderAt, offset int64, size int64, timecodeScale
 		}
 	}
 	return stats, len(stats) > 0
+}
+
+func matroskaProbesComplete(audioProbes map[uint64]*matroskaAudioProbe, videoProbes map[uint64]*matroskaVideoProbe) bool {
+	for _, probe := range audioProbes {
+		if probe == nil {
+			continue
+		}
+		if probe.collect {
+			return false
+		}
+	}
+	for _, probe := range videoProbes {
+		if videoProbeNeedsSample(probe) {
+			return false
+		}
+	}
+	return true
 }
 
 func scanMatroskaCluster(er *ebmlReader, size int64, timecodeScale int64, stats map[uint64]*matroskaTrackStats, audioProbes map[uint64]*matroskaAudioProbe, videoProbes map[uint64]*matroskaVideoProbe) error {
@@ -236,7 +266,6 @@ func scanMatroskaBlockGroup(er *ebmlReader, size int64, clusterTimecode int64, t
 	var blockFrames int64
 	var hasBlock bool
 	var blockDuration uint64
-	var payloadSamples [][]byte
 
 	for er.pos-start < size {
 		id, elemSize, err := readMatroskaElementHeader(er, size, start)
@@ -245,7 +274,7 @@ func scanMatroskaBlockGroup(er *ebmlReader, size int64, clusterTimecode int64, t
 		}
 		switch id {
 		case mkvIDBlock:
-			track, timecode, dataSize, frames, samples, err := readMatroskaBlockHeader(er, int64(elemSize), audioProbes, videoProbes)
+			track, timecode, dataSize, frames, err := readMatroskaBlockHeader(er, int64(elemSize), audioProbes, videoProbes)
 			if err != nil {
 				return err
 			}
@@ -253,7 +282,6 @@ func scanMatroskaBlockGroup(er *ebmlReader, size int64, clusterTimecode int64, t
 			blockTimecode = timecode
 			blockSize = dataSize
 			blockFrames = frames
-			payloadSamples = samples
 			hasBlock = true
 		case mkvIDBlockDuration:
 			payload, err := er.readN(int64(elemSize))
@@ -274,60 +302,56 @@ func scanMatroskaBlockGroup(er *ebmlReader, size int64, clusterTimecode int64, t
 		durationNs := int64(blockDuration) * timecodeScale
 		absTime := (clusterTimecode + int64(blockTimecode)) * timecodeScale
 		statsForTrack(stats, blockTrack).addBlock(absTime, blockSize, durationNs, blockFrames)
-		for _, sample := range payloadSamples {
-			probeMatroskaAudio(audioProbes, blockTrack, sample, 1)
-			probeMatroskaVideo(videoProbes, blockTrack, sample)
-		}
 	}
 	return nil
 }
 
 func scanMatroskaBlock(er *ebmlReader, size int64, clusterTimecode int64, timecodeScale int64, stats map[uint64]*matroskaTrackStats, audioProbes map[uint64]*matroskaAudioProbe, videoProbes map[uint64]*matroskaVideoProbe, durationUnits uint64) error {
-	track, timecode, dataSize, frames, samples, err := readMatroskaBlockHeader(er, size, audioProbes, videoProbes)
+	track, timecode, dataSize, frames, err := readMatroskaBlockHeader(er, size, audioProbes, videoProbes)
 	if err != nil {
 		return err
 	}
 	durationNs := int64(durationUnits) * timecodeScale
 	absTime := (clusterTimecode + int64(timecode)) * timecodeScale
 	statsForTrack(stats, track).addBlock(absTime, dataSize, durationNs, frames)
-	for _, sample := range samples {
-		probeMatroskaAudio(audioProbes, track, sample, 1)
-		probeMatroskaVideo(videoProbes, track, sample)
-	}
 	return nil
 }
 
-func readMatroskaBlockHeader(er *ebmlReader, size int64, audioProbes map[uint64]*matroskaAudioProbe, videoProbes map[uint64]*matroskaVideoProbe) (uint64, int16, int64, int64, [][]byte, error) {
+func readMatroskaBlockHeader(er *ebmlReader, size int64, audioProbes map[uint64]*matroskaAudioProbe, videoProbes map[uint64]*matroskaVideoProbe) (uint64, int16, int64, int64, error) {
 	if size < 4 {
 		if err := er.skip(size); err != nil {
-			return 0, 0, 0, 0, nil, err
+			return 0, 0, 0, 0, err
 		}
-		return 0, 0, 0, 0, nil, io.ErrUnexpectedEOF
+		return 0, 0, 0, 0, io.ErrUnexpectedEOF
 	}
 	first, err := er.readByte()
 	if err != nil {
-		return 0, 0, 0, 0, nil, err
+		return 0, 0, 0, 0, err
 	}
 	trackLen := vintLength(first)
 	if trackLen == 0 {
-		return 0, 0, 0, 0, nil, io.ErrUnexpectedEOF
+		return 0, 0, 0, 0, io.ErrUnexpectedEOF
 	}
 	trackVal := uint64(first & byte(0xFF>>trackLen))
 	for i := 1; i < trackLen; i++ {
 		b, err := er.readByte()
 		if err != nil {
-			return 0, 0, 0, 0, nil, err
+			return 0, 0, 0, 0, err
 		}
 		trackVal = (trackVal << 8) | uint64(b)
 	}
-	timeBytes, err := er.readN(2)
+	tb1, err := er.readByte()
 	if err != nil {
-		return 0, 0, 0, 0, nil, err
+		return 0, 0, 0, 0, err
 	}
-	timecode := int16(binary.BigEndian.Uint16(timeBytes))
+	tb2, err := er.readByte()
+	if err != nil {
+		return 0, 0, 0, 0, err
+	}
+	timecode := int16(uint16(tb1)<<8 | uint16(tb2))
 	flags, err := er.readByte()
 	if err != nil { // flags
-		return 0, 0, 0, 0, nil, err
+		return 0, 0, 0, 0, err
 	}
 	headerLen := int64(trackLen + 3)
 	frameCount := int64(1)
@@ -337,7 +361,7 @@ func readMatroskaBlockHeader(er *ebmlReader, size int64, audioProbes map[uint64]
 	if lacing != 0 {
 		countByte, err := er.readByte()
 		if err != nil {
-			return 0, 0, 0, 0, nil, err
+			return 0, 0, 0, 0, err
 		}
 		headerLen++
 		frameCount = int64(countByte) + 1
@@ -349,7 +373,7 @@ func readMatroskaBlockHeader(er *ebmlReader, size int64, audioProbes map[uint64]
 				for {
 					b, err := er.readByte()
 					if err != nil {
-						return 0, 0, 0, 0, nil, err
+						return 0, 0, 0, 0, err
 					}
 					headerLen++
 					size += int64(b)
@@ -388,11 +412,11 @@ func readMatroskaBlockHeader(er *ebmlReader, size int64, audioProbes map[uint64]
 			laceSizes = make([]int64, frameCount-1)
 			firstSizeByte, err := er.readByte()
 			if err != nil {
-				return 0, 0, 0, 0, nil, err
+				return 0, 0, 0, 0, err
 			}
 			sizeVal, length, err := readUnsigned(firstSizeByte)
 			if err != nil {
-				return 0, 0, 0, 0, nil, err
+				return 0, 0, 0, 0, err
 			}
 			headerLen += int64(length)
 			laceSizes[0] = int64(sizeVal)
@@ -401,11 +425,11 @@ func readMatroskaBlockHeader(er *ebmlReader, size int64, audioProbes map[uint64]
 			for i := int64(1); i < frameCount-1; i++ {
 				firstDiff, err := er.readByte()
 				if err != nil {
-					return 0, 0, 0, 0, nil, err
+					return 0, 0, 0, 0, err
 				}
 				diff, length, err := readSigned(firstDiff)
 				if err != nil {
-					return 0, 0, 0, 0, nil, err
+					return 0, 0, 0, 0, err
 				}
 				headerLen += int64(length)
 				size := prev + diff
@@ -433,14 +457,12 @@ func readMatroskaBlockHeader(er *ebmlReader, size int64, audioProbes map[uint64]
 			}
 		}
 	}
-	var samples [][]byte
 	if dataSize > 0 {
 		audioProbe := audioProbes[trackVal]
 		videoProbe := videoProbes[trackVal]
 		needAudio := audioProbe != nil && (!audioProbe.ok || audioProbe.collect)
 		needVideo := videoProbeNeedsSample(videoProbe)
 		if needAudio || needVideo {
-			samples = make([][]byte, 0, frameCount)
 			for i := int64(0); i < frameCount; i++ {
 				size := frameSizes[i]
 				peek := int64(256)
@@ -452,22 +474,27 @@ func readMatroskaBlockHeader(er *ebmlReader, size int64, audioProbes map[uint64]
 				peek = min(size, peek)
 				payload, err := er.readN(peek)
 				if err != nil {
-					return 0, 0, 0, 0, nil, err
+					return 0, 0, 0, 0, err
 				}
-				samples = append(samples, payload)
+				if needAudio {
+					probeMatroskaAudio(audioProbes, trackVal, payload, 1)
+				}
+				if needVideo {
+					probeMatroskaVideo(videoProbes, trackVal, payload)
+				}
 				if size > peek {
 					if err := er.skip(size - peek); err != nil {
-						return 0, 0, 0, 0, nil, err
+						return 0, 0, 0, 0, err
 					}
 				}
 			}
-			return trackVal, timecode, dataSize, frameCount, samples, nil
+			return trackVal, timecode, dataSize, frameCount, nil
 		}
 		if err := er.skip(dataSize); err != nil {
-			return 0, 0, 0, 0, nil, err
+			return 0, 0, 0, 0, err
 		}
 	}
-	return trackVal, timecode, dataSize, frameCount, samples, nil
+	return trackVal, timecode, dataSize, frameCount, nil
 }
 
 func videoProbeNeedsSample(probe *matroskaVideoProbe) bool {
