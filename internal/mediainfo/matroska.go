@@ -129,10 +129,19 @@ func ParseMatroskaWithOptions(r io.ReaderAt, size int64, opts AnalyzeOptions) (M
 	if !ok {
 		return MatroskaInfo{}, false
 	}
-	if hdr := parseDolbyVisionConfigFromPrivate(buf); hdr != "" {
-		for i := range info.Tracks {
-			if info.Tracks[i].Kind == StreamVideo && findField(info.Tracks[i].Fields, "HDR format") == "" {
-				info.Tracks[i].Fields = insertFieldBefore(info.Tracks[i].Fields, Field{Name: "HDR format", Value: hdr}, "Codec ID")
+	needsDolbyVisionProbe := false
+	for i := range info.Tracks {
+		if info.Tracks[i].Kind == StreamVideo && findField(info.Tracks[i].Fields, "Format") == "HEVC" {
+			needsDolbyVisionProbe = true
+			break
+		}
+	}
+	if needsDolbyVisionProbe {
+		if hdr := parseDolbyVisionConfigFromPrivate(buf); hdr != "" {
+			for i := range info.Tracks {
+				if info.Tracks[i].Kind == StreamVideo && findField(info.Tracks[i].Fields, "HDR format") == "" {
+					info.Tracks[i].Fields = insertFieldBefore(info.Tracks[i].Fields, Field{Name: "HDR format", Value: hdr}, "Codec ID")
+				}
 			}
 		}
 	}
