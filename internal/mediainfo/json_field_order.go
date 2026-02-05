@@ -242,6 +242,8 @@ func sortJSONFields(kind StreamKind, fields []jsonKV) []jsonKV {
 		order = jsonTextFieldOrder
 	case StreamMenu:
 		order = jsonMenuFieldOrder
+	case StreamImage:
+		order = jsonVideoFieldOrder
 	}
 	positions := map[string]int{}
 	for i, field := range fields {

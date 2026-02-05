@@ -183,9 +183,10 @@ func parseH264SPS(nal []byte) h264SPSInfo {
 
 	_ = br.readUE()
 	pocType := br.readUE()
-	if pocType == 0 {
+	switch pocType {
+	case 0:
 		_ = br.readUE()
-	} else if pocType == 1 {
+	case 1:
 		_ = br.readBitsValue(1)
 		_ = br.readSE()
 		_ = br.readSE()
@@ -404,8 +405,10 @@ func parseH264HRD(br *bitReader) (int64, int64, bool, bool) {
 			cbrFlag = flag == 1
 		}
 	}
-	if br.readBitsValue(5) == ^uint64(0) || br.readBitsValue(5) == ^uint64(0) || br.readBitsValue(5) == ^uint64(0) || br.readBitsValue(5) == ^uint64(0) {
-		return 0, 0, false, false
+	for range 4 {
+		if br.readBitsValue(5) == ^uint64(0) {
+			return 0, 0, false, false
+		}
 	}
 	bitRate := int64(bitRateValue+1) << (6 + bitRateScale)
 	bufferSize := int64(cpbSizeValue+1) << (4 + cpbSizeScale)
@@ -681,10 +684,6 @@ func newBitReader(data []byte) *bitReader {
 	return &bitReader{data: data}
 }
 
-func (br *bitReader) readBits(n uint8) bool {
-	return br.readBitsValue(n) != ^uint64(0)
-}
-
 func (br *bitReader) readBitsValue(n uint8) uint64 {
 	var value uint64
 	for range n {
@@ -737,7 +736,7 @@ func (br *bitReader) readUEWithOk() (int, bool) {
 	if value == ^uint64(0) {
 		return 0, false
 	}
-	return int((1 << zeros) - 1 + int(value)), true
+	return (1 << zeros) - 1 + int(value), true
 }
 
 func skipScalingList(br *bitReader, size int) {

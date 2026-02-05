@@ -51,7 +51,9 @@ func TestParseMP4Duration(t *testing.T) {
 
 func writeMP4Box(buf *bytes.Buffer, typ string, payload []byte) {
 	size := uint32(8 + len(payload))
-	binary.Write(buf, binary.BigEndian, size)
+	if err := binary.Write(buf, binary.BigEndian, size); err != nil {
+		panic(err)
+	}
 	buf.WriteString(typ)
 	buf.Write(payload)
 }

@@ -64,7 +64,9 @@ func TestParseMP4CodecFromStsd(t *testing.T) {
 func buildTrackWithStsd(handler, sample string) []byte {
 	var stsd bytes.Buffer
 	stsd.Write([]byte{0x00, 0x00, 0x00, 0x00})
-	binary.Write(&stsd, binary.BigEndian, uint32(1))
+	if err := binary.Write(&stsd, binary.BigEndian, uint32(1)); err != nil {
+		panic(err)
+	}
 	entry := make([]byte, 86)
 	binary.BigEndian.PutUint32(entry[0:4], uint32(len(entry)))
 	copy(entry[4:8], []byte(sample))

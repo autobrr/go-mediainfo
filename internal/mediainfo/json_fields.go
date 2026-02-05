@@ -20,16 +20,13 @@ func buildJSONMedia(report Report) jsonMediaOut {
 	tracks := make([]jsonTrackOut, 0, len(report.Streams)+1)
 	tracks = append(tracks, jsonTrackOut{Fields: buildJSONGeneralFields(report)})
 	sorted := orderTracks(report.Streams)
-	kindCounts := countStreams(sorted)
-	kindIndex := map[StreamKind]int{}
-	for i, stream := range sorted {
-		kindIndex[stream.Kind]++
+	forEachStreamWithKindIndex(sorted, func(stream Stream, index, total, order int) {
 		typeOrder := 0
-		if kindCounts[stream.Kind] > 1 {
-			typeOrder = kindIndex[stream.Kind]
+		if total > 1 {
+			typeOrder = index
 		}
-		tracks = append(tracks, jsonTrackOut{Fields: buildJSONStreamFields(stream, i, typeOrder)})
-	}
+		tracks = append(tracks, jsonTrackOut{Fields: buildJSONStreamFields(stream, order, typeOrder)})
+	})
 	return jsonMediaOut{Ref: report.Ref, Tracks: tracks}
 }
 

@@ -196,7 +196,7 @@ func writeLogFile(path, output string, includeBOM bool) error {
 		data = append([]byte{0xEF, 0xBB, 0xBF}, data...)
 	}
 
-	return os.WriteFile(path, data, 0644)
+	return os.WriteFile(path, data, 0o644) //nolint:gosec // user-facing output file
 }
 
 func runCore(opts Options, files []string) (string, int, error) {

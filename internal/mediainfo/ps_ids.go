@@ -6,7 +6,6 @@ type psStream struct {
 	kind                 StreamKind
 	format               string
 	bytes                uint64
-	frames               uint64
 	pts                  ptsTracker
 	audioProfile         string
 	audioObject          int

@@ -68,7 +68,7 @@ type dvdMenuLists struct {
 	subPanScan string
 }
 
-func ParseDVDVideo(path string, file *os.File, size int64, opts AnalyzeOptions) (dvdInfo, bool) {
+func parseDVDVideo(path string, file *os.File, size int64, opts AnalyzeOptions) (dvdInfo, bool) {
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		return dvdInfo{}, false
 	}
@@ -168,7 +168,7 @@ func ParseDVDVideo(path string, file *os.File, size int64, opts AnalyzeOptions) 
 				if streamSizeSum > 0 {
 					remaining := info.FileSize - streamSizeSum
 					if remaining >= 0 {
-						info.GeneralJSON["StreamSize"] = fmt.Sprintf("%d", remaining)
+						info.GeneralJSON["StreamSize"] = strconv.FormatInt(remaining, 10)
 					}
 				}
 			}
@@ -194,7 +194,7 @@ func ParseDVDVideo(path string, file *os.File, size int64, opts AnalyzeOptions) 
 		if info.GeneralJSON == nil {
 			info.GeneralJSON = map[string]string{}
 		}
-		info.GeneralJSON["OverallBitRate"] = fmt.Sprintf("%d", int64(overall+0.5))
+		info.GeneralJSON["OverallBitRate"] = strconv.FormatInt(int64(overall+0.5), 10)
 	}
 	if videoAttrs.FrameRate > 0 && !titleSetParsed {
 		generalFields = append(generalFields, Field{Name: "Frame rate", Value: formatFrameRate(videoAttrs.FrameRate)})
@@ -408,9 +408,10 @@ func parseDVDVideoAttrs(data []byte, offset int) dvdVideoAttrs {
 	resCode := (b1 >> 3) & 0x03
 
 	attrs := dvdVideoAttrs{}
-	if coding == 1 {
+	switch coding {
+	case 1:
 		attrs.Version = "Version 2"
-	} else if coding == 0 {
+	case 0:
 		attrs.Version = "Version 1"
 	}
 
@@ -431,7 +432,8 @@ func parseDVDVideoAttrs(data []byte, offset int) dvdVideoAttrs {
 	}
 
 	width := 0
-	if attrs.Standard == "PAL" {
+	switch attrs.Standard {
+	case "PAL":
 		switch resCode {
 		case 0:
 			width = 720
@@ -446,7 +448,7 @@ func parseDVDVideoAttrs(data []byte, offset int) dvdVideoAttrs {
 			width = 352
 			attrs.Height = 288
 		}
-	} else if attrs.Standard == "NTSC" {
+	case "NTSC":
 		switch resCode {
 		case 0:
 			width = 720
@@ -712,19 +714,6 @@ func parseDVDChapters(data []byte, pttOffset int, pgcOffset int) (float64, []int
 	return duration, starts
 }
 
-func dvdTimeToSeconds(b []byte) float64 {
-	if len(b) < 4 {
-		return 0
-	}
-	ms := dvdTimeToMilliseconds(b)
-	return float64(ms) / 1000.0
-}
-
-func dvdTimeToMilliseconds(b []byte) int64 {
-	ticks := dvdTimeToTicks(b)
-	return dvdTicksToMilliseconds(ticks)
-}
-
 func dvdTimeToTicks(b []byte) int64 {
 	if len(b) < 4 {
 		return 0
@@ -890,7 +879,7 @@ func mergeDVDTitleSetStreams(streams []Stream, source string) []Stream {
 			if stream.JSON == nil {
 				stream.JSON = map[string]string{}
 			}
-			stream.JSON["StreamOrder"] = fmt.Sprintf("%d", audioIndex)
+			stream.JSON["StreamOrder"] = strconv.Itoa(audioIndex)
 			audioIndex++
 		}
 		if stream.Kind == StreamVideo && hasAudio {
@@ -937,7 +926,7 @@ func dvdJSONStreamStats(streams []Stream) (string, int64) {
 				duration, durOk := parseDurationSeconds(findField(stream.Fields, "Duration"))
 				fps, fpsOk := parseFPS(findField(stream.Fields, "Frame rate"))
 				if durOk && fpsOk {
-					frameCount = fmt.Sprintf("%d", int(math.Round(duration*fps)))
+					frameCount = strconv.Itoa(int(math.Round(duration * fps)))
 				}
 			}
 		}

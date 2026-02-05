@@ -243,7 +243,7 @@ func parseMatroskaSegment(buf []byte) (MatroskaInfo, bool) {
 		if scale == 0 {
 			scale = 1000000
 		}
-		var chapters []matroskaChapter
+		chapters := make([]matroskaChapter, 0, len(chaptersPayloads))
 		for _, payload := range chaptersPayloads {
 			chapters = append(chapters, parseMatroskaChapters(payload, scale)...)
 		}
@@ -340,7 +340,7 @@ func parseMatroskaChapters(buf []byte, timecodeScale uint64) []matroskaChapter {
 	return chapters
 }
 
-func parseMatroskaEditionEntry(buf []byte, timecodeScale uint64) []matroskaChapter {
+func parseMatroskaEditionEntry(buf []byte, _ uint64) []matroskaChapter {
 	var chapters []matroskaChapter
 	pos := 0
 	for pos < len(buf) {
@@ -358,7 +358,7 @@ func parseMatroskaEditionEntry(buf []byte, timecodeScale uint64) []matroskaChapt
 			dataEnd = len(buf)
 		}
 		if id == mkvIDChapterAtom {
-			if chapter, ok := parseMatroskaChapterAtom(buf[dataStart:dataEnd], timecodeScale); ok {
+			if chapter, ok := parseMatroskaChapterAtom(buf[dataStart:dataEnd]); ok {
 				chapters = append(chapters, chapter)
 			}
 		}
@@ -367,7 +367,7 @@ func parseMatroskaEditionEntry(buf []byte, timecodeScale uint64) []matroskaChapt
 	return chapters
 }
 
-func parseMatroskaChapterAtom(buf []byte, timecodeScale uint64) (matroskaChapter, bool) {
+func parseMatroskaChapterAtom(buf []byte) (matroskaChapter, bool) {
 	var chapter matroskaChapter
 	var hasStart bool
 	pos := 0
@@ -442,7 +442,7 @@ func formatMatroskaChapterTimeMs(msTotal int64) string {
 }
 
 func renderMatroskaMenuExtra(chapters []matroskaChapter) string {
-	fields := []jsonKV{}
+	fields := make([]jsonKV, 0, len(chapters))
 	for i, chapter := range chapters {
 		name := chapter.name
 		if name == "" {
@@ -693,7 +693,7 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64) (Stream, bool)
 	}
 	fields := []Field{{Name: "Format", Value: format}}
 	if trackNumber > 0 {
-		fields = append(fields, Field{Name: "ID", Value: fmt.Sprintf("%d", trackNumber)})
+		fields = append(fields, Field{Name: "ID", Value: strconv.FormatUint(trackNumber, 10)})
 	}
 	if codecID != "" {
 		fields = append(fields, Field{Name: "Codec ID", Value: codecID})
@@ -889,7 +889,7 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64) (Stream, bool)
 	}
 	jsonExtras := map[string]string{}
 	if trackUID > 0 {
-		jsonExtras["UniqueID"] = fmt.Sprintf("%d", trackUID)
+		jsonExtras["UniqueID"] = strconv.FormatUint(trackUID, 10)
 	}
 	if bitRate > 0 {
 		bitRateNominal := trackBitRate || (spsInfo.HasBitRateCBR && spsInfo.BitRateCBR)
@@ -936,7 +936,7 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64) (Stream, bool)
 			}
 		}
 		if storedWidth > 0 && displayWidth > 0 && storedWidth != displayWidth {
-			jsonExtras["Stored_Width"] = fmt.Sprintf("%d", storedWidth)
+			jsonExtras["Stored_Width"] = strconv.FormatUint(storedWidth, 10)
 		}
 		if storedHeight == displayHeight && displayHeight > 0 && codecID == "V_MPEG4/ISO/AVC" {
 			if displayHeight%16 != 0 {
@@ -944,7 +944,7 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64) (Stream, bool)
 			}
 		}
 		if storedHeight > 0 && displayHeight > 0 && storedHeight != displayHeight {
-			jsonExtras["Stored_Height"] = fmt.Sprintf("%d", storedHeight)
+			jsonExtras["Stored_Height"] = strconv.FormatUint(storedHeight, 10)
 		}
 		if spsInfo.HasFixedFrameRate && !spsInfo.FixedFrameRate {
 			if findField(fields, "Frame rate mode") == "Constant" {

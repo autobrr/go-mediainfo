@@ -18,13 +18,14 @@ func mp4TopLevelSizes(r io.ReaderAt, size int64) (int64, int64, int64, int, bool
 		if boxType == "moov" && !seenMdat {
 			moovBeforeMdat = true
 		}
-		if boxType == "mdat" {
+		switch {
+		case boxType == "mdat":
 			dataSize += boxSize
 			mdatCount++
 			seenMdat = true
-		} else if !seenMdat {
+		case !seenMdat:
 			headerSize += boxSize
-		} else {
+		default:
 			footerSize += boxSize
 		}
 		offset += boxSize

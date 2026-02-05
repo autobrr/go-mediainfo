@@ -3,6 +3,7 @@ package mediainfo
 import (
 	"fmt"
 	"math"
+	"strconv"
 )
 
 func buildCCTextStream(entry *psStream, videoDelay float64, videoDuration float64, frameRate float64) *Stream {
@@ -80,7 +81,7 @@ func buildCCTextStream(entry *psStream, videoDelay float64, videoDuration float6
 	fields = append(fields, Field{Name: "Bit rate mode", Value: "Constant"})
 	fields = append(fields, Field{Name: "Stream size", Value: "0.00 Byte (0%)"})
 	framesBefore := max(track.firstFrame, 0)
-	fields = append(fields, Field{Name: "Count of frames before first event", Value: fmt.Sprintf("%d", framesBefore)})
+	fields = append(fields, Field{Name: "Count of frames before first event", Value: strconv.Itoa(framesBefore)})
 	fields = append(fields, Field{Name: "Type of the first event", Value: firstType})
 	fields = append(fields, Field{Name: "Caption service name", Value: service})
 
@@ -94,7 +95,7 @@ func buildCCTextStream(entry *psStream, videoDelay float64, videoDuration float6
 	}
 	stream.JSON["ID"] = fmt.Sprintf("%d-%s", entry.id, service)
 	if entry.firstPacketOrder >= 0 {
-		stream.JSON["FirstPacketOrder"] = fmt.Sprintf("%d", entry.firstPacketOrder)
+		stream.JSON["FirstPacketOrder"] = strconv.Itoa(entry.firstPacketOrder)
 	}
 	if videoDuration > 0 {
 		stream.JSON["Duration"] = formatJSONSeconds(videoDuration)
@@ -128,7 +129,7 @@ func buildCCTextStream(entry *psStream, videoDelay float64, videoDuration float6
 	}
 	stream.JSON["Video_Delay"] = "0.000"
 	stream.JSON["StreamSize"] = "0"
-	stream.JSON["FirstDisplay_Delay_Frames"] = fmt.Sprintf("%d", framesBefore)
+	stream.JSON["FirstDisplay_Delay_Frames"] = strconv.Itoa(framesBefore)
 	stream.JSON["FirstDisplay_Type"] = firstType
 	stream.JSONRaw["extra"] = renderJSONObject([]jsonKV{{Key: "CaptionServiceName", Val: service}}, false)
 	return &stream

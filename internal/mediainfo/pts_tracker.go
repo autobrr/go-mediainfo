@@ -1,7 +1,5 @@
 package mediainfo
 
-import "math"
-
 type ptsTracker struct {
 	first        uint64
 	min          uint64
@@ -80,15 +78,4 @@ func ptsDelta(start, end uint64) uint64 {
 		end += 1 << 33
 	}
 	return end - start
-}
-
-func safeRate(count uint64, duration float64) float64 {
-	if duration <= 0 {
-		return 0
-	}
-	rate := float64(count) / duration
-	if math.IsNaN(rate) || math.IsInf(rate, 0) {
-		return 0
-	}
-	return rate
 }

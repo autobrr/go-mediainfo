@@ -6,7 +6,8 @@ func consumeMPEG2Captions(entry *psStream, payload []byte, pts uint64, hasPTS bo
 	if entry == nil || len(payload) == 0 {
 		return
 	}
-	buf := append(entry.videoCCCarry, payload...)
+	entry.videoCCCarry = append(entry.videoCCCarry, payload...)
+	buf := entry.videoCCCarry
 	for i := 0; i+4 <= len(buf); i++ {
 		if buf[i] != 0x00 || buf[i+1] != 0x00 || buf[i+2] != 0x01 {
 			continue

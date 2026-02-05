@@ -3,6 +3,7 @@ package mediainfo
 import (
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 )
 
@@ -21,7 +22,6 @@ func formatDuration(seconds float64) string {
 	if totalSec == 59 && remMs >= 500 {
 		totalSec = 60
 		remMs = 0
-		totalMs = totalSec * 1000
 	}
 	if totalSec < 60 {
 		return fmt.Sprintf("%d s %d ms", totalSec, remMs)
@@ -45,14 +45,14 @@ func formatBitrate(bitsPerSecond float64) string {
 		return fmt.Sprintf("%.1f Mb/s", mbps)
 	}
 	kbps := int64(math.Round(bitsPerSecond / 1000))
-	return fmt.Sprintf("%s kb/s", formatThousands(kbps))
+	return formatThousands(kbps) + " kb/s"
 }
 
 func formatBitrateKbps(kbps int64) string {
 	if kbps <= 0 {
 		return ""
 	}
-	return fmt.Sprintf("%s kb/s", formatThousands(kbps))
+	return formatThousands(kbps) + " kb/s"
 }
 
 func formatBitratePrecise(bitsPerSecond float64) string {
@@ -63,7 +63,7 @@ func formatBitratePrecise(bitsPerSecond float64) string {
 	if kbps < 100 {
 		return fmt.Sprintf("%.1f kb/s", kbps)
 	}
-	return fmt.Sprintf("%s kb/s", formatThousands(int64(math.Round(kbps))))
+	return formatThousands(int64(math.Round(kbps))) + " kb/s"
 }
 
 func formatBitrateSmall(bitsPerSecond float64) string {
@@ -78,7 +78,7 @@ func formatBitrateSmall(bitsPerSecond float64) string {
 
 func formatThousands(value int64) string {
 	if value < 1000 {
-		return fmt.Sprintf("%d", value)
+		return strconv.FormatInt(value, 10)
 	}
 
 	parts := []string{}
@@ -86,9 +86,13 @@ func formatThousands(value int64) string {
 		chunk := value % 1000
 		value /= 1000
 		if value > 0 {
-			parts = append(parts, fmt.Sprintf("%03d", chunk))
+			chunkStr := strconv.FormatInt(chunk, 10)
+			for len(chunkStr) < 3 {
+				chunkStr = "0" + chunkStr
+			}
+			parts = append(parts, chunkStr)
 		} else {
-			parts = append(parts, fmt.Sprintf("%d", chunk))
+			parts = append(parts, strconv.FormatInt(chunk, 10))
 		}
 	}
 

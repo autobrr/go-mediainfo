@@ -13,17 +13,11 @@ func RenderText(reports []Report) string {
 			buf.WriteString("\n")
 		}
 		writeStream(&buf, string(report.General.Kind), report.General)
-		kindCounts := map[StreamKind]int{}
-		for _, stream := range report.Streams {
-			kindCounts[stream.Kind]++
-		}
-		kindIndex := map[StreamKind]int{}
-		for _, stream := range report.Streams {
+		forEachStreamWithKindIndex(report.Streams, func(stream Stream, index, total, _ int) {
 			buf.WriteString("\n")
-			kindIndex[stream.Kind]++
-			title := streamTitle(stream.Kind, kindIndex[stream.Kind], kindCounts[stream.Kind])
+			title := streamTitle(stream.Kind, index, total)
 			writeStream(&buf, title, stream)
-		}
+		})
 	}
 	output := strings.TrimRight(buf.String(), "\n")
 	return output + "\n\n"

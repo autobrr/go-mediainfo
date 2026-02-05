@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"strconv"
 )
 
 func ParseMPEGVideo(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, bool) {
@@ -14,7 +15,7 @@ func ParseMPEGVideo(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, bo
 	if err != nil || len(data) < 4 {
 		return ContainerInfo{}, nil, false
 	}
-	if !(len(data) >= 4 && data[0] == 0x00 && data[1] == 0x00 && data[2] == 0x01 && data[3] == 0xB3) {
+	if data[0] != 0x00 || data[1] != 0x00 || data[2] != 0x01 || data[3] != 0xB3 {
 		return ContainerInfo{}, nil, false
 	}
 
@@ -93,7 +94,7 @@ func ParseMPEGVideo(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, bo
 		if info.GOPFirstClosed != "" {
 			fields = append(fields, Field{Name: "GOP, Open/Closed of first frame", Value: info.GOPFirstClosed})
 		}
-		if streamSize := formatStreamSize(int64(size), size); streamSize != "" {
+		if streamSize := formatStreamSize(size, size); streamSize != "" {
 			fields = append(fields, Field{Name: "Stream size", Value: streamSize})
 		}
 	}
@@ -102,14 +103,14 @@ func ParseMPEGVideo(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, bo
 	if duration > 0 {
 		jsonDuration := math.Round(duration*1000) / 1000
 		if jsonDuration > 0 {
-			jsonExtras["BitRate"] = fmt.Sprintf("%d", int64(math.Round((float64(size)*8)/jsonDuration)))
+			jsonExtras["BitRate"] = strconv.FormatInt(int64(math.Round((float64(size)*8)/jsonDuration)), 10)
 		}
 	}
 	if size > 0 {
-		jsonExtras["StreamSize"] = fmt.Sprintf("%d", size)
+		jsonExtras["StreamSize"] = strconv.FormatInt(size, 10)
 	}
 	if info.BufferSize > 0 {
-		jsonExtras["BufferSize"] = fmt.Sprintf("%d", info.BufferSize)
+		jsonExtras["BufferSize"] = strconv.FormatInt(info.BufferSize, 10)
 	}
 	if info.GOPDropFrame != nil && info.GOPClosed != nil && info.GOPBrokenLink != nil {
 		drop := 0
@@ -135,7 +136,7 @@ func ParseMPEGVideo(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, bo
 	}
 	jsonRaw := map[string]string{}
 	if info.IntraDCPrecision > 0 {
-		jsonRaw["extra"] = renderJSONObject([]jsonKV{{Key: "intra_dc_precision", Val: fmt.Sprintf("%d", info.IntraDCPrecision)}}, false)
+		jsonRaw["extra"] = renderJSONObject([]jsonKV{{Key: "intra_dc_precision", Val: strconv.Itoa(info.IntraDCPrecision)}}, false)
 	}
 
 	streams := []Stream{{Kind: StreamVideo, Fields: fields, JSON: jsonExtras, JSONRaw: jsonRaw}}

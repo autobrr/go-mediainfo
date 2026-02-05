@@ -4,7 +4,8 @@ func consumeMPEG2HeaderBytes(entry *psStream, payload []byte, hasPTS bool) {
 	if entry == nil || len(payload) == 0 {
 		return
 	}
-	buf := append(entry.videoHeaderCarry, payload...)
+	entry.videoHeaderCarry = append(entry.videoHeaderCarry, payload...)
+	buf := entry.videoHeaderCarry
 	for i := 0; i+4 <= len(buf); i++ {
 		if buf[i] != 0x00 || buf[i+1] != 0x00 || buf[i+2] != 0x01 {
 			continue
@@ -45,7 +46,8 @@ func consumeMPEG2FrameBytes(entry *psStream, payload []byte) {
 		}
 		return
 	}
-	buf := append(entry.videoFrameCarry, payload...)
+	entry.videoFrameCarry = append(entry.videoFrameCarry, payload...)
+	buf := entry.videoFrameCarry
 	basePos := entry.videoFramePos - int64(len(entry.videoFrameCarry))
 	for i := 0; i+4 <= len(buf); i++ {
 		if buf[i] != 0x00 || buf[i+1] != 0x00 || buf[i+2] != 0x01 || buf[i+3] != 0x00 {
@@ -73,21 +75,4 @@ func consumeMPEG2FrameBytes(entry *psStream, payload []byte) {
 		entry.videoFrameCarry = append(entry.videoFrameCarry[:0], buf...)
 	}
 	entry.videoFramePos += int64(len(payload))
-}
-
-func mpeg2HeaderSize(code byte) uint64 {
-	switch {
-	case code == 0xB3:
-		return 12
-	case code == 0xB5:
-		return 4
-	case code == 0xB8:
-		return 8
-	case code == 0x00:
-		return 6
-	case code >= 0x01 && code <= 0xAF:
-		return 6
-	default:
-		return 0
-	}
 }

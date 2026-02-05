@@ -156,12 +156,12 @@ func parseVisualSampleEntry(entry []byte, sampleType string) sampleEntryResult {
 	if info := mapVideoCodecIDInfo(sampleType); info != "" {
 		fields = append(fields, Field{Name: "Codec ID/Info", Value: info})
 	}
-	if _, max, avg, ok := parseBtrt(entry, mp4VisualSampleEntryHeaderSize); ok {
-		if max > 0 {
-			fields = append(fields, Field{Name: "Nominal bit rate", Value: formatBitrate(float64(max))})
-			fields = append(fields, Field{Name: "Maximum bit rate", Value: formatBitrate(float64(max))})
-		} else if avg > 0 {
-			fields = append(fields, Field{Name: "Nominal bit rate", Value: formatBitrate(float64(avg))})
+	if _, maxRate, avgRate, ok := parseBtrt(entry, mp4VisualSampleEntryHeaderSize); ok {
+		if maxRate > 0 {
+			fields = append(fields, Field{Name: "Nominal bit rate", Value: formatBitrate(float64(maxRate))})
+			fields = append(fields, Field{Name: "Maximum bit rate", Value: formatBitrate(float64(maxRate))})
+		} else if avgRate > 0 {
+			fields = append(fields, Field{Name: "Nominal bit rate", Value: formatBitrate(float64(avgRate))})
 		}
 	}
 	return sampleEntryResult{Fields: fields, Width: uint64(width), Height: uint64(height)}
@@ -208,11 +208,11 @@ func parseAudioSampleEntry(entry []byte, sampleType string) sampleEntryResult {
 	if sampleType == "mp4a" {
 		fields = append(fields, Field{Name: "Compression mode", Value: "Lossy"})
 	}
-	if _, max, avg, ok := parseBtrt(entry, mp4AudioSampleEntryHeaderSize); ok {
-		if max > 0 {
-			fields = append(fields, Field{Name: "Maximum bit rate", Value: formatBitrate(float64(max))})
-		} else if avg > 0 {
-			fields = append(fields, Field{Name: "Maximum bit rate", Value: formatBitrate(float64(avg))})
+	if _, maxRate, avgRate, ok := parseBtrt(entry, mp4AudioSampleEntryHeaderSize); ok {
+		if maxRate > 0 {
+			fields = append(fields, Field{Name: "Maximum bit rate", Value: formatBitrate(float64(maxRate))})
+		} else if avgRate > 0 {
+			fields = append(fields, Field{Name: "Maximum bit rate", Value: formatBitrate(float64(avgRate))})
 		}
 	}
 	fields = append(fields, Field{Name: "Codec ID", Value: codecID})

@@ -164,31 +164,42 @@ func parseMP3Header(header []byte) (mp3HeaderInfo, bool) {
 }
 
 func mp3Bitrate(versionID, layerID, index byte) int {
-	table := [][]int{
-		{}, // unused
-		{0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320}, // MPEG1 Layer III
-		{0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160},     // MPEG2/2.5 Layer III
-	}
 	if layerID != 0x01 {
 		return 0
 	}
-	if versionID == 0x03 {
-		return table[1][index]
-	}
-	return table[2][index]
-}
-
-func mp3SampleRate(versionID, index byte) int {
+	var rates []int
 	switch versionID {
-	case 0x03: // MPEG1
-		return []int{44100, 48000, 32000}[index]
-	case 0x02: // MPEG2
-		return []int{22050, 24000, 16000}[index]
-	case 0x00: // MPEG2.5
-		return []int{11025, 12000, 8000}[index]
+	case 0x03:
+		rates = []int{0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320}
+	case 0x02, 0x00:
+		rates = []int{0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160}
 	default:
 		return 0
 	}
+	idx := int(index)
+	if idx < 0 || idx >= len(rates) {
+		return 0
+	}
+	return rates[idx]
+}
+
+func mp3SampleRate(versionID, index byte) int {
+	var rates []int
+	switch versionID {
+	case 0x03: // MPEG1
+		rates = []int{44100, 48000, 32000}
+	case 0x02: // MPEG2
+		rates = []int{22050, 24000, 16000}
+	case 0x00: // MPEG2.5
+		rates = []int{11025, 12000, 8000}
+	default:
+		return 0
+	}
+	idx := int(index)
+	if idx < 0 || idx >= len(rates) {
+		return 0
+	}
+	return rates[idx]
 }
 
 func hasVBRHeader(buf []byte, info mp3HeaderInfo) bool {

@@ -9,7 +9,7 @@ func formatPixels(value uint64) string {
 	if value == 0 {
 		return ""
 	}
-	return fmt.Sprintf("%s pixels", formatThousands(int64(value)))
+	return formatThousands(int64(value)) + " pixels"
 }
 
 func formatChannels(value uint64) string {

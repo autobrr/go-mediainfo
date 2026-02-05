@@ -7,6 +7,7 @@ import (
 	"io"
 	"math"
 	"slices"
+	"strconv"
 )
 
 const psSubstreamNone = 0xFF
@@ -171,9 +172,7 @@ func ParseMPEGPSWithOptions(file io.ReadSeeker, size int64, opts mpegPSOptions) 
 			payloadLen = next - payloadStart
 		}
 		payloadEnd := min(payloadStart+payloadLen, len(data))
-		if payloadEnd < payloadStart {
-			payloadEnd = payloadStart
-		}
+		payloadEnd = max(payloadEnd, payloadStart)
 
 		payload := data[payloadStart:payloadEnd]
 		subID := byte(psSubstreamNone)
@@ -400,7 +399,7 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 			if st.packetCount > 0 || st.bytes > 0 {
 				menuOverheadBytes += int64(st.bytes) + int64(st.packetCount)*6
 			}
-		default:
+		case StreamGeneral, StreamAudio, StreamText, StreamImage:
 			nonVideoBytes += int64(st.bytes)
 		}
 	}
@@ -416,13 +415,13 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 		jsonExtras := map[string]string{}
 		jsonRaw := map[string]string{}
 		if st.firstPacketOrder >= 0 && st.kind != StreamMenu {
-			jsonExtras["FirstPacketOrder"] = fmt.Sprintf("%d", st.firstPacketOrder)
+			jsonExtras["FirstPacketOrder"] = strconv.Itoa(st.firstPacketOrder)
 		}
 		if st.kind != StreamMenu {
 			if st.subID != psSubstreamNone {
 				jsonExtras["ID"] = fmt.Sprintf("%d-%d", st.id, st.subID)
 			} else {
-				jsonExtras["ID"] = fmt.Sprintf("%d", st.id)
+				jsonExtras["ID"] = strconv.FormatUint(uint64(st.id), 10)
 			}
 		}
 		info := mpeg2VideoInfo{}
@@ -462,431 +461,442 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 			fields = append(fields, Field{Name: "Muxing mode", Value: "DVD-Video"})
 		}
 		if st.kind == StreamAudio {
-			if format == "AC-3" {
+			switch {
+			case format == "AC-3":
 				if info := mapMatroskaFormatInfo(st.format); info != "" {
 					fields = append(fields, Field{Name: "Format/Info", Value: info})
 				}
 				fields = append(fields, Field{Name: "Commercial name", Value: "Dolby Digital"})
 				fields = append(fields, Field{Name: "Muxing mode", Value: "DVD-Video"})
-			} else if st.audioProfile == "LC" {
+			case st.audioProfile == "LC":
 				fields = append(fields, Field{Name: "Format/Info", Value: "Advanced Audio Codec Low Complexity"})
 				fields = append(fields, Field{Name: "Format version", Value: formatAACVersion(st.audioMPEGVersion)})
 				fields = append(fields, Field{Name: "Muxing mode", Value: "ADTS"})
 				if st.audioObject > 0 {
-					fields = append(fields, Field{Name: "Codec ID", Value: fmt.Sprintf("%d", st.audioObject)})
+					fields = append(fields, Field{Name: "Codec ID", Value: strconv.Itoa(st.audioObject)})
 				}
-			} else if info := mapMatroskaFormatInfo(st.format); info != "" {
-				fields = append(fields, Field{Name: "Format/Info", Value: info})
+			default:
+				if info := mapMatroskaFormatInfo(st.format); info != "" {
+					fields = append(fields, Field{Name: "Format/Info", Value: info})
+				}
 			}
 		}
-		if st.kind == StreamVideo && st.videoIsH264 {
-			if info := mapMatroskaFormatInfo(st.format); info != "" {
-				fields = append(fields, Field{Name: "Format/Info", Value: info})
-			}
-			if len(st.videoFields) > 0 {
-				fields = append(fields, st.videoFields...)
-			}
-			if st.videoSliceCount > 0 {
-				fields = append(fields, Field{Name: "Format settings, Slice count", Value: fmt.Sprintf("%d slices per frame", st.videoSliceCount)})
-			}
-			duration := ptsDurationPS(st.pts, opts)
-			if duration == 0 {
-				duration = ptsDurationPS(videoPTS, opts)
-			}
-			if duration > 0 {
+		switch st.kind {
+		case StreamVideo:
+			if st.videoIsH264 {
+				if info := mapMatroskaFormatInfo(st.format); info != "" {
+					fields = append(fields, Field{Name: "Format/Info", Value: info})
+				}
+				if len(st.videoFields) > 0 {
+					fields = append(fields, st.videoFields...)
+				}
+				if st.videoSliceCount > 0 {
+					fields = append(fields, Field{Name: "Format settings, Slice count", Value: fmt.Sprintf("%d slices per frame", st.videoSliceCount)})
+				}
+				duration := ptsDurationPS(st.pts, opts)
+				if duration == 0 {
+					duration = ptsDurationPS(videoPTS, opts)
+				}
+				if duration > 0 {
+					if st.videoFrameRate > 0 {
+						duration += 2.0 / st.videoFrameRate
+					}
+					fields = addStreamDuration(fields, duration)
+				}
+				mode := "Constant"
+				fields = append(fields, Field{Name: "Bit rate mode", Value: mode})
+				bitrate := 0.0
+				if duration > 0 && st.bytes > 0 {
+					bitrate = (float64(st.bytes) * 8) / duration
+					if value := formatBitrate(bitrate); value != "" {
+						fields = append(fields, Field{Name: "Nominal bit rate", Value: value})
+					}
+				}
+				width := st.videoWidth
+				height := st.videoHeight
+				if width > 0 {
+					fields = append(fields, Field{Name: "Width", Value: formatPixels(width)})
+				}
+				if height > 0 {
+					fields = append(fields, Field{Name: "Height", Value: formatPixels(height)})
+				}
+				if ar := formatAspectRatio(width, height); ar != "" {
+					fields = append(fields, Field{Name: "Display aspect ratio", Value: ar})
+				}
 				if st.videoFrameRate > 0 {
-					duration += 2.0 / st.videoFrameRate
+					fields = append(fields, Field{Name: "Frame rate", Value: formatFrameRate(st.videoFrameRate)})
 				}
-				fields = addStreamDuration(fields, duration)
-			}
-			mode := "Constant"
-			fields = append(fields, Field{Name: "Bit rate mode", Value: mode})
-			bitrate := 0.0
-			if duration > 0 && st.bytes > 0 {
-				bitrate = (float64(st.bytes) * 8) / duration
-				if value := formatBitrate(bitrate); value != "" {
-					fields = append(fields, Field{Name: "Nominal bit rate", Value: value})
+				fields = append(fields, Field{Name: "Color space", Value: "YUV"})
+				if bitrate > 0 && width > 0 && height > 0 && st.videoFrameRate > 0 {
+					bits := bitrate / (float64(width) * float64(height) * st.videoFrameRate)
+					fields = append(fields, Field{Name: "Bits/(Pixel*Frame)", Value: fmt.Sprintf("%.3f", bits)})
 				}
-			}
-			width := st.videoWidth
-			height := st.videoHeight
-			if width > 0 {
-				fields = append(fields, Field{Name: "Width", Value: formatPixels(width)})
-			}
-			if height > 0 {
-				fields = append(fields, Field{Name: "Height", Value: formatPixels(height)})
-			}
-			if ar := formatAspectRatio(width, height); ar != "" {
-				fields = append(fields, Field{Name: "Display aspect ratio", Value: ar})
-			}
-			if st.videoFrameRate > 0 {
-				fields = append(fields, Field{Name: "Frame rate", Value: formatFrameRate(st.videoFrameRate)})
-			}
-			fields = append(fields, Field{Name: "Color space", Value: "YUV"})
-			if bitrate > 0 && width > 0 && height > 0 && st.videoFrameRate > 0 {
-				bits := bitrate / (float64(width) * float64(height) * st.videoFrameRate)
-				fields = append(fields, Field{Name: "Bits/(Pixel*Frame)", Value: fmt.Sprintf("%.3f", bits)})
-			}
-		} else if st.kind == StreamVideo {
-			if info.Version != "" {
-				fields = append(fields, Field{Name: "Format version", Value: info.Version})
-			}
-			frameRateRounded := info.FrameRate
-			if frameRateRounded == 0 && info.FrameRateNumer > 0 && info.FrameRateDenom > 0 {
-				frameRateRounded = float64(info.FrameRateNumer) / float64(info.FrameRateDenom)
-			}
-			if frameRateRounded > 0 {
-				frameRateRounded = math.Round(frameRateRounded*1000) / 1000
-			}
-			if info.Profile != "" {
-				fields = append(fields, Field{Name: "Format profile", Value: info.Profile})
-			}
-			formatSettings := ""
-			if info.Matrix == "Custom" {
-				formatSettings = "CustomMatrix"
-			}
-			if info.BVOP != nil && *info.BVOP {
+			} else {
+				if info.Version != "" {
+					fields = append(fields, Field{Name: "Format version", Value: info.Version})
+				}
+				frameRateRounded := info.FrameRate
+				if frameRateRounded == 0 && info.FrameRateNumer > 0 && info.FrameRateDenom > 0 {
+					frameRateRounded = float64(info.FrameRateNumer) / float64(info.FrameRateDenom)
+				}
+				if frameRateRounded > 0 {
+					frameRateRounded = math.Round(frameRateRounded*1000) / 1000
+				}
+				if info.Profile != "" {
+					fields = append(fields, Field{Name: "Format profile", Value: info.Profile})
+				}
+				formatSettings := ""
+				if info.Matrix == "Custom" {
+					formatSettings = "CustomMatrix"
+				}
+				if info.BVOP != nil && *info.BVOP {
+					if formatSettings != "" {
+						formatSettings += " / BVOP"
+					} else {
+						formatSettings = "BVOP"
+					}
+				}
 				if formatSettings != "" {
-					formatSettings += " / BVOP"
-				} else {
-					formatSettings = "BVOP"
+					fields = append(fields, Field{Name: "Format settings", Value: formatSettings})
 				}
-			}
-			if formatSettings != "" {
-				fields = append(fields, Field{Name: "Format settings", Value: formatSettings})
-			}
-			if info.BVOP != nil {
-				fields = append(fields, Field{Name: "Format settings, BVOP", Value: formatYesNo(*info.BVOP)})
-			}
-			if info.Matrix != "" {
-				fields = append(fields, Field{Name: "Format settings, Matrix", Value: info.Matrix})
-			}
-			if info.GOPM > 0 && info.GOPN > 0 && info.BVOP != nil && *info.BVOP {
-				fields = append(fields, Field{Name: "Format settings, GOP", Value: fmt.Sprintf("M=%d, N=%d", info.GOPM, info.GOPN)})
-			} else if info.GOPVariable {
-				fields = append(fields, Field{Name: "Format settings, GOP", Value: "Variable"})
-			} else if info.GOPLength > 1 {
-				fields = append(fields, Field{Name: "Format settings, GOP", Value: fmt.Sprintf("N=%d", info.GOPLength)})
-			}
-			duration := ptsDurationPS(st.pts, opts)
-			zeroSegment := false
-			if !opts.dvdParsing && st.pts.hasResets() && st.pts.segmentStart == st.pts.last {
-				duration = 0
-				zeroSegment = true
-			}
-			if duration == 0 && !zeroSegment {
-				duration = ptsDurationPS(videoPTS, opts)
-			}
-			fromGOP := false
-			syncApplied := false
-			if duration == 0 && !zeroSegment {
-				if frameRateRounded > 0 && info.GOPLength > 0 {
-					duration = float64(info.GOPLength) / frameRateRounded
-					fromGOP = true
-				} else {
-					duration = ptsDurationPS(anyPTS, opts)
+				if info.BVOP != nil {
+					fields = append(fields, Field{Name: "Format settings, BVOP", Value: formatYesNo(*info.BVOP)})
 				}
-			}
-			if zeroSegment && frameRateRounded > 0 {
-				duration = 0.5 / frameRateRounded
-			}
-			headerOnly := false
-			headerFrameCount := 0
-			headerDurationRate := frameRateRounded
-			if frameRateRounded > 0 && info.GOPLengthFirst > 0 {
-				gopDuration := float64(info.GOPLengthFirst) / frameRateRounded
-				if opts.dvdParsing {
-					if duration == 0 || (st.pts.hasResets() && duration > gopDuration*10) {
+				if info.Matrix != "" {
+					fields = append(fields, Field{Name: "Format settings, Matrix", Value: info.Matrix})
+				}
+				switch {
+				case info.GOPM > 0 && info.GOPN > 0 && info.BVOP != nil && *info.BVOP:
+					fields = append(fields, Field{Name: "Format settings, GOP", Value: fmt.Sprintf("M=%d, N=%d", info.GOPM, info.GOPN)})
+				case info.GOPVariable:
+					fields = append(fields, Field{Name: "Format settings, GOP", Value: "Variable"})
+				case info.GOPLength > 1:
+					fields = append(fields, Field{Name: "Format settings, GOP", Value: fmt.Sprintf("N=%d", info.GOPLength)})
+				}
+				duration := ptsDurationPS(st.pts, opts)
+				zeroSegment := false
+				if !opts.dvdParsing && st.pts.hasResets() && st.pts.segmentStart == st.pts.last {
+					duration = 0
+					zeroSegment = true
+				}
+				if duration == 0 && !zeroSegment {
+					duration = ptsDurationPS(videoPTS, opts)
+				}
+				fromGOP := false
+				syncApplied := false
+				if duration == 0 && !zeroSegment {
+					if frameRateRounded > 0 && info.GOPLength > 0 {
+						duration = float64(info.GOPLength) / frameRateRounded
+						fromGOP = true
+					} else {
+						duration = ptsDurationPS(anyPTS, opts)
+					}
+				}
+				if zeroSegment && frameRateRounded > 0 {
+					duration = 0.5 / frameRateRounded
+				}
+				headerOnly := false
+				headerFrameCount := 0
+				headerDurationRate := frameRateRounded
+				if frameRateRounded > 0 && info.GOPLengthFirst > 0 {
+					gopDuration := float64(info.GOPLengthFirst) / frameRateRounded
+					if opts.dvdParsing {
+						if duration == 0 || (st.pts.hasResets() && duration > gopDuration*10) {
+							headerFrameCount = info.GOPLengthFirst
+							if info.GOPVariable || headerFrameCount == 0 {
+								headerFrameCount = 2
+							}
+							if info.FrameRate > 0 && math.Abs(info.FrameRate-29.97) < 0.02 && info.ScanType == "Progressive" && info.ScanOrder == "" {
+								headerDurationRate = 24000.0 / 1001.0
+							}
+							duration = float64(headerFrameCount) / headerDurationRate
+							fromGOP = true
+							headerOnly = true
+						}
+					} else if st.pts.hasResets() && duration > gopDuration*10 {
 						headerFrameCount = info.GOPLengthFirst
-						if info.GOPVariable || headerFrameCount == 0 {
-							headerFrameCount = 2
-						}
-						if info.FrameRate > 0 && math.Abs(info.FrameRate-29.97) < 0.02 && info.ScanType == "Progressive" && info.ScanOrder == "" {
-							headerDurationRate = 24000.0 / 1001.0
-						}
-						duration = float64(headerFrameCount) / headerDurationRate
+						duration = gopDuration
 						fromGOP = true
 						headerOnly = true
 					}
-				} else if st.pts.hasResets() && duration > gopDuration*10 {
-					headerFrameCount = info.GOPLengthFirst
-					duration = gopDuration
-					fromGOP = true
-					headerOnly = true
 				}
-			}
-			if frameRateRounded > 0 && st.videoFrameCount > 0 {
-				frameDuration := float64(st.videoFrameCount) / frameRateRounded
-				switch {
-				case duration == 0:
-					duration = frameDuration
-					fromGOP = true
-					headerOnly = true
-				case zeroSegment:
-					duration = frameDuration
-					fromGOP = true
-					headerOnly = true
-				case st.videoFrameCount <= 2 && duration > frameDuration*10:
-					duration = frameDuration
-					fromGOP = true
-					headerOnly = true
-				case st.videoFrameCount <= 2 && duration <= frameDuration*1.1:
-					fromGOP = true
-					headerOnly = true
-				}
-			}
-			if duration > 0 && info.FrameRate > 0 && !fromGOP {
-				duration += 2.0 / info.FrameRate
-			}
-			if sync.duration > 0 && !headerOnly {
-				candidate := sync.duration + (sync.durationDelayMs / 1000.0)
-				if candidate > 0 {
-					threshold := 0.05
-					if info.FrameRate > 0 {
-						threshold = 1.0 / info.FrameRate
-					}
-					if math.Abs(candidate-duration) > threshold {
-						duration = candidate
-						syncApplied = true
+				if frameRateRounded > 0 && st.videoFrameCount > 0 {
+					frameDuration := float64(st.videoFrameCount) / frameRateRounded
+					switch {
+					case duration == 0:
+						duration = frameDuration
+						fromGOP = true
+						headerOnly = true
+					case zeroSegment:
+						duration = frameDuration
+						fromGOP = true
+						headerOnly = true
+					case st.videoFrameCount <= 2 && duration > frameDuration*10:
+						duration = frameDuration
+						fromGOP = true
+						headerOnly = true
+					case st.videoFrameCount <= 2 && duration <= frameDuration*1.1:
+						fromGOP = true
+						headerOnly = true
 					}
 				}
-			}
-			if syncApplied && st.pts.hasResets() && info.FrameRate > 0 {
-				duration += 1.0 / (info.FrameRate * 10.0)
-			}
-			if duration > 0 {
-				fields = addStreamDuration(fields, duration)
-			}
-			effectiveBytes := st.bytes
-			useHeaderBytes := fromGOP && st.videoHeaderBytes > 0 && st.videoHeaderBytes == st.bytes
-			if headerOnly && st.videoHeaderBytes > 0 {
-				useHeaderBytes = true
-			}
-			if useHeaderBytes {
-				effectiveBytes = st.videoHeaderBytes
-				if opts.dvdParsing && st.videoSeqExtBytes > 0 {
-					effectiveBytes = st.videoSeqExtBytes + st.videoGOPBytes
+				if duration > 0 && info.FrameRate > 0 && !fromGOP {
+					duration += 2.0 / info.FrameRate
 				}
-			}
-			if !headerOnly && videoCount == 1 && videoResidualBytes > int64(effectiveBytes) && (menuOverheadBytes > 0 || opts.dvdParsing) {
-				effectiveBytes = uint64(videoResidualBytes)
-				useHeaderBytes = false
-			}
-			bitrateDuration := duration
-			frameCountForBitrate := st.videoFrameCount
-			if headerOnly && headerFrameCount > 0 {
-				frameCountForBitrate = headerFrameCount
-			}
-			headerFrameBytes := uint64(0)
-			if headerOnly && opts.dvdParsing && frameCountForBitrate > 0 {
-				if st.videoFrameBytesCount >= frameCountForBitrate && st.videoFrameBytes > 0 {
-					headerFrameBytes = st.videoFrameBytes
-					if frameCountForBitrate >= 2 && info.BufferSize > 0 && st.videoFrameBytes < uint64(info.BufferSize/2) {
+				if sync.duration > 0 && !headerOnly {
+					candidate := sync.duration + (sync.durationDelayMs / 1000.0)
+					if candidate > 0 {
+						threshold := 0.05
+						if info.FrameRate > 0 {
+							threshold = 1.0 / info.FrameRate
+						}
+						if math.Abs(candidate-duration) > threshold {
+							duration = candidate
+							syncApplied = true
+						}
+					}
+				}
+				if syncApplied && st.pts.hasResets() && info.FrameRate > 0 {
+					duration += 1.0 / (info.FrameRate * 10.0)
+				}
+				if duration > 0 {
+					fields = addStreamDuration(fields, duration)
+				}
+				effectiveBytes := st.bytes
+				useHeaderBytes := fromGOP && st.videoHeaderBytes > 0 && st.videoHeaderBytes == st.bytes
+				if headerOnly && st.videoHeaderBytes > 0 {
+					useHeaderBytes = true
+				}
+				if useHeaderBytes {
+					effectiveBytes = st.videoHeaderBytes
+					if opts.dvdParsing && st.videoSeqExtBytes > 0 {
+						effectiveBytes = st.videoSeqExtBytes + st.videoGOPBytes
+					}
+				}
+				if !headerOnly && videoCount == 1 && videoResidualBytes > int64(effectiveBytes) && (menuOverheadBytes > 0 || opts.dvdParsing) {
+					effectiveBytes = uint64(videoResidualBytes)
+					useHeaderBytes = false
+				}
+				bitrateDuration := duration
+				frameCountForBitrate := st.videoFrameCount
+				if headerOnly && headerFrameCount > 0 {
+					frameCountForBitrate = headerFrameCount
+				}
+				headerFrameBytes := uint64(0)
+				if headerOnly && opts.dvdParsing && frameCountForBitrate > 0 {
+					if st.videoFrameBytesCount >= frameCountForBitrate && st.videoFrameBytes > 0 {
+						headerFrameBytes = st.videoFrameBytes
+						if frameCountForBitrate >= 2 && info.BufferSize > 0 && st.videoFrameBytes < uint64(info.BufferSize/2) {
+							headerFrameBytes = uint64(math.Round(float64(info.BufferSize) * dvdHeaderStreamScale))
+						}
+					} else if frameCountForBitrate >= 2 && info.BufferSize > 0 {
 						headerFrameBytes = uint64(math.Round(float64(info.BufferSize) * dvdHeaderStreamScale))
 					}
-				} else if frameCountForBitrate >= 2 && info.BufferSize > 0 {
-					headerFrameBytes = uint64(math.Round(float64(info.BufferSize) * dvdHeaderStreamScale))
 				}
-			}
-			if syncApplied && info.FrameRate > 0 {
-				derived := int(math.Round(duration * info.FrameRate))
-				if derived > 0 {
-					frameCountForBitrate = derived
-				}
-			}
-			if st.pts.hasResets() && frameCountForBitrate > 0 && frameRateRounded > 0 {
-				bitrateDuration = float64(frameCountForBitrate) / frameRateRounded
-			} else if st.pts.hasResets() && st.pts.has() {
-				bitrateDuration = st.pts.durationTotal()
-			} else if !fromGOP && frameRateRounded > 0 {
-				bitrateDuration += 1.0 / frameRateRounded
-			}
-			if useHeaderBytes && frameRateRounded > 0 {
-				if headerOnly && frameCountForBitrate > 0 {
-					bitrateDuration = float64(frameCountForBitrate) / frameRateRounded
-				} else {
-					rounded := math.Round(frameRateRounded)
-					if rounded > 0 {
-						bitrateDuration = 1.0 / rounded
+				if syncApplied && info.FrameRate > 0 {
+					derived := int(math.Round(duration * info.FrameRate))
+					if derived > 0 {
+						frameCountForBitrate = derived
 					}
 				}
-			}
-			mode := info.BitRateMode
-			if mode == "" {
-				mode = "Variable"
-			}
-			if fromGOP && !opts.dvdParsing {
-				mode = "Constant"
-			}
-			fields = append(fields, Field{Name: "Bit rate mode", Value: mode})
-			bitrate := 0.0
-			kbps := int64(0)
-			if headerOnly && opts.dvdParsing && headerFrameBytes > 0 && frameRateRounded > 0 && frameCountForBitrate > 0 {
-				bitrate = float64(headerFrameBytes) * 8 * frameRateRounded / float64(frameCountForBitrate)
-				kbps = int64(bitrate / 1000.0)
-				if value := formatBitrate(bitrate); value != "" {
-					fields = appendFieldUnique(fields, Field{Name: "Bit rate", Value: value})
+				switch {
+				case st.pts.hasResets() && frameCountForBitrate > 0 && frameRateRounded > 0:
+					bitrateDuration = float64(frameCountForBitrate) / frameRateRounded
+				case st.pts.hasResets() && st.pts.has():
+					bitrateDuration = st.pts.durationTotal()
+				case !fromGOP && frameRateRounded > 0:
+					bitrateDuration += 1.0 / frameRateRounded
 				}
-			} else if bitrateDuration > 0 && effectiveBytes > 0 {
-				bitrate = (float64(effectiveBytes) * 8) / bitrateDuration
-				if bitrate >= 10_000_000 {
+				if useHeaderBytes && frameRateRounded > 0 {
+					if headerOnly && frameCountForBitrate > 0 {
+						bitrateDuration = float64(frameCountForBitrate) / frameRateRounded
+					} else {
+						rounded := math.Round(frameRateRounded)
+						if rounded > 0 {
+							bitrateDuration = 1.0 / rounded
+						}
+					}
+				}
+				mode := info.BitRateMode
+				if mode == "" {
+					mode = "Variable"
+				}
+				if fromGOP && !opts.dvdParsing {
+					mode = "Constant"
+				}
+				fields = append(fields, Field{Name: "Bit rate mode", Value: mode})
+				bitrate := 0.0
+				kbps := int64(0)
+				if headerOnly && opts.dvdParsing && headerFrameBytes > 0 && frameRateRounded > 0 && frameCountForBitrate > 0 {
+					bitrate = float64(headerFrameBytes) * 8 * frameRateRounded / float64(frameCountForBitrate)
+					kbps = int64(bitrate / 1000.0)
 					if value := formatBitrate(bitrate); value != "" {
 						fields = appendFieldUnique(fields, Field{Name: "Bit rate", Value: value})
 					}
-				} else if useHeaderBytes {
-					if value := formatBitratePrecise(bitrate); value != "" {
-						fields = appendFieldUnique(fields, Field{Name: "Bit rate", Value: value})
-					}
-				} else {
-					kbps = max(int64(bitrate/1000.0), 0)
-					if value := formatBitrateKbps(kbps); value != "" {
-						fields = appendFieldUnique(fields, Field{Name: "Bit rate", Value: value})
-					}
-				}
-			}
-			if info.MaxBitRateKbps > 0 {
-				if value := formatBitrateKbps(info.MaxBitRateKbps); value != "" {
-					fields = append(fields, Field{Name: "Maximum bit rate", Value: value})
-				}
-			}
-			if info.Width > 0 {
-				fields = append(fields, Field{Name: "Width", Value: formatPixels(info.Width)})
-			}
-			if info.Height > 0 {
-				fields = append(fields, Field{Name: "Height", Value: formatPixels(info.Height)})
-			}
-			if info.AspectRatio != "" {
-				fields = append(fields, Field{Name: "Display aspect ratio", Value: info.AspectRatio})
-			}
-			if info.FrameRateNumer > 0 && info.FrameRateDenom > 0 {
-				fields = append(fields, Field{Name: "Frame rate", Value: formatFrameRateRatio(info.FrameRateNumer, info.FrameRateDenom)})
-			} else if info.FrameRate > 0 {
-				fields = append(fields, Field{Name: "Frame rate", Value: formatFrameRate(info.FrameRate)})
-			}
-			if standard := mapMPEG2Standard(info.FrameRate); standard != "" {
-				if (standard == "NTSC" && info.Width == 720 && info.Height == 480) ||
-					(standard == "PAL" && info.Width == 720 && info.Height == 576) {
-					fields = append(fields, Field{Name: "Standard", Value: standard})
-				}
-			}
-			if info.ColorSpace != "" {
-				fields = append(fields, Field{Name: "Color space", Value: info.ColorSpace})
-			}
-			if info.ChromaSubsampling != "" {
-				fields = append(fields, Field{Name: "Chroma subsampling", Value: info.ChromaSubsampling})
-			}
-			if info.BitDepth != "" {
-				fields = append(fields, Field{Name: "Bit depth", Value: info.BitDepth})
-			}
-			if info.ScanType != "" {
-				fields = append(fields, Field{Name: "Scan type", Value: info.ScanType})
-			}
-			if info.ScanOrder != "" {
-				fields = append(fields, Field{Name: "Scan order", Value: info.ScanOrder})
-			}
-			fields = append(fields, Field{Name: "Compression mode", Value: "Lossy"})
-			if bitrate > 0 && info.Width > 0 && info.Height > 0 {
-				if bits := formatBitsPerPixelFrame(bitrate, info.Width, info.Height, info.FrameRate); bits != "" {
-					fields = append(fields, Field{Name: "Bits/(Pixel*Frame)", Value: bits})
-				}
-			}
-			if info.TimeCode != "" {
-				fields = append(fields, Field{Name: "Time code of first frame", Value: info.TimeCode})
-			}
-			if info.TimeCodeSource != "" {
-				fields = append(fields, Field{Name: "Time code source", Value: info.TimeCodeSource})
-			}
-			if info.GOPLength > 1 {
-				if info.GOPOpenClosed != "" {
-					fields = append(fields, Field{Name: "GOP, Open/Closed", Value: info.GOPOpenClosed})
-				}
-				if info.GOPFirstClosed != "" {
-					fields = append(fields, Field{Name: "GOP, Open/Closed of first frame", Value: info.GOPFirstClosed})
-				}
-			}
-			headerStreamBytes := int64(0)
-			if headerOnly && opts.dvdParsing && headerFrameBytes > 0 {
-				headerStreamBytes = int64(headerFrameBytes)
-			}
-			if headerOnly && headerStreamBytes > 0 {
-				if streamSize := formatStreamSize(headerStreamBytes, size); streamSize != "" {
-					fields = append(fields, Field{Name: "Stream size", Value: streamSize})
-				}
-			} else if headerOnly && bitrate > 0 && duration > 0 {
-				streamSizeBytes := int64((bitrate*duration)/8.0 + 0.5)
-				if streamSize := formatStreamSize(streamSizeBytes, size); streamSize != "" {
-					fields = append(fields, Field{Name: "Stream size", Value: streamSize})
-				}
-			} else if useHeaderBytes && effectiveBytes > 0 {
-				if streamSize := formatStreamSize(int64(effectiveBytes), size); streamSize != "" {
-					fields = append(fields, Field{Name: "Stream size", Value: streamSize})
-				}
-			} else if kbps > 0 && duration > 0 {
-				streamSizeBytes := int64(float64(kbps*1000)*duration/8.0 + 0.5)
-				if menuOverheadBytes > 0 && videoCount == 1 && bitrate > 0 {
-					streamSizeBytes = int64((bitrate*duration)/8.0 + 0.5)
-				}
-				if streamSize := formatStreamSize(streamSizeBytes, size); streamSize != "" {
-					fields = append(fields, Field{Name: "Stream size", Value: streamSize})
-				}
-			} else if effectiveBytes > 0 {
-				if streamSize := formatStreamSize(int64(effectiveBytes), size); streamSize != "" {
-					fields = append(fields, Field{Name: "Stream size", Value: streamSize})
-				}
-			}
-			streamBytes := int64(effectiveBytes)
-			if headerOnly {
-				if headerStreamBytes > 0 {
-					streamBytes = headerStreamBytes
-				} else if bitrate > 0 && duration > 0 {
-					streamBytes = int64((bitrate*duration)/8.0 + 0.5)
-				}
-			}
-			jsonStreamBytes := streamBytes
-			if jsonStreamBytes > 0 {
-				jsonExtras["StreamSize"] = fmt.Sprintf("%d", jsonStreamBytes)
-			}
-			if st.videoFrameCount > 0 {
-				frameCount := st.videoFrameCount
-				if duration > 0 && info.FrameRate > 0 {
-					derived := int(math.Round(duration * info.FrameRate))
-					if derived > 0 && math.Abs(float64(derived-frameCount)) <= 2 {
-						frameCount = derived
+				} else if bitrateDuration > 0 && effectiveBytes > 0 {
+					bitrate = (float64(effectiveBytes) * 8) / bitrateDuration
+					switch {
+					case bitrate >= 10_000_000:
+						if value := formatBitrate(bitrate); value != "" {
+							fields = appendFieldUnique(fields, Field{Name: "Bit rate", Value: value})
+						}
+					case useHeaderBytes:
+						if value := formatBitratePrecise(bitrate); value != "" {
+							fields = appendFieldUnique(fields, Field{Name: "Bit rate", Value: value})
+						}
+					default:
+						kbps = max(int64(bitrate/1000.0), 0)
+						if value := formatBitrateKbps(kbps); value != "" {
+							fields = appendFieldUnique(fields, Field{Name: "Bit rate", Value: value})
+						}
 					}
 				}
-				if headerOnly && headerFrameCount > 0 {
-					frameCount = headerFrameCount
+				if info.MaxBitRateKbps > 0 {
+					if value := formatBitrateKbps(info.MaxBitRateKbps); value != "" {
+						fields = append(fields, Field{Name: "Maximum bit rate", Value: value})
+					}
 				}
-				jsonExtras["FrameCount"] = fmt.Sprintf("%d", frameCount)
+				if info.Width > 0 {
+					fields = append(fields, Field{Name: "Width", Value: formatPixels(info.Width)})
+				}
+				if info.Height > 0 {
+					fields = append(fields, Field{Name: "Height", Value: formatPixels(info.Height)})
+				}
+				if info.AspectRatio != "" {
+					fields = append(fields, Field{Name: "Display aspect ratio", Value: info.AspectRatio})
+				}
+				if info.FrameRateNumer > 0 && info.FrameRateDenom > 0 {
+					fields = append(fields, Field{Name: "Frame rate", Value: formatFrameRateRatio(info.FrameRateNumer, info.FrameRateDenom)})
+				} else if info.FrameRate > 0 {
+					fields = append(fields, Field{Name: "Frame rate", Value: formatFrameRate(info.FrameRate)})
+				}
+				if standard := mapMPEG2Standard(info.FrameRate); standard != "" {
+					if (standard == "NTSC" && info.Width == 720 && info.Height == 480) ||
+						(standard == "PAL" && info.Width == 720 && info.Height == 576) {
+						fields = append(fields, Field{Name: "Standard", Value: standard})
+					}
+				}
+				if info.ColorSpace != "" {
+					fields = append(fields, Field{Name: "Color space", Value: info.ColorSpace})
+				}
+				if info.ChromaSubsampling != "" {
+					fields = append(fields, Field{Name: "Chroma subsampling", Value: info.ChromaSubsampling})
+				}
+				if info.BitDepth != "" {
+					fields = append(fields, Field{Name: "Bit depth", Value: info.BitDepth})
+				}
+				if info.ScanType != "" {
+					fields = append(fields, Field{Name: "Scan type", Value: info.ScanType})
+				}
+				if info.ScanOrder != "" {
+					fields = append(fields, Field{Name: "Scan order", Value: info.ScanOrder})
+				}
+				fields = append(fields, Field{Name: "Compression mode", Value: "Lossy"})
+				if bitrate > 0 && info.Width > 0 && info.Height > 0 {
+					if bits := formatBitsPerPixelFrame(bitrate, info.Width, info.Height, info.FrameRate); bits != "" {
+						fields = append(fields, Field{Name: "Bits/(Pixel*Frame)", Value: bits})
+					}
+				}
+				if info.TimeCode != "" {
+					fields = append(fields, Field{Name: "Time code of first frame", Value: info.TimeCode})
+				}
+				if info.TimeCodeSource != "" {
+					fields = append(fields, Field{Name: "Time code source", Value: info.TimeCodeSource})
+				}
+				if info.GOPLength > 1 {
+					if info.GOPOpenClosed != "" {
+						fields = append(fields, Field{Name: "GOP, Open/Closed", Value: info.GOPOpenClosed})
+					}
+					if info.GOPFirstClosed != "" {
+						fields = append(fields, Field{Name: "GOP, Open/Closed of first frame", Value: info.GOPFirstClosed})
+					}
+				}
+				headerStreamBytes := int64(0)
+				if headerOnly && opts.dvdParsing && headerFrameBytes > 0 {
+					headerStreamBytes = int64(headerFrameBytes)
+				}
+				switch {
+				case headerOnly && headerStreamBytes > 0:
+					if streamSize := formatStreamSize(headerStreamBytes, size); streamSize != "" {
+						fields = append(fields, Field{Name: "Stream size", Value: streamSize})
+					}
+				case headerOnly && bitrate > 0 && duration > 0:
+					streamSizeBytes := int64((bitrate*duration)/8.0 + 0.5)
+					if streamSize := formatStreamSize(streamSizeBytes, size); streamSize != "" {
+						fields = append(fields, Field{Name: "Stream size", Value: streamSize})
+					}
+				case useHeaderBytes && effectiveBytes > 0:
+					if streamSize := formatStreamSize(int64(effectiveBytes), size); streamSize != "" {
+						fields = append(fields, Field{Name: "Stream size", Value: streamSize})
+					}
+				case kbps > 0 && duration > 0:
+					streamSizeBytes := int64(float64(kbps*1000)*duration/8.0 + 0.5)
+					if menuOverheadBytes > 0 && videoCount == 1 && bitrate > 0 {
+						streamSizeBytes = int64((bitrate*duration)/8.0 + 0.5)
+					}
+					if streamSize := formatStreamSize(streamSizeBytes, size); streamSize != "" {
+						fields = append(fields, Field{Name: "Stream size", Value: streamSize})
+					}
+				case effectiveBytes > 0:
+					if streamSize := formatStreamSize(int64(effectiveBytes), size); streamSize != "" {
+						fields = append(fields, Field{Name: "Stream size", Value: streamSize})
+					}
+				}
+				streamBytes := int64(effectiveBytes)
+				if headerOnly {
+					if headerStreamBytes > 0 {
+						streamBytes = headerStreamBytes
+					} else if bitrate > 0 && duration > 0 {
+						streamBytes = int64((bitrate*duration)/8.0 + 0.5)
+					}
+				}
+				jsonStreamBytes := streamBytes
+				if jsonStreamBytes > 0 {
+					jsonExtras["StreamSize"] = strconv.FormatInt(jsonStreamBytes, 10)
+				}
+				if st.videoFrameCount > 0 {
+					frameCount := st.videoFrameCount
+					if duration > 0 && info.FrameRate > 0 {
+						derived := int(math.Round(duration * info.FrameRate))
+						if derived > 0 && math.Abs(float64(derived-frameCount)) <= 2 {
+							frameCount = derived
+						}
+					}
+					if headerOnly && headerFrameCount > 0 {
+						frameCount = headerFrameCount
+					}
+					jsonExtras["FrameCount"] = strconv.Itoa(frameCount)
+				}
+				jsonDuration := math.Round(duration*1000) / 1000
+				jsonBitrateDuration := bitrateDuration
+				if useHeaderBytes && fromGOP && info.FrameRate > 0 {
+					// MediaInfo JSON bitrate for GOP-only streams is slightly higher than GOPLength/FrameRate.
+					// Align with CLI output for header-only VOB samples.
+					jsonBitrateDuration *= 0.99818
+				}
+				if jsonBitrateDuration <= 0 {
+					jsonBitrateDuration = jsonDuration
+				}
+				switch {
+				case headerOnly && opts.dvdParsing && headerFrameBytes > 0 && bitrate > 0:
+					jsonExtras["BitRate"] = strconv.FormatInt(int64(math.Round(bitrate)), 10)
+				case jsonBitrateDuration > 0 && jsonStreamBytes > 0:
+					jsonBitrate := (float64(jsonStreamBytes) * 8) / jsonBitrateDuration
+					jsonExtras["BitRate"] = strconv.FormatInt(int64(math.Round(jsonBitrate)), 10)
+				case bitrate > 0:
+					jsonExtras["BitRate"] = strconv.FormatInt(int64(math.Round(bitrate)), 10)
+				}
+				if info.MatrixData != "" {
+					jsonExtras["Format_Settings_Matrix_Data"] = info.MatrixData
+				}
+				if info.BufferSize > 0 {
+					jsonExtras["BufferSize"] = strconv.FormatInt(info.BufferSize, 10)
+				}
+				if info.IntraDCPrecision > 0 {
+					jsonRaw["extra"] = renderJSONObject([]jsonKV{{Key: "intra_dc_precision", Val: strconv.Itoa(info.IntraDCPrecision)}}, false)
+				}
 			}
-			jsonDuration := math.Round(duration*1000) / 1000
-			jsonBitrateDuration := bitrateDuration
-			if useHeaderBytes && fromGOP && info.FrameRate > 0 {
-				// MediaInfo JSON bitrate for GOP-only streams is slightly higher than GOPLength/FrameRate.
-				// Align with CLI output for header-only VOB samples.
-				jsonBitrateDuration *= 0.99818
-			}
-			if jsonBitrateDuration <= 0 {
-				jsonBitrateDuration = jsonDuration
-			}
-			if headerOnly && opts.dvdParsing && headerFrameBytes > 0 && bitrate > 0 {
-				jsonExtras["BitRate"] = fmt.Sprintf("%d", int64(math.Round(bitrate)))
-			} else if jsonBitrateDuration > 0 && jsonStreamBytes > 0 {
-				jsonBitrate := (float64(jsonStreamBytes) * 8) / jsonBitrateDuration
-				jsonExtras["BitRate"] = fmt.Sprintf("%d", int64(math.Round(jsonBitrate)))
-			} else if bitrate > 0 {
-				jsonExtras["BitRate"] = fmt.Sprintf("%d", int64(math.Round(bitrate)))
-			}
-			if info.MatrixData != "" {
-				jsonExtras["Format_Settings_Matrix_Data"] = info.MatrixData
-			}
-			if info.BufferSize > 0 {
-				jsonExtras["BufferSize"] = fmt.Sprintf("%d", info.BufferSize)
-			}
-			if info.IntraDCPrecision > 0 {
-				jsonRaw["extra"] = renderJSONObject([]jsonKV{{Key: "intra_dc_precision", Val: fmt.Sprintf("%d", info.IntraDCPrecision)}}, false)
-			}
-		} else if st.kind == StreamAudio {
+		case StreamAudio:
 			duration := audioDurationPS(st, opts)
 			if duration > 0 {
 				fields = addStreamDuration(fields, duration)
@@ -924,13 +934,13 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 					fields = append(fields, Field{Name: "Service kind", Value: st.ac3Info.serviceKind})
 				}
 				if opts.dvdExtras && st.ac3Info.bsid > 0 {
-					fields = append(fields, Field{Name: "bsid", Value: fmt.Sprintf("%d", st.ac3Info.bsid)})
+					fields = append(fields, Field{Name: "bsid", Value: strconv.Itoa(st.ac3Info.bsid)})
 				}
 				if st.ac3Info.hasDialnorm {
 					if opts.dvdExtras {
-						fields = append(fields, Field{Name: "Dialog Normalization", Value: fmt.Sprintf("%d", st.ac3Info.dialnorm)})
+						fields = append(fields, Field{Name: "Dialog Normalization", Value: strconv.Itoa(st.ac3Info.dialnorm)})
 					}
-					fields = append(fields, Field{Name: "Dialog Normalization", Value: fmt.Sprintf("%d dB", st.ac3Info.dialnorm)})
+					fields = append(fields, Field{Name: "Dialog Normalization", Value: strconv.Itoa(st.ac3Info.dialnorm) + " dB"})
 				}
 				if st.ac3Info.hasCompr {
 					if opts.dvdExtras {
@@ -944,10 +954,10 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 				}
 				if opts.dvdExtras {
 					if st.ac3Info.hasDsurmod {
-						fields = append(fields, Field{Name: "dsurmod", Value: fmt.Sprintf("%d", st.ac3Info.dsurmod)})
+						fields = append(fields, Field{Name: "dsurmod", Value: strconv.Itoa(st.ac3Info.dsurmod)})
 					}
-					fields = append(fields, Field{Name: "acmod", Value: fmt.Sprintf("%d", st.ac3Info.acmod)})
-					fields = append(fields, Field{Name: "lfeon", Value: fmt.Sprintf("%d", st.ac3Info.lfeon)})
+					fields = append(fields, Field{Name: "acmod", Value: strconv.Itoa(st.ac3Info.acmod)})
+					fields = append(fields, Field{Name: "lfeon", Value: strconv.Itoa(st.ac3Info.lfeon)})
 				}
 				if st.ac3Info.hasCmixlev {
 					if opts.dvdExtras {
@@ -959,33 +969,33 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 					fields = append(fields, Field{Name: "surmixlev", Value: fmt.Sprintf("%.0f dB", st.ac3Info.surmixlevDB)})
 				}
 				if st.ac3Info.hasMixlevel {
-					fields = append(fields, Field{Name: "mixlevel", Value: fmt.Sprintf("%d dB", st.ac3Info.mixlevel)})
+					fields = append(fields, Field{Name: "mixlevel", Value: strconv.Itoa(st.ac3Info.mixlevel) + " dB"})
 				}
 				if st.ac3Info.hasRoomtyp {
 					fields = append(fields, Field{Name: "roomtyp", Value: st.ac3Info.roomtyp})
 				}
-				if avg, min, max, ok := st.ac3Info.dialnormStats(); ok {
+				if avg, minVal, maxVal, ok := st.ac3Info.dialnormStats(); ok {
 					if opts.dvdExtras {
-						fields = append(fields, Field{Name: "dialnorm_Average", Value: fmt.Sprintf("%d", avg)})
-						fields = append(fields, Field{Name: "dialnorm_Minimum", Value: fmt.Sprintf("%d", min)})
-						fields = append(fields, Field{Name: "dialnorm_Maximum", Value: fmt.Sprintf("%d", max)})
+						fields = append(fields, Field{Name: "dialnorm_Average", Value: strconv.Itoa(avg)})
+						fields = append(fields, Field{Name: "dialnorm_Minimum", Value: strconv.Itoa(minVal)})
+						fields = append(fields, Field{Name: "dialnorm_Maximum", Value: strconv.Itoa(maxVal)})
 					}
-					fields = append(fields, Field{Name: "dialnorm_Average", Value: fmt.Sprintf("%d dB", avg)})
-					fields = append(fields, Field{Name: "dialnorm_Minimum", Value: fmt.Sprintf("%d dB", min)})
-					fields = append(fields, Field{Name: "dialnorm_Maximum", Value: fmt.Sprintf("%d dB", max)})
+					fields = append(fields, Field{Name: "dialnorm_Average", Value: strconv.Itoa(avg) + " dB"})
+					fields = append(fields, Field{Name: "dialnorm_Minimum", Value: strconv.Itoa(minVal) + " dB"})
+					fields = append(fields, Field{Name: "dialnorm_Maximum", Value: strconv.Itoa(maxVal) + " dB"})
 					if opts.dvdExtras && st.ac3Info.dialnormCount > 0 {
-						fields = append(fields, Field{Name: "dialnorm_Count", Value: fmt.Sprintf("%d", st.ac3Info.dialnormCount)})
+						fields = append(fields, Field{Name: "dialnorm_Count", Value: strconv.Itoa(st.ac3Info.dialnormCount)})
 					}
 				}
 				if opts.dvdExtras {
-					if avg, min, max, count, ok := st.ac3Info.comprStats(); ok {
+					if avg, minVal, maxVal, count, ok := st.ac3Info.comprStats(); ok {
 						fields = append(fields, Field{Name: "compr_Average", Value: fmt.Sprintf("%.2f", avg)})
-						fields = append(fields, Field{Name: "compr_Minimum", Value: fmt.Sprintf("%.2f", min)})
-						fields = append(fields, Field{Name: "compr_Maximum", Value: fmt.Sprintf("%.2f", max)})
-						fields = append(fields, Field{Name: "compr_Count", Value: fmt.Sprintf("%d", count)})
+						fields = append(fields, Field{Name: "compr_Minimum", Value: fmt.Sprintf("%.2f", minVal)})
+						fields = append(fields, Field{Name: "compr_Maximum", Value: fmt.Sprintf("%.2f", maxVal)})
+						fields = append(fields, Field{Name: "compr_Count", Value: strconv.Itoa(count)})
 						fields = append(fields, Field{Name: "compr_Average", Value: fmt.Sprintf("%.2f dB", avg)})
-						fields = append(fields, Field{Name: "compr_Minimum", Value: fmt.Sprintf("%.2f dB", min)})
-						fields = append(fields, Field{Name: "compr_Maximum", Value: fmt.Sprintf("%.2f dB", max)})
+						fields = append(fields, Field{Name: "compr_Minimum", Value: fmt.Sprintf("%.2f dB", minVal)})
+						fields = append(fields, Field{Name: "compr_Maximum", Value: fmt.Sprintf("%.2f dB", maxVal)})
 					}
 				}
 			} else if st.audioRate > 0 {
@@ -1022,29 +1032,29 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 					jsonExtras["Duration"] = fmt.Sprintf("%.3f", duration)
 				}
 				if st.ac3Info.spf > 0 {
-					jsonExtras["SamplesPerFrame"] = fmt.Sprintf("%d", st.ac3Info.spf)
+					jsonExtras["SamplesPerFrame"] = strconv.Itoa(st.ac3Info.spf)
 				}
 				if st.ac3Info.sampleRate > 0 {
 					useFrames := st.audioFrames > 0 && st.ac3Info.spf > 0 && !st.pts.hasResets() && parseSpeed >= 1
 					if useFrames {
 						samplingCount := int64(st.audioFrames) * int64(st.ac3Info.spf)
-						jsonExtras["SamplingCount"] = fmt.Sprintf("%d", samplingCount)
-						jsonExtras["FrameCount"] = fmt.Sprintf("%d", st.audioFrames)
+						jsonExtras["SamplingCount"] = strconv.FormatInt(samplingCount, 10)
+						jsonExtras["FrameCount"] = strconv.FormatUint(st.audioFrames, 10)
 					} else if duration > 0 {
 						samplingCount := int64(math.Round(duration * st.ac3Info.sampleRate))
-						jsonExtras["SamplingCount"] = fmt.Sprintf("%d", samplingCount)
+						jsonExtras["SamplingCount"] = strconv.FormatInt(samplingCount, 10)
 						if st.ac3Info.spf > 0 {
 							frameCount := int64(math.Round(float64(samplingCount) / float64(st.ac3Info.spf)))
-							jsonExtras["FrameCount"] = fmt.Sprintf("%d", frameCount)
+							jsonExtras["FrameCount"] = strconv.FormatInt(frameCount, 10)
 						}
 					}
 				}
 				if st.bytes > 0 && parseSpeed >= 1 {
-					jsonExtras["StreamSize"] = fmt.Sprintf("%d", st.bytes)
+					jsonExtras["StreamSize"] = strconv.FormatUint(st.bytes, 10)
 				} else if st.ac3Info.bitRateKbps > 0 && duration > 0 {
 					streamSizeBytes := int64(math.Round(float64(st.ac3Info.bitRateKbps*1000) * duration / 8.0))
 					if streamSizeBytes > 0 {
-						jsonExtras["StreamSize"] = fmt.Sprintf("%d", streamSizeBytes)
+						jsonExtras["StreamSize"] = strconv.FormatInt(streamSizeBytes, 10)
 					}
 				}
 				jsonExtras["Format_Settings_Endianness"] = "Big"
@@ -1053,12 +1063,12 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 				}
 				extraFields := []jsonKV{}
 				if st.ac3Info.bsid > 0 {
-					extraFields = append(extraFields, jsonKV{Key: "bsid", Val: fmt.Sprintf("%d", st.ac3Info.bsid)})
+					extraFields = append(extraFields, jsonKV{Key: "bsid", Val: strconv.Itoa(st.ac3Info.bsid)})
 				}
 				if st.ac3Info.hasDialnorm {
-					extraFields = append(extraFields, jsonKV{Key: "dialnorm", Val: fmt.Sprintf("%d", st.ac3Info.dialnorm)})
+					extraFields = append(extraFields, jsonKV{Key: "dialnorm", Val: strconv.Itoa(st.ac3Info.dialnorm)})
 					if opts.dvdExtras {
-						extraFields = append(extraFields, jsonKV{Key: "dialnorm_String", Val: fmt.Sprintf("%d dB", st.ac3Info.dialnorm)})
+						extraFields = append(extraFields, jsonKV{Key: "dialnorm_String", Val: strconv.Itoa(st.ac3Info.dialnorm) + " dB"})
 					}
 				}
 				if st.ac3Info.hasCompr {
@@ -1068,13 +1078,13 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 					}
 				}
 				if st.ac3Info.acmod > 0 {
-					extraFields = append(extraFields, jsonKV{Key: "acmod", Val: fmt.Sprintf("%d", st.ac3Info.acmod)})
+					extraFields = append(extraFields, jsonKV{Key: "acmod", Val: strconv.Itoa(st.ac3Info.acmod)})
 				}
 				if st.ac3Info.hasDsurmod {
-					extraFields = append(extraFields, jsonKV{Key: "dsurmod", Val: fmt.Sprintf("%d", st.ac3Info.dsurmod)})
+					extraFields = append(extraFields, jsonKV{Key: "dsurmod", Val: strconv.Itoa(st.ac3Info.dsurmod)})
 				}
 				if st.ac3Info.lfeon >= 0 {
-					extraFields = append(extraFields, jsonKV{Key: "lfeon", Val: fmt.Sprintf("%d", st.ac3Info.lfeon)})
+					extraFields = append(extraFields, jsonKV{Key: "lfeon", Val: strconv.Itoa(st.ac3Info.lfeon)})
 				}
 				if st.ac3Info.hasCmixlev {
 					extraFields = append(extraFields, jsonKV{Key: "cmixlev", Val: fmt.Sprintf("%.1f", st.ac3Info.cmixlevDB)})
@@ -1090,59 +1100,63 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 					}
 				}
 				if st.ac3Info.hasMixlevel {
-					extraFields = append(extraFields, jsonKV{Key: "mixlevel", Val: fmt.Sprintf("%d", st.ac3Info.mixlevel)})
+					extraFields = append(extraFields, jsonKV{Key: "mixlevel", Val: strconv.Itoa(st.ac3Info.mixlevel)})
 				}
 				if st.ac3Info.hasRoomtyp {
 					extraFields = append(extraFields, jsonKV{Key: "roomtyp", Val: st.ac3Info.roomtyp})
 				}
-				if avg, min, max, ok := st.ac3Info.dialnormStats(); ok {
-					extraFields = append(extraFields, jsonKV{Key: "dialnorm_Average", Val: fmt.Sprintf("%d", avg)})
-					extraFields = append(extraFields, jsonKV{Key: "dialnorm_Minimum", Val: fmt.Sprintf("%d", min)})
-					if max != min || opts.dvdExtras {
-						extraFields = append(extraFields, jsonKV{Key: "dialnorm_Maximum", Val: fmt.Sprintf("%d", max)})
+				if avg, minVal, maxVal, ok := st.ac3Info.dialnormStats(); ok {
+					extraFields = append(extraFields, jsonKV{Key: "dialnorm_Average", Val: strconv.Itoa(avg)})
+					extraFields = append(extraFields, jsonKV{Key: "dialnorm_Minimum", Val: strconv.Itoa(minVal)})
+					if maxVal != minVal || opts.dvdExtras {
+						extraFields = append(extraFields, jsonKV{Key: "dialnorm_Maximum", Val: strconv.Itoa(maxVal)})
 					}
 					if opts.dvdExtras {
-						extraFields = append(extraFields, jsonKV{Key: "dialnorm_Average_String", Val: fmt.Sprintf("%d dB", avg)})
-						extraFields = append(extraFields, jsonKV{Key: "dialnorm_Minimum_String", Val: fmt.Sprintf("%d dB", min)})
-						extraFields = append(extraFields, jsonKV{Key: "dialnorm_Maximum_String", Val: fmt.Sprintf("%d dB", max)})
+						extraFields = append(extraFields, jsonKV{Key: "dialnorm_Average_String", Val: strconv.Itoa(avg) + " dB"})
+						extraFields = append(extraFields, jsonKV{Key: "dialnorm_Minimum_String", Val: strconv.Itoa(minVal) + " dB"})
+						extraFields = append(extraFields, jsonKV{Key: "dialnorm_Maximum_String", Val: strconv.Itoa(maxVal) + " dB"})
 						if st.ac3Info.dialnormCount > 0 {
-							extraFields = append(extraFields, jsonKV{Key: "dialnorm_Count", Val: fmt.Sprintf("%d", st.ac3Info.dialnormCount)})
+							extraFields = append(extraFields, jsonKV{Key: "dialnorm_Count", Val: strconv.Itoa(st.ac3Info.dialnormCount)})
 						}
 					}
 				}
-				if avg, min, max, count, ok := st.ac3Info.comprStats(); ok {
+				if avg, minVal, maxVal, count, ok := st.ac3Info.comprStats(); ok {
 					extraFields = append(extraFields, jsonKV{Key: "compr_Average", Val: fmt.Sprintf("%.2f", avg)})
-					extraFields = append(extraFields, jsonKV{Key: "compr_Minimum", Val: fmt.Sprintf("%.2f", min)})
-					extraFields = append(extraFields, jsonKV{Key: "compr_Maximum", Val: fmt.Sprintf("%.2f", max)})
-					extraFields = append(extraFields, jsonKV{Key: "compr_Count", Val: fmt.Sprintf("%d", count)})
+					extraFields = append(extraFields, jsonKV{Key: "compr_Minimum", Val: fmt.Sprintf("%.2f", minVal)})
+					extraFields = append(extraFields, jsonKV{Key: "compr_Maximum", Val: fmt.Sprintf("%.2f", maxVal)})
+					extraFields = append(extraFields, jsonKV{Key: "compr_Count", Val: strconv.Itoa(count)})
 					if opts.dvdExtras {
 						extraFields = append(extraFields, jsonKV{Key: "compr_Average_String", Val: fmt.Sprintf("%.2f dB", avg)})
-						extraFields = append(extraFields, jsonKV{Key: "compr_Minimum_String", Val: fmt.Sprintf("%.2f dB", min)})
-						extraFields = append(extraFields, jsonKV{Key: "compr_Maximum_String", Val: fmt.Sprintf("%.2f dB", max)})
+						extraFields = append(extraFields, jsonKV{Key: "compr_Minimum_String", Val: fmt.Sprintf("%.2f dB", minVal)})
+						extraFields = append(extraFields, jsonKV{Key: "compr_Maximum_String", Val: fmt.Sprintf("%.2f dB", maxVal)})
 					}
 				}
-				if avg, min, max, count, ok := st.ac3Info.dynrngStats(); ok {
+				if avg, minVal, maxVal, count, ok := st.ac3Info.dynrngStats(); ok {
 					extraFields = append(extraFields, jsonKV{Key: "dynrng_Average", Val: fmt.Sprintf("%.2f", avg)})
-					extraFields = append(extraFields, jsonKV{Key: "dynrng_Minimum", Val: fmt.Sprintf("%.2f", min)})
-					extraFields = append(extraFields, jsonKV{Key: "dynrng_Maximum", Val: fmt.Sprintf("%.2f", max)})
-					extraFields = append(extraFields, jsonKV{Key: "dynrng_Count", Val: fmt.Sprintf("%d", count)})
+					extraFields = append(extraFields, jsonKV{Key: "dynrng_Minimum", Val: fmt.Sprintf("%.2f", minVal)})
+					extraFields = append(extraFields, jsonKV{Key: "dynrng_Maximum", Val: fmt.Sprintf("%.2f", maxVal)})
+					extraFields = append(extraFields, jsonKV{Key: "dynrng_Count", Val: strconv.Itoa(count)})
 				}
 				if len(extraFields) > 0 {
 					jsonRaw["extra"] = renderJSONObject(extraFields, false)
 				}
 			}
-		} else if st.kind == StreamText && st.pts.has() {
-			duration := float64(ptsDelta(st.pts.first, st.pts.last)) / 90000.0
-			if duration > 0 {
-				fields = addStreamDuration(fields, duration)
-				jsonExtras["Duration"] = fmt.Sprintf("%.3f", duration)
-			}
-			if delay, ok := delayRelativeToVideoMs(st.pts, videoPTS, videoIsH264, videoFrameRate); ok {
-				if rounded := int64(math.Round(delay)); rounded != 0 {
-					fields = append(fields, Field{Name: "Delay relative to video", Value: formatDelayMs(rounded)})
+		case StreamText:
+			if st.pts.has() {
+				duration := float64(ptsDelta(st.pts.first, st.pts.last)) / 90000.0
+				if duration > 0 {
+					fields = addStreamDuration(fields, duration)
+					jsonExtras["Duration"] = fmt.Sprintf("%.3f", duration)
 				}
+				if delay, ok := delayRelativeToVideoMs(st.pts, videoPTS, videoIsH264, videoFrameRate); ok {
+					if rounded := int64(math.Round(delay)); rounded != 0 {
+						fields = append(fields, Field{Name: "Delay relative to video", Value: formatDelayMs(rounded)})
+					}
+				}
+			} else if duration := ptsDurationPS(st.pts, opts); duration > 0 {
+				fields = addStreamDuration(fields, duration)
 			}
-		} else if st.kind != StreamVideo {
+		case StreamGeneral, StreamMenu, StreamImage:
 			if duration := ptsDurationPS(st.pts, opts); duration > 0 {
 				fields = addStreamDuration(fields, duration)
 			}
@@ -1186,11 +1200,12 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 	allConstant := true
 	for _, key := range streamOrder {
 		st := streams[key]
-		if st == nil || (st.kind != StreamVideo && st.kind != StreamAudio) {
+		if st == nil {
 			continue
 		}
 		mode := ""
-		if st.kind == StreamVideo {
+		switch st.kind {
+		case StreamVideo:
 			if parser := videoParsers[key]; parser != nil {
 				videoInfo := parser.finalize()
 				mode = videoInfo.BitRateMode
@@ -1198,12 +1213,14 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 					mode = "Constant"
 				}
 			}
-		} else if st.kind == StreamAudio {
+		case StreamAudio:
 			if st.hasAC3 {
 				mode = "Constant"
 			} else if st.audioRate > 0 {
 				mode = "Variable"
 			}
+		case StreamGeneral, StreamText, StreamImage, StreamMenu:
+			continue
 		}
 		if mode == "" {
 			continue

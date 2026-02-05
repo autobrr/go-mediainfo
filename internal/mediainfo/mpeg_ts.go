@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"strconv"
 	"strings"
 )
 
@@ -279,10 +280,10 @@ func ParseMPEGTS(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, []Fie
 			continue
 		}
 		jsonExtras := map[string]string{}
-		jsonExtras["ID"] = fmt.Sprintf("%d", st.pid)
+		jsonExtras["ID"] = strconv.FormatUint(uint64(st.pid), 10)
 		jsonExtras["StreamOrder"] = fmt.Sprintf("0-%d", i)
 		if st.programNumber > 0 {
-			jsonExtras["MenuID"] = fmt.Sprintf("%d", st.programNumber)
+			jsonExtras["MenuID"] = strconv.FormatUint(uint64(st.programNumber), 10)
 		}
 		if st.pts.has() {
 			delay := float64(st.pts.min) / 90000.0
@@ -326,7 +327,7 @@ func ParseMPEGTS(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, []Fie
 			if st.streamType != 0 {
 				parts := []string{formatTSCodecID(st.streamType)}
 				if st.audioObject > 0 {
-					parts = append(parts, fmt.Sprintf("%d", st.audioObject))
+					parts = append(parts, strconv.Itoa(st.audioObject))
 				}
 				fields = append(fields, Field{Name: "Codec ID", Value: strings.Join(parts, "-")})
 			}
@@ -446,12 +447,13 @@ func ParseMPEGTS(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, []Fie
 			switch st.kind {
 			case StreamVideo:
 				listKinds = append(listKinds, "1")
-				listPositions = append(listPositions, fmt.Sprintf("%d", videoIndex))
+				listPositions = append(listPositions, strconv.Itoa(videoIndex))
 				videoIndex++
 			case StreamAudio:
 				listKinds = append(listKinds, "2")
-				listPositions = append(listPositions, fmt.Sprintf("%d", audioIndex))
+				listPositions = append(listPositions, strconv.Itoa(audioIndex))
 				audioIndex++
+			case StreamGeneral, StreamText, StreamImage, StreamMenu:
 			}
 		}
 		if len(formats) > 0 {
@@ -474,10 +476,10 @@ func ParseMPEGTS(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, []Fie
 		}
 		menuJSON := map[string]string{
 			"StreamOrder": "0",
-			"ID":          fmt.Sprintf("%d", pmtPID),
+			"ID":          strconv.FormatUint(uint64(pmtPID), 10),
 		}
 		if programNumber > 0 {
-			menuJSON["MenuID"] = fmt.Sprintf("%d", programNumber)
+			menuJSON["MenuID"] = strconv.FormatUint(uint64(programNumber), 10)
 		}
 		if duration := pcrPTS.duration(); duration > 0 {
 			menuJSON["Duration"] = fmt.Sprintf("%.9f", duration)
@@ -599,23 +601,12 @@ func mapTSStream(streamType byte) (StreamKind, string) {
 	}
 }
 
-func durationFromPTS(first, last uint64, ok bool) float64 {
-	if !ok || last == 0 {
-		return 0
-	}
-	if last < first {
-		last += 1 << 33
-	}
-	delta := last - first
-	return float64(delta) / 90000.0
-}
-
 func formatStreamID(pid uint16) string {
 	return formatID(uint64(pid))
 }
 
 func formatTSCodecID(streamType byte) string {
-	return fmt.Sprintf("%d", streamType)
+	return strconv.FormatUint(uint64(streamType), 10)
 }
 
 func parseH264FromPES(data []byte) ([]Field, uint64, uint64, float64) {
@@ -849,10 +840,7 @@ func scanTSForH264(file io.ReadSeeker, pid uint16, size int64) ([]Field, uint64,
 	if size > 0 {
 		maxPackets = size / 188
 	}
-	for {
-		if maxPackets > 0 && readPackets >= maxPackets {
-			break
-		}
+	for maxPackets == 0 || readPackets < maxPackets {
 		_, err := io.ReadFull(reader, packet)
 		if err != nil {
 			break

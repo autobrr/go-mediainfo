@@ -60,7 +60,7 @@ func TestGoldenOutputs(t *testing.T) {
 						if err := os.MkdirAll(filepath.Dir(goldenPath), 0755); err != nil {
 							t.Fatalf("mkdir: %v", err)
 						}
-						if err := os.WriteFile(goldenPath, []byte(got), 0644); err != nil {
+						if err := os.WriteFile(goldenPath, []byte(got), 0o600); err != nil {
 							t.Fatalf("write golden: %v", err)
 						}
 						return

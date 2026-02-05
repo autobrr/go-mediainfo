@@ -33,6 +33,7 @@ const helpTemplate = helpBanner + `
 var rootCmd = &cobra.Command{
 	Use:                "mediainfo [options] <file> [file...]",
 	Short:              "Go rewrite of MediaInfo CLI.",
+	Args:               cobra.ArbitraryArgs,
 	DisableFlagParsing: true,
 	SilenceUsage:       true,
 	SilenceErrors:      true,

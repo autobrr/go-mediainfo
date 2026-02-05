@@ -61,17 +61,14 @@ func renderXMLMedia(report Report) string {
 	buf.WriteString(renderXMLTrack("General", 0, buildJSONGeneralFields(report)))
 
 	sorted := orderTracks(report.Streams)
-	kindCounts := countStreams(sorted)
-	kindIndex := map[StreamKind]int{}
-	for i, stream := range sorted {
-		kindIndex[stream.Kind]++
+	forEachStreamWithKindIndex(sorted, func(stream Stream, index, total, order int) {
 		typeOrder := 0
-		if kindCounts[stream.Kind] > 1 {
-			typeOrder = kindIndex[stream.Kind]
+		if total > 1 {
+			typeOrder = index
 		}
-		fields := buildJSONStreamFields(stream, i, 0)
+		fields := buildJSONStreamFields(stream, order, 0)
 		buf.WriteString(renderXMLTrack(string(stream.Kind), typeOrder, fields))
-	}
+	})
 
 	buf.WriteString("</media>\n")
 	return buf.String()
@@ -134,12 +131,14 @@ func renderOrderedXML(key string, value orderedValue) string {
 		var buf bytes.Buffer
 		buf.WriteString(fmt.Sprintf("<%s>\n", name))
 		for _, item := range value.arr {
-			if item.kind == orderedObject {
+			switch item.kind {
+			case orderedObject:
 				for _, kv := range item.obj {
 					buf.WriteString(renderOrderedXML(kv.key, kv.val))
 				}
-			} else if item.kind == orderedString {
+			case orderedString:
 				buf.WriteString(xmlEscape(item.str))
+			case orderedArray:
 			}
 		}
 		buf.WriteString(fmt.Sprintf("</%s>\n", name))

@@ -610,10 +610,10 @@ func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAud
 			}
 			stream.Fields = insertFieldBefore(stream.Fields, Field{Name: "compr", Value: formatCompr(comprValue)}, "Default")
 		}
-		if avg, min, max, ok := ac3.dialnormStats(); ok {
+		if avg, minVal, maxVal, ok := ac3.dialnormStats(); ok {
 			stream.Fields = insertFieldBefore(stream.Fields, Field{Name: "dialnorm_Average", Value: formatDialnorm(avg)}, "Default")
-			stream.Fields = insertFieldBefore(stream.Fields, Field{Name: "dialnorm_Minimum", Value: formatDialnorm(min)}, "Default")
-			stream.Fields = insertFieldBefore(stream.Fields, Field{Name: "dialnorm_Maximum", Value: formatDialnorm(max)}, "Default")
+			stream.Fields = insertFieldBefore(stream.Fields, Field{Name: "dialnorm_Minimum", Value: formatDialnorm(minVal)}, "Default")
+			stream.Fields = insertFieldBefore(stream.Fields, Field{Name: "dialnorm_Maximum", Value: formatDialnorm(maxVal)}, "Default")
 		}
 
 		if stream.JSON == nil {
@@ -662,17 +662,17 @@ func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAud
 		if ac3.lfeon >= 0 {
 			extraFields = append(extraFields, jsonKV{Key: "lfeon", Val: strconv.Itoa(ac3.lfeon)})
 		}
-		if avg, min, max, ok := ac3.dialnormStats(); ok {
+		if avg, minVal, maxVal, ok := ac3.dialnormStats(); ok {
 			extraFields = append(extraFields, jsonKV{Key: "dialnorm_Average", Val: strconv.Itoa(avg)})
-			extraFields = append(extraFields, jsonKV{Key: "dialnorm_Minimum", Val: strconv.Itoa(min)})
-			if max != min {
-				extraFields = append(extraFields, jsonKV{Key: "dialnorm_Maximum", Val: strconv.Itoa(max)})
+			extraFields = append(extraFields, jsonKV{Key: "dialnorm_Minimum", Val: strconv.Itoa(minVal)})
+			if maxVal != minVal {
+				extraFields = append(extraFields, jsonKV{Key: "dialnorm_Maximum", Val: strconv.Itoa(maxVal)})
 			}
 		}
-		if avg, min, max, count, ok := ac3.comprStats(); ok {
+		if avg, minVal, maxVal, count, ok := ac3.comprStats(); ok {
 			extraFields = append(extraFields, jsonKV{Key: "compr_Average", Val: formatComprRaw(avg)})
-			extraFields = append(extraFields, jsonKV{Key: "compr_Minimum", Val: formatComprRaw(min)})
-			extraFields = append(extraFields, jsonKV{Key: "compr_Maximum", Val: formatComprRaw(max)})
+			extraFields = append(extraFields, jsonKV{Key: "compr_Minimum", Val: formatComprRaw(minVal)})
+			extraFields = append(extraFields, jsonKV{Key: "compr_Maximum", Val: formatComprRaw(maxVal)})
 			extraFields = append(extraFields, jsonKV{Key: "compr_Count", Val: strconv.Itoa(count)})
 		}
 		if len(extraFields) > 0 {

@@ -53,15 +53,15 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			}
 			if info.DurationSeconds > 0 {
 				overall := (float64(stat.Size()) * 8) / info.DurationSeconds
-				general.JSON["OverallBitRate"] = fmt.Sprintf("%d", int64(math.Round(overall)))
+				general.JSON["OverallBitRate"] = strconv.FormatInt(int64(math.Round(overall)), 10)
 			}
 			if headerSize, dataSize, footerSize, mdatCount, moovBeforeMdat, ok := mp4TopLevelSizes(file, stat.Size()); ok {
-				general.JSON["HeaderSize"] = fmt.Sprintf("%d", headerSize)
-				general.JSON["DataSize"] = fmt.Sprintf("%d", dataSize)
-				general.JSON["FooterSize"] = fmt.Sprintf("%d", footerSize)
+				general.JSON["HeaderSize"] = strconv.FormatInt(headerSize, 10)
+				general.JSON["DataSize"] = strconv.FormatInt(dataSize, 10)
+				general.JSON["FooterSize"] = strconv.FormatInt(footerSize, 10)
 				streamSize := stat.Size() - (dataSize - int64(mdatCount*8))
 				if streamSize > 0 {
-					general.JSON["StreamSize"] = fmt.Sprintf("%d", streamSize)
+					general.JSON["StreamSize"] = strconv.FormatInt(streamSize, 10)
 				}
 				if moovBeforeMdat {
 					general.JSON["IsStreamable"] = "Yes"
@@ -81,7 +81,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 					}
 				}
 				if track.ID > 0 {
-					fields = appendFieldUnique(fields, Field{Name: "ID", Value: fmt.Sprintf("%d", track.ID)})
+					fields = appendFieldUnique(fields, Field{Name: "ID", Value: strconv.FormatUint(uint64(track.ID), 10)})
 				}
 				if track.Format != "" {
 					fields = appendFieldUnique(fields, Field{Name: "Format", Value: track.Format})
@@ -111,7 +111,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 								diffSamples := int64(track.LastSampleDelta) - int64(track.SampleDelta)
 								diffMs := int64(math.Round(float64(diffSamples) * 1000 / float64(track.Timescale)))
 								if diffMs != 0 {
-									fields = appendFieldUnique(fields, Field{Name: "Source_Duration_LastFrame", Value: fmt.Sprintf("%d ms", diffMs)})
+									fields = appendFieldUnique(fields, Field{Name: "Source_Duration_LastFrame", Value: strconv.FormatInt(diffMs, 10) + " ms"})
 								}
 							}
 						}
@@ -123,7 +123,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 							}
 						}
 						fields = addStreamBitrate(fields, bitrate)
-						jsonExtras["BitRate"] = fmt.Sprintf("%d", int64(math.Round(bitrate)))
+						jsonExtras["BitRate"] = strconv.FormatInt(int64(math.Round(bitrate)), 10)
 					}
 				}
 				if track.SampleBytes > 0 {
@@ -149,19 +149,19 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 						if track.Kind == StreamAudio && sourceDuration > 0 {
 							jsonStreamBytes++
 						}
-						jsonExtras["StreamSize"] = fmt.Sprintf("%d", jsonStreamBytes)
+						jsonExtras["StreamSize"] = strconv.FormatInt(jsonStreamBytes, 10)
 					}
 					if sourceDuration > 0 {
 						if sourceSize := formatStreamSize(int64(track.SampleBytes), stat.Size()); sourceSize != "" {
 							fields = appendFieldUnique(fields, Field{Name: "Source stream size", Value: sourceSize})
 						}
-						jsonExtras["Source_StreamSize"] = fmt.Sprintf("%d", int64(track.SampleBytes))
+						jsonExtras["Source_StreamSize"] = strconv.FormatInt(int64(track.SampleBytes), 10)
 						if track.Kind == StreamAudio {
 							if displaySamples > 0 {
-								jsonExtras["FrameCount"] = fmt.Sprintf("%d", int64(math.Round(displaySamples)))
+								jsonExtras["FrameCount"] = strconv.FormatInt(int64(math.Round(displaySamples)), 10)
 							}
 							if track.SampleCount > 0 {
-								jsonExtras["Source_FrameCount"] = fmt.Sprintf("%d", track.SampleCount)
+								jsonExtras["Source_FrameCount"] = strconv.FormatUint(track.SampleCount, 10)
 							}
 						}
 					}
@@ -178,22 +178,22 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 							fields = appendFieldUnique(fields, Field{Name: "Bits/(Pixel*Frame)", Value: bits})
 						}
 					}
-					jsonExtras["FrameCount"] = fmt.Sprintf("%d", track.SampleCount)
+					jsonExtras["FrameCount"] = strconv.FormatUint(track.SampleCount, 10)
 					jsonExtras["FrameRate_Mode_Original"] = "VFR"
 					if generalFrameCount == "" {
-						generalFrameCount = fmt.Sprintf("%d", track.SampleCount)
+						generalFrameCount = strconv.FormatUint(track.SampleCount, 10)
 					}
 				}
 				if track.Default && track.Kind != StreamVideo {
 					fields = appendFieldUnique(fields, Field{Name: "Default", Value: "Yes"})
 				}
 				if track.AlternateGroup > 0 {
-					fields = appendFieldUnique(fields, Field{Name: "Alternate group", Value: fmt.Sprintf("%d", track.AlternateGroup)})
+					fields = appendFieldUnique(fields, Field{Name: "Alternate group", Value: strconv.FormatUint(uint64(track.AlternateGroup), 10)})
 				}
 				if track.Kind == StreamAudio && track.EditMediaTime > 0 && track.Timescale > 0 {
 					delayMs := int64(math.Round(float64(track.EditMediaTime) * 1000 / float64(track.Timescale)))
 					if delayMs != 0 {
-						jsonRaw["extra"] = fmt.Sprintf("{\"Source_Delay\":\"-%d\",\"Source_Delay_Source\":\"Container\"}", delayMs)
+						jsonRaw["extra"] = "{\"Source_Delay\":\"-" + strconv.FormatInt(delayMs, 10) + "\",\"Source_Delay_Source\":\"Container\"}"
 					}
 				}
 				streams = append(streams, Stream{Kind: track.Kind, Fields: fields, JSON: jsonExtras, JSONRaw: jsonRaw})
@@ -248,7 +248,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			}
 			if info.DurationSeconds > 0 {
 				overall := (float64(stat.Size()) * 8) / info.DurationSeconds
-				general.JSON["OverallBitRate"] = fmt.Sprintf("%d", int64(math.Round(overall)))
+				general.JSON["OverallBitRate"] = strconv.FormatInt(int64(math.Round(overall)), 10)
 			}
 			general.JSON["IsStreamable"] = "Yes"
 			var streamSizeSum int64
@@ -268,7 +268,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			if streamSizeSum > 0 {
 				remaining := stat.Size() - streamSizeSum
 				if remaining >= 0 {
-					general.JSON["StreamSize"] = fmt.Sprintf("%d", remaining)
+					general.JSON["StreamSize"] = strconv.FormatInt(remaining, 10)
 				}
 			}
 			overallModeField := ""
@@ -308,7 +308,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 					duration, durOk := parseDurationSeconds(findField(stream.Fields, "Duration"))
 					fps, fpsOk := parseFPS(findField(stream.Fields, "Frame rate"))
 					if durOk && fpsOk {
-						general.JSON["FrameCount"] = fmt.Sprintf("%d", int(math.Round(duration*fps)))
+						general.JSON["FrameCount"] = strconv.Itoa(int(math.Round(duration * fps)))
 					}
 				}
 				break
@@ -361,12 +361,12 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			if info.DurationSeconds > 0 {
 				general.JSON["Duration"] = fmt.Sprintf("%.9f", info.DurationSeconds)
 				overall := (float64(stat.Size()) * 8) / info.DurationSeconds
-				general.JSON["OverallBitRate"] = fmt.Sprintf("%d", int64(math.Round(overall)))
+				general.JSON["OverallBitRate"] = strconv.FormatInt(int64(math.Round(overall)), 10)
 			}
 			if info.OverallBitrateMin > 0 && info.OverallBitrateMax > 0 {
-				min := int64(math.Round(info.OverallBitrateMin))
-				max := int64(math.Round(info.OverallBitrateMax))
-				general.JSONRaw["extra"] = fmt.Sprintf("{\"OverallBitRate_Precision_Min\":\"%d\",\"OverallBitRate_Precision_Max\":\"%d\"}", min, max)
+				minRate := int64(math.Round(info.OverallBitrateMin))
+				maxRate := int64(math.Round(info.OverallBitrateMax))
+				general.JSONRaw["extra"] = "{\"OverallBitRate_Precision_Min\":\"" + strconv.FormatInt(minRate, 10) + "\",\"OverallBitRate_Precision_Max\":\"" + strconv.FormatInt(maxRate, 10) + "\"}"
 			}
 			if _, err := file.Seek(0, io.SeekStart); err == nil {
 				sniff := make([]byte, 1<<20)
@@ -412,7 +412,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 					if general.JSON == nil {
 						general.JSON = map[string]string{}
 					}
-					general.JSON["FileSize"] = fmt.Sprintf("%d", vobSize)
+					general.JSON["FileSize"] = strconv.FormatInt(vobSize, 10)
 					if completeNameLast != "" {
 						general.Fields = appendFieldUnique(general.Fields, Field{Name: "CompleteName_Last", Value: completeNameLast})
 						general.JSON["CompleteName_Last"] = completeNameLast
@@ -439,7 +439,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 				if jsonDuration > 0 {
 					general.JSON["Duration"] = formatJSONSeconds(jsonDuration)
 					overall := (float64(psSize) * 8) / jsonDuration
-					general.JSON["OverallBitRate"] = fmt.Sprintf("%d", int64(math.Round(overall)))
+					general.JSON["OverallBitRate"] = strconv.FormatInt(int64(math.Round(overall)), 10)
 				}
 			}
 			var frameCount string
@@ -459,11 +459,11 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 					continue
 				}
 				if streams[i].Kind == StreamAudio {
-					streams[i].JSON["StreamOrder"] = fmt.Sprintf("%d", audioIndex)
+					streams[i].JSON["StreamOrder"] = strconv.Itoa(audioIndex)
 					audioIndex++
 				}
 				if streams[i].Kind == StreamText {
-					streams[i].JSON["StreamOrder"] = fmt.Sprintf("%d", textIndex)
+					streams[i].JSON["StreamOrder"] = strconv.Itoa(textIndex)
 					textIndex++
 				}
 				if streams[i].Kind == StreamVideo {
@@ -476,7 +476,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 						duration, durOk := parseDurationSeconds(findField(streams[i].Fields, "Duration"))
 						fps, fpsOk := parseFPS(findField(streams[i].Fields, "Frame rate"))
 						if durOk && fpsOk {
-							frameCount = fmt.Sprintf("%d", int(math.Round(duration*fps)))
+							frameCount = strconv.Itoa(int(math.Round(duration * fps)))
 						}
 					}
 					if hasAudio {
@@ -497,7 +497,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			if streamSizeSum > 0 {
 				remaining := psSize - streamSizeSum
 				if remaining >= 0 {
-					general.JSON["StreamSize"] = fmt.Sprintf("%d", remaining)
+					general.JSON["StreamSize"] = strconv.FormatInt(remaining, 10)
 				}
 			}
 		}
@@ -534,7 +534,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 				jsonDuration := math.Round(info.DurationSeconds*1000) / 1000
 				if jsonDuration > 0 {
 					overall := (float64(stat.Size()) * 8) / jsonDuration
-					general.JSON["OverallBitRate"] = fmt.Sprintf("%d", int64(math.Round(overall)))
+					general.JSON["OverallBitRate"] = strconv.FormatInt(int64(math.Round(overall)), 10)
 				}
 			}
 			var frameCount string
@@ -545,7 +545,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 					duration, durOk := parseDurationSeconds(findField(streams[i].Fields, "Duration"))
 					fps, fpsOk := parseFPS(findField(streams[i].Fields, "Frame rate"))
 					if durOk && fpsOk {
-						frameCount = fmt.Sprintf("%d", int(math.Round(duration*fps)))
+						frameCount = strconv.Itoa(int(math.Round(duration * fps)))
 					}
 				}
 				if streams[i].JSON != nil {
@@ -562,7 +562,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			if streamSizeSum > 0 {
 				remaining := stat.Size() - streamSizeSum
 				if remaining >= 0 {
-					general.JSON["StreamSize"] = fmt.Sprintf("%d", remaining)
+					general.JSON["StreamSize"] = strconv.FormatInt(remaining, 10)
 				}
 			}
 			general.JSONRaw = map[string]string{
@@ -581,7 +581,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 				jsonDuration := math.Round(info.DurationSeconds*1000) / 1000
 				if jsonDuration > 0 {
 					overall := (float64(stat.Size()) * 8) / jsonDuration
-					general.JSON["OverallBitRate"] = fmt.Sprintf("%d", int64(math.Round(overall)))
+					general.JSON["OverallBitRate"] = strconv.FormatInt(int64(math.Round(overall)), 10)
 				}
 			}
 			var frameCount string
@@ -591,7 +591,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 					duration, durOk := parseDurationSeconds(findField(stream.Fields, "Duration"))
 					fps, fpsOk := parseFPS(findField(stream.Fields, "Frame rate"))
 					if durOk && fpsOk {
-						frameCount = fmt.Sprintf("%d", int(math.Round(duration*fps)))
+						frameCount = strconv.Itoa(int(math.Round(duration * fps)))
 					}
 				}
 				if stream.JSON != nil {
@@ -608,12 +608,12 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			if streamSizeSum > 0 {
 				remaining := stat.Size() - streamSizeSum
 				if remaining >= 0 {
-					general.JSON["StreamSize"] = fmt.Sprintf("%d", remaining)
+					general.JSON["StreamSize"] = strconv.FormatInt(remaining, 10)
 				}
 			}
 		}
 	case "DVD Video":
-		if parsed, ok := ParseDVDVideo(path, file, stat.Size(), opts); ok {
+		if parsed, ok := parseDVDVideo(path, file, stat.Size(), opts); ok {
 			info = parsed.Container
 			if parsed.FileSize > 0 {
 				general.Fields = setFieldValue(general.Fields, "File size", formatBytes(parsed.FileSize))
@@ -631,7 +631,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 				general.JSONRaw = parsed.GeneralJSONRaw
 			}
 			if parsed.FileSize > 0 {
-				general.JSON["FileSize"] = fmt.Sprintf("%d", parsed.FileSize)
+				general.JSON["FileSize"] = strconv.FormatInt(parsed.FileSize, 10)
 			}
 			if info.DurationSeconds > 0 {
 				general.JSON["Duration"] = formatJSONSeconds(info.DurationSeconds)
@@ -653,7 +653,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			if (format == "MPEG-PS" || format == "MPEG Video" || format == "Matroska") && strings.Contains(rate, "(") {
 				parts := strings.Fields(rate)
 				if len(parts) > 0 {
-					general.Fields = appendFieldUnique(general.Fields, Field{Name: "Frame rate", Value: fmt.Sprintf("%s FPS", parts[0])})
+					general.Fields = appendFieldUnique(general.Fields, Field{Name: "Frame rate", Value: parts[0] + " FPS"})
 					break
 				}
 			}

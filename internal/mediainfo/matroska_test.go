@@ -39,7 +39,7 @@ func buildMatroskaSample() []byte {
 }
 
 func buildMatroskaInfo() []byte {
-	info := []byte{}
+	info := make([]byte, 0, 32)
 	info = append(info, buildMatroskaElement(mkvIDTimecodeScale, []byte{0x0F, 0x42, 0x40})...)
 	info = append(info, buildMatroskaElement(mkvIDDuration, []byte{0x41, 0x20, 0x00, 0x00})...)
 	return buildMatroskaElement(mkvIDInfo, info)
@@ -56,7 +56,7 @@ func buildMatroskaTracks() []byte {
 }
 
 func buildMatroskaVideoSettings(width, height uint64) []byte {
-	video := []byte{}
+	video := make([]byte, 0, 24)
 	video = append(video, buildMatroskaElement(mkvIDPixelWidth, encodeMatroskaUint(width))...)
 	video = append(video, buildMatroskaElement(mkvIDPixelHeight, encodeMatroskaUint(height))...)
 	return buildMatroskaElement(mkvIDTrackVideo, video)

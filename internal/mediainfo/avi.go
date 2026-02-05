@@ -2,9 +2,9 @@ package mediainfo
 
 import (
 	"encoding/binary"
-	"fmt"
 	"io"
 	"math"
+	"strconv"
 )
 
 const aviMaxVisualScan = 1 << 20
@@ -19,29 +19,28 @@ type aviMainHeader struct {
 }
 
 type aviStream struct {
-	index         int
-	kind          StreamKind
-	handler       string
-	compression   string
-	scale         uint32
-	rate          uint32
-	length        uint32
-	width         uint32
-	height        uint32
-	bitCount      uint16
-	bytes         uint64
-	writingLib    string
-	profile       string
-	bvop          *bool
-	qpel          *bool
-	gmc           string
-	matrix        string
-	colorSpace    string
-	chroma        string
-	bitDepth      string
-	scanType      string
-	hasVideoInfo  bool
-	streamSizeSet bool
+	index        int
+	kind         StreamKind
+	handler      string
+	compression  string
+	scale        uint32
+	rate         uint32
+	length       uint32
+	width        uint32
+	height       uint32
+	bitCount     uint16
+	bytes        uint64
+	writingLib   string
+	profile      string
+	bvop         *bool
+	qpel         *bool
+	gmc          string
+	matrix       string
+	colorSpace   string
+	chroma       string
+	bitDepth     string
+	scanType     string
+	hasVideoInfo bool
 }
 
 type vopScanner struct {
@@ -200,7 +199,7 @@ func ParseAVI(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, []Field,
 		fields := []Field{}
 		if st.kind == StreamVideo {
 			var jsonExtras map[string]string
-			fields = append(fields, Field{Name: "ID", Value: fmt.Sprintf("%d", st.index)})
+			fields = append(fields, Field{Name: "ID", Value: strconv.Itoa(st.index)})
 			if format := mapAVICompression(st); format != "" {
 				fields = append(fields, Field{Name: "Format", Value: format})
 			}
@@ -232,7 +231,7 @@ func ParseAVI(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, []Field,
 				if jsonExtras == nil {
 					jsonExtras = map[string]string{}
 				}
-				jsonExtras["BitRate"] = fmt.Sprintf("%d", int64(math.Round(bitrate)))
+				jsonExtras["BitRate"] = strconv.FormatInt(int64(math.Round(bitrate)), 10)
 				if st.width > 0 && st.height > 0 {
 					frameRate := aviFrameRate(st)
 					if frameRate > 0 {
@@ -276,7 +275,7 @@ func ParseAVI(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, []Field,
 				if jsonExtras == nil {
 					jsonExtras = map[string]string{}
 				}
-				jsonExtras["StreamSize"] = fmt.Sprintf("%d", st.bytes)
+				jsonExtras["StreamSize"] = strconv.FormatUint(st.bytes, 10)
 			}
 			if st.writingLib != "" {
 				fields = append(fields, Field{Name: "Writing library", Value: st.writingLib})

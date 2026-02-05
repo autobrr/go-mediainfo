@@ -9,17 +9,10 @@ func RenderCSV(reports []Report) string {
 	var buf bytes.Buffer
 	for _, report := range reports {
 		writeCSVTrack(&buf, string(report.General.Kind), report.General)
-
-		kindCounts := map[StreamKind]int{}
-		for _, stream := range report.Streams {
-			kindCounts[stream.Kind]++
-		}
-		kindIndex := map[StreamKind]int{}
-		for _, stream := range report.Streams {
-			kindIndex[stream.Kind]++
-			title := csvStreamTitle(stream.Kind, kindIndex[stream.Kind], kindCounts[stream.Kind])
+		forEachStreamWithKindIndex(report.Streams, func(stream Stream, index, total, _ int) {
+			title := csvStreamTitle(stream.Kind, index, total)
 			writeCSVTrack(&buf, title, stream)
-		}
+		})
 	}
 	return buf.String()
 }

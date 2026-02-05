@@ -387,11 +387,12 @@ func (p *mpeg2VideoParser) parsePictureHeader(data []byte) {
 }
 
 func (p *mpeg2VideoParser) finalize() mpeg2VideoInfo {
-	if p.gopVariable {
+	switch {
+	case p.gopVariable:
 		p.info.GOPVariable = true
-	} else if p.gopLength > 0 {
+	case p.gopLength > 0:
 		p.info.GOPLength = p.gopLength
-	} else if p.currentGOPCount > 0 {
+	case p.currentGOPCount > 0:
 		p.info.GOPLength = p.currentGOPCount
 	}
 	if p.gopN > 0 && !p.gopNVariable {
