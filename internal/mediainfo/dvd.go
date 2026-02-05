@@ -71,7 +71,7 @@ func parseDVDVideo(path string, file *os.File, size int64, opts AnalyzeOptions) 
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		return dvdInfo{}, false
 	}
-	data, err := io.ReadAll(file)
+	data, err := readSizedFile(file, size)
 	if err != nil || len(data) < 0x0206 {
 		return dvdInfo{}, false
 	}
@@ -393,6 +393,24 @@ func parseDVDVideo(path string, file *os.File, size int64, opts AnalyzeOptions) 
 
 	info.Streams = streams
 	return info, true
+}
+
+func readSizedFile(file *os.File, size int64) ([]byte, error) {
+	if size <= 0 {
+		return io.ReadAll(file)
+	}
+	if size > int64(^uint(0)>>1) {
+		return io.ReadAll(file)
+	}
+	buf := make([]byte, int(size))
+	n, err := io.ReadFull(file, buf)
+	if err != nil {
+		if err == io.EOF || err == io.ErrUnexpectedEOF {
+			return buf[:n], nil
+		}
+		return nil, err
+	}
+	return buf[:n], nil
 }
 
 func parseDVDVideoAttrs(data []byte, offset int) dvdVideoAttrs {
