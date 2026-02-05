@@ -9,6 +9,9 @@ cask "mediainfo" do
     skip "Auto-generated on release."
   end
 
+  conflicts_with formula: "media-info"
+  conflicts_with formula: "mediainfo"
+
   binary "mediainfo"
 
   on_macos do

@@ -80,7 +80,9 @@ homebrew_casks:
       - mediainfo
     homepage: "https://github.com/autobrr/go-mediainfo"
     description: "Go rewrite of MediaInfo CLI."
+    custom_block: |
+      conflicts_with formula: "media-info"
+      conflicts_with formula: "mediainfo"
     repository:
       owner: autobrr
       name: "go-mediainfo"
-

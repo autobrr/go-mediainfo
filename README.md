@@ -18,6 +18,8 @@ brew tap autobrr/go-mediainfo https://github.com/autobrr/go-mediainfo
 brew install --cask autobrr/go-mediainfo/mediainfo
 ```
 
+Note: Homebrew’s official MediaInfo install can conflict (`media-info` / `mediainfo`). If you have it installed, uninstall/unlink it first.
+
 - Go install (requires Go toolchain):
 
 ```sh
