@@ -27,8 +27,6 @@ type psPending struct {
 	skip       int
 }
 
-var pesStartPrefix = []byte{0x00, 0x00, 0x01}
-
 func newPSStreamParser() *psStreamParser {
 	return &psStreamParser{
 		streams:      map[uint16]*psStream{},
@@ -410,19 +408,20 @@ func findPESStart(data []byte, start int) int {
 	if start < 0 {
 		start = 0
 	}
-	if start+4 > len(data) {
+	if len(data) < 4 || start+4 > len(data) {
 		return -1
 	}
-	for pos := start; pos+4 <= len(data); {
-		idx := bytes.Index(data[pos:], pesStartPrefix)
+	limit := len(data) - 3
+	for pos := start; pos < limit; {
+		idx := bytes.IndexByte(data[pos:limit], 0x00)
 		if idx < 0 {
 			return -1
 		}
-		i := pos + idx
-		if i+3 < len(data) && isPESStreamID(data[i+3]) {
-			return i
+		pos += idx
+		if data[pos+1] == 0x00 && data[pos+2] == 0x01 && isPESStreamID(data[pos+3]) {
+			return pos
 		}
-		pos = i + 1
+		pos++
 	}
 	return -1
 }
