@@ -209,10 +209,7 @@ func ParseMPEGTS(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, []Fie
 				processPES(entry)
 			}
 			headerLen := int(payload[8])
-			dataStart := 9 + headerLen
-			if dataStart > len(payload) {
-				dataStart = len(payload)
-			}
+			dataStart := min(9+headerLen, len(payload))
 			data := payload[dataStart:]
 			if entry.kind == StreamVideo && len(data) > 0 {
 				entry.pesData = append(entry.pesData[:0], data...)
@@ -889,10 +886,7 @@ func scanTSForH264(file io.ReadSeeker, pid uint16, size int64) ([]Field, uint64,
 				}
 			}
 			headerLen := int(payload[8])
-			dataStart := 9 + headerLen
-			if dataStart > len(payload) {
-				dataStart = len(payload)
-			}
+			dataStart := min(9+headerLen, len(payload))
 			pesData = append(pesData[:0], payload[dataStart:]...)
 			continue
 		}

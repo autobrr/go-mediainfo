@@ -117,7 +117,7 @@ func (p *mpeg2VideoParser) parseSequenceHeader(data []byte) {
 	loadIntra := br.readBitsValue(1)
 	if loadIntra == 1 {
 		matrix := make([]byte, 0, 64)
-		for i := 0; i < 64; i++ {
+		for range 64 {
 			value := br.readBitsValue(8)
 			if len(matrix) < 64 {
 				matrix = append(matrix, byte(value))
@@ -135,7 +135,7 @@ func (p *mpeg2VideoParser) parseSequenceHeader(data []byte) {
 	loadNonIntra := br.readBitsValue(1)
 	if loadNonIntra == 1 {
 		matrix := make([]byte, 0, 64)
-		for i := 0; i < 64; i++ {
+		for range 64 {
 			value := br.readBitsValue(8)
 			if len(matrix) < 64 {
 				matrix = append(matrix, byte(value))

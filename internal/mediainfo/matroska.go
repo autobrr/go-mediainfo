@@ -95,10 +95,7 @@ func ParseMatroska(r io.ReaderAt, size int64) (MatroskaInfo, bool) {
 
 func ParseMatroskaWithOptions(r io.ReaderAt, size int64, opts AnalyzeOptions) (MatroskaInfo, bool) {
 	opts = normalizeAnalyzeOptions(opts)
-	scanSize := size
-	if scanSize > mkvMaxScan {
-		scanSize = mkvMaxScan
-	}
+	scanSize := min(size, mkvMaxScan)
 	if scanSize <= 0 {
 		return MatroskaInfo{}, false
 	}
@@ -1430,7 +1427,7 @@ func readVintID(buf []byte, pos int) (uint64, int, bool) {
 		return 0, 0, false
 	}
 	var value uint64
-	for i := 0; i < length; i++ {
+	for i := range length {
 		value = (value << 8) | uint64(buf[pos+i])
 	}
 	return value, length, true
@@ -1457,7 +1454,7 @@ func readVintSize(buf []byte, pos int) (uint64, int, bool) {
 }
 
 func vintLength(first byte) int {
-	for i := 0; i < 8; i++ {
+	for i := range 8 {
 		if first&(1<<(7-uint(i))) != 0 {
 			return i + 1
 		}

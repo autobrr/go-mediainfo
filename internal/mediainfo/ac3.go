@@ -63,7 +63,7 @@ func (br *ac3BitReader) readBits(n int) (uint32, bool) {
 		return 0, false
 	}
 	var value uint32
-	for i := 0; i < n; i++ {
+	for range n {
 		byteVal := br.data[br.bitPos>>3]
 		bit := (byteVal >> (7 - (br.bitPos & 7))) & 0x01
 		value = (value << 1) | uint32(bit)
@@ -829,12 +829,12 @@ func parseAC3Dynrng(br *ac3BitReader, acmod int) (bool, byte, bool) {
 	if nfchans <= 0 {
 		return false, 0, false
 	}
-	for i := 0; i < nfchans; i++ {
+	for range nfchans {
 		if _, ok := br.readBits(1); !ok {
 			return false, 0, false
 		}
 	}
-	for i := 0; i < nfchans; i++ {
+	for range nfchans {
 		if _, ok := br.readBits(1); !ok {
 			return false, 0, false
 		}

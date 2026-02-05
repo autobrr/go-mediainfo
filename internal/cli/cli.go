@@ -155,11 +155,11 @@ func normalizeArg(arg string) string {
 }
 
 func valueAfterEqual(arg string) (string, bool) {
-	eq := strings.IndexByte(arg, '=')
-	if eq == -1 {
+	_, after, ok := strings.Cut(arg, "=")
+	if !ok {
 		return "", false
 	}
-	return arg[eq+1:], true
+	return after, true
 }
 
 func valueAfterLogfile(arg string) string {

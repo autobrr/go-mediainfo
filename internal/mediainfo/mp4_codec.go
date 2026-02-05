@@ -321,7 +321,7 @@ func mapAACProfile(objType int) string {
 }
 
 func findESDSDecoderSpecificInfo(buf []byte) []byte {
-	for i := 0; i < len(buf); i++ {
+	for i := range buf {
 		if buf[i] != 0x05 {
 			continue
 		}

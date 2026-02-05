@@ -475,7 +475,7 @@ func parseDVDAudioAttrs(data []byte, countOffset int, attrOffset int) []dvdAudio
 		return nil
 	}
 	attrs := []dvdAudioAttrs{}
-	for i := 0; i < count; i++ {
+	for i := range count {
 		off := attrOffset + i*8
 		if off+8 > len(data) {
 			break
@@ -510,7 +510,7 @@ func parseDVDSubpicAttrs(data []byte, countOffset int, attrOffset int) []dvdSubp
 		return nil
 	}
 	attrs := []dvdSubpicAttrs{}
-	for i := 0; i < count; i++ {
+	for i := range count {
 		off := attrOffset + i*6
 		if off+6 > len(data) {
 			break
@@ -581,7 +581,7 @@ func dvdIndexList(count int) string {
 		return ""
 	}
 	values := make([]string, count)
-	for i := 0; i < count; i++ {
+	for i := range count {
 		values[i] = strconv.Itoa(i)
 	}
 	return strings.Join(values, " / ")
@@ -592,7 +592,7 @@ func dvdZeroList(count int) string {
 		return ""
 	}
 	values := make([]string, count)
-	for i := 0; i < count; i++ {
+	for i := range count {
 		values[i] = "0"
 	}
 	return strings.Join(values, " / ")
@@ -682,7 +682,7 @@ func parseDVDChapters(data []byte, pttOffset int, pgcOffset int) (float64, []int
 
 	programMap := data[progMapStart : progMapStart+programCount]
 	cellTimes := make([]int64, 0, cellCount)
-	for i := 0; i < cellCount; i++ {
+	for i := range cellCount {
 		entryStart := cellPlayStart + i*0x18
 		if entryStart+8 > len(data) {
 			break
@@ -957,8 +957,8 @@ func appendJSONExtra(raw string, key string, value string) string {
 		return renderJSONObject([]jsonKV{{Key: key, Val: value}}, false)
 	}
 	raw = strings.TrimSpace(raw)
-	if strings.HasSuffix(raw, "}") {
-		raw = strings.TrimSuffix(raw, "}")
+	if before, ok := strings.CutSuffix(raw, "}"); ok {
+		raw = before
 		if len(raw) > 1 {
 			raw += ","
 		}

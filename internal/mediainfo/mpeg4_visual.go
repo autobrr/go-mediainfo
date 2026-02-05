@@ -208,7 +208,7 @@ func newMPEG4BitReader(data []byte) *mpeg4BitReader {
 
 func (br *mpeg4BitReader) readBitsValue(n uint8) uint64 {
 	var value uint64
-	for i := uint8(0); i < n; i++ {
+	for range n {
 		if br.pos >= len(br.data) {
 			return 0
 		}
@@ -237,7 +237,7 @@ func bitLength(value uint64) int {
 
 func skipMPEG4QuantMatrix(br *mpeg4BitReader) bool {
 	last := 8
-	for i := 0; i < 64; i++ {
+	for range 64 {
 		if last == 0 {
 			return true
 		}

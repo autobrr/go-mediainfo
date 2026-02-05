@@ -158,10 +158,7 @@ func sliceBox(buf []byte, offset, length int64) []byte {
 	if offset < 0 || length < 0 {
 		return nil
 	}
-	end := offset + length
-	if end > int64(len(buf)) {
-		end = int64(len(buf))
-	}
+	end := min(offset+length, int64(len(buf)))
 	if offset > end {
 		return nil
 	}

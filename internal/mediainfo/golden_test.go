@@ -44,7 +44,6 @@ func TestGoldenOutputs(t *testing.T) {
 	goldenDir := filepath.Join("internal", "mediainfo", "testdata", "golden")
 
 	for _, sample := range samples {
-		sample := sample
 		t.Run(sample, func(t *testing.T) {
 			report, err := AnalyzeFile(filepath.Join("samples", sample))
 			if err != nil {
@@ -53,7 +52,6 @@ func TestGoldenOutputs(t *testing.T) {
 			reports := []Report{report}
 
 			for _, tc := range cases {
-				tc := tc
 				t.Run(tc.name, func(t *testing.T) {
 					got := tc.norm(tc.render(reports))
 					goldenPath := filepath.Join(goldenDir, sample+tc.ext)

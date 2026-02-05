@@ -17,8 +17,8 @@ func findX264Info(data []byte) (string, string) {
 	}
 
 	writingLib := ""
-	if strings.HasPrefix(s, "x264 - ") {
-		rest := strings.TrimPrefix(s, "x264 - ")
+	if after, ok := strings.CutPrefix(s, "x264 - "); ok {
+		rest := after
 		parts := strings.SplitN(rest, " - ", 2)
 		if len(parts) > 0 {
 			writingLib = "x264 " + strings.TrimSpace(parts[0])
@@ -26,8 +26,8 @@ func findX264Info(data []byte) (string, string) {
 	}
 
 	encoding := ""
-	if idx := strings.Index(s, "options:"); idx != -1 {
-		opts := strings.TrimSpace(s[idx+len("options:"):])
+	if _, after, ok := strings.Cut(s, "options:"); ok {
+		opts := strings.TrimSpace(after)
 		if opts != "" {
 			tokens := strings.Fields(opts)
 			encoding = strings.Join(tokens, " / ")

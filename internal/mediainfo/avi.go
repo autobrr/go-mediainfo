@@ -422,10 +422,7 @@ func parseAVIMovi(file io.ReadSeeker, start, end int64, streams []*aviStream, vi
 							if _, err := readAt(file, dataStart, payload); err == nil {
 								vopScan.feed(payload)
 								if videoData != nil && len(*videoData) < aviMaxVisualScan {
-									remaining := aviMaxVisualScan - len(*videoData)
-									if remaining > len(payload) {
-										remaining = len(payload)
-									}
+									remaining := min(aviMaxVisualScan-len(*videoData), len(payload))
 									*videoData = append(*videoData, payload[:remaining]...)
 								}
 							}

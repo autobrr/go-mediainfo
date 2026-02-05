@@ -173,7 +173,7 @@ func parseH264SPS(nal []byte) h264SPSInfo {
 		_ = br.readBitsValue(1)
 		bitDepth = bitDepthLuma
 		if br.readBitsValue(1) == 1 {
-			for i := 0; i < 8; i++ {
+			for range 8 {
 				if br.readBitsValue(1) == 1 {
 					skipScalingList(br, 16)
 				}
@@ -190,7 +190,7 @@ func parseH264SPS(nal []byte) h264SPSInfo {
 		_ = br.readSE()
 		_ = br.readSE()
 		numRef := br.readUE()
-		for i := 0; i < numRef; i++ {
+		for range numRef {
 			_ = br.readSE()
 		}
 	}
@@ -687,7 +687,7 @@ func (br *bitReader) readBits(n uint8) bool {
 
 func (br *bitReader) readBitsValue(n uint8) uint64 {
 	var value uint64
-	for i := uint8(0); i < n; i++ {
+	for range n {
 		if br.pos >= len(br.data) {
 			return ^uint64(0)
 		}
@@ -743,7 +743,7 @@ func (br *bitReader) readUEWithOk() (int, bool) {
 func skipScalingList(br *bitReader, size int) {
 	last := 8
 	next := 8
-	for i := 0; i < size; i++ {
+	for range size {
 		if next != 0 {
 			next = (last + br.readSE() + 256) % 256
 		}

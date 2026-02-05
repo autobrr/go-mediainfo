@@ -79,10 +79,7 @@ func buildCCTextStream(entry *psStream, videoDelay float64, videoDuration float6
 	}
 	fields = append(fields, Field{Name: "Bit rate mode", Value: "Constant"})
 	fields = append(fields, Field{Name: "Stream size", Value: "0.00 Byte (0%)"})
-	framesBefore := track.firstFrame
-	if framesBefore < 0 {
-		framesBefore = 0
-	}
+	framesBefore := max(track.firstFrame, 0)
 	fields = append(fields, Field{Name: "Count of frames before first event", Value: fmt.Sprintf("%d", framesBefore)})
 	fields = append(fields, Field{Name: "Type of the first event", Value: firstType})
 	fields = append(fields, Field{Name: "Caption service name", Value: service})

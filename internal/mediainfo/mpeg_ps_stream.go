@@ -238,10 +238,7 @@ func (p *psStreamParser) parseReader(r io.Reader) bool {
 
 		payloadLen := 0
 		if pesLen > 0 {
-			payloadLen = pesLen - 3 - headerLen
-			if payloadLen < 0 {
-				payloadLen = 0
-			}
+			payloadLen = max(pesLen-3-headerLen, 0)
 			payloadEnd := payloadStart + payloadLen
 			if payloadEnd > len(buf) {
 				if !readMore() {
@@ -463,10 +460,7 @@ func parseMPEGPSFileSample(parser *psStreamParser, file *os.File, opts mpegPSOpt
 
 	sampleSize := int64(64 << 20)
 	if parseSpeed > 0 && parseSpeed < 1 {
-		sampleSize = int64(float64(sampleSize) * parseSpeed)
-		if sampleSize < 4<<20 {
-			sampleSize = 4 << 20
-		}
+		sampleSize = max(int64(float64(sampleSize)*parseSpeed), 4<<20)
 	}
 	if opts.dvdParsing && sampleSize < 16<<20 {
 		sampleSize = 16 << 20

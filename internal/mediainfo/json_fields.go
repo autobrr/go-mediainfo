@@ -480,8 +480,8 @@ func splitProfileLevel(value string) (string, string) {
 }
 
 func splitAACFormat(value string) (string, string) {
-	if strings.HasPrefix(value, "AAC ") {
-		return "AAC", strings.TrimSpace(strings.TrimPrefix(value, "AAC "))
+	if after, ok := strings.CutPrefix(value, "AAC "); ok {
+		return "AAC", strings.TrimSpace(after)
 	}
 	return value, ""
 }

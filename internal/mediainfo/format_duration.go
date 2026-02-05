@@ -3,6 +3,7 @@ package mediainfo
 import (
 	"fmt"
 	"math"
+	"strings"
 )
 
 func formatDuration(seconds float64) string {
@@ -95,9 +96,10 @@ func formatThousands(value int64) string {
 		parts[i], parts[j] = parts[j], parts[i]
 	}
 
-	result := parts[0]
+	var result strings.Builder
+	result.WriteString(parts[0])
 	for i := 1; i < len(parts); i++ {
-		result += " " + parts[i]
+		result.WriteString(" " + parts[i])
 	}
-	return result
+	return result.String()
 }

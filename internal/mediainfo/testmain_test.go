@@ -20,7 +20,7 @@ func TestMain(m *testing.M) {
 
 func findRepoRoot(start string) string {
 	dir := start
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
 			return dir
 		}

@@ -410,10 +410,7 @@ func readMatroskaBlockHeader(er *ebmlReader, size int64, probes map[uint64]*matr
 		switch lacing {
 		case 1, 3:
 			copy(frameSizes, laceSizes)
-			last := dataSize - laceSum
-			if last < 0 {
-				last = 0
-			}
+			last := max(dataSize-laceSum, 0)
 			frameSizes[frameCount-1] = last
 		case 2:
 			if frameCount > 0 {
@@ -430,10 +427,7 @@ func readMatroskaBlockHeader(er *ebmlReader, size int64, probes map[uint64]*matr
 			samples = make([][]byte, 0, frameCount)
 			for i := int64(0); i < frameCount; i++ {
 				size := frameSizes[i]
-				peek := int64(256)
-				if size < peek {
-					peek = size
-				}
+				peek := min(size, int64(256))
 				payload, err := er.readN(peek)
 				if err != nil {
 					return 0, 0, 0, 0, nil, err

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"sort"
+	"slices"
 )
 
 const psSubstreamNone = 0xFF
@@ -34,10 +34,7 @@ func ParseMPEGPSWithOptions(file io.ReadSeeker, size int64, opts mpegPSOptions) 
 			}
 			sampleSize := int64(64 << 20)
 			if parseSpeed > 0 && parseSpeed < 1 {
-				sampleSize = int64(float64(sampleSize) * parseSpeed)
-				if sampleSize < 4<<20 {
-					sampleSize = 4 << 20
-				}
+				sampleSize = max(int64(float64(sampleSize)*parseSpeed), 4<<20)
 			}
 			if opts.dvdParsing && sampleSize < 16<<20 {
 				sampleSize = 16 << 20
@@ -117,10 +114,7 @@ func ParseMPEGPSWithOptions(file io.ReadSeeker, size int64, opts mpegPSOptions) 
 			if i+6 <= len(data) {
 				length := int(binary.BigEndian.Uint16(data[i+4 : i+6]))
 				payloadStart := i + 6
-				payloadEnd := payloadStart + length
-				if payloadEnd > len(data) {
-					payloadEnd = len(data)
-				}
+				payloadEnd := min(payloadStart+length, len(data))
 				kind, format := mapPSStream(streamID, psSubstreamNone)
 				if kind != "" {
 					key := psStreamKey(streamID, psSubstreamNone)
@@ -168,10 +162,7 @@ func ParseMPEGPSWithOptions(file io.ReadSeeker, size int64, opts mpegPSOptions) 
 
 		payloadLen := 0
 		if pesLen > 0 {
-			payloadLen = pesLen - 3 - headerLen
-			if payloadLen < 0 {
-				payloadLen = 0
-			}
+			payloadLen = max(pesLen-3-headerLen, 0)
 			if payloadStart+payloadLen > len(data) {
 				payloadLen = len(data) - payloadStart
 			}
@@ -179,10 +170,7 @@ func ParseMPEGPSWithOptions(file io.ReadSeeker, size int64, opts mpegPSOptions) 
 			next := nextPESStart(data, payloadStart)
 			payloadLen = next - payloadStart
 		}
-		payloadEnd := payloadStart + payloadLen
-		if payloadEnd > len(data) {
-			payloadEnd = len(data)
-		}
+		payloadEnd := min(payloadStart+payloadLen, len(data))
 		if payloadEnd < payloadStart {
 			payloadEnd = payloadStart
 		}
@@ -354,7 +342,7 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 	if parseSpeed == 0 {
 		parseSpeed = 1
 	}
-	sort.Slice(streamOrder, func(i, j int) bool { return streamOrder[i] < streamOrder[j] })
+	slices.Sort(streamOrder)
 	var videoFrameRate float64
 	var videoIsH264 bool
 	var ccEntry *psStream
@@ -418,10 +406,7 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 	}
 	videoResidualBytes := int64(0)
 	if size > 0 {
-		videoResidualBytes = size - menuOverheadBytes - nonVideoBytes
-		if videoResidualBytes < 0 {
-			videoResidualBytes = 0
-		}
+		videoResidualBytes = max(size-menuOverheadBytes-nonVideoBytes, 0)
 	}
 	for _, key := range streamOrder {
 		st := streams[key]
@@ -753,10 +738,7 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 						fields = appendFieldUnique(fields, Field{Name: "Bit rate", Value: value})
 					}
 				} else {
-					kbps = int64(bitrate / 1000.0)
-					if kbps < 0 {
-						kbps = 0
-					}
+					kbps = max(int64(bitrate/1000.0), 0)
 					if value := formatBitrateKbps(kbps); value != "" {
 						fields = appendFieldUnique(fields, Field{Name: "Bit rate", Value: value})
 					}
