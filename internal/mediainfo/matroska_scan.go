@@ -49,6 +49,9 @@ type matroskaVideoProbe struct {
 	nalLengthSize int
 	hdrInfo       hevcHDRInfo
 	headerStrip   []byte
+	packetCount   int
+	targetPackets int
+	exhausted     bool
 }
 
 const matroskaVideoProbeMaxBytes = 256 * 1024
@@ -549,6 +552,12 @@ func readMatroskaBlockHeader(er *ebmlReader, size int64, audioProbes map[uint64]
 					videoPayload := applyMatroskaVideoHeaderStrip(payload, videoProbe)
 					probeMatroskaVideo(videoProbes, trackVal, videoPayload)
 				}
+				if needVideo && videoProbe != nil && videoProbe.targetPackets > 0 {
+					videoProbe.packetCount++
+					if videoProbe.packetCount >= videoProbe.targetPackets {
+						videoProbe.exhausted = true
+					}
+				}
 				if size > peek {
 					if err := er.skip(size - peek); err != nil {
 						return 0, 0, 0, 0, err
@@ -572,6 +581,9 @@ func readMatroskaBlockHeader(er *ebmlReader, size int64, audioProbes map[uint64]
 
 func videoProbeNeedsSample(probe *matroskaVideoProbe) bool {
 	if probe == nil {
+		return false
+	}
+	if probe.exhausted {
 		return false
 	}
 	return !probe.hdrInfo.complete()

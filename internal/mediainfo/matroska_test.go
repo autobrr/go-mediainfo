@@ -236,6 +236,27 @@ func TestShouldApplyMatroskaClusterStats(t *testing.T) {
 	}
 }
 
+func TestVideoProbeNeedsSample(t *testing.T) {
+	probe := &matroskaVideoProbe{}
+	if !videoProbeNeedsSample(probe) {
+		t.Fatalf("expected probe to need samples")
+	}
+	probe.exhausted = true
+	if videoProbeNeedsSample(probe) {
+		t.Fatalf("expected exhausted probe to stop sampling")
+	}
+	probe.exhausted = false
+	probe.hdrInfo = hevcHDRInfo{
+		hasMastering: true,
+		maxCLL:       1000,
+		maxFALL:      400,
+		hdr10Plus:    true,
+	}
+	if videoProbeNeedsSample(probe) {
+		t.Fatalf("expected complete probe to stop sampling")
+	}
+}
+
 func buildMatroskaSample() []byte {
 	segment := append(
 		buildMatroskaInfo(),

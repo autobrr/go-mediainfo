@@ -108,6 +108,7 @@ const (
 
 const matroskaEAC3QuickProbeFrames = 1113
 const matroskaEAC3QuickProbePackets = 300
+const matroskaHEVCQuickProbePackets = 300
 
 type MatroskaInfo struct {
 	Container     ContainerInfo
@@ -231,11 +232,15 @@ func ParseMatroskaWithOptions(r io.ReaderAt, size int64, opts AnalyzeOptions) (M
 				case StreamVideo:
 					format := findField(stream.Fields, "Format")
 					if format == "HEVC" && stream.nalLengthSize > 0 {
-						videoProbes[id] = &matroskaVideoProbe{
+						probe := &matroskaVideoProbe{
 							codec:         format,
 							nalLengthSize: stream.nalLengthSize,
 							headerStrip:   stream.mkvHeaderStripBytes,
 						}
+						if opts.ParseSpeed < 1 {
+							probe.targetPackets = matroskaHEVCQuickProbePackets
+						}
+						videoProbes[id] = probe
 					}
 				case StreamGeneral, StreamText, StreamImage, StreamMenu:
 					continue
