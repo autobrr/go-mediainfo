@@ -46,6 +46,8 @@ mediainfo /path/to/dir
 mediainfo --Info-Parameters
 mediainfo --Info-CanHandleUrls
 mediainfo --Version
+mediainfo update
+mediainfo version
 ```
 
 Path is required (file or directory).
@@ -62,3 +64,9 @@ Default output: text.
 - `--Help`, `--Help-Output`
 - `--Info-Parameters`, `--Info-CanHandleUrls`
 - `--Version`
+- `--self-update` / `--update` (update to latest release; release builds only)
+
+## Commands
+
+- `update` (same as `--self-update`)
+- `version`
