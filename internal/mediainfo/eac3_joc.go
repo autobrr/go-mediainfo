@@ -114,13 +114,28 @@ func parseEAC3Dec3Payload(data []byte) (eac3Dec3Info, bool) {
 func parseEAC3EMDF(payload []byte) (eac3JOCMeta, bool) {
 	var meta eac3JOCMeta
 	totalBits := len(payload) * 8
-	for pos := 0; pos+16 <= totalBits; pos++ {
-		value, ok := readBitsAt(payload, pos, 16)
-		if !ok || value != 0x5838 {
-			continue
+	if totalBits < 16 {
+		return meta, false
+	}
+	for i := 0; i+1 < len(payload); i++ {
+		chunk := uint32(payload[i]) << 16
+		chunk |= uint32(payload[i+1]) << 8
+		if i+2 < len(payload) {
+			chunk |= uint32(payload[i+2])
 		}
-		if parseEAC3EMDFAt(payload, pos, &meta) {
-			return meta, meta.hasJOC || meta.hasJOCDyn || meta.hasJOCBed || meta.hasJOCComplex || meta.jocObjects > 0
+		basePos := i * 8
+		for shift := 0; shift < 8; shift++ {
+			pos := basePos + shift
+			if pos+16 > totalBits {
+				break
+			}
+			value := uint16((chunk >> (8 - shift)) & 0xFFFF)
+			if value != 0x5838 {
+				continue
+			}
+			if parseEAC3EMDFAt(payload, pos, &meta) {
+				return meta, meta.hasJOC || meta.hasJOCDyn || meta.hasJOCBed || meta.hasJOCComplex || meta.jocObjects > 0
+			}
 		}
 	}
 	return meta, false
@@ -428,20 +443,6 @@ func parseEAC3JOCHeader(br *ac3BitReader, meta *eac3JOCMeta) bool {
 		return false
 	}
 	return true
-}
-
-func readBitsAt(data []byte, bitPos int, n int) (uint32, bool) {
-	totalBits := len(data) * 8
-	if n <= 0 || bitPos+n > totalBits {
-		return 0, false
-	}
-	var value uint32
-	for i := range n {
-		byteVal := data[(bitPos+i)>>3]
-		bit := (byteVal >> (7 - ((bitPos + i) & 7))) & 0x01
-		value = (value << 1) | uint32(bit)
-	}
-	return value, true
 }
 
 var ac3NonstdBedChannelLayoutList = []string{
