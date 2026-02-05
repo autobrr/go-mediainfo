@@ -1,0 +1,22 @@
+{
+"creatingLibrary":{"name":"MediaInfoLib","version":"26.01","url":"https://mediaarea.net/MediaInfo"},
+"media":{"@ref":"samples/sample.ogg","track":[{"@type":"General","AudioCount":"1",
+"FileExtension":"ogg",
+"Format":"Ogg",
+"FileSize":"68981",
+"Duration":"4.007",
+"OverallBitRate_Mode":"VBR",
+"OverallBitRate":"138000",
+"File_Created_Date":"<redacted>",
+"File_Created_Date_Local":"<redacted>",
+"File_Modified_Date":"<redacted>",
+"File_Modified_Date_Local":"<redacted>"},{"@type":"Audio","StreamOrder":"0",
+"Format":"Opus",
+"Duration":"4.007",
+"BitRate_Mode":"VBR",
+"BitRate":"137000",
+"Channels":"1",
+"ChannelPositions":"Front: C",
+"ChannelLayout":"M",
+"SamplingRate":"48000"}]}
+}

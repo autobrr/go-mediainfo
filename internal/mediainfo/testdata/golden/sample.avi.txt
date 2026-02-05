@@ -1,0 +1,35 @@
+General
+Complete name                            : samples/sample.avi
+Format                                   : AVI
+Format/Info                              : Audio Video Interleave
+Format settings                          : BitmapInfoHeader
+File size                                : 989 KiB
+Duration                                 : 4 s 4 ms
+Overall bit rate                         : 2 024 kb/s
+Frame rate                               : 29.970 FPS
+Writing application                      : Lavf62.3.100
+
+Video
+ID                                       : 0
+Format                                   : MPEG-4 Visual
+Format profile                           : Simple@L1
+Format settings, BVOP                    : No
+Format settings, QPel                    : No
+Format settings, GMC                     : No warppoints
+Format settings, Matrix                  : Default (H.263)
+Codec ID                                 : XVID
+Duration                                 : 4 s 4 ms
+Bit rate                                 : 1 861 kb/s
+Width                                    : 640 pixels
+Height                                   : 360 pixels
+Display aspect ratio                     : 16:9
+Frame rate                               : 29.970 (30000/1001) FPS
+Color space                              : YUV
+Chroma subsampling                       : 4:2:0
+Bit depth                                : 8 bits
+Scan type                                : Progressive
+Compression mode                         : Lossy
+Bits/(Pixel*Frame)                       : 0.269
+Stream size                              : 910 KiB (92%)
+Writing library                          : Lavc62.11.100
+

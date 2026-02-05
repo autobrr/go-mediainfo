@@ -23,7 +23,7 @@ func TestSamplesSmoke(t *testing.T) {
 
 	for _, name := range cases {
 		t.Run(name, func(t *testing.T) {
-			path := filepath.Join("..", "..", "samples", name)
+			path := filepath.Join("samples", name)
 			report, err := AnalyzeFile(path)
 			if err != nil {
 				t.Fatalf("analyze sample: %v", err)

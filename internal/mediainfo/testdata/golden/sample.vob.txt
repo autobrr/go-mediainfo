@@ -1,0 +1,44 @@
+General
+Complete name                            : samples/sample.vob
+Format                                   : MPEG-PS
+File size                                : 1.17 MiB
+Duration                                 : 4 s 4 ms
+Overall bit rate mode                    : Variable
+Overall bit rate                         : 2 455 kb/s
+Frame rate                               : 29.970 FPS
+
+Video
+ID                                       : 224 (0xE0)
+Format                                   : MPEG Video
+Format version                           : Version 2
+Format profile                           : Main@Main
+Format settings, BVOP                    : No
+Format settings, Matrix                  : Default
+Format settings, GOP                     : N=15
+Duration                                 : 4 s 4 ms
+Bit rate mode                            : Variable
+Bit rate                                 : 2 210 kb/s
+Maximum bit rate                         : 8 000 kb/s
+Width                                    : 720 pixels
+Height                                   : 480 pixels
+Display aspect ratio                     : 1:1
+Frame rate                               : 29.970 (30000/1001) FPS
+Standard                                 : NTSC
+Color space                              : YUV
+Chroma subsampling                       : 4:2:0
+Bit depth                                : 8 bits
+Scan type                                : Progressive
+Compression mode                         : Lossy
+Bits/(Pixel*Frame)                       : 0.213
+Time code of first frame                 : 00:00:00:00
+Time code source                         : Group of pictures header
+GOP, Open/Closed                         : Open
+GOP, Open/Closed of first frame          : Closed
+Stream size                              : 1.05 MiB (90%)
+
+Audio
+ID                                       : 192 (0xC0)
+Format                                   : MPEG Audio
+Format/Info                              : MPEG Audio
+Duration                                 : 3 s 960 ms
+

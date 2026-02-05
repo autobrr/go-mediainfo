@@ -7,7 +7,7 @@ import (
 )
 
 func TestMpegPsGOPHeaderJSONBitRate(t *testing.T) {
-	path := filepath.Join("..", "..", "samples", "sample_ac3.vob")
+	path := filepath.Join("samples", "sample_ac3.vob")
 	report, err := AnalyzeFile(path)
 	if err != nil {
 		t.Fatalf("analyze sample: %v", err)

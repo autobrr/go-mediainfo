@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<MediaInfo
+    xmlns="https://mediaarea.net/mediainfo"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="https://mediaarea.net/mediainfo https://mediaarea.net/mediainfo/mediainfo_2_0.xsd"
+    version="2.0">
+<creatingLibrary version="26.01" url="https://mediaarea.net/MediaInfo">MediaInfoLib</creatingLibrary>
+<media ref="samples/sample.flac">
+<track type="General">
+<AudioCount>1</AudioCount>
+<FileExtension>flac</FileExtension>
+<Format>FLAC</Format>
+<FileSize>61033</FileSize>
+<Duration>4.000</Duration>
+<OverallBitRate_Mode>VBR</OverallBitRate_Mode>
+<OverallBitRate>122000</OverallBitRate>
+<File_Created_Date><redacted></File_Created_Date>
+<File_Created_Date_Local><redacted></File_Created_Date_Local>
+<File_Modified_Date><redacted></File_Modified_Date>
+<File_Modified_Date_Local><redacted></File_Modified_Date_Local>
+</track>
+<track type="Audio">
+<StreamOrder>0</StreamOrder>
+<Format>FLAC</Format>
+<Duration>4.000</Duration>
+<BitRate_Mode>VBR</BitRate_Mode>
+<BitRate>122000</BitRate>
+<Channels>1</Channels>
+<ChannelPositions>Front: C</ChannelPositions>
+<ChannelLayout>M</ChannelLayout>
+<SamplingRate>48000</SamplingRate>
+<BitDepth>16</BitDepth>
+</track>
+</media>
+</MediaInfo>

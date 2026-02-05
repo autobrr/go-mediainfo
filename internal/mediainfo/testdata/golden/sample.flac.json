@@ -1,0 +1,23 @@
+{
+"creatingLibrary":{"name":"MediaInfoLib","version":"26.01","url":"https://mediaarea.net/MediaInfo"},
+"media":{"@ref":"samples/sample.flac","track":[{"@type":"General","AudioCount":"1",
+"FileExtension":"flac",
+"Format":"FLAC",
+"FileSize":"61033",
+"Duration":"4.000",
+"OverallBitRate_Mode":"VBR",
+"OverallBitRate":"122000",
+"File_Created_Date":"<redacted>",
+"File_Created_Date_Local":"<redacted>",
+"File_Modified_Date":"<redacted>",
+"File_Modified_Date_Local":"<redacted>"},{"@type":"Audio","StreamOrder":"0",
+"Format":"FLAC",
+"Duration":"4.000",
+"BitRate_Mode":"VBR",
+"BitRate":"122000",
+"Channels":"1",
+"ChannelPositions":"Front: C",
+"ChannelLayout":"M",
+"SamplingRate":"48000",
+"BitDepth":"16"}]}
+}

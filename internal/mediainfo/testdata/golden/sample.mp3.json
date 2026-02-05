@@ -1,0 +1,22 @@
+{
+"creatingLibrary":{"name":"MediaInfoLib","version":"26.01","url":"https://mediaarea.net/MediaInfo"},
+"media":{"@ref":"samples/sample.mp3","track":[{"@type":"General","AudioCount":"1",
+"FileExtension":"mp3",
+"Format":"MPEG Audio",
+"FileSize":"64940",
+"Duration":"4.056",
+"OverallBitRate_Mode":"CBR",
+"OverallBitRate":"128000",
+"File_Created_Date":"<redacted>",
+"File_Created_Date_Local":"<redacted>",
+"File_Modified_Date":"<redacted>",
+"File_Modified_Date_Local":"<redacted>"},{"@type":"Audio","StreamOrder":"0",
+"Format":"MPEG Audio",
+"Duration":"4.056",
+"BitRate_Mode":"CBR",
+"BitRate":"128000",
+"Channels":"1",
+"ChannelPositions":"Front: C",
+"ChannelLayout":"M",
+"SamplingRate":"48000"}]}
+}

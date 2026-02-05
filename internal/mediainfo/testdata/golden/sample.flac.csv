@@ -1,0 +1,18 @@
+General
+Complete name,samples/sample.flac
+Format,FLAC
+File size,59.6 KiB
+Duration,4 s 0 ms
+Overall bit rate mode,Variable
+Overall bit rate,122 kb/s
+
+Audio
+Format,FLAC
+Duration,4 s 0 ms
+Bit rate mode,Variable
+Bit rate,122 kb/s
+Channel(s),1 channel
+Channel layout,M
+Sampling rate,48.0 kHz
+Bit depth,16 bits
+

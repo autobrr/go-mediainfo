@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<MediaInfo
+    xmlns="https://mediaarea.net/mediainfo"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="https://mediaarea.net/mediainfo https://mediaarea.net/mediainfo/mediainfo_2_0.xsd"
+    version="2.0">
+<creatingLibrary version="26.01" url="https://mediaarea.net/MediaInfo">MediaInfoLib</creatingLibrary>
+<media ref="samples/sample.mp4">
+<track type="General">
+<VideoCount>1</VideoCount>
+<AudioCount>1</AudioCount>
+<FileExtension>mp4</FileExtension>
+<Format>MPEG-4</Format>
+<Format_Profile>Base Media</Format_Profile>
+<CodecID>isom</CodecID>
+<CodecID_Compatible>isom/iso2/avc1/mp41</CodecID_Compatible>
+<FileSize>277741</FileSize>
+<Duration>4.000</Duration>
+<OverallBitRate_Mode>VBR</OverallBitRate_Mode>
+<OverallBitRate>555482</OverallBitRate>
+<FrameRate>29.970</FrameRate>
+<FrameCount>119</FrameCount>
+<StreamSize>5721</StreamSize>
+<HeaderSize>5713</HeaderSize>
+<DataSize>272028</DataSize>
+<FooterSize>0</FooterSize>
+<IsStreamable>Yes</IsStreamable>
+<File_Created_Date><redacted></File_Created_Date>
+<File_Created_Date_Local><redacted></File_Created_Date_Local>
+<File_Modified_Date><redacted></File_Modified_Date>
+<File_Modified_Date_Local><redacted></File_Modified_Date_Local>
+<Encoded_Application>Lavf62.3.100</Encoded_Application>
+</track>
+<track type="Video">
+<StreamOrder>0</StreamOrder>
+<ID>1</ID>
+<Format>AVC</Format>
+<Format_Profile>High</Format_Profile>
+<Format_Level>3</Format_Level>
+<Format_Settings_CABAC>Yes</Format_Settings_CABAC>
+<Format_Settings_RefFrames>4</Format_Settings_RefFrames>
+<CodecID>avc1</CodecID>
+<Duration>3.971</Duration>
+<BitRate>450258</BitRate>
+<BitRate_Nominal>450000</BitRate_Nominal>
+<BitRate_Maximum>450000</BitRate_Maximum>
+<Width>640</Width>
+<Height>360</Height>
+<Sampled_Width>640</Sampled_Width>
+<Sampled_Height>360</Sampled_Height>
+<PixelAspectRatio>1.000</PixelAspectRatio>
+<DisplayAspectRatio>1.778</DisplayAspectRatio>
+<Rotation>0.000</Rotation>
+<FrameRate_Mode>CFR</FrameRate_Mode>
+<FrameRate_Mode_Original>VFR</FrameRate_Mode_Original>
+<FrameRate>29.970</FrameRate>
+<FrameRate_Num>30000</FrameRate_Num>
+<FrameRate_Den>1001</FrameRate_Den>
+<FrameCount>119</FrameCount>
+<ChromaSubsampling>4:2:0</ChromaSubsampling>
+<BitDepth>8</BitDepth>
+<ScanType>Progressive</ScanType>
+<StreamSize>223476</StreamSize>
+<Encoded_Library>x264 - core 165 r3222 b35605a</Encoded_Library>
+<Encoded_Library_Name>x264</Encoded_Library_Name>
+<Encoded_Library_Version>core 165 r3222 b35605a</Encoded_Library_Version>
+<Encoded_Library_Settings>cabac=1 / ref=1 / deblock=1:0:0 / analyse=0x3:0x113 / me=hex / subme=2 / psy=1 / psy_rd=1.00:0.00 / mixed_ref=0 / me_range=16 / chroma_me=1 / trellis=0 / 8x8dct=1 / cqm=0 / deadzone=21,11 / fast_pskip=1 / chroma_qp_offset=0 / threads=11 / lookahead_threads=2 / sliced_threads=0 / nr=0 / decimate=1 / interlaced=0 / bluray_compat=0 / constrained_intra=0 / bframes=3 / b_pyramid=2 / b_adapt=1 / b_bias=0 / direct=1 / weightb=1 / open_gop=0 / weightp=1 / keyint=60 / keyint_min=31 / scenecut=0 / intra_refresh=0 / rc_lookahead=10 / rc=crf / mbtree=1 / crf=28.0 / qcomp=0.60 / qpmin=0 / qpmax=69 / qpstep=4 / ip_ratio=1.40 / aq=1:1.00</Encoded_Library_Settings>
+<extra>
+<CodecConfigurationBox>avcC</CodecConfigurationBox>
+</extra>
+</track>
+<track type="Audio">
+<StreamOrder>1</StreamOrder>
+<ID>2</ID>
+<Format>AAC</Format>
+<Format_Settings_SBR>No (Explicit)</Format_Settings_SBR>
+<Format_AdditionalFeatures>LC</Format_AdditionalFeatures>
+<CodecID>mp4a-40-2</CodecID>
+<Duration>4.000</Duration>
+<Source_Duration>4.021</Source_Duration>
+<Source_Duration_LastFrame>-0.011</Source_Duration_LastFrame>
+<BitRate_Mode>VBR</BitRate_Mode>
+<BitRate>96573</BitRate>
+<BitRate_Maximum>97000</BitRate_Maximum>
+<Channels>1</Channels>
+<ChannelPositions>Front: C</ChannelPositions>
+<ChannelLayout>M</ChannelLayout>
+<SamplesPerFrame>1024</SamplesPerFrame>
+<SamplingRate>48000</SamplingRate>
+<SamplingCount>192000</SamplingCount>
+<FrameRate>46.875</FrameRate>
+<FrameCount>188</FrameCount>
+<Source_FrameCount>189</Source_FrameCount>
+<Compression_Mode>Lossy</Compression_Mode>
+<StreamSize>48160</StreamSize>
+<Source_StreamSize>48544</Source_StreamSize>
+<Default>Yes</Default>
+<AlternateGroup>1</AlternateGroup>
+<extra>
+<Source_Delay>-21</Source_Delay>
+<Source_Delay_Source>Container</Source_Delay_Source>
+</extra>
+</track>
+</media>
+</MediaInfo>

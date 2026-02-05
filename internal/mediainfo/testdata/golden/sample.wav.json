@@ -1,0 +1,23 @@
+{
+"creatingLibrary":{"name":"MediaInfoLib","version":"26.01","url":"https://mediaarea.net/MediaInfo"},
+"media":{"@ref":"samples/sample.wav","track":[{"@type":"General","AudioCount":"1",
+"FileExtension":"wav",
+"Format":"Wave",
+"FileSize":"384078",
+"Duration":"4.000",
+"OverallBitRate_Mode":"CBR",
+"OverallBitRate":"768000",
+"File_Created_Date":"<redacted>",
+"File_Created_Date_Local":"<redacted>",
+"File_Modified_Date":"<redacted>",
+"File_Modified_Date_Local":"<redacted>"},{"@type":"Audio","StreamOrder":"0",
+"Format":"PCM",
+"Duration":"4.000",
+"BitRate_Mode":"CBR",
+"BitRate":"768000",
+"Channels":"1",
+"ChannelPositions":"Front: C",
+"ChannelLayout":"M",
+"SamplingRate":"48000",
+"BitDepth":"16"}]}
+}

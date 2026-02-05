@@ -9,7 +9,7 @@ import (
 )
 
 func TestMpegVideoJSONFields(t *testing.T) {
-	path := filepath.Join("..", "..", "samples", "sample.mpg")
+	path := filepath.Join("samples", "sample.mpg")
 	stat, err := os.Stat(path)
 	if err != nil {
 		t.Fatalf("stat sample: %v", err)

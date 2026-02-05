@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<MediaInfo
+    xmlns="https://mediaarea.net/mediainfo"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="https://mediaarea.net/mediainfo https://mediaarea.net/mediainfo/mediainfo_2_0.xsd"
+    version="2.0">
+<creatingLibrary version="26.01" url="https://mediaarea.net/MediaInfo">MediaInfoLib</creatingLibrary>
+<media ref="samples/sample.ogg">
+<track type="General">
+<AudioCount>1</AudioCount>
+<FileExtension>ogg</FileExtension>
+<Format>Ogg</Format>
+<FileSize>68981</FileSize>
+<Duration>4.007</Duration>
+<OverallBitRate_Mode>VBR</OverallBitRate_Mode>
+<OverallBitRate>138000</OverallBitRate>
+<File_Created_Date><redacted></File_Created_Date>
+<File_Created_Date_Local><redacted></File_Created_Date_Local>
+<File_Modified_Date><redacted></File_Modified_Date>
+<File_Modified_Date_Local><redacted></File_Modified_Date_Local>
+</track>
+<track type="Audio">
+<StreamOrder>0</StreamOrder>
+<Format>Opus</Format>
+<Duration>4.007</Duration>
+<BitRate_Mode>VBR</BitRate_Mode>
+<BitRate>137000</BitRate>
+<Channels>1</Channels>
+<ChannelPositions>Front: C</ChannelPositions>
+<ChannelLayout>M</ChannelLayout>
+<SamplingRate>48000</SamplingRate>
+</track>
+</media>
+</MediaInfo>

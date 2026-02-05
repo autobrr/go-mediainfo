@@ -1,0 +1,38 @@
+General
+Complete name,samples/sample.mpg
+Format,MPEG Video
+Format version,Version 2
+File size,694 KiB
+Duration,4 s 4 ms
+Overall bit rate mode,Variable
+Overall bit rate,1 421 kb/s
+Frame rate,29.970 FPS
+FileExtension_Invalid,mpgv mpv mp1v m1v mp2v m2v
+Conformance warnings,Yes
+ General compliance,File name extension is not expected for this file format (actual mpg, expected mpgv mpv mp1v m1v mp2v m2v)
+
+Video
+Format,MPEG Video
+Format version,Version 2
+Format profile,Main@Main
+Format settings, BVOP,No
+Format settings, Matrix,Default
+Format settings, GOP,N=12
+Duration,4 s 4 ms
+Bit rate mode,Variable
+Bit rate,1 421 kb/s
+Width,640 pixels
+Height,360 pixels
+Display aspect ratio,16:9
+Frame rate,29.970 (30000/1001) FPS
+Color space,YUV
+Chroma subsampling,4:2:0
+Bit depth,8 bits
+Scan type,Progressive
+Compression mode,Lossy
+Bits/(Pixel*Frame),0.206
+Time code of first frame,00:00:00:00
+GOP, Open/Closed,Open
+GOP, Open/Closed of first frame,Closed
+Stream size,694 KiB (100%)
+

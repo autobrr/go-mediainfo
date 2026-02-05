@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<MediaInfo
+    xmlns="https://mediaarea.net/mediainfo"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="https://mediaarea.net/mediainfo https://mediaarea.net/mediainfo/mediainfo_2_0.xsd"
+    version="2.0">
+<creatingLibrary version="26.01" url="https://mediaarea.net/MediaInfo">MediaInfoLib</creatingLibrary>
+<media ref="samples/sample_ac3.vob">
+<track type="General">
+<VideoCount>1</VideoCount>
+<AudioCount>1</AudioCount>
+<FileExtension>vob</FileExtension>
+<Format>MPEG-PS</Format>
+<FileSize>1228800</FileSize>
+<Duration>4.004</Duration>
+<OverallBitRate_Mode>VBR</OverallBitRate_Mode>
+<OverallBitRate>2455145</OverallBitRate>
+<FrameRate>29.970</FrameRate>
+<FrameCount>120</FrameCount>
+<StreamSize>17380</StreamSize>
+<File_Created_Date><redacted></File_Created_Date>
+<File_Created_Date_Local><redacted></File_Created_Date_Local>
+<File_Modified_Date><redacted></File_Modified_Date>
+<File_Modified_Date_Local><redacted></File_Modified_Date_Local>
+</track>
+<track type="Video">
+<FirstPacketOrder>0</FirstPacketOrder>
+<ID>224</ID>
+<Format>MPEG Video</Format>
+<Format_Version>2</Format_Version>
+<Format_Profile>Main</Format_Profile>
+<Format_Level>Main</Format_Level>
+<Format_Settings_BVOP>No</Format_Settings_BVOP>
+<Format_Settings_Matrix>Default</Format_Settings_Matrix>
+<Format_Settings_GOP>N=15</Format_Settings_GOP>
+<Duration>4.004</Duration>
+<BitRate_Mode>VBR</BitRate_Mode>
+<BitRate>2210193</BitRate>
+<BitRate_Maximum>8000000</BitRate_Maximum>
+<Width>720</Width>
+<Height>480</Height>
+<Sampled_Width>720</Sampled_Width>
+<Sampled_Height>480</Sampled_Height>
+<PixelAspectRatio>0.667</PixelAspectRatio>
+<DisplayAspectRatio>1.000</DisplayAspectRatio>
+<FrameRate>29.970</FrameRate>
+<FrameRate_Num>30000</FrameRate_Num>
+<FrameRate_Den>1001</FrameRate_Den>
+<FrameCount>120</FrameCount>
+<Standard>NTSC</Standard>
+<ColorSpace>YUV</ColorSpace>
+<ChromaSubsampling>4:2:0</ChromaSubsampling>
+<BitDepth>8</BitDepth>
+<ScanType>Progressive</ScanType>
+<Compression_Mode>Lossy</Compression_Mode>
+<Delay>0.533366667</Delay>
+<Delay_DropFrame>No</Delay_DropFrame>
+<Delay_Source>Container</Delay_Source>
+<Delay_Original>0.000</Delay_Original>
+<Delay_Original_DropFrame>No</Delay_Original_DropFrame>
+<Delay_Original_Source>Stream</Delay_Original_Source>
+<TimeCode_FirstFrame>00:00:00:00</TimeCode_FirstFrame>
+<TimeCode_Source>Group of pictures header</TimeCode_Source>
+<Gop_OpenClosed>Open</Gop_OpenClosed>
+<Gop_OpenClosed_FirstFrame>Closed</Gop_OpenClosed_FirstFrame>
+<StreamSize>1115420</StreamSize>
+<BufferSize>229376</BufferSize>
+<extra>
+<intra_dc_precision>8</intra_dc_precision>
+</extra>
+</track>
+<track type="Audio">
+<StreamOrder>0</StreamOrder>
+<FirstPacketOrder>1</FirstPacketOrder>
+<ID>189-128</ID>
+<Format>AC-3</Format>
+<Format_Commercial_IfAny>Dolby Digital</Format_Commercial_IfAny>
+<Format_Settings_Endianness>Big</Format_Settings_Endianness>
+<MuxingMode>DVD-Video</MuxingMode>
+<Duration>4.000</Duration>
+<BitRate_Mode>CBR</BitRate_Mode>
+<BitRate>192000</BitRate>
+<Channels>2</Channels>
+<ChannelPositions>Front: L R</ChannelPositions>
+<ChannelLayout>L R</ChannelLayout>
+<SamplesPerFrame>1536</SamplesPerFrame>
+<SamplingRate>48000</SamplingRate>
+<SamplingCount>192000</SamplingCount>
+<FrameRate>31.250</FrameRate>
+<FrameCount>125</FrameCount>
+<Compression_Mode>Lossy</Compression_Mode>
+<Delay>0.528033333</Delay>
+<Delay_Source>Container</Delay_Source>
+<Video_Delay>-0.005</Video_Delay>
+<StreamSize>96000</StreamSize>
+<ServiceKind>CM</ServiceKind>
+<extra>
+<bsid>8</bsid>
+<dialnorm>-31</dialnorm>
+<acmod>2</acmod>
+<dsurmod>0</dsurmod>
+<lfeon>0</lfeon>
+<dialnorm_Average>-31</dialnorm_Average>
+<dialnorm_Minimum>-31</dialnorm_Minimum>
+</extra>
+</track>
+</media>
+</MediaInfo>
