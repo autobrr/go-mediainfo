@@ -389,6 +389,7 @@ func (p *psStreamParser) consumePayload(entry *psStream, key uint16, flags byte,
 		}
 		if entry.videoIsMPEG2 {
 			consumeMPEG2HeaderBytes(entry, payload, hasPTS)
+			consumeMPEG2FrameBytes(entry, payload)
 		} else {
 			consumeH264PS(entry, payload)
 		}
@@ -467,7 +468,7 @@ func parseMPEGPSFileSample(parser *psStreamParser, file *os.File, opts mpegPSOpt
 			sampleSize = 4 << 20
 		}
 	}
-	if opts.dvdExtras && sampleSize < 16<<20 {
+	if opts.dvdParsing && sampleSize < 16<<20 {
 		sampleSize = 16 << 20
 	}
 	if size <= sampleSize {
@@ -480,7 +481,7 @@ func parseMPEGPSFileSample(parser *psStreamParser, file *os.File, opts mpegPSOpt
 		parsedAny = true
 	}
 	if size > sampleSize*2 {
-		if opts.dvdExtras {
+		if opts.dvdParsing {
 			mid := (size - sampleSize) / 2
 			middle := io.NewSectionReader(file, mid, sampleSize)
 			if reader(middle) {

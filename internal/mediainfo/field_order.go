@@ -4,6 +4,7 @@ var generalFieldOrder = map[string]int{
 	"ID":                    -2,
 	"Unique ID":             -1,
 	"Complete name":         0,
+	"CompleteName_Last":     0,
 	"Format":                1,
 	"Format/Info":           2,
 	"Format settings":       3,

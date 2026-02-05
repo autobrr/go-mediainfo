@@ -394,15 +394,51 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			}
 		}
 	case "MPEG-PS":
-		if parsedInfo, parsedStreams, ok := ParseMPEGPSWithOptions(file, stat.Size(), mpegPSOptions{parseSpeed: opts.ParseSpeed}); ok {
+		psSize := stat.Size()
+		psPaths := []string{path}
+		var completeNameLast string
+		dvdExtras := false
+		dvdParsing := false
+		if strings.EqualFold(filepath.Ext(path), ".vob") && strings.EqualFold(filepath.Base(filepath.Dir(path)), "VIDEO_TS") {
+			dvdParsing = true
+			if dvdVOBIndex(path) == 1 {
+				if vobPaths, vobSize := dvdTitleSetVOBs(path); len(vobPaths) > 0 && vobSize > 0 {
+					psPaths = vobPaths
+					psSize = vobSize
+					if len(vobPaths) > 1 {
+						completeNameLast = vobPaths[len(vobPaths)-1]
+					}
+					general.Fields = setFieldValue(general.Fields, "File size", formatBytes(vobSize))
+					if general.JSON == nil {
+						general.JSON = map[string]string{}
+					}
+					general.JSON["FileSize"] = fmt.Sprintf("%d", vobSize)
+					if completeNameLast != "" {
+						general.Fields = appendFieldUnique(general.Fields, Field{Name: "CompleteName_Last", Value: completeNameLast})
+						general.JSON["CompleteName_Last"] = completeNameLast
+					}
+				}
+			}
+		}
+		var parsedInfo ContainerInfo
+		var parsedStreams []Stream
+		var ok bool
+		if len(psPaths) > 1 {
+			parsedInfo, parsedStreams, ok = ParseMPEGPSFiles(psPaths, psSize, mpegPSOptions{dvdExtras: dvdExtras, dvdParsing: dvdParsing, parseSpeed: opts.ParseSpeed})
+		} else {
+			parsedInfo, parsedStreams, ok = ParseMPEGPSWithOptions(file, psSize, mpegPSOptions{dvdExtras: dvdExtras, dvdParsing: dvdParsing, parseSpeed: opts.ParseSpeed})
+		}
+		if ok {
 			info = parsedInfo
 			streams = parsedStreams
-			general.JSON = map[string]string{}
+			if general.JSON == nil {
+				general.JSON = map[string]string{}
+			}
 			if info.DurationSeconds > 0 {
 				jsonDuration := math.Round(info.DurationSeconds*1000) / 1000
 				if jsonDuration > 0 {
 					general.JSON["Duration"] = formatJSONSeconds(jsonDuration)
-					overall := (float64(stat.Size()) * 8) / jsonDuration
+					overall := (float64(psSize) * 8) / jsonDuration
 					general.JSON["OverallBitRate"] = fmt.Sprintf("%d", int64(math.Round(overall)))
 				}
 			}
@@ -459,7 +495,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 				general.JSON["FrameCount"] = frameCount
 			}
 			if streamSizeSum > 0 {
-				remaining := stat.Size() - streamSizeSum
+				remaining := psSize - streamSizeSum
 				if remaining >= 0 {
 					general.JSON["StreamSize"] = fmt.Sprintf("%d", remaining)
 				}

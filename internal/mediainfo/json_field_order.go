@@ -12,6 +12,7 @@ var jsonGeneralFieldOrder = map[string]int{
 	"ImageCount":                  5,
 	"MenuCount":                   6,
 	"FileExtension":               7,
+	"CompleteName_Last":           7,
 	"Format":                      8,
 	"Format_Settings":             9,
 	"Format_Version":              10,

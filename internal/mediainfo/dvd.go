@@ -146,7 +146,7 @@ func ParseDVDVideo(path string, file *os.File, size int64, opts AnalyzeOptions) 
 			if ifoInfo, err := os.Stat(path); err == nil {
 				info.FileSize += ifoInfo.Size()
 			}
-			if parsedInfo, parsedStreams, ok := ParseMPEGPSFiles(vobPaths, info.FileSize, mpegPSOptions{dvdExtras: true, parseSpeed: opts.ParseSpeed}); ok {
+			if parsedInfo, parsedStreams, ok := ParseMPEGPSFiles(vobPaths, info.FileSize, mpegPSOptions{dvdExtras: true, dvdParsing: true, parseSpeed: opts.ParseSpeed}); ok {
 				streams = mergeDVDTitleSetStreams(parsedStreams, dvdTitleSetSource(base))
 				titleSetParsed = len(streams) > 0
 				if parsedInfo.DurationSeconds > 0 {
@@ -172,6 +172,18 @@ func ParseDVDVideo(path string, file *os.File, size int64, opts AnalyzeOptions) 
 					}
 				}
 			}
+		}
+	}
+	if aggregateMode && titleSetParsed && ifoDurationSeconds > 0 {
+		info.Container.DurationSeconds = ifoDurationSeconds
+		durationSeconds = ifoDurationSeconds
+		generalFields = setFieldValue(generalFields, "Duration", formatDVDDuration(ifoDurationSeconds))
+		for i := range streams {
+			streams[i].Fields = setFieldValue(streams[i].Fields, "Duration", formatDVDDuration(ifoDurationSeconds))
+			if streams[i].JSON == nil {
+				streams[i].JSON = map[string]string{}
+			}
+			streams[i].JSON["Duration"] = formatJSONSeconds(ifoDurationSeconds)
 		}
 	}
 

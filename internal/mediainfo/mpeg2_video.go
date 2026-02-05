@@ -15,6 +15,7 @@ type mpeg2VideoInfo struct {
 	FrameRateDenom    uint32
 	Profile           string
 	Version           string
+	BitRate           int64
 	BitRateMode       string
 	MaxBitRateKbps    int64
 	BVOP              *bool
@@ -58,6 +59,8 @@ type mpeg2VideoParser struct {
 	framesSinceAnchor int
 	lastISeen       bool
 	lastAnchorSeen  bool
+	iFrameCount     int
+	pFrameCount     int
 	maxBitRateKbps  int64
 	maxBitRateSet   bool
 	maxBitRateMixed bool
@@ -179,6 +182,9 @@ func (p *mpeg2VideoParser) parseSequenceHeader(data []byte) {
 		p.info.BitDepth = "8 bits"
 	}
 	if bitRateValue != 0x3FFFF {
+		if p.info.BitRate == 0 {
+			p.info.BitRate = int64(bitRateValue) * 400
+		}
 		maxKbps := int64(bitRateValue*400) / 1000
 		if !p.maxBitRateSet {
 			p.maxBitRateKbps = maxKbps
@@ -350,6 +356,7 @@ func (p *mpeg2VideoParser) parsePictureHeader(data []byte) {
 
 	switch codingType {
 	case 1: // I
+		p.iFrameCount++
 		if p.lastISeen && p.framesSinceI > 0 {
 			if p.gopNCounts == nil {
 				p.gopNCounts = map[int]int{}
@@ -367,6 +374,7 @@ func (p *mpeg2VideoParser) parsePictureHeader(data []byte) {
 		p.framesSinceAnchor = 0
 		p.lastAnchorSeen = true
 	case 2: // P
+		p.pFrameCount++
 		if p.lastAnchorSeen && p.framesSinceAnchor > 0 {
 			if p.gopMCounts == nil {
 				p.gopMCounts = map[int]int{}
