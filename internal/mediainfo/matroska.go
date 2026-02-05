@@ -146,6 +146,13 @@ func ParseMatroskaWithOptions(r io.ReaderAt, size int64, opts AnalyzeOptions) (M
 					}
 					probe := &matroskaAudioProbe{format: format}
 					if format == "E-AC-3" {
+						if stream.eac3Dec3.hasJOCComplex {
+							probe.info.hasJOCComplex = true
+							probe.info.jocComplexity = stream.eac3Dec3.jocComplexity
+						}
+						if stream.eac3Dec3.hasJOC {
+							probe.info.hasJOC = true
+						}
 						probe.collect = true
 						if opts.ParseSpeed < 1 {
 							probe.targetFrames = matroskaEAC3QuickProbeFrames
@@ -720,6 +727,12 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64) (Stream, bool)
 	if kind == "" {
 		return Stream{}, false
 	}
+	var dec3Info eac3Dec3Info
+	if kind == StreamAudio && format == "E-AC-3" && len(codecPrivate) > 0 {
+		if info, ok := parseEAC3Dec3(codecPrivate); ok {
+			dec3Info = info
+		}
+	}
 	aacProfile := ""
 	aacObjType := 0
 	if kind == StreamAudio && format == "AAC" && len(codecPrivate) > 0 {
@@ -1064,7 +1077,7 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64) (Stream, bool)
 		}
 		jsonExtras["Duration"] = fmt.Sprintf("%.9f", durationSeconds)
 	}
-	return Stream{Kind: kind, Fields: fields, JSON: jsonExtras, nalLengthSize: nalLengthSize}, true
+	return Stream{Kind: kind, Fields: fields, JSON: jsonExtras, eac3Dec3: dec3Info, nalLengthSize: nalLengthSize}, true
 }
 
 type matroskaVideoInfo struct {

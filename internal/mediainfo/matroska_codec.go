@@ -51,6 +51,8 @@ func mapMatroskaFormatInfo(format string) string {
 		return "Audio Coding 3"
 	case "E-AC-3":
 		return "Enhanced AC-3"
+	case "E-AC-3 JOC":
+		return "Enhanced AC-3 with Joint Object Coding"
 	case "Opus":
 		return "Opus"
 	case "FLAC":

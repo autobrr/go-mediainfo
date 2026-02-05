@@ -51,15 +51,32 @@ type ac3Info struct {
 	hasMixlevel   bool
 	roomtyp       string
 	hasRoomtyp    bool
+	hasJOC        bool
+	hasJOCComplex bool
+	jocComplexity int
+	jocObjects    int
+	hasJOCDyn     bool
+	jocDynObjects int
+	hasJOCBed     bool
+	jocBedCount   uint64
+	jocBedLayout  string
 }
 
 type ac3BitReader struct {
 	data   []byte
 	bitPos int
+	limit  int
+}
+
+func (br *ac3BitReader) maxBits() int {
+	if br.limit > 0 {
+		return br.limit
+	}
+	return len(br.data) * 8
 }
 
 func (br *ac3BitReader) readBits(n int) (uint32, bool) {
-	if n <= 0 || br.bitPos+n > len(br.data)*8 {
+	if n <= 0 || br.bitPos+n > br.maxBits() {
 		return 0, false
 	}
 	var value uint32
@@ -68,6 +85,45 @@ func (br *ac3BitReader) readBits(n int) (uint32, bool) {
 		bit := (byteVal >> (7 - (br.bitPos & 7))) & 0x01
 		value = (value << 1) | uint32(bit)
 		br.bitPos++
+	}
+	return value, true
+}
+
+func (br *ac3BitReader) skipBits(n int) bool {
+	if n <= 0 {
+		return true
+	}
+	if br.bitPos+n > br.maxBits() {
+		return false
+	}
+	br.bitPos += n
+	return true
+}
+
+func (br *ac3BitReader) remaining() int {
+	return br.maxBits() - br.bitPos
+}
+
+func (br *ac3BitReader) readVariableBits(bits int) (uint32, bool) {
+	if bits <= 0 {
+		return 0, false
+	}
+	var value uint32
+	for {
+		part, ok := br.readBits(bits)
+		if !ok {
+			return 0, false
+		}
+		value += part
+		cont, ok := br.readBits(1)
+		if !ok {
+			return 0, false
+		}
+		if cont == 0 {
+			break
+		}
+		value <<= bits
+		value += 1 << bits
 	}
 	return value, true
 }
@@ -411,6 +467,10 @@ func parseEAC3Frame(payload []byte) (ac3Info, int, bool) {
 		bitRate = int64(math.Round(float64(frameSize*8) * sampleRate / (float64(spf) * 1000.0)))
 	}
 	channels, layout := ac3ChannelLayout(int(acmod), lfeonVal == 1)
+	var jocMeta eac3JOCMeta
+	if meta, ok := parseEAC3EMDF(payload); ok {
+		jocMeta = meta
+	}
 	info = ac3Info{
 		bitRateKbps:   bitRate,
 		sampleRate:    sampleRate,
@@ -437,6 +497,15 @@ func parseEAC3Frame(payload []byte) (ac3Info, int, bool) {
 		dynrngDB:      info.dynrngDB,
 		hasDynrng:     info.hasDynrng,
 		hasCompr:      info.hasCompr,
+		hasJOC:        jocMeta.hasJOC,
+		hasJOCComplex: jocMeta.hasJOCComplex,
+		jocComplexity: jocMeta.jocComplexity,
+		jocObjects:    jocMeta.jocObjects,
+		hasJOCDyn:     jocMeta.hasJOCDyn,
+		jocDynObjects: jocMeta.jocDynObjects,
+		hasJOCBed:     jocMeta.hasJOCBed,
+		jocBedCount:   jocMeta.jocBedCount,
+		jocBedLayout:  jocMeta.jocBedLayout,
 	}
 	return info, frameSize, true
 }
@@ -602,6 +671,25 @@ func (info *ac3Info) mergeFrame(frame ac3Info) {
 			info.dialnormMax = frame.dialnormMax
 		}
 		info.hasDialnorm = true
+	}
+	if frame.hasJOC && !info.hasJOC {
+		info.hasJOC = true
+	}
+	if frame.hasJOCComplex && !info.hasJOCComplex {
+		info.hasJOCComplex = true
+		info.jocComplexity = frame.jocComplexity
+	}
+	if frame.jocObjects > 0 && info.jocObjects == 0 {
+		info.jocObjects = frame.jocObjects
+	}
+	if frame.hasJOCDyn && !info.hasJOCDyn {
+		info.hasJOCDyn = true
+		info.jocDynObjects = frame.jocDynObjects
+	}
+	if frame.hasJOCBed && !info.hasJOCBed {
+		info.hasJOCBed = true
+		info.jocBedCount = frame.jocBedCount
+		info.jocBedLayout = frame.jocBedLayout
 	}
 }
 

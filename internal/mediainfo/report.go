@@ -23,6 +23,7 @@ type Stream struct {
 	JSONRaw             map[string]string
 	JSONSkipStreamOrder bool
 	JSONSkipComputed    bool
+	eac3Dec3            eac3Dec3Info
 	nalLengthSize       int
 }
 

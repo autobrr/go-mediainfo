@@ -2,6 +2,7 @@ package mediainfo
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -445,6 +446,8 @@ func readMatroskaBlockHeader(er *ebmlReader, size int64, audioProbes map[uint64]
 				peek := int64(256)
 				if needVideo {
 					peek = int64(matroskaVideoProbeMaxBytes)
+				} else if needAudio && audioProbe != nil && audioProbe.format == "E-AC-3" {
+					peek = size
 				}
 				peek = min(size, peek)
 				payload, err := er.readN(peek)
@@ -619,10 +622,42 @@ func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAud
 		}
 		stream.Fields = insertFieldBefore(stream.Fields, Field{Name: "Compression mode", Value: "Lossy"}, "Stream size")
 		if probe.format == "E-AC-3" {
-			stream.Fields = setFieldValue(stream.Fields, "Commercial name", "Dolby Digital Plus")
+			hasJOC := ac3.hasJOC || ac3.hasJOCComplex || ac3.jocObjects > 0 || ac3.hasJOCDyn || ac3.hasJOCBed
+			if hasJOC {
+				stream.Fields = setFieldValue(stream.Fields, "Format", "E-AC-3 JOC")
+				stream.Fields = setFieldValue(stream.Fields, "Format/Info", "Enhanced AC-3 with Joint Object Coding")
+				stream.Fields = setFieldValue(stream.Fields, "Commercial name", "Dolby Digital Plus with Dolby Atmos")
+			} else {
+				stream.Fields = setFieldValue(stream.Fields, "Commercial name", "Dolby Digital Plus")
+			}
 		}
 		if ac3.serviceKind != "" {
 			stream.Fields = insertFieldBefore(stream.Fields, Field{Name: "Service kind", Value: ac3.serviceKind}, "Default")
+		}
+		if probe.format == "E-AC-3" {
+			before := "Dialog Normalization"
+			complexity := -1
+			if ac3.hasJOCComplex {
+				complexity = ac3.jocComplexity
+			} else {
+				fallback := ac3.jocObjects
+				if ac3.hasJOCDyn && ac3.jocDynObjects > fallback {
+					fallback = ac3.jocDynObjects
+				}
+				if fallback > 0 {
+					complexity = fallback + 1
+				}
+			}
+			if complexity >= 0 {
+				stream.Fields = insertFieldBefore(stream.Fields, Field{Name: "Complexity index", Value: strconv.Itoa(complexity)}, before)
+			}
+			if ac3.hasJOCDyn {
+				stream.Fields = insertFieldBefore(stream.Fields, Field{Name: "Number of dynamic objects", Value: strconv.Itoa(ac3.jocDynObjects)}, before)
+			}
+			if ac3.hasJOCBed {
+				stream.Fields = insertFieldBefore(stream.Fields, Field{Name: "Bed channel count", Value: formatChannels(ac3.jocBedCount)}, before)
+				stream.Fields = insertFieldBefore(stream.Fields, Field{Name: "Bed channel configuration", Value: ac3.jocBedLayout}, before)
+			}
 		}
 		if ac3.hasDialnorm {
 			stream.Fields = insertFieldBefore(stream.Fields, Field{Name: "Dialog Normalization", Value: formatDialnorm(ac3.dialnorm)}, "Default")
@@ -816,7 +851,31 @@ func probeMatroskaAudio(probes map[uint64]*matroskaAudioProbe, track uint64, pay
 			probe.ok = true
 		}
 	case "E-AC-3":
-		if info, _, ok := parseEAC3Frame(payload); ok {
+		if info, frameSize, ok := parseEAC3Frame(payload); ok {
+			if !ac3HasJOCInfo(info) {
+				offset := 2
+				if frameSize > 0 && frameSize < len(payload) {
+					offset = frameSize
+				}
+				for offset+1 < len(payload) {
+					sync := bytes.Index(payload[offset:], []byte{0x0B, 0x77})
+					if sync < 0 {
+						break
+					}
+					offset += sync
+					sub := payload[offset:]
+					subInfo, subSize, ok := parseEAC3Frame(sub)
+					if ok && ac3HasJOCInfo(subInfo) {
+						info.mergeFrame(subInfo)
+						break
+					}
+					if ok && subSize > 0 && subSize < len(sub) {
+						offset += subSize
+					} else {
+						offset += 2
+					}
+				}
+			}
 			if info.hasCompr && info.comprDB > -0.56 {
 				info.comprCount = 0
 				info.comprSumDB = 0
