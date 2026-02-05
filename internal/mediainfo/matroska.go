@@ -232,7 +232,7 @@ func ParseMatroskaWithOptions(r io.ReaderAt, size int64, opts AnalyzeOptions) (M
 				}
 			}
 		}
-		applyStats := opts.ParseSpeed >= 1 || (size > mkvMaxScan && !tagStatsComplete)
+		applyStats := shouldApplyMatroskaClusterStats(opts.ParseSpeed, size, info.tagStats, tagStatsComplete)
 		needsScan := applyStats || len(audioProbes) > 0 || len(videoProbes) > 0
 		if needsScan {
 			if stats, ok := scanMatroskaClusters(r, info.SegmentOffset, info.SegmentSize, info.TimecodeScale, audioProbes, videoProbes, applyStats); ok {
@@ -245,6 +245,19 @@ func ParseMatroskaWithOptions(r io.ReaderAt, size int64, opts AnalyzeOptions) (M
 		}
 	}
 	return info, true
+}
+
+func shouldApplyMatroskaClusterStats(parseSpeed float64, size int64, tagStats map[uint64]matroskaTagStats, tagStatsComplete bool) bool {
+	if parseSpeed >= 1 {
+		return true
+	}
+	if size <= mkvMaxScan {
+		return false
+	}
+	if tagStatsComplete {
+		return false
+	}
+	return len(tagStats) == 0
 }
 
 func findMatroskaSeekPosition(buf []byte, segmentOffset int, targetID uint64) (uint64, bool) {

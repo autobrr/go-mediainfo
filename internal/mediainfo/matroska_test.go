@@ -115,6 +115,70 @@ func TestParseMatroskaTagStatsWithoutDate(t *testing.T) {
 	}
 }
 
+func TestShouldApplyMatroskaClusterStats(t *testing.T) {
+	nonEmptyTags := map[uint64]matroskaTagStats{
+		1: {trusted: true, hasDataBytes: true, dataBytes: 42},
+	}
+	tests := []struct {
+		name       string
+		parseSpeed float64
+		size       int64
+		tagStats   map[uint64]matroskaTagStats
+		complete   bool
+		want       bool
+	}{
+		{
+			name:       "full parse speed always applies",
+			parseSpeed: 1,
+			size:       mkvMaxScan * 10,
+			tagStats:   nonEmptyTags,
+			complete:   true,
+			want:       true,
+		},
+		{
+			name:       "small file skips cluster stats",
+			parseSpeed: 0.5,
+			size:       mkvMaxScan,
+			tagStats:   nil,
+			complete:   false,
+			want:       false,
+		},
+		{
+			name:       "large file with no tag stats applies",
+			parseSpeed: 0.5,
+			size:       mkvMaxScan + 1,
+			tagStats:   nil,
+			complete:   false,
+			want:       true,
+		},
+		{
+			name:       "large file with some tag stats skips",
+			parseSpeed: 0.5,
+			size:       mkvMaxScan + 1,
+			tagStats:   nonEmptyTags,
+			complete:   false,
+			want:       false,
+		},
+		{
+			name:       "complete tag stats skips",
+			parseSpeed: 0.5,
+			size:       mkvMaxScan + 1,
+			tagStats:   nonEmptyTags,
+			complete:   true,
+			want:       false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := shouldApplyMatroskaClusterStats(tc.parseSpeed, tc.size, tc.tagStats, tc.complete)
+			if got != tc.want {
+				t.Fatalf("got %v want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func buildMatroskaSample() []byte {
 	segment := append(
 		buildMatroskaInfo(),
