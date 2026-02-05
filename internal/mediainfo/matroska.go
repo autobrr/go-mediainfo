@@ -1,6 +1,7 @@
 package mediainfo
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -8,6 +9,7 @@ import (
 	"math/big"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const (
@@ -25,9 +27,11 @@ const (
 	mkvIDTags              = 0x1254C367
 	mkvIDChapters          = 0x1043A770
 	mkvIDTag               = 0x7373
+	mkvIDTagTargets        = 0x63C0
 	mkvIDSimpleTag         = 0x67C8
 	mkvIDTagName           = 0x45A3
 	mkvIDTagString         = 0x4487
+	mkvIDTagTrackUID       = 0x63C5
 	mkvIDEditionEntry      = 0x45B9
 	mkvIDChapterAtom       = 0xB6
 	mkvIDChapterTimeStart  = 0x91
@@ -101,6 +105,7 @@ type MatroskaInfo struct {
 	SegmentOffset int64
 	SegmentSize   int64
 	TimecodeScale uint64
+	tagStats      map[uint64]matroskaTagStats
 }
 
 func ParseMatroska(r io.ReaderAt, size int64) (MatroskaInfo, bool) {
@@ -134,6 +139,27 @@ func ParseMatroskaWithOptions(r io.ReaderAt, size int64, opts AnalyzeOptions) (M
 		info.SegmentSize = size - info.SegmentOffset
 	}
 	if info.SegmentOffset > 0 && info.SegmentSize > 0 && info.TimecodeScale > 0 {
+		if len(info.tagStats) == 0 && size > scanSize {
+			writingApp := findField(info.General, "Writing application")
+			muxingApp := findField(info.General, "Writing library")
+			tailSize := min(size, int64(8<<20))
+			if tailSize > 0 {
+				tailBuf := make([]byte, tailSize)
+				if _, err := r.ReadAt(tailBuf, size-tailSize); err == nil || err == io.EOF {
+					encoders, stats := parseMatroskaTagsFromBuffer(tailBuf, writingApp, muxingApp)
+					if len(stats) > 0 {
+						info.tagStats = stats
+					}
+					if len(encoders) > 0 && len(info.Tracks) > 0 {
+						applyMatroskaEncoders(info.Tracks, encoders)
+					}
+				}
+			}
+		}
+		tagStatsComplete := false
+		if len(info.tagStats) > 0 {
+			tagStatsComplete = applyMatroskaTagStats(&info, info.tagStats, size)
+		}
 		audioProbes := map[uint64]*matroskaAudioProbe{}
 		videoProbes := map[uint64]*matroskaVideoProbe{}
 		for _, stream := range info.Tracks {
@@ -172,7 +198,7 @@ func ParseMatroskaWithOptions(r io.ReaderAt, size int64, opts AnalyzeOptions) (M
 				}
 			}
 		}
-		applyStats := opts.ParseSpeed >= 1 || size > mkvMaxScan
+		applyStats := opts.ParseSpeed >= 1 || (size > mkvMaxScan && !tagStatsComplete)
 		needsScan := applyStats || len(audioProbes) > 0 || len(videoProbes) > 0
 		if needsScan {
 			if stats, ok := scanMatroskaClusters(r, info.SegmentOffset, info.SegmentSize, info.TimecodeScale, audioProbes, videoProbes, applyStats); ok {
@@ -227,6 +253,7 @@ func parseMatroska(buf []byte) (MatroskaInfo, bool) {
 func parseMatroskaSegment(buf []byte) (MatroskaInfo, bool) {
 	info := MatroskaInfo{}
 	var encoders []string
+	statsByTrackUID := map[uint64]matroskaTagStats{}
 	var segmentFields []Field
 	var chaptersPayloads [][]byte
 	pos := 0
@@ -262,7 +289,15 @@ func parseMatroskaSegment(buf []byte) (MatroskaInfo, bool) {
 			}
 		}
 		if id == mkvIDTags {
-			encoders = append(encoders, parseMatroskaEncoders(buf[dataStart:dataEnd])...)
+			writingApp := findField(info.General, "Writing application")
+			muxingApp := findField(info.General, "Writing library")
+			tagEncoders, tagStats := parseMatroskaTags(buf[dataStart:dataEnd], writingApp, muxingApp)
+			encoders = append(encoders, tagEncoders...)
+			for trackUID, stat := range tagStats {
+				current := statsByTrackUID[trackUID]
+				mergeMatroskaTagStats(&current, stat)
+				statsByTrackUID[trackUID] = current
+			}
 		}
 		if id == mkvIDChapters {
 			chaptersPayloads = append(chaptersPayloads, buf[dataStart:dataEnd])
@@ -274,6 +309,9 @@ func parseMatroskaSegment(buf []byte) (MatroskaInfo, bool) {
 	}
 	if len(segmentFields) > 0 {
 		info.General = append(info.General, segmentFields...)
+	}
+	if len(statsByTrackUID) > 0 {
+		info.tagStats = statsByTrackUID
 	}
 	if findField(info.General, "ErrorDetectionType") == "" && matroskaHasCRC(buf) {
 		info.General = append(info.General, Field{Name: "ErrorDetectionType", Value: "Per level 1"})
@@ -1560,8 +1598,9 @@ func matroskaColorSource(value string, fallback string) string {
 	return fallback
 }
 
-func parseMatroskaEncoders(buf []byte) []string {
+func parseMatroskaTags(buf []byte, writingApp string, muxingApp string) ([]string, map[uint64]matroskaTagStats) {
 	var encoders []string
+	statsByTrackUID := map[uint64]matroskaTagStats{}
 	pos := 0
 	for pos < len(buf) {
 		id, idLen, ok := readVintID(buf, pos)
@@ -1578,15 +1617,60 @@ func parseMatroskaEncoders(buf []byte) []string {
 			dataEnd = len(buf)
 		}
 		if id == mkvIDTag {
-			encoders = append(encoders, parseMatroskaTagEncoders(buf[dataStart:dataEnd])...)
+			trackUID, tags := parseMatroskaTag(buf[dataStart:dataEnd])
+			if encoder, ok := tags["ENCODER"]; ok && encoder != "" {
+				encoders = append(encoders, encoder)
+			}
+			if trackUID > 0 {
+				if stats, ok := parseMatroskaTagStats(tags, writingApp, muxingApp); ok {
+					current := statsByTrackUID[trackUID]
+					mergeMatroskaTagStats(&current, stats)
+					statsByTrackUID[trackUID] = current
+				}
+			}
 		}
 		pos = dataEnd
 	}
-	return encoders
+	return encoders, statsByTrackUID
 }
 
-func parseMatroskaTagEncoders(buf []byte) []string {
+func parseMatroskaTagsFromBuffer(buf []byte, writingApp string, muxingApp string) ([]string, map[uint64]matroskaTagStats) {
 	var encoders []string
+	statsByTrackUID := map[uint64]matroskaTagStats{}
+	pattern := []byte{0x12, 0x54, 0xC3, 0x67}
+	searchPos := 0
+	for searchPos+len(pattern) <= len(buf) {
+		index := bytes.Index(buf[searchPos:], pattern)
+		if index < 0 {
+			break
+		}
+		start := searchPos + index
+		size, sizeLen, ok := readVintSize(buf, start+len(pattern))
+		if !ok || size == unknownVintSize {
+			searchPos = start + 1
+			continue
+		}
+		dataStart := start + len(pattern) + sizeLen
+		dataEnd := dataStart + int(size)
+		if dataStart >= len(buf) || dataEnd > len(buf) {
+			searchPos = start + 1
+			continue
+		}
+		tagEncoders, tagStats := parseMatroskaTags(buf[dataStart:dataEnd], writingApp, muxingApp)
+		encoders = append(encoders, tagEncoders...)
+		for trackUID, stat := range tagStats {
+			current := statsByTrackUID[trackUID]
+			mergeMatroskaTagStats(&current, stat)
+			statsByTrackUID[trackUID] = current
+		}
+		searchPos = start + len(pattern)
+	}
+	return encoders, statsByTrackUID
+}
+
+func parseMatroskaTag(buf []byte) (uint64, map[string]string) {
+	var trackUID uint64
+	tags := map[string]string{}
 	pos := 0
 	for pos < len(buf) {
 		id, idLen, ok := readVintID(buf, pos)
@@ -1602,17 +1686,50 @@ func parseMatroskaTagEncoders(buf []byte) []string {
 		if size == unknownVintSize || dataEnd > len(buf) {
 			dataEnd = len(buf)
 		}
-		if id == mkvIDSimpleTag {
-			if encoder := parseMatroskaSimpleTagEncoder(buf[dataStart:dataEnd]); encoder != "" {
-				encoders = append(encoders, encoder)
+		switch id {
+		case mkvIDTagTargets:
+			if value := parseMatroskaTagTargets(buf[dataStart:dataEnd]); value > 0 {
+				trackUID = value
+			}
+		case mkvIDSimpleTag:
+			parseMatroskaSimpleTagTree(buf[dataStart:dataEnd], tags)
+		}
+		pos = dataEnd
+	}
+	return trackUID, tags
+}
+
+func parseMatroskaTagTargets(buf []byte) uint64 {
+	var trackUID uint64
+	pos := 0
+	for pos < len(buf) {
+		id, idLen, ok := readVintID(buf, pos)
+		if !ok {
+			break
+		}
+		size, sizeLen, ok := readVintSize(buf, pos+idLen)
+		if !ok {
+			break
+		}
+		dataStart := pos + idLen + sizeLen
+		dataEnd := dataStart + int(size)
+		if size == unknownVintSize || dataEnd > len(buf) {
+			dataEnd = len(buf)
+		}
+		if id == mkvIDTagTrackUID {
+			if value, ok := readUnsigned(buf[dataStart:dataEnd]); ok {
+				trackUID = value
 			}
 		}
 		pos = dataEnd
 	}
-	return encoders
+	return trackUID
 }
 
-func parseMatroskaSimpleTagEncoder(buf []byte) string {
+func parseMatroskaSimpleTagTree(buf []byte, tags map[string]string) {
+	if tags == nil {
+		return
+	}
 	var name string
 	var value string
 	pos := 0
@@ -1631,6 +1748,9 @@ func parseMatroskaSimpleTagEncoder(buf []byte) string {
 			dataEnd = len(buf)
 		}
 		payload := buf[dataStart:dataEnd]
+		if id == mkvIDSimpleTag {
+			parseMatroskaSimpleTagTree(payload, tags)
+		}
 		if id == mkvIDTagName {
 			name = string(payload)
 		}
@@ -1639,10 +1759,176 @@ func parseMatroskaSimpleTagEncoder(buf []byte) string {
 		}
 		pos = dataEnd
 	}
-	if name == "ENCODER" && value != "" {
-		return value
+	name = strings.TrimSpace(name)
+	if name != "" && value != "" {
+		if _, exists := tags[name]; !exists {
+			tags[name] = value
+		}
 	}
-	return ""
+}
+
+func parseMatroskaTagStats(tags map[string]string, writingApp string, muxingApp string) (matroskaTagStats, bool) {
+	if len(tags) == 0 {
+		return matroskaTagStats{}, false
+	}
+	list := strings.Fields(tags["_STATISTICS_TAGS"])
+	if len(list) == 0 {
+		return matroskaTagStats{}, false
+	}
+	statsApp := strings.TrimSpace(tags["_STATISTICS_WRITING_APP"])
+	statsDateUTC := strings.TrimSpace(tags["_STATISTICS_WRITING_DATE_UTC"])
+	if statsApp == "" {
+		return matroskaTagStats{}, false
+	}
+	if statsDateUTC != "" && !parseMatroskaStatsUTC(statsDateUTC) {
+		return matroskaTagStats{}, false
+	}
+	if !matroskaStatsAppMatches(statsApp, writingApp, muxingApp) {
+		return matroskaTagStats{}, false
+	}
+	out := matroskaTagStats{trusted: true}
+	for _, key := range list {
+		value := strings.TrimSpace(tags[key])
+		if value == "" {
+			continue
+		}
+		switch key {
+		case "BPS":
+			if parsed, ok := parseMatroskaTagInt(value); ok && parsed > 0 {
+				out.bitRate = parsed
+				out.hasBitRate = true
+			}
+		case "DURATION":
+			if seconds, ok := parseMatroskaStatisticsDuration(value); ok && seconds > 0 {
+				out.durationSeconds = seconds
+				out.hasDuration = true
+			}
+		case "NUMBER_OF_FRAMES":
+			if parsed, ok := parseMatroskaTagInt(value); ok && parsed > 0 {
+				out.frameCount = parsed
+				out.hasFrameCount = true
+			}
+		case "NUMBER_OF_BYTES":
+			if parsed, ok := parseMatroskaTagInt(value); ok && parsed > 0 {
+				out.dataBytes = parsed
+				out.hasDataBytes = true
+			}
+		}
+	}
+	if !out.hasBitRate && !out.hasDuration && !out.hasFrameCount && !out.hasDataBytes {
+		return matroskaTagStats{}, false
+	}
+	return out, true
+}
+
+func parseMatroskaStatisticsDuration(value string) (float64, bool) {
+	parts := strings.Split(strings.TrimSpace(value), ":")
+	if len(parts) != 3 {
+		return 0, false
+	}
+	hours, err := strconv.ParseFloat(parts[0], 64)
+	if err != nil {
+		return 0, false
+	}
+	minutes, err := strconv.ParseFloat(parts[1], 64)
+	if err != nil {
+		return 0, false
+	}
+	seconds, err := strconv.ParseFloat(parts[2], 64)
+	if err != nil {
+		return 0, false
+	}
+	total := (hours * 60 * 60) + (minutes * 60) + seconds
+	if total <= 0 {
+		return 0, false
+	}
+	return total, true
+}
+
+func parseMatroskaStatsUTC(value string) bool {
+	value = strings.TrimSpace(strings.TrimSuffix(value, " UTC"))
+	if value == "" {
+		return false
+	}
+	layouts := []string{
+		"2006-01-02 15:04:05",
+		"2006-01-02 15:04:05.000000",
+		"2006-01-02 15:04:05.000000000",
+		time.RFC3339,
+		"2006-01-02T15:04:05",
+	}
+	for _, layout := range layouts {
+		if _, err := time.Parse(layout, value); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+func matroskaStatsAppMatches(statsApp string, writingApp string, muxingApp string) bool {
+	statsApp = strings.Join(strings.Fields(strings.ToLower(statsApp)), " ")
+	if statsApp == "" {
+		return false
+	}
+	if writingApp == "" && muxingApp == "" {
+		return true
+	}
+	for _, candidate := range []string{writingApp, muxingApp} {
+		candidate = strings.Join(strings.Fields(strings.ToLower(candidate)), " ")
+		if candidate == "" {
+			continue
+		}
+		if strings.Contains(candidate, statsApp) || strings.Contains(statsApp, candidate) {
+			return true
+		}
+		statsTokens := strings.Fields(statsApp)
+		candidateTokens := strings.Fields(candidate)
+		if len(statsTokens) > 0 && len(candidateTokens) > 0 && statsTokens[0] == candidateTokens[0] {
+			return true
+		}
+	}
+	return false
+}
+
+func parseMatroskaTagInt(value string) (int64, bool) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0, false
+	}
+	parsed, err := strconv.ParseInt(value, 10, 64)
+	if err == nil {
+		return parsed, true
+	}
+	floatValue, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		return 0, false
+	}
+	return int64(math.Round(floatValue)), true
+}
+
+func mergeMatroskaTagStats(dst *matroskaTagStats, src matroskaTagStats) {
+	if dst == nil {
+		return
+	}
+	if src.trusted {
+		dst.trusted = true
+	}
+	if src.hasBitRate {
+		dst.bitRate = src.bitRate
+		dst.hasBitRate = true
+	}
+	if src.hasDuration {
+		dst.durationSeconds = src.durationSeconds
+		dst.hasDuration = true
+	}
+	if src.hasFrameCount {
+		dst.frameCount = src.frameCount
+		dst.hasFrameCount = true
+	}
+	if src.hasDataBytes {
+		dst.dataBytes = src.dataBytes
+		dst.hasDataBytes = true
+	}
 }
 
 func applyMatroskaEncoders(streams []Stream, encoders []string) {

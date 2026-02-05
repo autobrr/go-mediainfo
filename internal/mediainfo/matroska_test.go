@@ -28,6 +28,93 @@ func TestParseMatroskaTracks(t *testing.T) {
 	}
 }
 
+func TestParseMatroskaStatsTags(t *testing.T) {
+	tagsPayload := buildMatroskaTagForStats(123)
+	encoders, stats := parseMatroskaTags(tagsPayload, "mkvmerge v82.0.0", "libebml v1.4.5 + libmatroska v1.7.1")
+	if len(encoders) != 1 || encoders[0] != "Lavf60.3.100" {
+		t.Fatalf("unexpected encoders: %#v", encoders)
+	}
+	entry := stats[123]
+	if !entry.trusted {
+		t.Fatalf("expected trusted stats")
+	}
+	if !entry.hasDataBytes || entry.dataBytes != 1048576 {
+		t.Fatalf("unexpected bytes: %+v", entry)
+	}
+	if !entry.hasFrameCount || entry.frameCount != 1200 {
+		t.Fatalf("unexpected frame count: %+v", entry)
+	}
+	if !entry.hasDuration || entry.durationSeconds != 50 {
+		t.Fatalf("unexpected duration: %+v", entry)
+	}
+	if !entry.hasBitRate || entry.bitRate != 166000 {
+		t.Fatalf("unexpected bitrate: %+v", entry)
+	}
+}
+
+func TestApplyMatroskaTagStats(t *testing.T) {
+	info := MatroskaInfo{
+		Tracks: []Stream{
+			{
+				Kind: StreamVideo,
+				Fields: []Field{
+					{Name: "Format", Value: "AVC"},
+					{Name: "ID", Value: "1"},
+					{Name: "Width", Value: "1920 pixels"},
+					{Name: "Height", Value: "1080 pixels"},
+					{Name: "Frame rate", Value: "24.000 FPS"},
+				},
+				JSON: map[string]string{"UniqueID": "123"},
+			},
+		},
+	}
+	complete := applyMatroskaTagStats(&info, map[uint64]matroskaTagStats{
+		123: {
+			trusted:         true,
+			dataBytes:       1048576,
+			hasDataBytes:    true,
+			frameCount:      1200,
+			hasFrameCount:   true,
+			durationSeconds: 50,
+			hasDuration:     true,
+			bitRate:         166000,
+			hasBitRate:      true,
+		},
+	}, 2*1048576)
+	if !complete {
+		t.Fatalf("expected complete stats coverage")
+	}
+	if findField(info.Tracks[0].Fields, "Stream size") == "" {
+		t.Fatalf("expected stream size")
+	}
+	if findField(info.Tracks[0].Fields, "Duration") == "" {
+		t.Fatalf("expected duration")
+	}
+	if findField(info.Tracks[0].Fields, "Bit rate") == "" {
+		t.Fatalf("expected bitrate")
+	}
+	if info.Tracks[0].JSON["FrameCount"] != "1200" {
+		t.Fatalf("unexpected frame count json: %#v", info.Tracks[0].JSON)
+	}
+}
+
+func TestParseMatroskaTagStatsWithoutDate(t *testing.T) {
+	stats, ok := parseMatroskaTagStats(map[string]string{
+		"_STATISTICS_TAGS":        "BPS DURATION NUMBER_OF_FRAMES NUMBER_OF_BYTES",
+		"_STATISTICS_WRITING_APP": "mkvmerge v94.0 ('Initiate') 64-bit",
+		"BPS":                     "5913898",
+		"DURATION":                "00:42:01.080000000",
+		"NUMBER_OF_FRAMES":        "63027",
+		"NUMBER_OF_BYTES":         "1863676305",
+	}, "mkvmerge v94.0 ('Initiate') 64-bit", "libebml v1.4.5")
+	if !ok || !stats.trusted {
+		t.Fatalf("expected trusted stats, got: %+v", stats)
+	}
+	if !stats.hasDataBytes || !stats.hasDuration || !stats.hasFrameCount || !stats.hasBitRate {
+		t.Fatalf("missing parsed stats: %+v", stats)
+	}
+}
+
 func buildMatroskaSample() []byte {
 	segment := append(
 		buildMatroskaInfo(),
@@ -53,6 +140,25 @@ func buildMatroskaTracks() []byte {
 	trackEntry = append(trackEntry, buildMatroskaVideoSettings(1920, 1080)...)
 	trackEntry = buildMatroskaElement(mkvIDTrackEntry, trackEntry)
 	return buildMatroskaElement(mkvIDTracks, trackEntry)
+}
+
+func buildMatroskaTagForStats(trackUID uint64) []byte {
+	targets := buildMatroskaElement(mkvIDTagTargets, buildMatroskaElement(mkvIDTagTrackUID, encodeMatroskaUint(trackUID)))
+	body := append(targets, buildMatroskaSimpleTag("ENCODER", "Lavf60.3.100")...)
+	body = append(body, buildMatroskaSimpleTag("_STATISTICS_TAGS", "BPS DURATION NUMBER_OF_FRAMES NUMBER_OF_BYTES")...)
+	body = append(body, buildMatroskaSimpleTag("_STATISTICS_WRITING_APP", "mkvmerge v82.0.0")...)
+	body = append(body, buildMatroskaSimpleTag("_STATISTICS_WRITING_DATE_UTC", "2024-01-01 12:00:00")...)
+	body = append(body, buildMatroskaSimpleTag("BPS", "166000")...)
+	body = append(body, buildMatroskaSimpleTag("DURATION", "00:00:50.000000000")...)
+	body = append(body, buildMatroskaSimpleTag("NUMBER_OF_FRAMES", "1200")...)
+	body = append(body, buildMatroskaSimpleTag("NUMBER_OF_BYTES", "1048576")...)
+	return buildMatroskaElement(mkvIDTag, body)
+}
+
+func buildMatroskaSimpleTag(name, value string) []byte {
+	body := buildMatroskaElement(mkvIDTagName, []byte(name))
+	body = append(body, buildMatroskaElement(mkvIDTagString, []byte(value))...)
+	return buildMatroskaElement(mkvIDSimpleTag, body)
 }
 
 func buildMatroskaVideoSettings(width, height uint64) []byte {

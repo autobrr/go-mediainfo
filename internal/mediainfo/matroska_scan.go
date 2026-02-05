@@ -20,6 +20,18 @@ type matroskaTrackStats struct {
 	hasEnd     bool
 }
 
+type matroskaTagStats struct {
+	trusted         bool
+	dataBytes       int64
+	hasDataBytes    bool
+	frameCount      int64
+	hasFrameCount   bool
+	durationSeconds float64
+	hasDuration     bool
+	bitRate         int64
+	hasBitRate      bool
+}
+
 type matroskaAudioProbe struct {
 	format       string
 	info         ac3Info
@@ -613,6 +625,115 @@ func applyMatroskaStats(info *MatroskaInfo, stats map[uint64]*matroskaTrackStats
 	}
 }
 
+func applyMatroskaTagStats(info *MatroskaInfo, tagStats map[uint64]matroskaTagStats, fileSize int64) bool {
+	if info == nil || len(tagStats) == 0 {
+		return false
+	}
+	statsByTrack := map[uint64]*matroskaTrackStats{}
+	for _, stream := range info.Tracks {
+		trackUID := streamTrackUID(stream)
+		if trackUID == 0 {
+			continue
+		}
+		tag := tagStats[trackUID]
+		if !tag.trusted {
+			continue
+		}
+		trackNumber := streamTrackNumber(stream)
+		if trackNumber == 0 {
+			continue
+		}
+		stat := &matroskaTrackStats{}
+		if tag.hasDataBytes && tag.dataBytes > 0 {
+			stat.dataBytes = tag.dataBytes
+		}
+		if tag.hasFrameCount && tag.frameCount > 0 {
+			stat.blockCount = tag.frameCount
+		}
+		if tag.hasDuration && tag.durationSeconds > 0 {
+			stat.hasTime = true
+			stat.minTimeNs = 0
+			stat.maxTimeNs = int64(tag.durationSeconds * 1e9)
+		}
+		if stat.dataBytes > 0 || stat.blockCount > 0 || stat.hasTime {
+			statsByTrack[trackNumber] = stat
+		}
+	}
+	if len(statsByTrack) > 0 {
+		applyMatroskaStats(info, statsByTrack, fileSize)
+	}
+	for i := range info.Tracks {
+		stream := &info.Tracks[i]
+		trackUID := streamTrackUID(*stream)
+		if trackUID == 0 {
+			continue
+		}
+		tag := tagStats[trackUID]
+		if !tag.trusted || !tag.hasBitRate || tag.bitRate <= 0 {
+			continue
+		}
+		bitrate := float64(tag.bitRate)
+		switch stream.Kind {
+		case StreamText:
+			if bitrate < 1000 {
+				stream.Fields = setFieldValue(stream.Fields, "Bit rate", fmt.Sprintf("%.0f b/s", math.Floor(bitrate)))
+			} else {
+				stream.Fields = setFieldValue(stream.Fields, "Bit rate", formatBitrateSmall(bitrate))
+			}
+			if stream.JSON == nil {
+				stream.JSON = map[string]string{}
+			}
+			stream.JSON["BitRate"] = strconv.FormatInt(tag.bitRate, 10)
+		case StreamVideo:
+			stream.Fields = setFieldValue(stream.Fields, "Bit rate", formatBitrate(bitrate))
+			if stream.JSON == nil {
+				stream.JSON = map[string]string{}
+			}
+			stream.JSON["BitRate"] = strconv.FormatInt(tag.bitRate, 10)
+			width, _ := parsePixels(findField(stream.Fields, "Width"))
+			height, _ := parsePixels(findField(stream.Fields, "Height"))
+			fps, _ := parseFPS(findField(stream.Fields, "Frame rate"))
+			if bits := formatBitsPerPixelFrame(bitrate, width, height, fps); bits != "" {
+				stream.Fields = setFieldValue(stream.Fields, "Bits/(Pixel*Frame)", bits)
+			}
+		case StreamAudio:
+			if findField(stream.Fields, "Bit rate") == "" {
+				stream.Fields = setFieldValue(stream.Fields, "Bit rate", formatBitrate(bitrate))
+			}
+		}
+	}
+	return matroskaHasCompleteTagStats(info.Tracks, tagStats)
+}
+
+func matroskaHasCompleteTagStats(streams []Stream, tagStats map[uint64]matroskaTagStats) bool {
+	hasMediaTrack := false
+	for _, stream := range streams {
+		if stream.Kind != StreamVideo && stream.Kind != StreamAudio && stream.Kind != StreamText {
+			continue
+		}
+		hasMediaTrack = true
+		trackUID := streamTrackUID(stream)
+		if trackUID == 0 {
+			return false
+		}
+		tag := tagStats[trackUID]
+		if !tag.trusted || !tag.hasDataBytes || tag.dataBytes <= 0 {
+			return false
+		}
+		switch stream.Kind {
+		case StreamAudio:
+			if !(tag.hasDuration || tag.hasBitRate) {
+				return false
+			}
+		case StreamVideo, StreamText:
+			if !(tag.hasDuration || tag.hasFrameCount) {
+				return false
+			}
+		}
+	}
+	return hasMediaTrack
+}
+
 func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAudioProbe) {
 	if len(probes) == 0 {
 		return
@@ -995,4 +1116,16 @@ func streamTrackNumber(stream Stream) uint64 {
 	}
 	value, _ := strconv.ParseUint(id, 10, 64)
 	return value
+}
+
+func streamTrackUID(stream Stream) uint64 {
+	if stream.JSON == nil {
+		return 0
+	}
+	value := stream.JSON["UniqueID"]
+	if value == "" {
+		return 0
+	}
+	parsed, _ := strconv.ParseUint(value, 10, 64)
+	return parsed
 }
