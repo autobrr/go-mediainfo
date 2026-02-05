@@ -742,12 +742,6 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 				if value := formatBitrate(bitrate); value != "" {
 					fields = appendFieldUnique(fields, Field{Name: "Bit rate", Value: value})
 				}
-			} else if headerOnly && info.BitRate > 0 {
-				bitrate = float64(info.BitRate)
-				kbps = int64(bitrate / 1000.0)
-				if value := formatBitrate(bitrate); value != "" {
-					fields = appendFieldUnique(fields, Field{Name: "Bit rate", Value: value})
-				}
 			} else if bitrateDuration > 0 && effectiveBytes > 0 {
 				bitrate = (float64(effectiveBytes) * 8) / bitrateDuration
 				if bitrate >= 10_000_000 {
@@ -895,8 +889,6 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 			}
 			if headerOnly && opts.dvdParsing && headerFrameBytes > 0 && bitrate > 0 {
 				jsonExtras["BitRate"] = fmt.Sprintf("%d", int64(math.Round(bitrate)))
-			} else if headerOnly && info.BitRate > 0 {
-				jsonExtras["BitRate"] = fmt.Sprintf("%d", info.BitRate)
 			} else if jsonBitrateDuration > 0 && jsonStreamBytes > 0 {
 				jsonBitrate := (float64(jsonStreamBytes) * 8) / jsonBitrateDuration
 				jsonExtras["BitRate"] = fmt.Sprintf("%d", int64(math.Round(jsonBitrate)))
