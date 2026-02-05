@@ -401,6 +401,8 @@ func parseAVIINFO(data []byte) string {
 }
 
 func parseAVIMovi(file io.ReadSeeker, start, end int64, streams []*aviStream, videoData *[]byte, vopScan *vopScanner) {
+	const aviScanChunk = 256 << 10
+	scanBuf := make([]byte, aviScanChunk)
 	offset := start
 	for offset+8 <= end {
 		var header [8]byte
@@ -420,14 +422,40 @@ func parseAVIMovi(file io.ReadSeeker, start, end int64, streams []*aviStream, vi
 					stream := streams[index]
 					stream.bytes += uint64(chunkSize)
 					if stream.kind == StreamVideo && chunkSize > 0 {
-						if vopScan != nil {
-							payload := make([]byte, chunkSize)
-							if _, err := readAt(file, dataStart, payload); err == nil {
-								vopScan.feed(payload)
-								if videoData != nil && len(*videoData) < aviMaxVisualScan {
-									remaining := min(aviMaxVisualScan-len(*videoData), len(payload))
-									*videoData = append(*videoData, payload[:remaining]...)
+						needVOP := vopScan != nil && vopScan.bvop == nil
+						needVisual := videoData != nil && len(*videoData) < aviMaxVisualScan
+						if needVOP || needVisual {
+							remainingVisual := 0
+							if needVisual {
+								remainingVisual = aviMaxVisualScan - len(*videoData)
+							}
+							remainingChunk := chunkSize
+							readPos := dataStart
+							for remainingChunk > 0 && (needVOP || remainingVisual > 0) {
+								readLen := int64(len(scanBuf))
+								if readLen > remainingChunk {
+									readLen = remainingChunk
 								}
+								buf := scanBuf[:readLen]
+								if _, err := readAt(file, readPos, buf); err != nil {
+									break
+								}
+								if needVOP {
+									vopScan.feed(buf)
+									if vopScan.bvop != nil {
+										needVOP = false
+									}
+								}
+								if remainingVisual > 0 {
+									take := len(buf)
+									if take > remainingVisual {
+										take = remainingVisual
+									}
+									*videoData = append(*videoData, buf[:take]...)
+									remainingVisual -= take
+								}
+								remainingChunk -= readLen
+								readPos += readLen
 							}
 						}
 					}
@@ -513,10 +541,31 @@ func parseRIFFChunks(data []byte, fn func(id string, payload []byte)) {
 }
 
 func readAt(file io.ReadSeeker, offset int64, buf []byte) (int, error) {
+	if readerAt, ok := file.(io.ReaderAt); ok {
+		return readAtReaderAt(readerAt, offset, buf)
+	}
 	if _, err := file.Seek(offset, io.SeekStart); err != nil {
 		return 0, err
 	}
 	return io.ReadFull(file, buf)
+}
+
+func readAtReaderAt(readerAt io.ReaderAt, offset int64, buf []byte) (int, error) {
+	total := 0
+	for total < len(buf) {
+		n, err := readerAt.ReadAt(buf[total:], offset+int64(total))
+		total += n
+		if err != nil {
+			if err == io.EOF && total == len(buf) {
+				return total, nil
+			}
+			return total, err
+		}
+		if n == 0 {
+			return total, io.EOF
+		}
+	}
+	return total, nil
 }
 
 func fourCC(value uint32) string {
