@@ -470,7 +470,7 @@ func parseMPEGPSFileSample(parser *psStreamParser, file *os.File, opts mpegPSOpt
 		return reader(file)
 	}
 
-	sampleSize := int64(64 << 20)
+	sampleSize := int64(8 << 20)
 	if parseSpeed > 0 && parseSpeed < 1 {
 		sampleSize = max(int64(float64(sampleSize)*parseSpeed), 4<<20)
 	}

@@ -32,7 +32,7 @@ func ParseMPEGPSWithOptions(file io.ReadSeeker, size int64, opts mpegPSOptions) 
 				buf := bufio.NewReaderSize(r, 1<<20)
 				return parser.parseReader(buf)
 			}
-			sampleSize := int64(64 << 20)
+			sampleSize := int64(8 << 20)
 			if parseSpeed > 0 && parseSpeed < 1 {
 				sampleSize = max(int64(float64(sampleSize)*parseSpeed), 4<<20)
 			}
