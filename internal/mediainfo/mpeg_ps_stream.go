@@ -15,6 +15,8 @@ type psStreamParser struct {
 	videoPTS     ptsTracker
 	anyPTS       ptsTracker
 	packetOrder  int
+	quickAC3     bool
+	quickAC3Max  uint64
 }
 
 type psPending struct {
@@ -27,11 +29,17 @@ type psPending struct {
 	skip       int
 }
 
-func newPSStreamParser() *psStreamParser {
+func newPSStreamParser(opts mpegPSOptions) *psStreamParser {
+	parseSpeed := opts.parseSpeed
+	if parseSpeed == 0 {
+		parseSpeed = 1
+	}
 	return &psStreamParser{
 		streams:      map[uint16]*psStream{},
 		streamOrder:  []uint16{},
 		videoParsers: map[uint16]*mpeg2VideoParser{},
+		quickAC3:     parseSpeed < 1 && !opts.dvdExtras,
+		quickAC3Max:  128,
 	}
 }
 
@@ -394,6 +402,9 @@ func (p *psStreamParser) consumePayload(entry *psStream, key uint16, flags byte,
 	}
 	if entry.kind == StreamAudio {
 		if entry.format == "AC-3" {
+			if p.quickAC3 && entry.hasAC3 && entry.audioFrames >= p.quickAC3Max {
+				return
+			}
 			consumeAC3PS(entry, payload)
 		} else {
 			consumeADTSPS(entry, payload)
@@ -430,7 +441,7 @@ func ParseMPEGPSFiles(paths []string, size int64, opts mpegPSOptions) (Container
 	if len(paths) == 0 {
 		return ContainerInfo{}, nil, false
 	}
-	parser := newPSStreamParser()
+	parser := newPSStreamParser(opts)
 	parsedAny := false
 	for _, path := range paths {
 		file, err := os.Open(path)

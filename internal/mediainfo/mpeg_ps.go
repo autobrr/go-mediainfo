@@ -27,7 +27,7 @@ func ParseMPEGPSWithOptions(file io.ReadSeeker, size int64, opts mpegPSOptions) 
 	}
 	if parseSpeed < 1 && size > 0 {
 		if readerAt, ok := file.(io.ReaderAt); ok {
-			parser := newPSStreamParser()
+			parser := newPSStreamParser(opts)
 			reader := func(r io.Reader) bool {
 				buf := bufio.NewReaderSize(r, 1<<20)
 				return parser.parseReader(buf)
@@ -75,7 +75,7 @@ func ParseMPEGPSWithOptions(file io.ReadSeeker, size int64, opts mpegPSOptions) 
 	}
 
 	reader := bufio.NewReaderSize(file, 1<<20)
-	parser := newPSStreamParser()
+	parser := newPSStreamParser(opts)
 	if !parser.parseReader(reader) {
 		return ContainerInfo{}, nil, false
 	}
