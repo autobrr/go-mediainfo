@@ -55,7 +55,9 @@ type matroskaVideoProbe struct {
 }
 
 const matroskaVideoProbeMaxBytes = 256 * 1024
-const ebmlSkipSeekMin = 4 * 1024
+
+// Cluster scans should avoid reading payload bytes; prefer Seek-based skipping.
+const ebmlSkipSeekMin = 0
 
 func (s *matroskaTrackStats) addBlock(timeNs int64, dataBytes int64, durationNs int64, frames int64) {
 	if dataBytes > 0 {
@@ -89,9 +91,16 @@ type ebmlReader struct {
 }
 
 func newEBMLReader(rs io.ReadSeeker) *ebmlReader {
+	return newEBMLReaderWithBufSize(rs, 1024*1024)
+}
+
+func newEBMLReaderWithBufSize(rs io.ReadSeeker, bufSize int) *ebmlReader {
+	if bufSize <= 0 {
+		bufSize = 64 * 1024
+	}
 	return &ebmlReader{
 		rs: rs,
-		r:  bufio.NewReaderSize(rs, 1024*1024),
+		r:  bufio.NewReaderSize(rs, bufSize),
 	}
 }
 
@@ -245,7 +254,8 @@ func scanMatroskaClusters(r io.ReaderAt, offset int64, size int64, timecodeScale
 		return nil, false
 	}
 	reader := io.NewSectionReader(r, offset, size)
-	er := newEBMLReader(reader)
+	// Cluster scans do lots of skipping; avoid read-ahead into payloads.
+	er := newEBMLReaderWithBufSize(reader, 8*1024)
 	stats := map[uint64]*matroskaTrackStats{}
 
 	for er.pos < size {
@@ -665,12 +675,21 @@ func applyMatroskaStats(info *MatroskaInfo, stats map[uint64]*matroskaTrackStats
 				durationSeconds = float64(stat.blockCount) / fps
 			}
 		}
+		if info.Tracks[i].Kind == StreamAudio && stat.blockCount > 0 {
+			if fps, ok := parseFPS(findField(info.Tracks[i].Fields, "Frame rate")); ok && fps > 0 {
+				// Official mediainfo reports audio Duration based on frame count / frame rate when available.
+				durationSeconds = float64(stat.blockCount) / fps
+			}
+		}
 		if durationSeconds > 0 {
 			if info.Tracks[i].Kind == StreamVideo {
 				durationSeconds = math.Ceil(durationSeconds*1000) / 1000
 			}
+			if info.Tracks[i].Kind == StreamAudio {
+				durationSeconds = math.Round(durationSeconds*1000) / 1000
+			}
 			info.Tracks[i].Fields = setFieldValue(info.Tracks[i].Fields, "Duration", formatDuration(durationSeconds))
-			if info.Tracks[i].Kind == StreamText || info.Tracks[i].Kind == StreamVideo {
+			if info.Tracks[i].Kind == StreamText || info.Tracks[i].Kind == StreamVideo || info.Tracks[i].Kind == StreamAudio {
 				if info.Tracks[i].JSON == nil {
 					info.Tracks[i].JSON = map[string]string{}
 				}
@@ -714,18 +733,34 @@ func applyMatroskaStats(info *MatroskaInfo, stats map[uint64]*matroskaTrackStats
 					bitrateDuration = value
 				}
 			}
-			if bitrateDuration > 0 && stat.dataBytes > 0 {
-				bitrate := (float64(stat.dataBytes) * 8) / bitrateDuration
-				info.Tracks[i].Fields = setFieldValue(info.Tracks[i].Fields, "Bit rate", formatBitrate(bitrate))
-				if info.Tracks[i].JSON == nil {
-					info.Tracks[i].JSON = map[string]string{}
+			if findField(info.Tracks[i].Fields, "Bit rate") == "" {
+				// If x264 parsing provided a nominal bitrate, prefer it over derived StreamSize/Duration.
+				if nominal := findField(info.Tracks[i].Fields, "Nominal bit rate"); nominal != "" {
+					if bps, ok := parseBitrateBps(nominal); ok && bps > 0 {
+						info.Tracks[i].Fields = setFieldValue(info.Tracks[i].Fields, "Bit rate", nominal)
+						if info.Tracks[i].JSON == nil {
+							info.Tracks[i].JSON = map[string]string{}
+						}
+						info.Tracks[i].JSON["BitRate"] = strconv.FormatInt(bps, 10)
+					}
 				}
-				info.Tracks[i].JSON["BitRate"] = strconv.FormatInt(int64(bitrate), 10)
-				width, _ := parsePixels(findField(info.Tracks[i].Fields, "Width"))
-				height, _ := parsePixels(findField(info.Tracks[i].Fields, "Height"))
-				fps, _ := parseFPS(findField(info.Tracks[i].Fields, "Frame rate"))
-				if bits := formatBitsPerPixelFrame(bitrate, width, height, fps); bits != "" {
-					info.Tracks[i].Fields = setFieldValue(info.Tracks[i].Fields, "Bits/(Pixel*Frame)", bits)
+			}
+			if bitrateDuration > 0 && stat.dataBytes > 0 && findField(info.Tracks[i].Fields, "Bit rate") == "" {
+				if info.Tracks[i].JSON != nil && info.Tracks[i].JSON["BitRate"] != "" {
+					// Already set by tags or earlier steps.
+				} else {
+					bitrate := (float64(stat.dataBytes) * 8) / bitrateDuration
+					info.Tracks[i].Fields = setFieldValue(info.Tracks[i].Fields, "Bit rate", formatBitrate(bitrate))
+					if info.Tracks[i].JSON == nil {
+						info.Tracks[i].JSON = map[string]string{}
+					}
+					info.Tracks[i].JSON["BitRate"] = strconv.FormatInt(int64(bitrate), 10)
+					width, _ := parsePixels(findField(info.Tracks[i].Fields, "Width"))
+					height, _ := parsePixels(findField(info.Tracks[i].Fields, "Height"))
+					fps, _ := parseFPS(findField(info.Tracks[i].Fields, "Frame rate"))
+					if bits := formatBitsPerPixelFrame(bitrate, width, height, fps); bits != "" {
+						info.Tracks[i].Fields = setFieldValue(info.Tracks[i].Fields, "Bits/(Pixel*Frame)", bits)
+					}
 				}
 			}
 		}
@@ -733,6 +768,11 @@ func applyMatroskaStats(info *MatroskaInfo, stats map[uint64]*matroskaTrackStats
 			if durationSeconds > 0 && stat.dataBytes > 0 && findField(info.Tracks[i].Fields, "Bit rate") == "" {
 				bitrate := (float64(stat.dataBytes) * 8) / durationSeconds
 				info.Tracks[i].Fields = setFieldValue(info.Tracks[i].Fields, "Bit rate", formatBitrate(bitrate))
+				if info.Tracks[i].JSON == nil {
+					info.Tracks[i].JSON = map[string]string{}
+				}
+				// Official mediainfo truncates derived audio bitrate.
+				info.Tracks[i].JSON["BitRate"] = strconv.FormatInt(int64(bitrate), 10)
 			}
 		}
 	}
@@ -885,9 +925,12 @@ func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAud
 		if probe.format == "E-AC-3" {
 			hasJOC := ac3.hasJOC || ac3.hasJOCComplex || ac3.jocObjects > 0 || ac3.hasJOCDyn || ac3.hasJOCBed
 			if hasJOC {
-				stream.Fields = setFieldValue(stream.Fields, "Format", "E-AC-3 JOC")
-				stream.Fields = setFieldValue(stream.Fields, "Format/Info", "Enhanced AC-3 with Joint Object Coding")
 				stream.Fields = setFieldValue(stream.Fields, "Commercial name", "Dolby Digital Plus with Dolby Atmos")
+				if stream.JSON == nil {
+					stream.JSON = map[string]string{}
+				}
+				// Official mediainfo keeps Format=E-AC-3 and uses Format_AdditionalFeatures=JOC.
+				stream.JSON["Format_AdditionalFeatures"] = "JOC"
 			} else {
 				stream.Fields = setFieldValue(stream.Fields, "Commercial name", "Dolby Digital Plus")
 			}

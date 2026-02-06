@@ -277,6 +277,53 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 				addNominalBitrate:      true,
 				addBitsPerPixel:        true,
 			})
+			// Official mediainfo sometimes prefers nominal bitrate (from encoder settings) over
+			// a derived average from StreamSize/Duration for Matroska. When we can detect
+			// that BitRate is derived (within a tiny tolerance) and nominal is close, align to nominal.
+			for i := range streams {
+				if streams[i].Kind != StreamVideo || streams[i].JSON == nil {
+					continue
+				}
+				nominalBps := int64(0)
+				if v := streams[i].JSON["BitRate_Nominal"]; v != "" {
+					if parsed, ok := parseInt(v); ok && parsed > 0 {
+						nominalBps = parsed
+					}
+				}
+				if nominalBps == 0 {
+					nominalField := findField(streams[i].Fields, "Nominal bit rate")
+					if parsed, ok := parseBitrateBps(nominalField); ok && parsed > 0 {
+						nominalBps = parsed
+					}
+				}
+				if nominalBps <= 0 {
+					continue
+				}
+				br, brOk := parseInt(streams[i].JSON["BitRate"])
+				ss, ssOk := parseInt(streams[i].JSON["StreamSize"])
+				if !brOk || !ssOk || br <= 0 || ss <= 0 {
+					continue
+				}
+				dur, err := strconv.ParseFloat(streams[i].JSON["Duration"], 64)
+				if err != nil || dur <= 0 {
+					continue
+				}
+				// Match applyMatroskaStats: truncation via int64(); allow tiny rounding noise.
+				derived := int64((float64(ss) * 8) / dur)
+				diff := derived - br
+				if diff < 0 {
+					diff = -diff
+				}
+				if diff > 2 {
+					continue
+				}
+				// Only trust nominal when it's close to the derived average.
+				if math.Abs(float64(nominalBps-br))/float64(br) > 0.05 {
+					continue
+				}
+				streams[i].JSON["BitRate"] = strconv.FormatInt(nominalBps, 10)
+				streams[i].Fields = setFieldValue(streams[i].Fields, "Bit rate", formatBitrate(float64(nominalBps)))
+			}
 		}
 	case "MPEG-TS":
 		if parsedInfo, parsedStreams, generalFields, ok := ParseMPEGTS(file, stat.Size()); ok {
@@ -312,33 +359,22 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 		dvdExtras := false
 		dvdParsing := false
 		if strings.EqualFold(filepath.Ext(path), ".vob") && strings.EqualFold(filepath.Base(filepath.Dir(path)), "VIDEO_TS") {
-			dvdParsing = true
-			if dvdVOBIndex(path) == 1 {
-				if vobPaths, vobSize := dvdTitleSetVOBs(path); len(vobPaths) > 0 && vobSize > 0 {
-					psPaths = vobPaths
-					psSize = vobSize
-					if len(vobPaths) > 1 {
-						completeNameLast = vobPaths[len(vobPaths)-1]
-					}
-					general.Fields = setFieldValue(general.Fields, "File size", formatBytes(vobSize))
-					if general.JSON == nil {
-						general.JSON = map[string]string{}
-					}
-					general.JSON["FileSize"] = strconv.FormatInt(vobSize, 10)
-					if completeNameLast != "" {
-						general.Fields = appendFieldUnique(general.Fields, Field{Name: "CompleteName_Last", Value: completeNameLast})
-						general.JSON["CompleteName_Last"] = completeNameLast
-					}
-				}
-			}
+			// Keep VOB-as-file behavior aligned with official mediainfo: treat it as plain MPEG-PS.
+			// DVD title-set aggregation is handled when parsing IFOs.
+			_ = completeNameLast
+		}
+		parseSpeed := opts.ParseSpeed
+		if dvdParsing && parseSpeed < 1 {
+			// DVD-Video VOB aggregation needs full parsing for stable duration/stream stats.
+			parseSpeed = 1
 		}
 		var parsedInfo ContainerInfo
 		var parsedStreams []Stream
 		var ok bool
 		if len(psPaths) > 1 {
-			parsedInfo, parsedStreams, ok = ParseMPEGPSFiles(psPaths, psSize, mpegPSOptions{dvdExtras: dvdExtras, dvdParsing: dvdParsing, parseSpeed: opts.ParseSpeed})
+			parsedInfo, parsedStreams, ok = ParseMPEGPSFiles(psPaths, psSize, mpegPSOptions{dvdExtras: dvdExtras, dvdParsing: dvdParsing, parseSpeed: parseSpeed})
 		} else {
-			parsedInfo, parsedStreams, ok = ParseMPEGPSWithOptions(file, psSize, mpegPSOptions{dvdExtras: dvdExtras, dvdParsing: dvdParsing, parseSpeed: opts.ParseSpeed})
+			parsedInfo, parsedStreams, ok = ParseMPEGPSWithOptions(file, psSize, mpegPSOptions{dvdExtras: dvdExtras, dvdParsing: dvdParsing, parseSpeed: parseSpeed})
 		}
 		if ok {
 			info = parsedInfo

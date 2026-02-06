@@ -22,8 +22,8 @@ Format settings, Reference frames        : 4 frames
 Codec ID                                 : V_MPEG4/ISO/AVC
 Duration                                 : 4 s 4 ms
 Width                                    : 640 pixels
-Height                                   : 368 pixels
-Display aspect ratio                     : 40:23
+Height                                   : 360 pixels
+Display aspect ratio                     : 16:9
 Frame rate mode                          : Constant
 Frame rate                               : 29.970 (30000/1001) FPS
 Color space                              : YUV
@@ -45,11 +45,10 @@ Duration                                 : 4 s 21 ms
 Channel(s)                               : 1 channel
 Channel layout                           : M
 Sampling rate                            : 48.0 kHz
-Frame rate                               : 46.875 FPS (1024 SPF)
+Frame rate                               : 46.8750 FPS (1024 SPF)
 Compression mode                         : Lossy
 Writing library                          : Lavc62.11.100 aac
 Default                                  : No
 Forced                                   : No
 
 ReportBy : go-mediainfo - dev
-

@@ -95,6 +95,7 @@ const (
 	mkvIDTransferChar        = 0x55BA
 	mkvIDMatrixCoeffs        = 0x55B3
 	mkvIDSamplingRate        = 0xB5
+	mkvIDOutputSamplingRate  = 0x78B5
 	mkvIDChannels            = 0x9F
 	mkvIDDocType             = 0x4282
 	mkvIDDocTypeVersion      = 0x4287
@@ -272,13 +273,18 @@ func ParseMatroskaWithOptions(r io.ReaderAt, size int64, opts AnalyzeOptions) (M
 	return info, true
 }
 
-func shouldApplyMatroskaClusterStats(parseSpeed float64, _ int64, _ map[uint64]matroskaTagStats, _ bool) bool {
-	if parseSpeed >= 1 {
-		return true
+func shouldApplyMatroskaClusterStats(parseSpeed float64, _ int64, tagStats map[uint64]matroskaTagStats, tagStatsComplete bool) bool {
+	// MediaInfo CLI default is metadata-first and very fast; per-track StreamSize/FrameCount
+	// are usually sourced from Matroska Statistics Tags (mkvmerge) without a full Cluster pass.
+	// A full Cluster scan is extremely expensive on large files, so only do it for "full"
+	// parse speed and when tags didn't already provide the stats.
+	if parseSpeed < 1 {
+		return false
 	}
-	// MediaInfo at default parse speed does not do a full Cluster pass.
-	// Keep probes enabled, but skip expensive stats scan unless user asks for ParseSpeed=1.
-	return false
+	if tagStatsComplete {
+		return false
+	}
+	return len(tagStats) == 0
 }
 
 func findMatroskaSeekPosition(buf []byte, segmentOffset int, targetID uint64) (uint64, bool) {
@@ -827,6 +833,7 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64) (Stream, bool)
 	var spsInfo h264SPSInfo
 	var audioChannels uint64
 	var audioSampleRate float64
+	var audioBaseSampleRate float64
 	var defaultDuration uint64
 	var bitRate uint64
 	var trackBitRate bool
@@ -926,12 +933,19 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64) (Stream, bool)
 			videoInfo = parseMatroskaVideo(buf[dataStart:dataEnd])
 		}
 		if id == mkvIDTrackAudio {
-			channels, sampleRate := parseMatroskaAudio(buf[dataStart:dataEnd])
+			channels, sampleRate, outputSampleRate := parseMatroskaAudio(buf[dataStart:dataEnd])
 			if channels > 0 {
 				audioChannels = channels
 			}
-			if sampleRate > 0 {
+			// For HE-AAC/SBR, Matroska may provide both base and output sample rates.
+			// Prefer output for display, but keep base for frame rate/SPF decisions.
+			if outputSampleRate > 0 {
+				audioSampleRate = outputSampleRate
+			} else if sampleRate > 0 {
 				audioSampleRate = sampleRate
+			}
+			if sampleRate > 0 {
+				audioBaseSampleRate = sampleRate
 			}
 		}
 		pos = dataEnd
@@ -1010,6 +1024,15 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64) (Stream, bool)
 	if spsInfo.CodedHeight > 0 {
 		videoInfo.codedHeight = spsInfo.CodedHeight
 	}
+	// If container didn't specify DisplayWidth/DisplayHeight, prefer SPS visible dimensions.
+	// This matches official mediainfo behavior for streams with coded size (e.g. 1920x1088)
+	// and cropping to display (e.g. 1920x1080).
+	if videoInfo.displayWidth == 0 && spsInfo.Width > 0 {
+		videoInfo.displayWidth = spsInfo.Width
+	}
+	if videoInfo.displayHeight == 0 && spsInfo.Height > 0 {
+		videoInfo.displayHeight = spsInfo.Height
+	}
 	if videoInfo.colorRange == "" && spsInfo.HasColorRange {
 		videoInfo.colorRange = spsInfo.ColorRange
 		videoInfo.colorRangeSource = "Stream"
@@ -1030,7 +1053,7 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64) (Stream, bool)
 		bitRate = uint64(spsInfo.BitRate)
 	}
 	if kind == StreamVideo {
-		bitRateNominal := trackBitRate || (spsInfo.HasBitRateCBR && spsInfo.BitRateCBR)
+		bitRateNominal := spsInfo.HasBitRateCBR && spsInfo.BitRateCBR
 		storedWidth := videoInfo.pixelWidth
 		storedHeight := videoInfo.pixelHeight
 		if videoInfo.codedWidth > 0 {
@@ -1045,11 +1068,17 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64) (Stream, bool)
 			displayWidth = 0
 			displayHeight = 0
 		}
-		if storedWidth > 0 {
-			fields = append(fields, Field{Name: "Width", Value: formatPixels(storedWidth)})
+		outWidth := storedWidth
+		outHeight := storedHeight
+		if displayWidth > 0 && displayHeight > 0 {
+			outWidth = displayWidth
+			outHeight = displayHeight
 		}
-		if storedHeight > 0 {
-			fields = append(fields, Field{Name: "Height", Value: formatPixels(storedHeight)})
+		if outWidth > 0 {
+			fields = append(fields, Field{Name: "Width", Value: formatPixels(outWidth)})
+		}
+		if outHeight > 0 {
+			fields = append(fields, Field{Name: "Height", Value: formatPixels(outHeight)})
 		}
 		aspectW := storedWidth
 		aspectH := storedHeight
@@ -1073,12 +1102,17 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64) (Stream, bool)
 			}
 		}
 		if bitRate > 0 {
-			if bitRateNominal {
-				fields = append(fields, Field{Name: "Nominal bit rate", Value: formatBitrate(float64(bitRate))})
-				fields = append(fields, Field{Name: "Bit rate mode", Value: "Constant"})
-			} else {
-				fields = append(fields, Field{Name: "Maximum bit rate", Value: formatBitrate(float64(bitRate))})
-				fields = append(fields, Field{Name: "Bit rate mode", Value: "Variable"})
+			// Prefer container/stream bit rate metadata over derived StreamSize/Duration.
+			// Official mediainfo reports this as BitRate (not BitRate_Nominal/Maximum) for Matroska.
+			fields = append(fields, Field{Name: "Bit rate", Value: formatBitrate(float64(bitRate))})
+			// Only emit BitRate_Mode when the stream provides HRD mode signaling.
+			// (Some files report BitRate but omit BitRate_Mode in official output.)
+			if spsInfo.HasBitRateCBR {
+				if bitRateNominal {
+					fields = append(fields, Field{Name: "Bit rate mode", Value: "Constant"})
+				} else {
+					fields = append(fields, Field{Name: "Bit rate mode", Value: "Variable"})
+				}
 			}
 			if defaultDuration > 0 && storedWidth > 0 && storedHeight > 0 {
 				rate := 1e9 / float64(defaultDuration)
@@ -1136,8 +1170,14 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64) (Stream, bool)
 		if audioSampleRate > 0 {
 			fields = append(fields, Field{Name: "Sampling rate", Value: formatSampleRate(audioSampleRate)})
 			if format == "AAC LC" {
-				frameRate := audioSampleRate / 1024.0
-				fields = append(fields, Field{Name: "Frame rate", Value: fmt.Sprintf("%.3f FPS (1024 SPF)", frameRate)})
+				spf := 1024.0
+				// HE-AAC/SBR commonly reports base and output sample rates; MediaInfo uses 2048 SPF at output rate.
+				if audioBaseSampleRate > 0 && audioSampleRate > audioBaseSampleRate {
+					spf = 2048.0
+				}
+				frameRate := audioSampleRate / spf
+				// Keep enough precision so duration from FrameCount/FrameRate matches official JSON rounding.
+				fields = append(fields, Field{Name: "Frame rate", Value: fmt.Sprintf("%.4f FPS (%.0f SPF)", frameRate, spf)})
 			}
 		}
 		if bitRate > 0 {
@@ -1544,10 +1584,11 @@ func parseMatroskaVideo(buf []byte) matroskaVideoInfo {
 	return info
 }
 
-func parseMatroskaAudio(buf []byte) (uint64, float64) {
+func parseMatroskaAudio(buf []byte) (uint64, float64, float64) {
 	pos := 0
 	var channels uint64
 	var sampleRate float64
+	var outputSampleRate float64
 	for pos < len(buf) {
 		id, idLen, ok := readVintID(buf, pos)
 		if !ok {
@@ -1574,9 +1615,16 @@ func parseMatroskaAudio(buf []byte) (uint64, float64) {
 				sampleRate = float64(valueInt)
 			}
 		}
+		if id == mkvIDOutputSamplingRate {
+			if value, ok := readFloat(buf[dataStart:dataEnd]); ok {
+				outputSampleRate = value
+			} else if valueInt, ok := readUnsigned(buf[dataStart:dataEnd]); ok {
+				outputSampleRate = float64(valueInt)
+			}
+		}
 		pos = dataEnd
 	}
-	return channels, sampleRate
+	return channels, sampleRate, outputSampleRate
 }
 
 type matroskaColourInfo struct {

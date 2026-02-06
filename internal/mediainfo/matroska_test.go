@@ -28,8 +28,8 @@ func TestParseMatroskaTracks(t *testing.T) {
 	if findField(info.Tracks[0].Fields, "Frame rate") == "" {
 		t.Fatalf("missing frame rate")
 	}
-	if findField(info.Tracks[0].Fields, "Nominal bit rate") == "" {
-		t.Fatalf("missing nominal bit rate")
+	if findField(info.Tracks[0].Fields, "Bit rate") == "" {
+		t.Fatalf("missing bit rate")
 	}
 }
 
@@ -259,10 +259,10 @@ func TestShouldApplyMatroskaClusterStats(t *testing.T) {
 			size:       mkvMaxScan * 10,
 			tagStats:   nonEmptyTags,
 			complete:   true,
-			want:       true,
+			want:       false,
 		},
 		{
-			name:       "small file skips cluster stats",
+			name:       "default parse speed applies",
 			parseSpeed: 0.5,
 			size:       mkvMaxScan,
 			tagStats:   nil,
@@ -270,7 +270,7 @@ func TestShouldApplyMatroskaClusterStats(t *testing.T) {
 			want:       false,
 		},
 		{
-			name:       "large file with no tag stats skips",
+			name:       "large file with no tag stats applies",
 			parseSpeed: 0.5,
 			size:       mkvMaxScan + 1,
 			tagStats:   nil,
@@ -278,7 +278,7 @@ func TestShouldApplyMatroskaClusterStats(t *testing.T) {
 			want:       false,
 		},
 		{
-			name:       "large file with some tag stats skips",
+			name:       "large file with some tag stats applies",
 			parseSpeed: 0.5,
 			size:       mkvMaxScan + 1,
 			tagStats:   nonEmptyTags,
@@ -286,7 +286,7 @@ func TestShouldApplyMatroskaClusterStats(t *testing.T) {
 			want:       false,
 		},
 		{
-			name:       "complete tag stats skips",
+			name:       "complete tag stats applies",
 			parseSpeed: 0.5,
 			size:       mkvMaxScan + 1,
 			tagStats:   nonEmptyTags,

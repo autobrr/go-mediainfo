@@ -41,12 +41,12 @@
 <CodecID>V_MPEG4/ISO/AVC</CodecID>
 <Duration>4.004000000</Duration>
 <Width>640</Width>
-<Height>368</Height>
+<Height>360</Height>
 <Stored_Height>368</Stored_Height>
 <Sampled_Width>640</Sampled_Width>
-<Sampled_Height>368</Sampled_Height>
+<Sampled_Height>360</Sampled_Height>
 <PixelAspectRatio>1.000</PixelAspectRatio>
-<DisplayAspectRatio>1.739</DisplayAspectRatio>
+<DisplayAspectRatio>1.778</DisplayAspectRatio>
 <FrameRate_Mode>CFR</FrameRate_Mode>
 <FrameRate_Mode_Original>VFR</FrameRate_Mode_Original>
 <FrameRate>29.970</FrameRate>
