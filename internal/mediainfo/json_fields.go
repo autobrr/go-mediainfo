@@ -248,6 +248,9 @@ func mapStreamFieldsToJSON(kind StreamKind, fields []Field) []jsonKV {
 			out = append(out, jsonKV{Key: "Language", Val: field.Value})
 		case "Title":
 			out = append(out, jsonKV{Key: "Title", Val: field.Value})
+		case "Movie name":
+			out = append(out, jsonKV{Key: "Title", Val: field.Value})
+			out = append(out, jsonKV{Key: "Movie", Val: field.Value})
 		case "Channel(s)":
 			out = append(out, jsonKV{Key: "Channels", Val: extractLeadingNumber(field.Value)})
 		case "Channel layout":

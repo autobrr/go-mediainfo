@@ -24,6 +24,7 @@ const (
 	mkvIDSegmentUID          = 0x73A4
 	mkvIDTimecodeScale       = 0x2AD7B1
 	mkvIDDuration            = 0x4489
+	mkvIDTitle               = 0x7BA9
 	mkvIDDateUTC             = 0x4461
 	mkvIDMuxingApp           = 0x4D80
 	mkvIDWritingApp          = 0x5741
@@ -783,6 +784,13 @@ func parseMatroskaInfo(buf []byte) (matroskaSegmentInfo, bool) {
 			if len(payload) > 0 {
 				fields = append(fields, Field{Name: "Writing library", Value: string(payload)})
 			}
+		case mkvIDTitle:
+			if len(payload) > 0 {
+				title := strings.TrimRight(string(payload), "\x00")
+				if title != "" {
+					fields = append(fields, Field{Name: "Movie name", Value: title})
+				}
+			}
 		case mkvIDDateUTC:
 			if value, ok := readSigned(payload); ok {
 				fields = append(fields, Field{Name: "Encoded date", Value: formatMatroskaDateUTC(value)})
@@ -858,7 +866,6 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64) (Stream, bool)
 	var audioBaseSampleRate float64
 	var defaultDuration uint64
 	var bitRate uint64
-	var trackBitRate bool
 	var flagDefault *bool
 	var flagForced *bool
 	var nalLengthSize int
@@ -940,10 +947,8 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64) (Stream, bool)
 		if id == mkvIDBitRate {
 			if value, ok := readUnsigned(buf[dataStart:dataEnd]); ok {
 				bitRate = value
-				trackBitRate = true
 			} else if value, ok := readFloat(buf[dataStart:dataEnd]); ok {
 				bitRate = uint64(math.Round(value))
-				trackBitRate = true
 			}
 		}
 		if id == mkvIDDefaultDuration {
@@ -1269,14 +1274,6 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64) (Stream, bool)
 	jsonExtras := map[string]string{}
 	if trackUID > 0 {
 		jsonExtras["UniqueID"] = strconv.FormatUint(trackUID, 10)
-	}
-	if bitRate > 0 {
-		bitRateNominal := trackBitRate || (spsInfo.HasBitRateCBR && spsInfo.BitRateCBR)
-		if bitRateNominal {
-			jsonExtras["BitRate_Nominal"] = strconv.FormatUint(bitRate, 10)
-		} else {
-			jsonExtras["BitRate_Maximum"] = strconv.FormatUint(bitRate, 10)
-		}
 	}
 	if languageCode != "" {
 		jsonExtras["Language"] = languageCode

@@ -61,3 +61,36 @@ func findX264Bitrate(encoding string) (float64, bool) {
 	}
 	return value * 1000, true
 }
+
+func findX264ParamKbps(encoding string, key string) (float64, bool) {
+	idx := strings.Index(encoding, key+"=")
+	if idx == -1 {
+		return 0, false
+	}
+	start := idx + len(key) + 1
+	end := start
+	for end < len(encoding) {
+		ch := encoding[end]
+		if (ch >= '0' && ch <= '9') || ch == '.' {
+			end++
+			continue
+		}
+		break
+	}
+	if end == start {
+		return 0, false
+	}
+	value, err := strconv.ParseFloat(encoding[start:end], 64)
+	if err != nil || value <= 0 {
+		return 0, false
+	}
+	return value, true
+}
+
+func findX264VbvMaxrate(encoding string) (float64, bool) {
+	return findX264ParamKbps(encoding, "vbv_maxrate")
+}
+
+func findX264VbvBufsize(encoding string) (float64, bool) {
+	return findX264ParamKbps(encoding, "vbv_bufsize")
+}

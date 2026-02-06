@@ -285,55 +285,45 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			applyX264Info(file, streams, x264InfoOptions{
 				skipWritingLibIfExists: true,
 				skipEncodingIfExists:   true,
-				addNominalBitrate:      true,
-				addBitsPerPixel:        true,
+				addNominalBitrate:      false,
+				addBitsPerPixel:        false,
 			})
-			// Official mediainfo sometimes prefers nominal bitrate (from encoder settings) over
-			// a derived average from StreamSize/Duration for Matroska. When we can detect
-			// that BitRate is derived (within a tiny tolerance) and nominal is close, align to nominal.
+			// MediaInfo prefers x264 settings for bitrate/VBV constraints when available.
 			for i := range streams {
-				if streams[i].Kind != StreamVideo || streams[i].JSON == nil {
+				if streams[i].Kind != StreamVideo {
 					continue
 				}
-				nominalBps := int64(0)
-				if v := streams[i].JSON["BitRate_Nominal"]; v != "" {
-					if parsed, ok := parseInt(v); ok && parsed > 0 {
-						nominalBps = parsed
+				enc := findField(streams[i].Fields, "Encoding settings")
+				if enc == "" {
+					continue
+				}
+				if bitrate, ok := findX264Bitrate(enc); ok && bitrate > 0 {
+					streams[i].Fields = setFieldValue(streams[i].Fields, "Bit rate", formatBitrate(bitrate))
+					if streams[i].JSON == nil {
+						streams[i].JSON = map[string]string{}
+					}
+					streams[i].JSON["BitRate"] = strconv.FormatInt(int64(math.Round(bitrate)), 10)
+				}
+				// MediaInfo reports VBV constraints only when HRD signaling is enabled.
+				if !strings.Contains(enc, "nal_hrd=none") {
+					if maxKbps, ok := findX264VbvMaxrate(enc); ok && maxKbps > 0 {
+						maxBps := maxKbps * 1000
+						streams[i].Fields = setFieldValue(streams[i].Fields, "Maximum bit rate", formatBitrate(maxBps))
+						if streams[i].JSON == nil {
+							streams[i].JSON = map[string]string{}
+						}
+						streams[i].JSON["BitRate_Maximum"] = strconv.FormatInt(int64(math.Round(maxBps)), 10)
+					}
+					if bufKbps, ok := findX264VbvBufsize(enc); ok && bufKbps > 0 {
+						bufBps := bufKbps * 1000
+						if streams[i].JSON == nil {
+							streams[i].JSON = map[string]string{}
+						}
+						if streams[i].JSON["BufferSize"] == "" {
+							streams[i].JSON["BufferSize"] = strconv.FormatInt(int64(math.Round(bufBps)), 10)
+						}
 					}
 				}
-				if nominalBps == 0 {
-					nominalField := findField(streams[i].Fields, "Nominal bit rate")
-					if parsed, ok := parseBitrateBps(nominalField); ok && parsed > 0 {
-						nominalBps = parsed
-					}
-				}
-				if nominalBps <= 0 {
-					continue
-				}
-				br, brOk := parseInt(streams[i].JSON["BitRate"])
-				ss, ssOk := parseInt(streams[i].JSON["StreamSize"])
-				if !brOk || !ssOk || br <= 0 || ss <= 0 {
-					continue
-				}
-				dur, err := strconv.ParseFloat(streams[i].JSON["Duration"], 64)
-				if err != nil || dur <= 0 {
-					continue
-				}
-				// Match applyMatroskaStats: truncation via int64(); allow tiny rounding noise.
-				derived := int64((float64(ss) * 8) / dur)
-				diff := derived - br
-				if diff < 0 {
-					diff = -diff
-				}
-				if diff > 2 {
-					continue
-				}
-				// Only trust nominal when it's close to the derived average.
-				if math.Abs(float64(nominalBps-br))/float64(br) > 0.05 {
-					continue
-				}
-				streams[i].JSON["BitRate"] = strconv.FormatInt(nominalBps, 10)
-				streams[i].Fields = setFieldValue(streams[i].Fields, "Bit rate", formatBitrate(float64(nominalBps)))
 			}
 		}
 	case "MPEG-TS":
