@@ -5,10 +5,8 @@
 "Format":"MPEG Audio",
 "FileSize":"64940",
 "Duration":"4.056",
-"OverallBitRate_Mode":"CBR",
 "OverallBitRate":"128000",
-"File_Created_Date":"<redacted>",
-"File_Created_Date_Local":"<redacted>",
+"StreamSize":"44",
 "File_Modified_Date":"<redacted>",
 "File_Modified_Date_Local":"<redacted>"},{"@type":"Audio","StreamOrder":"0",
 "Format":"MPEG Audio",
@@ -18,5 +16,7 @@
 "Channels":"1",
 "ChannelPositions":"Front: C",
 "ChannelLayout":"M",
-"SamplingRate":"48000"}]}
+"SamplingRate":"48000",
+"FrameCount":"169",
+"StreamSize":"64896"}]}
 }

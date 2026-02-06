@@ -56,8 +56,12 @@ func buildJSONGeneralFields(report Report) []jsonKV {
 			fields = append(fields, jsonKV{Key: "FileSize", Val: strconv.FormatInt(size, 10)})
 		}
 		if createdUTC, createdLocal, modifiedUTC, modifiedLocal, ok := fileTimes(report.Ref); ok {
-			fields = append(fields, jsonKV{Key: "File_Created_Date", Val: createdUTC})
-			fields = append(fields, jsonKV{Key: "File_Created_Date_Local", Val: createdLocal})
+			if createdUTC != "" {
+				fields = append(fields, jsonKV{Key: "File_Created_Date", Val: createdUTC})
+			}
+			if createdLocal != "" {
+				fields = append(fields, jsonKV{Key: "File_Created_Date_Local", Val: createdLocal})
+			}
 			fields = append(fields, jsonKV{Key: "File_Modified_Date", Val: modifiedUTC})
 			fields = append(fields, jsonKV{Key: "File_Modified_Date_Local", Val: modifiedLocal})
 		}
@@ -88,6 +92,8 @@ func mapStreamFieldsToJSON(kind StreamKind, fields []Field) []jsonKV {
 	var extras []jsonKV
 	for _, field := range fields {
 		switch field.Name {
+		case "CompleteName_Last":
+			out = append(out, jsonKV{Key: "CompleteName_Last", Val: field.Value})
 		case "Format":
 			format, extra := splitAACFormat(field.Value)
 			out = append(out, jsonKV{Key: "Format", Val: format})

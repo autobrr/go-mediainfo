@@ -21,6 +21,8 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 	if err != nil {
 		return Report{}, err
 	}
+	fileSize := stat.Size()
+	var completeNameLast string
 
 	header := make([]byte, maxSniffBytes)
 	file, err := os.Open(path)
@@ -34,12 +36,27 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 
 	format := DetectFormat(header, path)
 
+	if opts.TestContinuousFileNames && (format == "BDAV" || format == "MPEG-TS") {
+		if set, ok := detectContinuousFileSet(path); ok {
+			completeNameLast = set.LastPath
+			fileSize = set.TotalSize
+		}
+	}
+
 	general := Stream{Kind: StreamGeneral}
 	general.Fields = append(general.Fields,
 		Field{Name: "Complete name", Value: path},
 		Field{Name: "Format", Value: format},
-		Field{Name: "File size", Value: formatBytes(stat.Size())},
+		Field{Name: "File size", Value: formatBytes(fileSize)},
 	)
+	if completeNameLast != "" {
+		general.Fields = appendFieldUnique(general.Fields, Field{Name: "CompleteName_Last", Value: completeNameLast})
+		if general.JSON == nil {
+			general.JSON = map[string]string{}
+		}
+		// Override JSON FileSize (default comes from report.Ref on disk).
+		general.JSON["FileSize"] = strconv.FormatInt(fileSize, 10)
+	}
 
 	info := ContainerInfo{}
 	streams := []Stream{}
@@ -330,6 +347,9 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			info = parsedInfo
 			general.JSON = map[string]string{}
 			general.JSONRaw = map[string]string{}
+			if completeNameLast != "" {
+				general.JSON["FileSize"] = strconv.FormatInt(fileSize, 10)
+			}
 			for _, field := range generalFields {
 				general.Fields = appendFieldUnique(general.Fields, field)
 			}
@@ -342,7 +362,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			if info.DurationSeconds > 0 {
 				general.JSON["Duration"] = fmt.Sprintf("%.9f", info.DurationSeconds)
 			}
-			setOverallBitRate(general.JSON, stat.Size(), info.DurationSeconds)
+			setOverallBitRate(general.JSON, fileSize, info.DurationSeconds)
 			if info.OverallBitrateMin > 0 && info.OverallBitrateMax > 0 {
 				minRate := int64(math.Round(info.OverallBitrateMin))
 				maxRate := int64(math.Round(info.OverallBitrateMax))
@@ -353,31 +373,319 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			})
 		}
 	case "BDAV":
-		if parsedInfo, parsedStreams, generalFields, ok := ParseBDAV(file, stat.Size()); ok {
-			info = parsedInfo
-			general.JSON = map[string]string{}
-			general.JSONRaw = map[string]string{}
+			if parsedInfo, parsedStreams, generalFields, ok := ParseBDAV(file, stat.Size()); ok {
+				info = parsedInfo
+				general.JSON = map[string]string{}
+				general.JSONRaw = map[string]string{}
+			if completeNameLast != "" {
+				general.JSON["FileSize"] = strconv.FormatInt(fileSize, 10)
+			}
 			for _, field := range generalFields {
 				general.Fields = appendFieldUnique(general.Fields, field)
 			}
-			streams = parsedStreams
-			if id := findField(general.Fields, "ID"); id != "" {
-				if value := extractLeadingNumber(id); value != "" {
-					general.JSON["ID"] = value
+				streams = parsedStreams
+				if id := findField(general.Fields, "ID"); id != "" {
+					if value := extractLeadingNumber(id); value != "" {
+						general.JSON["ID"] = value
+					}
 				}
-			}
-			if info.DurationSeconds > 0 {
-				general.JSON["Duration"] = fmt.Sprintf("%.9f", info.DurationSeconds)
-			}
-			setOverallBitRate(general.JSON, stat.Size(), info.DurationSeconds)
-			if info.OverallBitrateMin > 0 && info.OverallBitrateMax > 0 {
-				minRate := int64(math.Round(info.OverallBitrateMin))
-				maxRate := int64(math.Round(info.OverallBitrateMax))
-				general.JSONRaw["extra"] = "{\"OverallBitRate_Precision_Min\":\"" + strconv.FormatInt(minRate, 10) + "\",\"OverallBitRate_Precision_Max\":\"" + strconv.FormatInt(maxRate, 10) + "\"}"
+				// MediaInfo reports BDAV/M2TS General ID as 0.
+				general.JSON["ID"] = "0"
+				if info.DurationSeconds > 0 {
+					general.JSON["Duration"] = fmt.Sprintf("%.9f", info.DurationSeconds)
+				}
+				// Blu-ray max mux rate (per MediaInfo output).
+				general.JSON["OverallBitRate_Maximum"] = "48000000"
+				// MediaInfo uses a PCR-derived estimate for BDAV overall bitrate.
+				if info.OverallBitrateMin > 0 && info.OverallBitrateMax > 0 {
+					mid := (info.OverallBitrateMin + info.OverallBitrateMax) / 2
+					general.JSON["OverallBitRate"] = strconv.FormatInt(int64(math.Round(mid)), 10)
+				} else {
+					setOverallBitRate(general.JSON, fileSize, info.DurationSeconds)
+				}
+				if info.OverallBitrateMin > 0 && info.OverallBitrateMax > 0 {
+					minRate := int64(math.Round(info.OverallBitrateMin))
+					maxRate := int64(math.Round(info.OverallBitrateMax))
+					general.JSONRaw["extra"] = "{\"OverallBitRate_Precision_Min\":\"" + strconv.FormatInt(minRate, 10) + "\",\"OverallBitRate_Precision_Max\":\"" + strconv.FormatInt(maxRate, 10) + "\"}"
 			}
 			applyX264Info(file, streams, x264InfoOptions{
 				addNominalBitrate: true,
 			})
+
+			// MediaInfo CLI continuous file names behavior (File_TestContinuousFileNames=1):
+			// Keep stream layout from the first file, but use the last file's duration and the
+			// aggregated FileSize for bitrate/stream size computations.
+			if completeNameLast != "" {
+				var lastInfo ContainerInfo
+				var lastStreams []Stream
+				var lastSize int64
+				if f, err := os.Open(completeNameLast); err == nil {
+					if st, err := f.Stat(); err == nil {
+						lastSize = st.Size()
+						if li, ls, _, ok := ParseBDAV(f, st.Size()); ok && li.DurationSeconds > 0 {
+							lastInfo = li
+							lastStreams = ls
+						}
+					}
+					_ = f.Close()
+				}
+					if lastInfo.DurationSeconds > 0 {
+						info.DurationSeconds = lastInfo.DurationSeconds
+						general.JSON["Duration"] = fmt.Sprintf("%.9f", info.DurationSeconds)
+						// MediaInfo continuous-file behavior: total FileSize, but bitrate correction based on the last file's PCR-derived bitrate.
+						if lastSize > 0 && fileSize > lastSize && lastInfo.OverallBitrateMin > 0 && lastInfo.OverallBitrateMax > 0 && info.DurationSeconds > 0 {
+							lastMid := (lastInfo.OverallBitrateMin + lastInfo.OverallBitrateMax) / 2
+							lastMidRounded := float64(int64(math.Round(lastMid)))
+							overall := (float64(fileSize-lastSize) * 8 / info.DurationSeconds) + lastMidRounded
+							overallRounded := int64(math.Round(overall))
+							general.JSON["OverallBitRate"] = strconv.FormatInt(overallRounded, 10)
+							// MediaInfo continuous output exposes a very tight precision range.
+							textCount := 0
+							for _, s := range streams {
+								if s.Kind == StreamText {
+									textCount++
+								}
+							}
+							denom := int64(9600)
+							if textCount > 0 {
+								denom = int64(960 * textCount)
+							}
+							lastMidInt := int64(lastMidRounded)
+							precision := float64(lastMidInt) / float64(denom)
+							// MediaInfo uses ceil() when serializing these float-based bounds.
+							minRate := int64(math.Ceil(float64(overallRounded) - precision))
+							maxRate := int64(math.Ceil(float64(overallRounded) + precision))
+							general.JSONRaw["extra"] = "{\"OverallBitRate_Precision_Min\":\"" + strconv.FormatInt(minRate, 10) + "\",\"OverallBitRate_Precision_Max\":\"" + strconv.FormatInt(maxRate, 10) + "\"}"
+						} else {
+							setOverallBitRate(general.JSON, fileSize, info.DurationSeconds)
+						}
+						// Override per-stream JSON durations to match MediaInfo's continuous file behavior.
+						var lastVideoDuration string
+						var lastVideoFrameCount string
+						for _, s := range lastStreams {
+						if s.Kind != StreamVideo || s.JSON == nil {
+							continue
+						}
+						lastVideoDuration = s.JSON["Duration"]
+						lastVideoFrameCount = s.JSON["FrameCount"]
+						break
+					}
+					for i := range streams {
+						if streams[i].JSON == nil {
+							continue
+						}
+						switch streams[i].Kind {
+						case StreamVideo:
+							if lastVideoDuration != "" {
+								streams[i].JSON["Duration"] = lastVideoDuration
+							} else {
+								streams[i].JSON["Duration"] = fmt.Sprintf("%.3f", info.DurationSeconds)
+							}
+							if lastVideoFrameCount != "" {
+								streams[i].JSON["FrameCount"] = lastVideoFrameCount
+							}
+						case StreamAudio:
+							streams[i].JSON["Duration"] = fmt.Sprintf("%.3f", info.DurationSeconds)
+							delete(streams[i].JSON, "FrameCount")
+							if sr, ok := parseSampleRate(findField(streams[i].Fields, "Sampling rate")); ok && sr > 0 && info.DurationSeconds > 0 {
+								samplingCount := int64(math.Round(info.DurationSeconds * float64(sr)))
+								if samplingCount > 0 {
+									streams[i].JSON["SamplingCount"] = strconv.FormatInt(samplingCount, 10)
+								}
+							}
+						case StreamText:
+							delete(streams[i].JSON, "Duration")
+							delete(streams[i].JSON, "FrameCount")
+						}
+					}
+				}
+
+				// Prefer bitrate-derived audio StreamSize (CBR) over PID byte counting.
+				for i := range streams {
+					if streams[i].Kind != StreamAudio || streams[i].JSON == nil {
+						continue
+					}
+					br := int64(0)
+					if parsed, ok := parseInt(streams[i].JSON["BitRate"]); ok && parsed > 0 {
+						br = parsed
+					} else if parsed, ok := parseBitrateBps(findField(streams[i].Fields, "Bit rate")); ok && parsed > 0 {
+						br = parsed
+					}
+					if br <= 0 || info.DurationSeconds <= 0 {
+						continue
+					}
+					// MediaInfo uses integer milliseconds for this calculation.
+					durationMs := int64(math.Round(info.DurationSeconds * 1000))
+					if durationMs <= 0 {
+						continue
+					}
+					ss := int64(math.Round(float64(br) * float64(durationMs) / 8000.0))
+					if ss > 0 {
+						streams[i].JSON["StreamSize"] = strconv.FormatInt(ss, 10)
+					}
+				}
+			}
+
+			// BDAV JSON parity: general FrameCount + remaining StreamSize (overhead, subtitles, etc).
+			for _, stream := range streams {
+				if stream.Kind != StreamVideo {
+					continue
+				}
+				if stream.JSON != nil {
+					if value := stream.JSON["FrameCount"]; value != "" {
+						general.JSON["FrameCount"] = value
+					}
+				}
+				if general.JSON["FrameCount"] == "" {
+					if count, ok := frameCountFromFields(stream.Fields); ok {
+						general.JSON["FrameCount"] = count
+					}
+				}
+				break
+			}
+			var audioSum int64
+			for _, stream := range streams {
+				if stream.Kind != StreamAudio || stream.JSON == nil {
+					continue
+				}
+				if ss, ok := parseInt(stream.JSON["StreamSize"]); ok && ss > 0 {
+					audioSum += ss
+				}
+			}
+
+			if completeNameLast != "" {
+				// MediaInfo's continuous-file behavior for BDAV: derive video bitrate/size from overall bitrate,
+				// subtracting audio + text overhead, then set General StreamSize as the remainder.
+				overallInt, ok := parseInt(general.JSON["OverallBitRate"])
+				if ok && overallInt > 0 && info.DurationSeconds > 0 && fileSize > 0 {
+					overall := float64(overallInt)
+					const (
+						generalRatio = 0.98
+						generalMinus = 5000
+						videoRatio   = 0.98
+						videoMinus   = 2000
+						audioRatio   = 0.98
+						audioMinus   = 2000
+						textRatio    = 0.98
+						textMinus    = 2000
+					)
+
+					videoBitrate := overall*generalRatio - generalMinus
+					valid := true
+					for i := range streams {
+						if streams[i].Kind != StreamAudio {
+							continue
+						}
+						br := int64(0)
+						if streams[i].JSON != nil {
+							if parsed, ok := parseInt(streams[i].JSON["BitRate"]); ok && parsed > 0 {
+								br = parsed
+							}
+						}
+						if br == 0 {
+							if parsed, ok := parseBitrateBps(findField(streams[i].Fields, "Bit rate")); ok && parsed > 0 {
+								br = parsed
+							}
+						}
+						if br == 0 {
+							valid = false
+							break
+						}
+						videoBitrate -= float64(br)/audioRatio + audioMinus
+					}
+					if valid {
+						for i := range streams {
+							if streams[i].Kind != StreamText {
+								continue
+							}
+							textBR := float64(0)
+							if streams[i].JSON != nil {
+								if parsed, ok := parseInt(streams[i].JSON["BitRate"]); ok && parsed > 0 {
+									textBR = float64(parsed)
+								}
+							}
+							if textBR == 0 {
+								if parsed, ok := parseBitrateBps(findField(streams[i].Fields, "Bit rate")); ok && parsed > 0 {
+									textBR = float64(parsed)
+								}
+							}
+							videoBitrate -= textBR/textRatio + textMinus
+						}
+						videoBitrate = videoBitrate*videoRatio - videoMinus
+					}
+
+					if valid && videoBitrate >= 10000 {
+						videoBps := int64(math.Round(videoBitrate))
+						var frameRate float64
+						var frameCount int64
+						for i := range streams {
+							if streams[i].Kind != StreamVideo || streams[i].JSON == nil {
+								continue
+							}
+							if parsed, err := strconv.ParseFloat(streams[i].JSON["FrameRate"], 64); err == nil && parsed > 0 {
+								frameRate = parsed
+							} else if parsed, ok := parseFPS(findField(streams[i].Fields, "Frame rate")); ok && parsed > 0 {
+								frameRate = parsed
+							}
+							if parsed, ok := parseInt(streams[i].JSON["FrameCount"]); ok && parsed > 0 {
+								frameCount = parsed
+							}
+							break
+						}
+						durationMs := float64(int64(math.Round(info.DurationSeconds * 1000)))
+						if frameRate > 0 && frameCount > 0 {
+							// MediaInfo uses the rounded FrameRate value for more stable (but slightly imprecise) sizing.
+							durationMs = float64(frameCount) * 1000 / frameRate
+						}
+						videoSS := int64(math.Round((videoBitrate / 8.0) * (durationMs / 1000.0)))
+						if videoSS > 0 {
+							for i := range streams {
+								if streams[i].Kind != StreamVideo {
+									continue
+								}
+								if streams[i].JSON == nil {
+									streams[i].JSON = map[string]string{}
+								}
+								streams[i].JSON["BitRate"] = strconv.FormatInt(videoBps, 10)
+								streams[i].JSON["StreamSize"] = strconv.FormatInt(videoSS, 10)
+								streams[i].Fields = setFieldValue(streams[i].Fields, "Bit rate", formatBitrate(float64(videoBps)))
+								break
+							}
+							generalSS := fileSize - videoSS - audioSum
+							if generalSS > 0 {
+								general.JSON["StreamSize"] = strconv.FormatInt(generalSS, 10)
+							}
+						}
+					}
+				}
+			} else {
+				overhead := info.StreamOverheadBytes
+				if overhead > 0 {
+					general.JSON["StreamSize"] = strconv.FormatInt(overhead, 10)
+				}
+				if fileSize > 0 && overhead > 0 {
+					videoSS := fileSize - overhead - audioSum
+					if videoSS > 0 {
+						for i := range streams {
+							if streams[i].Kind != StreamVideo {
+								continue
+							}
+							if streams[i].JSON == nil {
+								streams[i].JSON = map[string]string{}
+							}
+							streams[i].JSON["StreamSize"] = strconv.FormatInt(videoSS, 10)
+							if info.DurationSeconds > 0 {
+								br := int64(math.Round((float64(videoSS) * 8) / info.DurationSeconds))
+								if br > 0 {
+									streams[i].JSON["BitRate"] = strconv.FormatInt(br, 10)
+									streams[i].Fields = setFieldValue(streams[i].Fields, "Bit rate", formatBitrate(float64(br)))
+								}
+							}
+							break
+						}
+					}
+				}
+			}
 		}
 	case "MPEG-PS":
 		psSize := stat.Size()
@@ -466,11 +774,34 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 		if parsedInfo, parsedStreams, ok := ParseMP3(file, stat.Size()); ok {
 			info = parsedInfo
 			streams = parsedStreams
+			// For audio-only formats, the Field-based duration formatting drops milliseconds
+			// (e.g. "23 min 34 s"). Override JSON Duration to keep MediaInfo parity.
+			general.JSON = map[string]string{}
+			if info.DurationSeconds > 0 {
+				general.JSON["Duration"] = formatJSONSeconds(info.DurationSeconds)
+			}
+			// Official mediainfo overall bitrate excludes tags (ID3v2/ID3v1).
+			payloadSize := stat.Size() - info.StreamOverheadBytes
+			if payloadSize < 0 {
+				payloadSize = stat.Size()
+			}
+			setOverallBitRate(general.JSON, payloadSize, info.DurationSeconds)
+			if info.StreamOverheadBytes > 0 {
+				general.JSON["StreamSize"] = strconv.FormatInt(info.StreamOverheadBytes, 10)
+			}
 		}
 	case "FLAC":
 		if parsedInfo, parsedStreams, ok := ParseFLAC(file, stat.Size()); ok {
 			info = parsedInfo
 			streams = parsedStreams
+			general.JSON = map[string]string{}
+			if info.DurationSeconds > 0 {
+				general.JSON["Duration"] = formatJSONSeconds(info.DurationSeconds)
+			}
+			// Official mediainfo overall bitrate uses total file size for FLAC.
+			setOverallBitRate(general.JSON, stat.Size(), info.DurationSeconds)
+			// Official mediainfo sets General StreamSize=0 for FLAC.
+			general.JSON["StreamSize"] = "0"
 		}
 	case "Wave":
 		if parsedInfo, parsedStreams, ok := ParseWAV(file, stat.Size()); ok {
@@ -591,13 +922,13 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 
 	if info.HasDuration() && format != "DVD Video" {
 		general.Fields = append(general.Fields, Field{Name: "Duration", Value: formatDuration(info.DurationSeconds)})
-		bitrate := float64(stat.Size()*8) / info.DurationSeconds
+		bitrate := float64(fileSize*8) / info.DurationSeconds
 		if bitrate > 0 {
 			mode := info.BitrateMode
-			if mode != "" && format != "Matroska" && format != "AVI" {
+			if mode != "" && format != "Matroska" && format != "AVI" && format != "MPEG Audio" {
 				general.Fields = append(general.Fields, Field{Name: "Overall bit rate mode", Value: mode})
 			}
-			if mode == "" && format != "Matroska" && format != "AVI" {
+			if mode == "" && format != "Matroska" && format != "AVI" && format != "MPEG Audio" {
 				if inferred := bitrateMode(bitrate); inferred != "" {
 					general.Fields = append(general.Fields, Field{Name: "Overall bit rate mode", Value: inferred})
 				}

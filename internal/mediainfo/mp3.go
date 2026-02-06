@@ -2,6 +2,8 @@ package mediainfo
 
 import (
 	"io"
+	"math"
+	"strconv"
 )
 
 type mp3HeaderInfo struct {
@@ -27,7 +29,8 @@ func ParseMP3(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, bool) {
 		return ContainerInfo{}, nil, false
 	}
 
-	if hasID3v1(file, size) {
+	hasV1 := hasID3v1(file, size)
+	if hasV1 {
 		dataSize -= 128
 	}
 	if dataSize <= 0 {
@@ -52,6 +55,13 @@ func ParseMP3(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, bool) {
 	info := ContainerInfo{
 		DurationSeconds: duration,
 		BitrateMode:     mode,
+		StreamOverheadBytes: func() int64 {
+			overhead := size - dataSize
+			if overhead < 0 {
+				return 0
+			}
+			return overhead
+		}(),
 	}
 
 	fields := []Field{
@@ -69,7 +79,25 @@ func ParseMP3(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, bool) {
 	fields = append(fields, Field{Name: "Bit rate mode", Value: mode})
 	fields = addStreamCommon(fields, duration, float64(header.bitrateKbps)*1000)
 
-	return info, []Stream{{Kind: StreamAudio, Fields: fields}}, true
+	streamJSON := map[string]string{}
+	if duration > 0 {
+		streamJSON["Duration"] = formatJSONSeconds(duration)
+	}
+	if dataSize > 0 {
+		streamJSON["StreamSize"] = strconv.FormatInt(dataSize, 10)
+	}
+	if duration > 0 && header.sampleRate > 0 {
+		samplesPerFrame := 1152.0
+		if header.versionID != 0x03 {
+			samplesPerFrame = 576.0
+		}
+		frameCount := int64(math.Round(duration * float64(header.sampleRate) / samplesPerFrame))
+		if frameCount > 0 {
+			streamJSON["FrameCount"] = strconv.FormatInt(frameCount, 10)
+		}
+	}
+
+	return info, []Stream{{Kind: StreamAudio, Fields: fields, JSON: streamJSON}}, true
 }
 
 func skipID3v2(file io.ReadSeeker) (int64, error) {

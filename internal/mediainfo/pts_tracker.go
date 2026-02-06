@@ -13,6 +13,10 @@ type ptsTracker struct {
 }
 
 func (t *ptsTracker) add(pts uint64) {
+	// PTS can be slightly non-monotonic (e.g. B-frame reordering).
+	// Treat only large backwards jumps as discontinuities (segment breaks).
+	const reorderMax = 2 * 90000 // 2 seconds
+
 	if !t.ok {
 		t.first = pts
 		t.min = pts
@@ -23,13 +27,19 @@ func (t *ptsTracker) add(pts uint64) {
 		return
 	}
 	if pts < t.last {
-		segment := ptsDelta(t.segmentStart, t.last)
-		t.segmentTotal += segment
-		if segment > 0 {
-			t.lastNonZero = segment
+		backward := t.last - pts
+		if backward > reorderMax {
+			segment := ptsDelta(t.segmentStart, t.last)
+			t.segmentTotal += segment
+			if segment > 0 {
+				t.lastNonZero = segment
+			}
+			t.segmentStart = pts
+			t.resets++
+			t.last = pts
 		}
-		t.segmentStart = pts
-		t.resets++
+	} else {
+		t.last = pts
 	}
 	if pts < t.min {
 		t.min = pts
@@ -37,7 +47,27 @@ func (t *ptsTracker) add(pts uint64) {
 	if pts > t.max {
 		t.max = pts
 	}
-	t.last = pts
+}
+
+func (t *ptsTracker) breakSegment(start uint64) {
+	if !t.ok {
+		t.add(start)
+		return
+	}
+	segment := ptsDelta(t.segmentStart, t.last)
+	t.segmentTotal += segment
+	if segment > 0 {
+		t.lastNonZero = segment
+	}
+	t.segmentStart = start
+	t.last = start
+	t.resets++
+	if start < t.min {
+		t.min = start
+	}
+	if start > t.max {
+		t.max = start
+	}
 }
 
 func (t ptsTracker) duration() float64 {

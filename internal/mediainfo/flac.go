@@ -3,6 +3,8 @@ package mediainfo
 import (
 	"encoding/binary"
 	"io"
+	"math"
+	"strconv"
 )
 
 func ParseFLAC(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, bool) {
@@ -22,6 +24,7 @@ func ParseFLAC(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, bool) {
 	var channels uint8
 	var bitsPerSample uint8
 	var totalSamples uint64
+	var audioStart int64
 
 	for {
 		var blockHeader [4]byte
@@ -60,6 +63,10 @@ func ParseFLAC(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, bool) {
 			}
 		}
 		if isLast {
+			// The file cursor is now positioned at the start of the audio frames.
+			if pos, err := file.Seek(0, io.SeekCurrent); err == nil {
+				audioStart = pos
+			}
 			break
 		}
 	}
@@ -81,6 +88,12 @@ func ParseFLAC(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, bool) {
 	info := ContainerInfo{
 		DurationSeconds: duration,
 		BitrateMode:     "Variable",
+		StreamOverheadBytes: func() int64 {
+			if audioStart <= 0 {
+				return 0
+			}
+			return audioStart
+		}(),
 	}
 
 	fields := []Field{
@@ -94,7 +107,22 @@ func ParseFLAC(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, bool) {
 	fields = append(fields, Field{Name: "Bit rate mode", Value: "Variable"})
 	fields = addStreamCommon(fields, duration, bitrate)
 
-	return info, []Stream{{Kind: StreamAudio, Fields: fields}}, true
+	streamJSON := map[string]string{}
+	if duration > 0 {
+		streamJSON["Duration"] = formatJSONSeconds(duration)
+	}
+	if audioStart > 0 && audioStart < size {
+		payload := size - audioStart
+		streamJSON["StreamSize"] = strconv.FormatInt(payload, 10)
+		if duration > 0 {
+			br := int64(math.Round((float64(payload) * 8) / duration))
+			if br > 0 {
+				streamJSON["BitRate"] = strconv.FormatInt(br, 10)
+			}
+		}
+	}
+
+	return info, []Stream{{Kind: StreamAudio, Fields: fields, JSON: streamJSON}}, true
 }
 
 func parseFLACStreamInfo(data []byte) (uint32, uint8, uint8, uint64) {

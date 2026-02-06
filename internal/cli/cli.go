@@ -217,6 +217,13 @@ func runCore(opts Options, files []string) (string, int, error) {
 				analyzeOpts.ParseSpeed = value
 				analyzeOpts.HasParseSpeed = true
 			}
+			continue
+		}
+		if strings.EqualFold(opt.Name, "file_testcontinuousfilenames") {
+			value := strings.TrimSpace(opt.Value)
+			analyzeOpts.TestContinuousFileNames = value != "0"
+			analyzeOpts.HasTestContinuousFileNames = true
+			continue
 		}
 	}
 	reports, count, err := mediainfo.AnalyzeFilesWithOptions(files, analyzeOpts)

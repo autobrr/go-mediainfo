@@ -3,7 +3,6 @@ Complete name                            : samples/sample.mp3
 Format                                   : MPEG Audio
 File size                                : 63.4 KiB
 Duration                                 : 4 s 56 ms
-Overall bit rate mode                    : Constant
 Overall bit rate                         : 128 kb/s
 
 Audio

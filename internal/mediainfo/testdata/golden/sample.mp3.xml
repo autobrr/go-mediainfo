@@ -12,10 +12,8 @@
 <Format>MPEG Audio</Format>
 <FileSize>64940</FileSize>
 <Duration>4.056</Duration>
-<OverallBitRate_Mode>CBR</OverallBitRate_Mode>
 <OverallBitRate>128000</OverallBitRate>
-<File_Created_Date><redacted></File_Created_Date>
-<File_Created_Date_Local><redacted></File_Created_Date_Local>
+<StreamSize>44</StreamSize>
 <File_Modified_Date><redacted></File_Modified_Date>
 <File_Modified_Date_Local><redacted></File_Modified_Date_Local>
 </track>
@@ -29,6 +27,8 @@
 <ChannelPositions>Front: C</ChannelPositions>
 <ChannelLayout>M</ChannelLayout>
 <SamplingRate>48000</SamplingRate>
+<FrameCount>169</FrameCount>
+<StreamSize>64896</StreamSize>
 </track>
 </media>
 </MediaInfo>

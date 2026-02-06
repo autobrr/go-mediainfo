@@ -11,8 +11,6 @@
 "FrameRate":"29.970",
 "FrameCount":"120",
 "StreamSize":"0",
-"File_Created_Date":"<redacted>",
-"File_Created_Date_Local":"<redacted>",
 "File_Modified_Date":"<redacted>",
 "File_Modified_Date_Local":"<redacted>",
 "extra":{"FileExtension_Invalid":"mpgv mpv mp1v m1v mp2v m2v","ConformanceWarnings":[{"GeneralCompliance":"File name extension is not expected for this file format (actual mpg, expected mpgv mpv mp1v m1v mp2v m2v)"}]}},{"@type":"Video","Format":"MPEG Video",
