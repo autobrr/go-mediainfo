@@ -80,10 +80,10 @@ func buildJSONStreamFields(stream Stream, order int, typeOrder int) []jsonKV {
 		fields = append(fields, jsonKV{Key: "StreamOrder", Val: strconv.Itoa(order)})
 	}
 	fields = append(fields, mapStreamFieldsToJSON(stream.Kind, stream.Fields)...)
+	fields = applyJSONExtras(fields, stream.JSON, stream.JSONRaw)
 	if !stream.JSONSkipComputed {
 		fields = append(fields, buildJSONComputedFields(stream.Kind, fields)...)
 	}
-	fields = applyJSONExtras(fields, stream.JSON, stream.JSONRaw)
 	return sortJSONFields(stream.Kind, fields)
 }
 
