@@ -715,6 +715,9 @@ func renderMatroskaMenuExtra(chapters []matroskaChapter) string {
 		if name == "" {
 			name = fmt.Sprintf("Chapter %d", i+1)
 		}
+		if chapter.lang != "" {
+			name = chapter.lang + ":" + name
+		}
 		key := "_" + strings.NewReplacer(":", "_", ".", "_").Replace(formatMatroskaChapterTimeMs(chapter.startMs))
 		fields = append(fields, jsonKV{Key: key, Val: name})
 	}
