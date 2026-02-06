@@ -26,6 +26,7 @@ Height                                   : 368 pixels
 Display aspect ratio                     : 40:23
 Frame rate mode                          : Constant
 Frame rate                               : 29.970 (30000/1001) FPS
+Color space                              : YUV
 Chroma subsampling                       : 4:2:0
 Bit depth                                : 8 bits
 Scan type                                : Progressive

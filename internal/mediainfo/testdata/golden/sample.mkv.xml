@@ -53,6 +53,7 @@
 <FrameRate_Num>30000</FrameRate_Num>
 <FrameRate_Den>1001</FrameRate_Den>
 <FrameCount>120</FrameCount>
+<ColorSpace>YUV</ColorSpace>
 <ChromaSubsampling>4:2:0</ChromaSubsampling>
 <BitDepth>8</BitDepth>
 <ScanType>Progressive</ScanType>

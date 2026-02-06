@@ -1111,9 +1111,13 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64) (Stream, bool)
 		if hdrFormat != "" && findField(fields, "HDR format") == "" {
 			fields = insertFieldBefore(fields, Field{Name: "HDR format", Value: hdrFormat}, "Codec ID")
 		}
-		if findField(fields, "Color space") == "" && (videoInfo.colorRange != "" || videoInfo.colorPrimaries != "" || videoInfo.transferCharacteristics != "" || videoInfo.matrixCoefficients != "") {
-			if matroskaHasStreamColor(videoInfo) {
+		if findField(fields, "Color space") == "" {
+			if codecID == "V_MPEG4/ISO/AVC" || codecID == "V_MPEGH/ISO/HEVC" {
 				fields = append(fields, Field{Name: "Color space", Value: "YUV"})
+			} else if videoInfo.colorRange != "" || videoInfo.colorPrimaries != "" || videoInfo.transferCharacteristics != "" || videoInfo.matrixCoefficients != "" {
+				if matroskaHasStreamColor(videoInfo) {
+					fields = append(fields, Field{Name: "Color space", Value: "YUV"})
+				}
 			}
 		}
 	}

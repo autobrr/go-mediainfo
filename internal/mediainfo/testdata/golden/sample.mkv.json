@@ -41,6 +41,7 @@
 "FrameRate_Num":"30000",
 "FrameRate_Den":"1001",
 "FrameCount":"120",
+"ColorSpace":"YUV",
 "ChromaSubsampling":"4:2:0",
 "BitDepth":"8",
 "ScanType":"Progressive",
