@@ -975,6 +975,9 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64) (Stream, bool)
 	if kind == StreamAudio && format == "E-AC-3" {
 		fields = append(fields, Field{Name: "Commercial name", Value: "Dolby Digital Plus"})
 	}
+	if kind == StreamAudio && format == "AC-3" {
+		fields = append(fields, Field{Name: "Commercial name", Value: "Dolby Digital"})
+	}
 	if kind == StreamAudio && aacProfile == "LC" {
 		fields = append(fields, Field{Name: "Format/Info", Value: "Advanced Audio Codec Low Complexity"})
 	}
