@@ -2,7 +2,9 @@ package mediainfo
 
 import (
 	"bytes"
+	"encoding/binary"
 	"testing"
+	"time"
 )
 
 func TestParseMatroskaTracks(t *testing.T) {
@@ -169,6 +171,73 @@ func TestParseMatroskaTrackEntryNonHeaderCompression(t *testing.T) {
 	}
 	if len(stream.mkvHeaderStripBytes) != 0 {
 		t.Fatalf("unexpected header strip bytes: %#v", stream.mkvHeaderStripBytes)
+	}
+}
+
+func TestParseMatroskaInfoDateUTC(t *testing.T) {
+	base := time.Date(2001, time.January, 1, 0, 0, 0, 0, time.UTC)
+	target := time.Date(2012, time.November, 28, 15, 41, 23, 0, time.UTC)
+	delta := target.Sub(base).Nanoseconds()
+	datePayload := make([]byte, 8)
+	binary.BigEndian.PutUint64(datePayload, uint64(delta))
+
+	infoBuf := append(buildMatroskaElement(mkvIDTimecodeScale, []byte{0x0F, 0x42, 0x40}),
+		buildMatroskaElement(mkvIDDuration, []byte{0x41, 0x20, 0x00, 0x00})...)
+	infoBuf = append(infoBuf, buildMatroskaElement(mkvIDDateUTC, datePayload)...)
+
+	seg, ok := parseMatroskaInfo(infoBuf)
+	if !ok {
+		t.Fatalf("expected parsed segment info")
+	}
+	if got := findField(seg.Fields, "Encoded date"); got != "2012-11-28 15:41:23 UTC" {
+		t.Fatalf("unexpected encoded date: %q", got)
+	}
+}
+
+func TestApplyMatroskaAudioProbesSkipsDialnormTextFields(t *testing.T) {
+	info := &MatroskaInfo{
+		Tracks: []Stream{
+			{
+				Kind: StreamAudio,
+				Fields: []Field{
+					{Name: "Format", Value: "AC-3"},
+					{Name: "ID", Value: "1"},
+				},
+				JSON: map[string]string{},
+			},
+		},
+	}
+	probes := map[uint64]*matroskaAudioProbe{
+		1: {
+			format: "AC-3",
+			ok:     true,
+			info: ac3Info{
+				channels:      6,
+				layout:        "L R C LFE Ls Rs",
+				sampleRate:    48000,
+				frameRate:     31.25,
+				spf:           1536,
+				bitRateKbps:   640,
+				hasDialnorm:   true,
+				dialnorm:      -18,
+				hasCompr:      true,
+				comprDB:       -1.16,
+				hasComprField: true,
+				comprFieldDB:  -1.16,
+			},
+		},
+	}
+
+	applyMatroskaAudioProbes(info, probes)
+	stream := info.Tracks[0]
+	if got := findField(stream.Fields, "Dialog Normalization"); got != "" {
+		t.Fatalf("expected no dialog normalization field, got %q", got)
+	}
+	if got := findField(stream.Fields, "compr"); got != "" {
+		t.Fatalf("expected no compr field, got %q", got)
+	}
+	if got := findField(stream.Fields, "dialnorm_Average"); got != "" {
+		t.Fatalf("expected no dialnorm_Average field, got %q", got)
 	}
 }
 

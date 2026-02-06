@@ -908,24 +908,6 @@ func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAud
 				stream.Fields = insertFieldBefore(stream.Fields, Field{Name: "Bed channel configuration", Value: ac3.jocBedLayout}, before)
 			}
 		}
-		if ac3.hasDialnorm {
-			stream.Fields = insertFieldBefore(stream.Fields, Field{Name: "Dialog Normalization", Value: formatDialnorm(ac3.dialnorm)}, "Default")
-		}
-		if ac3.hasCompr {
-			comprValue := ac3.comprDB
-			if probe.format == "E-AC-3" {
-				comprValue = ac3ComprDB(0xFF)
-			} else if ac3.hasComprField {
-				comprValue = ac3.comprFieldDB
-			}
-			stream.Fields = insertFieldBefore(stream.Fields, Field{Name: "compr", Value: formatCompr(comprValue)}, "Default")
-		}
-		if avg, minVal, maxVal, ok := ac3.dialnormStats(); ok {
-			stream.Fields = insertFieldBefore(stream.Fields, Field{Name: "dialnorm_Average", Value: formatDialnorm(avg)}, "Default")
-			stream.Fields = insertFieldBefore(stream.Fields, Field{Name: "dialnorm_Minimum", Value: formatDialnorm(minVal)}, "Default")
-			stream.Fields = insertFieldBefore(stream.Fields, Field{Name: "dialnorm_Maximum", Value: formatDialnorm(maxVal)}, "Default")
-		}
-
 		if stream.JSON == nil {
 			stream.JSON = map[string]string{}
 		}
@@ -954,36 +936,11 @@ func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAud
 		if ac3.bsid > 0 {
 			extraFields = append(extraFields, jsonKV{Key: "bsid", Val: strconv.Itoa(ac3.bsid)})
 		}
-		if ac3.hasDialnorm {
-			extraFields = append(extraFields, jsonKV{Key: "dialnorm", Val: strconv.Itoa(ac3.dialnorm)})
-		}
-		if ac3.hasCompr {
-			comprValue := ac3.comprDB
-			if probe.format == "E-AC-3" {
-				comprValue = ac3ComprDB(0xFF)
-			} else if ac3.hasComprField {
-				comprValue = ac3.comprFieldDB
-			}
-			extraFields = append(extraFields, jsonKV{Key: "compr", Val: formatComprRaw(comprValue)})
-		}
 		if ac3.acmod > 0 {
 			extraFields = append(extraFields, jsonKV{Key: "acmod", Val: strconv.Itoa(ac3.acmod)})
 		}
 		if ac3.lfeon >= 0 {
 			extraFields = append(extraFields, jsonKV{Key: "lfeon", Val: strconv.Itoa(ac3.lfeon)})
-		}
-		if avg, minVal, maxVal, ok := ac3.dialnormStats(); ok {
-			extraFields = append(extraFields, jsonKV{Key: "dialnorm_Average", Val: strconv.Itoa(avg)})
-			extraFields = append(extraFields, jsonKV{Key: "dialnorm_Minimum", Val: strconv.Itoa(minVal)})
-			if maxVal != minVal {
-				extraFields = append(extraFields, jsonKV{Key: "dialnorm_Maximum", Val: strconv.Itoa(maxVal)})
-			}
-		}
-		if avg, minVal, maxVal, count, ok := ac3.comprStats(); ok {
-			extraFields = append(extraFields, jsonKV{Key: "compr_Average", Val: formatComprRaw(avg)})
-			extraFields = append(extraFields, jsonKV{Key: "compr_Minimum", Val: formatComprRaw(minVal)})
-			extraFields = append(extraFields, jsonKV{Key: "compr_Maximum", Val: formatComprRaw(maxVal)})
-			extraFields = append(extraFields, jsonKV{Key: "compr_Count", Val: strconv.Itoa(count)})
 		}
 		if len(extraFields) > 0 {
 			stream.JSONRaw["extra"] = renderJSONObject(extraFields, false)

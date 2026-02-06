@@ -24,6 +24,7 @@ const (
 	mkvIDSegmentUID          = 0x73A4
 	mkvIDTimecodeScale       = 0x2AD7B1
 	mkvIDDuration            = 0x4489
+	mkvIDDateUTC             = 0x4461
 	mkvIDMuxingApp           = 0x4D80
 	mkvIDWritingApp          = 0x5741
 	mkvIDErrorDetection      = 0x6BAA
@@ -749,6 +750,10 @@ func parseMatroskaInfo(buf []byte) (matroskaSegmentInfo, bool) {
 			if len(payload) > 0 {
 				fields = append(fields, Field{Name: "Writing library", Value: string(payload)})
 			}
+		case mkvIDDateUTC:
+			if value, ok := readSigned(payload); ok {
+				fields = append(fields, Field{Name: "Encoded date", Value: formatMatroskaDateUTC(value)})
+			}
 		case mkvIDErrorDetection:
 			if label := matroskaErrorDetectionLabel(payload); label != "" {
 				fields = append(fields, Field{Name: "ErrorDetectionType", Value: label})
@@ -765,6 +770,12 @@ func parseMatroskaInfo(buf []byte) (matroskaSegmentInfo, bool) {
 		return matroskaSegmentInfo{}, false
 	}
 	return matroskaSegmentInfo{Duration: seconds, TimecodeScale: timecodeScale, Fields: fields}, true
+}
+
+func formatMatroskaDateUTC(deltaNs int64) string {
+	base := time.Date(2001, time.January, 1, 0, 0, 0, 0, time.UTC)
+	value := base.Add(time.Duration(deltaNs))
+	return value.Format("2006-01-02 15:04:05 UTC")
 }
 
 func parseMatroskaTracks(buf []byte, segmentDuration float64) ([]Stream, bool) {
