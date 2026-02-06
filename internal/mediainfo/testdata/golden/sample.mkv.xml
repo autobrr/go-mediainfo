@@ -73,16 +73,17 @@
 <ID>2</ID>
 <UniqueID>6009407458651402918</UniqueID>
 <Format>AAC</Format>
-<Format_Settings_SBR>No (Explicit)</Format_Settings_SBR>
-<Format_AdditionalFeatures>LC</Format_AdditionalFeatures>
+<Format_Commercial_IfAny>HE-AAC</Format_Commercial_IfAny>
+<Format_Settings_SBR>Yes (Explicit)</Format_Settings_SBR>
+<Format_AdditionalFeatures>LC SBR</Format_AdditionalFeatures>
 <CodecID>A_AAC-2</CodecID>
 <Duration>4.021000000</Duration>
 <Channels>1</Channels>
 <ChannelPositions>Front: C</ChannelPositions>
 <ChannelLayout>M</ChannelLayout>
-<SamplesPerFrame>1024</SamplesPerFrame>
-<SamplingRate>48000</SamplingRate>
-<SamplingCount>193008</SamplingCount>
+<SamplesPerFrame>2048</SamplesPerFrame>
+<SamplingRate>96000</SamplingRate>
+<SamplingCount>386016</SamplingCount>
 <FrameRate>46.875</FrameRate>
 <Compression_Mode>Lossy</Compression_Mode>
 <Delay>0.000</Delay>

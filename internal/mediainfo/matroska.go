@@ -985,10 +985,21 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64) (Stream, bool)
 	}
 	aacProfile := ""
 	aacObjType := 0
+	aacHasSBR := false
+	aacHasPS := false
+	aacASCBaseSampleRate := 0.0
+	aacASCExtSampleRate := 0.0
 	if kind == StreamAudio && format == "AAC" && len(codecPrivate) > 0 {
-		aacProfile, aacObjType = parseAACProfileFromASC(codecPrivate)
+		aacProfile, aacObjType, aacHasSBR, aacHasPS, aacASCBaseSampleRate, aacASCExtSampleRate = parseAACInfoFromASC(codecPrivate)
 		if aacProfile != "" {
-			format = "AAC " + aacProfile
+			features := aacProfile
+			if aacHasSBR {
+				features += " SBR"
+			}
+			if aacHasPS {
+				features += " PS"
+			}
+			format = "AAC " + features
 		}
 		if codecID == "A_AAC" && aacObjType > 0 {
 			codecID = fmt.Sprintf("A_AAC-%d", aacObjType)
@@ -1186,12 +1197,19 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64) (Stream, bool)
 				fields = append(fields, Field{Name: "Channel layout", Value: layout})
 			}
 		}
+		// If the container didn't provide a full picture (common for HE-AAC), prefer ASC-derived rates.
+		if aacHasSBR && aacASCExtSampleRate > 0 {
+			audioSampleRate = aacASCExtSampleRate
+		}
+		if aacHasSBR && aacASCBaseSampleRate > 0 {
+			audioBaseSampleRate = aacASCBaseSampleRate
+		}
 		if audioSampleRate > 0 {
 			fields = append(fields, Field{Name: "Sampling rate", Value: formatSampleRate(audioSampleRate)})
-			if format == "AAC LC" {
+			if strings.HasPrefix(format, "AAC ") && strings.Contains(format, "LC") {
 				spf := 1024.0
-				// HE-AAC/SBR commonly reports base and output sample rates; MediaInfo uses 2048 SPF at output rate.
-				if audioBaseSampleRate > 0 && audioSampleRate > audioBaseSampleRate {
+				// HE-AAC/SBR uses 2048 SPF at output sample rate.
+				if aacHasSBR || (audioBaseSampleRate > 0 && audioSampleRate > audioBaseSampleRate) {
 					spf = 2048.0
 				}
 				frameRate := audioSampleRate / spf
@@ -1206,7 +1224,7 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64) (Stream, bool)
 		if segmentDuration > 0 {
 			fields = addStreamDuration(fields, segmentDuration)
 		}
-		if format == "AAC LC" {
+		if strings.HasPrefix(format, "AAC ") && strings.Contains(format, "LC") {
 			fields = append(fields, Field{Name: "Compression mode", Value: "Lossy"})
 		}
 		if codecName != "" && strings.Contains(codecName, "Lavc") {
@@ -1270,6 +1288,20 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64) (Stream, bool)
 		jsonExtras["Delay_Source"] = "Container"
 		if kind == StreamAudio {
 			jsonExtras["Video_Delay"] = delay
+		}
+	}
+	if kind == StreamAudio && strings.HasPrefix(format, "AAC ") && strings.Contains(format, "LC") {
+		// Match official JSON for HE-AAC/SBR when ASC indicates it explicitly.
+		if aacHasSBR {
+			jsonExtras["Format_Settings_SBR"] = "Yes (Explicit)"
+			jsonExtras["Format_Commercial_IfAny"] = "HE-AAC"
+			if aacHasPS {
+				jsonExtras["Format_Commercial_IfAny"] = "HE-AACv2"
+			}
+			jsonExtras["SamplesPerFrame"] = "2048"
+		} else {
+			jsonExtras["Format_Settings_SBR"] = "No (Explicit)"
+			jsonExtras["SamplesPerFrame"] = "1024"
 		}
 	}
 	if kind == StreamVideo {
@@ -2330,18 +2362,148 @@ func selectEncoder(encoders []string, token string) string {
 	return ""
 }
 
-func parseAACProfileFromASC(payload []byte) (string, int) {
+type ascBitReader struct {
+	b   []byte
+	pos int // bit index
+}
+
+func (r *ascBitReader) readBits(n int) (uint32, bool) {
+	if n <= 0 {
+		return 0, true
+	}
+	if r.pos+n > len(r.b)*8 {
+		return 0, false
+	}
+	var out uint32
+	for i := 0; i < n; i++ {
+		byteIdx := (r.pos + i) / 8
+		bitIdx := 7 - ((r.pos + i) % 8)
+		bit := (r.b[byteIdx] >> bitIdx) & 0x01
+		out = (out << 1) | uint32(bit)
+	}
+	r.pos += n
+	return out, true
+}
+
+func (r *ascBitReader) readAudioObjectType() (int, bool) {
+	v, ok := r.readBits(5)
+	if !ok {
+		return 0, false
+	}
+	objType := int(v)
+	if objType == 31 {
+		ext, ok := r.readBits(6)
+		if !ok {
+			return 0, false
+		}
+		objType = 32 + int(ext)
+	}
+	return objType, true
+}
+
+func (r *ascBitReader) readSamplingFrequency() (float64, bool) {
+	idx, ok := r.readBits(4)
+	if !ok {
+		return 0, false
+	}
+	if idx == 0x0F {
+		val, ok := r.readBits(24)
+		if !ok {
+			return 0, false
+		}
+		return float64(val), true
+	}
+	table := []float64{
+		96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050,
+		16000, 12000, 11025, 8000, 7350,
+	}
+	if int(idx) >= len(table) {
+		return 0, false
+	}
+	return table[int(idx)], true
+}
+
+func parseAACInfoFromASC(payload []byte) (profile string, objType int, hasSBR bool, hasPS bool, baseSampleRate float64, extSampleRate float64) {
 	if len(payload) == 0 {
-		return "", 0
+		return "", 0, false, false, 0, 0
 	}
-	objType := int(payload[0] >> 3)
-	if objType == 31 && len(payload) > 1 {
-		objType = 32 + int((payload[0]&0x07)<<3|payload[1]>>5)
+	r := &ascBitReader{b: payload}
+	audioObjectType, ok := r.readAudioObjectType()
+	if !ok || audioObjectType <= 0 {
+		return "", 0, false, false, 0, 0
 	}
-	if objType <= 0 {
-		return "", 0
+	sr, ok := r.readSamplingFrequency()
+	if !ok {
+		return "", audioObjectType, false, false, 0, 0
 	}
-	return mapAACProfile(objType), objType
+	// channelConfiguration, not currently used
+	if _, ok := r.readBits(4); !ok {
+		return "", audioObjectType, false, false, sr, 0
+	}
+	baseSampleRate = sr
+	objType = audioObjectType
+
+	// HE-AAC (SBR/PS) is signaled by AOT 5 (SBR) or 29 (PS) and includes an extension sampling rate + base AOT.
+	if audioObjectType == 5 || audioObjectType == 29 {
+		hasSBR = true
+		if audioObjectType == 29 {
+			hasPS = true
+		}
+		extSR, ok := r.readSamplingFrequency()
+		if ok && extSR > 0 {
+			extSampleRate = extSR
+		}
+		baseAOT, ok := r.readAudioObjectType()
+		if ok && baseAOT > 0 {
+			objType = baseAOT
+		}
+		return mapAACProfile(objType), objType, hasSBR, hasPS, baseSampleRate, extSampleRate
+	}
+
+	// Some encoders keep AOT=2 (LC) and signal SBR via the sync extension (0x2B7).
+	// We don't fully parse GASpecificConfig; instead, scan the remaining bits for the sync extension.
+	const syncExt uint32 = 0x2B7
+	for r.pos+11 <= len(r.b)*8 {
+		v, ok := r.readBits(11)
+		if !ok {
+			break
+		}
+		if v != syncExt {
+			// Slide window by 1 bit.
+			r.pos -= 10
+			continue
+		}
+		extAOT, ok := r.readAudioObjectType()
+		if !ok {
+			break
+		}
+		if extAOT == 5 { // SBR
+			hasSBR = true
+			// sbrPresentFlag (1 bit) is typically 1 for explicit SBR.
+			if _, ok := r.readBits(1); !ok {
+				break
+			}
+			extSR, ok := r.readSamplingFrequency()
+			if ok && extSR > 0 {
+				extSampleRate = extSR
+			}
+			break
+		}
+		if extAOT == 29 { // PS
+			hasSBR = true
+			hasPS = true
+			if _, ok := r.readBits(1); !ok {
+				break
+			}
+			extSR, ok := r.readSamplingFrequency()
+			if ok && extSR > 0 {
+				extSampleRate = extSR
+			}
+			break
+		}
+	}
+
+	return mapAACProfile(objType), objType, hasSBR, hasPS, baseSampleRate, extSampleRate
 }
 
 const unknownVintSize = ^uint64(0)

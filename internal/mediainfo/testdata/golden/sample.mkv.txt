@@ -38,14 +38,14 @@ Color range                              : Limited
 
 Audio
 ID                                       : 2
-Format                                   : AAC LC
+Format                                   : AAC LC SBR
 Format/Info                              : Advanced Audio Codec Low Complexity
 Codec ID                                 : A_AAC-2
 Duration                                 : 4 s 21 ms
 Channel(s)                               : 1 channel
 Channel layout                           : M
-Sampling rate                            : 48.0 kHz
-Frame rate                               : 46.8750 FPS (1024 SPF)
+Sampling rate                            : 96.0 kHz
+Frame rate                               : 46.8750 FPS (2048 SPF)
 Compression mode                         : Lossy
 Writing library                          : Lavc62.11.100 aac
 Default                                  : No
