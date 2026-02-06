@@ -20,6 +20,9 @@ func DetectFormat(header []byte, filename string) string {
 	if ext == ".vob" {
 		return "MPEG-PS"
 	}
+	if ext == ".m2ts" || ext == ".mts" || ext == ".m2t" {
+		return "BDAV"
+	}
 
 	if bytes.HasPrefix(header, []byte{0x1A, 0x45, 0xDF, 0xA3}) {
 		return "Matroska"
@@ -63,6 +66,9 @@ func DetectFormat(header []byte, filename string) string {
 	if isMPEGTS(header) {
 		return "MPEG-TS"
 	}
+	if isBDAV(header) {
+		return "BDAV"
+	}
 	if bytes.HasPrefix(header, []byte{0x00, 0x00, 0x01, 0xB3}) {
 		return "MPEG Video"
 	}
@@ -85,4 +91,12 @@ func isMPEGTS(header []byte) bool {
 		return false
 	}
 	return header[0] == 0x47 && header[188] == 0x47 && header[376] == 0x47
+}
+
+func isBDAV(header []byte) bool {
+	// BDAV/M2TS packets are 192 bytes: 4-byte timestamp + 188-byte TS packet.
+	if len(header) < 388+1 {
+		return false
+	}
+	return header[4] == 0x47 && header[196] == 0x47 && header[388] == 0x47
 }

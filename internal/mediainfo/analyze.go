@@ -352,6 +352,33 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 				addNominalBitrate: true,
 			})
 		}
+	case "BDAV":
+		if parsedInfo, parsedStreams, generalFields, ok := ParseBDAV(file, stat.Size()); ok {
+			info = parsedInfo
+			general.JSON = map[string]string{}
+			general.JSONRaw = map[string]string{}
+			for _, field := range generalFields {
+				general.Fields = appendFieldUnique(general.Fields, field)
+			}
+			streams = parsedStreams
+			if id := findField(general.Fields, "ID"); id != "" {
+				if value := extractLeadingNumber(id); value != "" {
+					general.JSON["ID"] = value
+				}
+			}
+			if info.DurationSeconds > 0 {
+				general.JSON["Duration"] = fmt.Sprintf("%.9f", info.DurationSeconds)
+			}
+			setOverallBitRate(general.JSON, stat.Size(), info.DurationSeconds)
+			if info.OverallBitrateMin > 0 && info.OverallBitrateMax > 0 {
+				minRate := int64(math.Round(info.OverallBitrateMin))
+				maxRate := int64(math.Round(info.OverallBitrateMax))
+				general.JSONRaw["extra"] = "{\"OverallBitRate_Precision_Min\":\"" + strconv.FormatInt(minRate, 10) + "\",\"OverallBitRate_Precision_Max\":\"" + strconv.FormatInt(maxRate, 10) + "\"}"
+			}
+			applyX264Info(file, streams, x264InfoOptions{
+				addNominalBitrate: true,
+			})
+		}
 	case "MPEG-PS":
 		psSize := stat.Size()
 		psPaths := []string{path}

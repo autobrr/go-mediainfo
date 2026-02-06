@@ -39,6 +39,15 @@ type tsStream struct {
 }
 
 func ParseMPEGTS(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, []Field, bool) {
+	return parseMPEGTSWithPacketSize(file, size, 188)
+}
+
+// ParseBDAV parses BDAV/M2TS streams (192-byte packets: 4-byte timestamp + 188-byte TS packet).
+func ParseBDAV(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, []Field, bool) {
+	return parseMPEGTSWithPacketSize(file, size, 192)
+}
+
+func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64) (ContainerInfo, []Stream, []Field, bool) {
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		return ContainerInfo{}, nil, nil, false
 	}
@@ -66,8 +75,15 @@ func ParseMPEGTS(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, []Fie
 	var pmtPointer int
 	var pmtSectionLen int
 
-	const tsPacketSize = 188
-	buf := make([]byte, tsPacketSize*2048)
+	const tsPacketSize = int64(188)
+	if packetSize != tsPacketSize && packetSize != 192 {
+		packetSize = tsPacketSize
+	}
+	tsOffset := int64(0)
+	if packetSize == 192 {
+		tsOffset = 4
+	}
+	buf := make([]byte, packetSize*2048)
 	var packetIndex int64
 	var carry int
 	for {
@@ -76,29 +92,33 @@ func ParseMPEGTS(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, []Fie
 			break
 		}
 		n += carry
-		packetCount := n / tsPacketSize
+		packetCount := n / int(packetSize)
 		for i := 0; i < packetCount; i++ {
-			packet := buf[i*tsPacketSize : (i+1)*tsPacketSize]
+			packet := buf[int64(i)*packetSize : (int64(i)+1)*packetSize]
 			packetIndex++
-			if packet[0] != 0x47 {
+			if tsOffset+tsPacketSize > int64(len(packet)) {
 				continue
 			}
-			pid := uint16(packet[1]&0x1F)<<8 | uint16(packet[2])
-			payloadStart := packet[1]&0x40 != 0
-			adaptation := (packet[3] & 0x30) >> 4
+			ts := packet[tsOffset : tsOffset+tsPacketSize]
+			if ts[0] != 0x47 {
+				continue
+			}
+			pid := uint16(ts[1]&0x1F)<<8 | uint16(ts[2])
+			payloadStart := ts[1]&0x40 != 0
+			adaptation := (ts[3] & 0x30) >> 4
 			payloadIndex := 4
 			if adaptation == 2 || adaptation == 3 {
-				adaptationLen := int(packet[4])
+				adaptationLen := int(ts[4])
 				payloadIndex += 1 + adaptationLen
 			}
 			if pid == pcrPID {
-				if pcr, ok := parsePCR(packet); ok {
+				if pcr, ok := parsePCR(ts); ok {
 					pcrPTS.add(pcr)
 					if hasPCR && pcr > lastPCR && packetIndex > lastPCRPacket {
 						delta := pcr - lastPCR
 						seconds := float64(delta) / 90000.0
 						if seconds > 0 {
-							bytesBetween := (packetIndex - lastPCRPacket) * tsPacketSize
+							bytesBetween := (packetIndex - lastPCRPacket) * packetSize
 							pcrBits += float64(bytesBetween * 8)
 							pcrSeconds += seconds
 						}
@@ -111,10 +131,10 @@ func ParseMPEGTS(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, []Fie
 			if adaptation == 2 {
 				continue
 			}
-			if payloadIndex >= len(packet) {
+			if payloadIndex >= len(ts) {
 				continue
 			}
-			payload := packet[payloadIndex:]
+			payload := ts[payloadIndex:]
 
 			if pid == 0 && payloadStart {
 				if program, pmt := parsePAT(payload); program != 0 {
@@ -257,9 +277,9 @@ func ParseMPEGTS(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, []Fie
 				consumeADTS(entry, payload)
 			}
 		}
-		carry = n - packetCount*tsPacketSize
+		carry = n - packetCount*int(packetSize)
 		if carry > 0 {
-			copy(buf, buf[packetCount*tsPacketSize:n])
+			copy(buf, buf[packetCount*int(packetSize):n])
 		}
 		if err != nil {
 			break
@@ -275,7 +295,16 @@ func ParseMPEGTS(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, []Fie
 		if entry.kind != StreamVideo || entry.hasVideoFields {
 			continue
 		}
-		if fields, width, height, fps := scanTSForH264(file, entry.pid, size); len(fields) > 0 {
+		var fields []Field
+		var width uint64
+		var height uint64
+		var fps float64
+		if packetSize == 192 {
+			fields, width, height, fps = scanBDAVForH264(file, entry.pid, size)
+		} else {
+			fields, width, height, fps = scanTSForH264(file, entry.pid, size)
+		}
+		if len(fields) > 0 {
 			entry.videoFields = fields
 			entry.hasVideoFields = true
 			entry.width = width
@@ -843,17 +872,32 @@ func mapServiceType(value byte) string {
 }
 
 func scanTSForH264(file io.ReadSeeker, pid uint16, size int64) ([]Field, uint64, uint64, float64) {
+	return scanTSForH264WithPacketSize(file, pid, size, 188)
+}
+
+func scanBDAVForH264(file io.ReadSeeker, pid uint16, size int64) ([]Field, uint64, uint64, float64) {
+	return scanTSForH264WithPacketSize(file, pid, size, 192)
+}
+
+func scanTSForH264WithPacketSize(file io.ReadSeeker, pid uint16, size int64, packetSize int64) ([]Field, uint64, uint64, float64) {
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		return nil, 0, 0, 0
 	}
 	reader := bufio.NewReaderSize(file, 1<<20)
-	const tsPacketSize = 188
-	buf := make([]byte, tsPacketSize*2048)
+	const tsPacketSize = int64(188)
+	if packetSize != tsPacketSize && packetSize != 192 {
+		packetSize = tsPacketSize
+	}
+	tsOffset := int64(0)
+	if packetSize == 192 {
+		tsOffset = 4
+	}
+	buf := make([]byte, packetSize*2048)
 	var pesData []byte
 	readPackets := int64(0)
 	maxPackets := int64(0)
 	if size > 0 {
-		maxPackets = size / tsPacketSize
+		maxPackets = size / packetSize
 	}
 	carry := 0
 	for maxPackets == 0 || readPackets < maxPackets {
@@ -862,34 +906,38 @@ func scanTSForH264(file io.ReadSeeker, pid uint16, size int64) ([]Field, uint64,
 			break
 		}
 		n += carry
-		packetCount := n / tsPacketSize
+		packetCount := n / int(packetSize)
 		for i := 0; i < packetCount; i++ {
-			packet := buf[i*tsPacketSize : (i+1)*tsPacketSize]
+			packet := buf[int64(i)*packetSize : (int64(i)+1)*packetSize]
 			readPackets++
 			if maxPackets > 0 && readPackets > maxPackets {
 				break
 			}
-			if packet[0] != 0x47 {
+			if tsOffset+tsPacketSize > int64(len(packet)) {
 				continue
 			}
-			pktPid := uint16(packet[1]&0x1F)<<8 | uint16(packet[2])
+			ts := packet[tsOffset : tsOffset+tsPacketSize]
+			if ts[0] != 0x47 {
+				continue
+			}
+			pktPid := uint16(ts[1]&0x1F)<<8 | uint16(ts[2])
 			if pktPid != pid {
 				continue
 			}
-			payloadStart := packet[1]&0x40 != 0
-			adaptation := (packet[3] & 0x30) >> 4
+			payloadStart := ts[1]&0x40 != 0
+			adaptation := (ts[3] & 0x30) >> 4
 			payloadIndex := 4
 			switch adaptation {
 			case 2:
 				continue
 			case 3:
-				adaptLen := int(packet[4])
+				adaptLen := int(ts[4])
 				payloadIndex += 1 + adaptLen
 			}
-			if payloadIndex >= len(packet) {
+			if payloadIndex >= len(ts) {
 				continue
 			}
-			payload := packet[payloadIndex:]
+			payload := ts[payloadIndex:]
 			if payloadStart && len(payload) >= 9 && payload[0] == 0x00 && payload[1] == 0x00 && payload[2] == 0x01 {
 				if len(pesData) > 0 {
 					if fields, width, height, fps := parseH264AnnexB(pesData); len(fields) > 0 {
@@ -905,9 +953,9 @@ func scanTSForH264(file io.ReadSeeker, pid uint16, size int64) ([]Field, uint64,
 				pesData = append(pesData, payload...)
 			}
 		}
-		carry = n - packetCount*tsPacketSize
+		carry = n - packetCount*int(packetSize)
 		if carry > 0 {
-			copy(buf, buf[packetCount*tsPacketSize:n])
+			copy(buf, buf[packetCount*int(packetSize):n])
 		}
 		if maxPackets > 0 && readPackets >= maxPackets {
 			break
