@@ -789,7 +789,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			setRemainingStreamSize(general.JSON, psSize, streamSizeSum)
 		}
 	case "MPEG Audio":
-		if parsedInfo, parsedStreams, ok := ParseMP3(file, stat.Size()); ok {
+		if parsedInfo, parsedStreams, tagJSON, tagJSONRaw, ok := ParseMP3(file, stat.Size()); ok {
 			info = parsedInfo
 			streams = parsedStreams
 			// For audio-only formats, the Field-based duration formatting drops milliseconds
@@ -798,14 +798,46 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			if info.DurationSeconds > 0 {
 				general.JSON["Duration"] = formatJSONSeconds(info.DurationSeconds)
 			}
-			// Official mediainfo overall bitrate excludes tags (ID3v2/ID3v1).
+			// Match official: overall bitrate uses audio payload (not trailing junk bytes).
 			payloadSize := stat.Size() - info.StreamOverheadBytes
 			if payloadSize < 0 {
 				payloadSize = stat.Size()
 			}
-			setOverallBitRate(general.JSON, payloadSize, info.DurationSeconds)
+			for _, s := range streams {
+				if s.Kind != StreamAudio || s.JSON == nil {
+					continue
+				}
+				if v := s.JSON["StreamSize"]; v != "" {
+					if parsed, err := strconv.ParseInt(v, 10, 64); err == nil && parsed > 0 {
+						payloadSize = parsed
+					}
+				}
+				// CBR: OverallBitRate matches stream BitRate.
+				if s.JSON["BitRate_Mode"] == "CBR" && s.JSON["BitRate"] != "" {
+					general.JSON["OverallBitRate"] = s.JSON["BitRate"]
+				}
+				break
+			}
+			if general.JSON["OverallBitRate"] == "" {
+				setOverallBitRate(general.JSON, payloadSize, info.DurationSeconds)
+			}
 			if info.StreamOverheadBytes > 0 {
 				general.JSON["StreamSize"] = strconv.FormatInt(info.StreamOverheadBytes, 10)
+			}
+			if len(tagJSON) > 0 {
+				for k, v := range tagJSON {
+					if general.JSON[k] == "" {
+						general.JSON[k] = v
+					}
+				}
+			}
+			if len(tagJSONRaw) > 0 {
+				if general.JSONRaw == nil {
+					general.JSONRaw = map[string]string{}
+				}
+				for k, v := range tagJSONRaw {
+					general.JSONRaw[k] = v
+				}
 			}
 		}
 	case "FLAC":

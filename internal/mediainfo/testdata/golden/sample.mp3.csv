@@ -2,15 +2,14 @@ General
 Complete name,samples/sample.mp3
 Format,MPEG Audio
 File size,63.4 KiB
-Duration,4 s 56 ms
-Overall bit rate,128 kb/s
+Duration,4 s 32 ms
+Overall bit rate,129 kb/s
 
 Audio
 Format,MPEG Audio
-Duration,4 s 56 ms
+Duration,4 s 32 ms
 Bit rate mode,Constant
 Bit rate,128 kb/s
 Channel(s),1 channel
-Channel layout,M
 Sampling rate,48.0 kHz
 

@@ -11,24 +11,30 @@
 <FileExtension>mp3</FileExtension>
 <Format>MPEG Audio</Format>
 <FileSize>64940</FileSize>
-<Duration>4.056</Duration>
+<Duration>4.032</Duration>
+<OverallBitRate_Mode>CBR</OverallBitRate_Mode>
 <OverallBitRate>128000</OverallBitRate>
 <StreamSize>44</StreamSize>
 <File_Modified_Date><redacted></File_Modified_Date>
 <File_Modified_Date_Local><redacted></File_Modified_Date_Local>
+<Encoded_Library>LAME3.100</Encoded_Library>
 </track>
 <track type="Audio">
-<StreamOrder>0</StreamOrder>
 <Format>MPEG Audio</Format>
-<Duration>4.056</Duration>
+<Format_Version>1</Format_Version>
+<Duration>4.032</Duration>
 <BitRate_Mode>CBR</BitRate_Mode>
 <BitRate>128000</BitRate>
 <Channels>1</Channels>
-<ChannelPositions>Front: C</ChannelPositions>
-<ChannelLayout>M</ChannelLayout>
+<SamplesPerFrame>1152</SamplesPerFrame>
 <SamplingRate>48000</SamplingRate>
-<FrameCount>169</FrameCount>
-<StreamSize>64896</StreamSize>
+<SamplingCount>193536</SamplingCount>
+<FrameRate>41.667</FrameRate>
+<FrameCount>168</FrameCount>
+<Compression_Mode>Lossy</Compression_Mode>
+<Encoded_Library>LAME3.100</Encoded_Library>
+<StreamSize>64512</StreamSize>
+<Format_Profile>Layer 3</Format_Profile>
 </track>
 </media>
 </MediaInfo>
