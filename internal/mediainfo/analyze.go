@@ -386,6 +386,39 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 				mid := (info.OverallBitrateMin + info.OverallBitrateMax) / 2
 				general.JSON["OverallBitRate"] = strconv.FormatInt(int64(math.Round(mid)), 10)
 			}
+			// When TS contains MPEG-2 video, official MediaInfo emits General FrameRate/FrameCount and StreamSize (overhead).
+			var mpeg2Video *Stream
+			for i := range streams {
+				if streams[i].Kind != StreamVideo {
+					continue
+				}
+				if findField(streams[i].Fields, "Format") == "MPEG Video" {
+					mpeg2Video = &streams[i]
+					break
+				}
+			}
+			if mpeg2Video != nil {
+				if frameRate, ok := parseFloatValue(findField(mpeg2Video.Fields, "Frame rate")); ok && frameRate > 0 {
+					general.JSON["FrameRate"] = formatJSONFloat(frameRate)
+				}
+				if fc := mpeg2Video.JSON["FrameCount"]; fc != "" {
+					general.JSON["FrameCount"] = fc
+				}
+				sum := int64(0)
+				for _, st := range streams {
+					if st.Kind != StreamVideo && st.Kind != StreamAudio {
+						continue
+					}
+					if v := st.JSON["StreamSize"]; v != "" {
+						if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+							sum += n
+						}
+					}
+				}
+				if sum > 0 && fileSize > sum {
+					general.JSON["StreamSize"] = strconv.FormatInt(fileSize-sum, 10)
+				}
+			}
 			if info.OverallBitrateMin > 0 && info.OverallBitrateMax > 0 {
 				minRate := int64(math.Round(info.OverallBitrateMin))
 				maxRate := int64(math.Round(info.OverallBitrateMax))
@@ -997,7 +1030,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			continue
 		}
 		if rate := findField(stream.Fields, "Frame rate"); rate != "" {
-			if (format == "MPEG-PS" || format == "MPEG Video" || format == "Matroska") && strings.Contains(rate, "(") {
+			if (format == "MPEG-PS" || format == "MPEG Video" || format == "MPEG-TS" || format == "BDAV" || format == "Matroska") && strings.Contains(rate, "(") {
 				parts := strings.Fields(rate)
 				if len(parts) > 0 {
 					general.Fields = appendFieldUnique(general.Fields, Field{Name: "Frame rate", Value: parts[0] + " FPS"})

@@ -5,6 +5,64 @@ import (
 	"math"
 )
 
+var mpeg2DefaultIntraMatrix = [64]byte{
+	8, 16, 19, 22, 26, 27, 29, 34,
+	16, 16, 22, 24, 27, 29, 34, 37,
+	19, 22, 26, 27, 29, 34, 34, 38,
+	22, 22, 26, 27, 29, 34, 37, 40,
+	22, 26, 27, 29, 32, 35, 40, 48,
+	26, 27, 29, 32, 35, 40, 48, 58,
+	26, 27, 29, 34, 38, 46, 56, 69,
+	27, 29, 35, 38, 46, 56, 69, 83,
+}
+
+// Some encoders signal an intra matrix that is effectively "flat" (only DC differs).
+// MediaInfo still reports this as Default.
+var mpeg2DefaultIntraMatrixFlat = [64]byte{
+	8, 16, 16, 16, 16, 16, 16, 16,
+	16, 16, 16, 16, 16, 16, 16, 16,
+	16, 16, 16, 16, 16, 16, 16, 16,
+	16, 16, 16, 16, 16, 16, 16, 16,
+	16, 16, 16, 16, 16, 16, 16, 16,
+	16, 16, 16, 16, 16, 16, 16, 16,
+	16, 16, 16, 16, 16, 16, 16, 16,
+	16, 16, 16, 16, 16, 16, 16, 16,
+}
+
+var mpeg2DefaultNonIntraMatrix = [64]byte{
+	16, 16, 16, 16, 16, 16, 16, 16,
+	16, 16, 16, 16, 16, 16, 16, 16,
+	16, 16, 16, 16, 16, 16, 16, 16,
+	16, 16, 16, 16, 16, 16, 16, 16,
+	16, 16, 16, 16, 16, 16, 16, 16,
+	16, 16, 16, 16, 16, 16, 16, 16,
+	16, 16, 16, 16, 16, 16, 16, 16,
+	16, 16, 16, 16, 16, 16, 16, 16,
+}
+
+func isDefaultMPEG2Matrix(m [64]byte, def [64]byte) bool {
+	for i := 0; i < 64; i++ {
+		if m[i] != def[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func isDefaultMPEG2IntraMatrix(m [64]byte) bool {
+	return isDefaultMPEG2Matrix(m, mpeg2DefaultIntraMatrix) || isDefaultMPEG2Matrix(m, mpeg2DefaultIntraMatrixFlat)
+}
+
+func formatMPEG2MatrixHex(m [64]byte) string {
+	const hex = "0123456789ABCDEF"
+	out := make([]byte, 0, 128)
+	for i := 0; i < 64; i++ {
+		b := m[i]
+		out = append(out, hex[b>>4], hex[b&0x0f])
+	}
+	return string(out)
+}
+
 type mpeg2VideoInfo struct {
 	Width             uint64
 	Height            uint64
@@ -72,6 +130,7 @@ type mpeg2VideoParser struct {
 	progressiveFrames int
 	repeatFirstField  int
 	topFieldFirst     int
+	intraDCCounts     map[int]int
 }
 
 func (p *mpeg2VideoParser) recordGOPMCount() {
@@ -125,15 +184,53 @@ func (p *mpeg2VideoParser) parseSequenceHeader(data []byte) {
 	bufferSize := br.readBitsValue(10)
 	_ = br.readBitsValue(1)
 	loadIntra := br.readBitsValue(1)
+	customMatrix := false
+	matrixKnown := false
 	if loadIntra == 1 {
-		if p.info.MatrixData == "" {
-			p.info.MatrixData = maybeCaptureMPEG2Matrix(br)
+		var m [64]byte
+		ok := true
+		for i := 0; i < 64; i++ {
+			v := br.readBitsValue(8)
+			if v == ^uint64(0) {
+				ok = false
+				break
+			}
+			m[i] = byte(v)
+		}
+		if ok {
+			matrixKnown = true
+			if !isDefaultMPEG2IntraMatrix(m) {
+				customMatrix = true
+				if p.info.MatrixData == "" {
+					p.info.MatrixData = formatMPEG2MatrixHex(m)
+				}
+			}
+		} else {
+			customMatrix = true
 		}
 	}
 	loadNonIntra := br.readBitsValue(1)
 	if loadNonIntra == 1 {
-		if p.info.MatrixData == "" {
-			p.info.MatrixData = maybeCaptureMPEG2Matrix(br)
+		var m [64]byte
+		ok := true
+		for i := 0; i < 64; i++ {
+			v := br.readBitsValue(8)
+			if v == ^uint64(0) {
+				ok = false
+				break
+			}
+			m[i] = byte(v)
+		}
+		if ok {
+			matrixKnown = true
+			if !isDefaultMPEG2Matrix(m, mpeg2DefaultNonIntraMatrix) {
+				customMatrix = true
+				if p.info.MatrixData == "" {
+					p.info.MatrixData = formatMPEG2MatrixHex(m)
+				}
+			}
+		} else {
+			customMatrix = true
 		}
 	}
 
@@ -153,7 +250,13 @@ func (p *mpeg2VideoParser) parseSequenceHeader(data []byte) {
 	}
 	if p.info.Matrix == "" {
 		if loadIntra == 1 || loadNonIntra == 1 {
-			p.info.Matrix = "Custom"
+			if customMatrix {
+				p.info.Matrix = "Custom"
+			} else if matrixKnown {
+				p.info.Matrix = "Default"
+			} else {
+				p.info.Matrix = "Custom"
+			}
 		} else {
 			p.info.Matrix = "Default"
 		}
@@ -237,8 +340,11 @@ func (p *mpeg2VideoParser) parseExtension(data []byte) {
 			_ = br.readBitsValue(5) // burst_amplitude
 			_ = br.readBitsValue(5) // sub_carrier_phase
 		}
-		if intra != ^uint64(0) && p.info.IntraDCPrecision == 0 {
-			p.info.IntraDCPrecision = int(8 + intra)
+		if intra != ^uint64(0) {
+			if p.intraDCCounts == nil {
+				p.intraDCCounts = map[int]int{}
+			}
+			p.intraDCCounts[int(intra)]++
 		}
 		if pictureStructure != ^uint64(0) {
 			p.pictureCount++
@@ -411,6 +517,10 @@ func (p *mpeg2VideoParser) finalize() mpeg2VideoInfo {
 	}
 	if p.info.Matrix == "" {
 		p.info.Matrix = "Default"
+	}
+	if len(p.intraDCCounts) > 0 {
+		mode, _ := modeValue(p.intraDCCounts)
+		p.info.IntraDCPrecision = 8 + mode
 	}
 	if p.info.ColorSpace == "" {
 		p.info.ColorSpace = "YUV"

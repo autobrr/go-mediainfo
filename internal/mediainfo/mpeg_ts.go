@@ -12,38 +12,54 @@ import (
 )
 
 type tsStream struct {
-	pid              uint16
-	programNumber    uint16
-	streamType       byte
-	kind             StreamKind
-	format           string
-	frames           uint64
-	bytes            uint64
-	pts              ptsTracker
-	hasAC3           bool
-	ac3Info          ac3Info
-	ac3StatsBytes    uint64
-	width            uint64
-	height           uint64
-	storedHeight     uint64
-	videoFields      []Field
-	hasVideoFields   bool
-	audioProfile     string
-	audioObject      int
-	audioMPEGVersion int
-	audioRate        float64
-	audioChannels    uint64
-	hasAudioInfo     bool
-	audioFrames      uint64
-	audioSpf         int
-	audioBitRateKbps int64
-	audioBitRateMode string
-	videoFrameRate   float64
-	pesData          []byte
-	audioBuffer      []byte
-	audioStarted     bool
-	writingLibrary   string
-	encoding         string
+	pid                 uint16
+	programNumber       uint16
+	streamType          byte
+	kind                StreamKind
+	format              string
+	frames              uint64
+	bytes               uint64
+	pts                 ptsTracker
+	lastPTS             uint64
+	hasLastPTS          bool
+	pesPayloadRemaining int
+	pesPayloadKnown     bool
+	hasAC3              bool
+	ac3Info             ac3Info
+	ac3StatsBytes       uint64
+	width               uint64
+	height              uint64
+	storedHeight        uint64
+	mpeg2Parser         *mpeg2VideoParser
+	mpeg2Info           mpeg2VideoInfo
+	hasMPEG2Info        bool
+	videoCCCarry        []byte
+	videoFrameCount     int
+	ccFound             bool
+	ccOdd               ccTrack
+	ccEven              ccTrack
+	dtvcc               dtvccState
+	dtvccServices       map[int]struct{}
+	language            string
+	videoFields         []Field
+	hasVideoFields      bool
+	audioProfile        string
+	audioObject         int
+	audioMPEGVersion    int
+	audioRate           float64
+	audioChannels       uint64
+	hasAudioInfo        bool
+	audioFrames         uint64
+	audioSpf            int
+	audioBitRateKbps    int64
+	audioBitRateMode    string
+	videoFrameRate      float64
+	pesData             []byte
+	audioBuffer         []byte
+	audioStarted        bool
+	videoStarted        bool
+	writingLibrary      string
+	encoding            string
 }
 
 func ParseMPEGTS(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, []Field, bool) {
@@ -163,6 +179,7 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64)
 	var videoPTS ptsTracker
 	var anyPTS ptsTracker
 	videoPIDs := map[uint16]struct{}{}
+	hasMPEGVideo := false
 	var pcrPTS ptsTracker
 	var pcrFull pcrTracker
 	var lastPCR uint64 // 27MHz ticks
@@ -336,6 +353,7 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64)
 							existing.format = st.format
 							existing.streamType = st.streamType
 							existing.programNumber = st.programNumber
+							existing.language = st.language
 							if pending, ok := pendingPTS[st.pid]; ok {
 								existing.pts = *pending
 								if st.kind == StreamVideo {
@@ -359,6 +377,9 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64)
 						}
 						if st.kind == StreamVideo {
 							videoPIDs[st.pid] = struct{}{}
+							if st.format == "MPEG Video" {
+								hasMPEGVideo = true
+							}
 						}
 					}
 					asm.reset()
@@ -378,6 +399,8 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64)
 						addPTS(&anyPTS, pts)
 						if entry, ok := streams[pid]; ok {
 							addPTS(&entry.pts, pts)
+							entry.lastPTS = pts
+							entry.hasLastPTS = true
 							if _, ok := videoPIDs[pid]; ok {
 								addPTS(&videoPTS, pts)
 							}
@@ -389,7 +412,11 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64)
 							}
 							addPTS(pending, pts)
 						}
+					} else if entry, ok := streams[pid]; ok {
+						entry.hasLastPTS = false
 					}
+				} else if entry, ok := streams[pid]; ok {
+					entry.hasLastPTS = false
 				}
 			}
 
@@ -431,17 +458,45 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64)
 			}
 
 			if pesStart {
+				if entry.kind == StreamVideo && !entry.videoStarted {
+					// Some TS files begin mid-PES. Don't count video bytes until we've seen a PES start
+					// for that PID, or we inflate StreamSize/overhead vs official MediaInfo.
+					entry.videoStarted = true
+				}
 				if len(entry.pesData) > 0 {
 					processPES(entry)
 				}
 				headerLen := int(payload[8])
 				dataStart := min(9+headerLen, len(payload))
 				data := payload[dataStart:]
+				if entry.kind == StreamVideo && entry.format == "MPEG Video" {
+					entry.pesPayloadKnown = false
+					entry.pesPayloadRemaining = 0
+					if len(payload) >= 6 {
+						pesLen := int(binary.BigEndian.Uint16(payload[4:6]))
+						if pesLen > 0 {
+							pesPayloadLen := pesLen - (3 + headerLen)
+							if pesPayloadLen < 0 {
+								pesPayloadLen = 0
+							}
+							usable := min(len(data), pesPayloadLen)
+							entry.pesPayloadRemaining = pesPayloadLen - usable
+							entry.pesPayloadKnown = true
+							data = data[:usable]
+						}
+					}
+				} else {
+					entry.pesPayloadKnown = false
+					entry.pesPayloadRemaining = 0
+				}
 				entry.bytes += uint64(len(data))
-				if entry.kind == StreamVideo && len(data) > 0 {
+				if entry.kind == StreamVideo && entry.format == "AVC" && len(data) > 0 {
 					entry.pesData = append(entry.pesData[:0], data...)
 				}
 
+				if entry.kind == StreamVideo && entry.format == "MPEG Video" && len(data) > 0 {
+					consumeMPEG2TSVideo(entry, data, entry.lastPTS, entry.hasLastPTS)
+				}
 				if entry.kind == StreamVideo && entry.format == "AVC" && !entry.hasVideoFields && len(data) > 0 {
 					if fields, sps, ok := parseH264FromPES(data); ok && len(fields) > 0 {
 						width, height, fps := sps.Width, sps.Height, sps.FrameRate
@@ -473,15 +528,32 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64)
 				continue
 			}
 
-			if entry.kind == StreamVideo && len(entry.pesData) > 0 {
+			if entry.kind == StreamVideo && !entry.videoStarted {
+				// Ignore pre-start payload for video PIDs (file starts mid-PES).
+				continue
+			}
+
+			if entry.kind == StreamVideo && entry.format == "AVC" && len(entry.pesData) > 0 {
 				entry.pesData = append(entry.pesData, payload...)
+			}
+			payloadData := payload
+			if entry.kind == StreamVideo && entry.format == "MPEG Video" && entry.pesPayloadKnown {
+				if entry.pesPayloadRemaining <= 0 {
+					continue
+				}
+				n := min(len(payload), entry.pesPayloadRemaining)
+				payloadData = payload[:n]
+				entry.pesPayloadRemaining -= n
+			}
+			if entry.kind == StreamVideo && entry.format == "MPEG Video" && len(payloadData) > 0 {
+				consumeMPEG2TSVideo(entry, payloadData, entry.lastPTS, entry.hasLastPTS)
 			}
 			if entry.kind == StreamAudio && entry.audioStarted && len(payload) > 0 {
 				entry.bytes += uint64(len(payload))
 				consumeAudio(entry, payload)
 			}
-			if entry.kind != StreamAudio && len(payload) > 0 {
-				entry.bytes += uint64(len(payload))
+			if entry.kind != StreamAudio && len(payloadData) > 0 {
+				entry.bytes += uint64(len(payloadData))
 			}
 		}
 		carry = n - packetCount*int(packetSize)
@@ -496,6 +568,20 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64)
 	for _, entry := range streams {
 		if len(entry.pesData) > 0 {
 			processPES(entry)
+		}
+		if entry.kind == StreamVideo && entry.format == "MPEG Video" && entry.mpeg2Parser != nil && entry.mpeg2Parser.sawSequence {
+			info := entry.mpeg2Parser.finalize()
+			entry.mpeg2Info = info
+			entry.hasMPEG2Info = true
+			if info.Width > 0 {
+				entry.width = info.Width
+			}
+			if info.Height > 0 {
+				entry.height = info.Height
+			}
+			if info.FrameRate > 0 {
+				entry.videoFrameRate = info.FrameRate
+			}
 		}
 	}
 	for _, entry := range streams {
@@ -540,6 +626,9 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64)
 		if isBDAV && st.bytes > 0 && (st.kind == StreamVideo || st.kind == StreamAudio) {
 			jsonExtras["StreamSize"] = strconv.FormatUint(st.bytes, 10)
 		}
+		if !isBDAV && hasMPEGVideo && st.bytes > 0 && (st.kind == StreamVideo || st.kind == StreamAudio) {
+			jsonExtras["StreamSize"] = strconv.FormatUint(st.bytes, 10)
+		}
 		if st.programNumber > 0 {
 			jsonExtras["MenuID"] = strconv.FormatUint(uint64(st.programNumber), 10)
 		}
@@ -580,6 +669,36 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64)
 		if format != "" {
 			fields = append(fields, Field{Name: "Format", Value: format})
 		}
+		if st.kind == StreamVideo && !isBDAV && hasMPEGVideo && st.format == "MPEG Video" && st.hasMPEG2Info {
+			info := st.mpeg2Info
+			if name := mpeg2CommercialNameTS(info); name != "" {
+				fields = append(fields, Field{Name: "Commercial name", Value: name})
+			}
+			if info.Version != "" {
+				fields = append(fields, Field{Name: "Format version", Value: info.Version})
+			}
+			if info.Profile != "" {
+				fields = append(fields, Field{Name: "Format profile", Value: info.Profile})
+			}
+			if info.BVOP != nil {
+				fields = append(fields, Field{Name: "Format settings", Value: "BVOP"})
+				fields = append(fields, Field{Name: "Format settings, BVOP", Value: formatYesNo(*info.BVOP)})
+			}
+			if info.Matrix != "" {
+				fields = append(fields, Field{Name: "Format settings, Matrix", Value: info.Matrix})
+			}
+			if info.IntraDCPrecision > 0 {
+				if jsonRaw == nil {
+					jsonRaw = map[string]string{}
+				}
+				jsonRaw["extra"] = renderJSONObject([]jsonKV{{Key: "intra_dc_precision", Val: strconv.Itoa(info.IntraDCPrecision)}}, false)
+			}
+			if info.GOPVariable {
+				fields = append(fields, Field{Name: "Format settings, GOP", Value: "Variable"})
+			} else if info.GOPLength > 0 {
+				fields = append(fields, Field{Name: "Format settings, GOP", Value: formatGOPLength(info.GOPLength)})
+			}
+		}
 		if st.kind == StreamVideo {
 			if info := mapMatroskaFormatInfo(st.format); info != "" {
 				fields = append(fields, Field{Name: "Format/Info", Value: info})
@@ -612,7 +731,7 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64)
 			if duration == 0 {
 				duration = videoDuration
 			}
-			if duration > 0 && st.videoFrameRate > 0 {
+			if duration > 0 && st.videoFrameRate > 0 && st.format != "MPEG Video" {
 				duration += 1.0 / st.videoFrameRate
 			}
 			if duration > 0 {
@@ -627,7 +746,35 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64)
 			if isBDAV && st.videoFrameRate > 0 {
 				fields = append(fields, Field{Name: "Frame rate", Value: fmt.Sprintf("%.3f FPS", st.videoFrameRate)})
 			}
-			fields = append(fields, Field{Name: "Frame rate mode", Value: "Variable"})
+			if !isBDAV && hasMPEGVideo && st.format == "MPEG Video" && st.hasMPEG2Info && duration > 0 {
+				info := st.mpeg2Info
+				fields = append(fields, Field{Name: "Bit rate mode", Value: "Variable"})
+				bitrate := (float64(st.bytes) * 8) / duration
+				fields = addStreamBitrate(fields, bitrate)
+				if maxKbps := info.MaxBitRateKbps; maxKbps > 0 {
+					fields = append(fields, Field{Name: "Maximum bit rate", Value: formatBitrate(float64(maxKbps) * 1000)})
+					jsonExtras["BitRate_Maximum"] = strconv.FormatInt(maxKbps*1000, 10)
+				}
+				if info.BufferSize > 0 {
+					jsonExtras["BufferSize"] = strconv.FormatInt(info.BufferSize, 10)
+				}
+				jsonDuration := math.Round(duration*1000) / 1000
+				if jsonDuration > 0 {
+					jsonExtras["BitRate"] = strconv.FormatInt(int64(math.Round((float64(st.bytes)*8)/jsonDuration)), 10)
+				}
+				if st.videoFrameCount > 0 {
+					jsonExtras["FrameCount"] = strconv.Itoa(st.videoFrameCount)
+				}
+				if info.GOPDropFrame != nil {
+					jsonExtras["Delay_Original"] = "0.000"
+					jsonExtras["Delay_Original_Source"] = "Stream"
+					jsonExtras["Delay_DropFrame"] = formatYesNo(*info.GOPDropFrame)
+					jsonExtras["Delay_Original_DropFrame"] = formatYesNo(*info.GOPDropFrame)
+				}
+			}
+			if st.format != "MPEG Video" {
+				fields = append(fields, Field{Name: "Frame rate mode", Value: "Variable"})
+			}
 			if isBDAV {
 				fields = append(fields, Field{Name: "Bit rate mode", Value: "Variable"})
 			}
@@ -645,6 +792,44 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64)
 			}
 			if ar := formatAspectRatio(st.width, st.height); ar != "" {
 				fields = append(fields, Field{Name: "Display aspect ratio", Value: ar})
+			}
+			if !isBDAV && hasMPEGVideo && st.format == "MPEG Video" && st.hasMPEG2Info {
+				info := st.mpeg2Info
+				if info.FrameRateNumer > 0 && info.FrameRateDenom > 0 {
+					fields = append(fields, Field{Name: "Frame rate", Value: formatFrameRateRatio(info.FrameRateNumer, info.FrameRateDenom)})
+				} else if info.FrameRate > 0 {
+					fields = append(fields, Field{Name: "Frame rate", Value: formatFrameRate(info.FrameRate)})
+				}
+				if info.ColorSpace != "" {
+					fields = append(fields, Field{Name: "Color space", Value: info.ColorSpace})
+				}
+				if info.ChromaSubsampling != "" {
+					fields = append(fields, Field{Name: "Chroma subsampling", Value: info.ChromaSubsampling})
+				}
+				if info.BitDepth != "" {
+					fields = append(fields, Field{Name: "Bit depth", Value: info.BitDepth})
+				}
+				if info.ScanType != "" {
+					fields = append(fields, Field{Name: "Scan type", Value: info.ScanType})
+				}
+				fields = append(fields, Field{Name: "Compression mode", Value: "Lossy"})
+				if duration > 0 && st.width > 0 && st.height > 0 && st.videoFrameRate > 0 {
+					bitrate := (float64(st.bytes) * 8) / duration
+					if bits := formatBitsPerPixelFrame(bitrate, st.width, st.height, st.videoFrameRate); bits != "" {
+						fields = append(fields, Field{Name: "Bits/(Pixel*Frame)", Value: bits})
+					}
+				}
+				if info.TimeCode != "" {
+					fields = append(fields, Field{Name: "Time code of first frame", Value: info.TimeCode})
+				}
+				if info.TimeCodeSource != "" {
+					fields = append(fields, Field{Name: "Time code source", Value: info.TimeCodeSource})
+				}
+				if st.bytes > 0 && size > 0 {
+					if value := formatStreamSize(int64(st.bytes), size); value != "" {
+						fields = append(fields, Field{Name: "Stream size", Value: value})
+					}
+				}
 			}
 		}
 		if st.kind == StreamAudio {
@@ -674,7 +859,11 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64)
 					fields = append(fields, Field{Name: "Bit rate", Value: formatBitrate(float64(st.audioBitRateKbps) * 1000)})
 				}
 				fields = append(fields, Field{Name: "Channel(s)", Value: formatChannels(st.audioChannels)})
-				if layout := channelLayout(st.audioChannels); layout != "" {
+				layout := channelLayout(st.audioChannels)
+				if st.format == "AC-3" && st.audioChannels == 6 {
+					layout = "L R C LFE Ls Rs"
+				}
+				if layout != "" {
 					fields = append(fields, Field{Name: "Channel layout", Value: layout})
 				}
 				fields = append(fields, Field{Name: "Sampling rate", Value: formatSampleRate(st.audioRate)})
@@ -708,6 +897,12 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64)
 				}
 				if code := ac3ServiceKindCode(st.ac3Info.bsmod); code != "" {
 					jsonExtras["ServiceKind"] = code
+				}
+				if st.ac3Info.serviceKind != "" {
+					fields = append(fields, Field{Name: "Service kind", Value: st.ac3Info.serviceKind})
+				}
+				if !isBDAV && hasMPEGVideo && st.audioFrames > 0 {
+					jsonExtras["FrameCount"] = strconv.FormatUint(st.audioFrames, 10)
 				}
 
 				extraFields := []jsonKV{
@@ -758,6 +953,16 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64)
 					jsonRaw["extra"] = renderJSONObject(extraFields, false)
 				}
 			}
+			if !isBDAV && hasMPEGVideo && st.bytes > 0 && size > 0 {
+				if value := formatStreamSize(int64(st.bytes), size); value != "" {
+					fields = append(fields, Field{Name: "Stream size", Value: value})
+				}
+			}
+			if st.language != "" {
+				fields = append(fields, Field{Name: "Language", Value: formatLanguage(st.language)})
+				// Official mediainfo prefers ISO 639-1 where possible (e.g. "eng" -> "en").
+				jsonExtras["Language"] = normalizeLanguageCode(st.language)
+			}
 		}
 		if st.kind == StreamText && st.streamType != 0 {
 			fields = append(fields, Field{Name: "Codec ID", Value: formatTSCodecID(st.streamType)})
@@ -774,6 +979,18 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64)
 			}
 		}
 		streamsOut = append(streamsOut, Stream{Kind: st.kind, Fields: fields, JSON: jsonExtras, JSONRaw: jsonRaw})
+	}
+
+	if !isBDAV && hasMPEGVideo {
+		for _, pid := range streamOrder {
+			st, ok := streams[pid]
+			if !ok {
+				continue
+			}
+			if st.kind == StreamVideo && st.format == "MPEG Video" {
+				appendTSCaptionStreams(&streamsOut, st)
+			}
+		}
 	}
 
 	info := ContainerInfo{}
@@ -810,8 +1027,9 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64)
 		generalFields = append(generalFields, Field{Name: "ID", Value: formatID(uint64(primaryProgramNumber))})
 	}
 
-	// MediaInfo CLI doesn't output a Menu track for BDAV/M2TS.
-	if primaryPMTPID != 0 && packetSize == tsPacketSize {
+	// MediaInfo only emits a Menu track for TS when DVB service descriptors are present (SDT).
+	// (ATSC/PSIP streams often omit SDT and don't get a Menu track in official output.)
+	if primaryPMTPID != 0 && packetSize == tsPacketSize && (serviceName != "" || serviceProvider != "" || serviceType != "") {
 		menuFields := []Field{
 			{Name: "ID", Value: formatID(uint64(primaryPMTPID))},
 		}
@@ -998,9 +1216,31 @@ func parsePMT(payload []byte, programNumber uint16) ([]tsStream, uint16, int, in
 		streamType := section[pos]
 		pid := binary.BigEndian.Uint16(section[pos+1:pos+3]) & 0x1FFF
 		esInfoLen := int(binary.BigEndian.Uint16(section[pos+3:pos+5]) & 0x0FFF)
+		language := ""
+		descStart := pos + 5
+		descEnd := descStart + esInfoLen
+		if esInfoLen > 0 && descEnd <= end && descEnd <= len(section) {
+			descs := section[descStart:descEnd]
+			for i := 0; i+2 <= len(descs); {
+				tag := descs[i]
+				length := int(descs[i+1])
+				i += 2
+				if i+length > len(descs) {
+					break
+				}
+				if tag == 0x0A && length >= 4 {
+					code := string(descs[i : i+3])
+					// Keep the first language descriptor value.
+					if language == "" {
+						language = strings.TrimSpace(code)
+					}
+				}
+				i += length
+			}
+		}
 		kind, format := mapTSStream(streamType)
 		if kind != "" {
-			streams = append(streams, tsStream{pid: pid, programNumber: programNumber, streamType: streamType, kind: kind, format: format})
+			streams = append(streams, tsStream{pid: pid, programNumber: programNumber, streamType: streamType, kind: kind, format: format, language: language})
 		}
 		pos += 5 + esInfoLen
 	}
@@ -1211,9 +1451,9 @@ func consumeAC3(entry *tsStream, payload []byte) {
 		}
 		entry.audioFrames++
 		entry.hasAC3 = true
-		// MediaInfo seems to sample only a limited window for AC-3 metadata stats.
-		// Keep parity and avoid doing a full-file pass.
-		const maxStatsBytes = 494 * 1024
+		// MediaInfo collects AC-3 metadata stats across a meaningful portion of the stream.
+		// Keep a cap to avoid worst-case work on very long files.
+		const maxStatsBytes = 8 * 1024 * 1024
 		if entry.ac3StatsBytes < maxStatsBytes {
 			entry.ac3Info.mergeFrame(info)
 			entry.ac3StatsBytes += uint64(frameSize)
