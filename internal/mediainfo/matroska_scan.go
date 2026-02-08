@@ -261,7 +261,7 @@ func readMatroskaElementHeader(er *ebmlReader, size int64, start int64) (uint64,
 
 var errMatroskaScanLimit = errors.New("matroska scan limit reached")
 
-func scanMatroskaClusters(r io.ReaderAt, offset int64, size int64, timecodeScale uint64, audioProbes map[uint64]*matroskaAudioProbe, videoProbes map[uint64]*matroskaVideoProbe, applyScan bool, collectBytes bool, parseSpeed float64, trackCount int) (map[uint64]*matroskaTrackStats, bool) {
+func scanMatroskaClusters(r io.ReaderAt, offset int64, size int64, timecodeScale uint64, audioProbes map[uint64]*matroskaAudioProbe, videoProbes map[uint64]*matroskaVideoProbe, applyScan bool, collectBytes bool, parseSpeed float64, trackCount int, needFirstTimes map[uint64]struct{}) (map[uint64]*matroskaTrackStats, bool) {
 	if size <= 0 {
 		return nil, false
 	}
@@ -292,13 +292,13 @@ func scanMatroskaClusters(r io.ReaderAt, offset int64, size int64, timecodeScale
 		}
 		switch id {
 		case mkvIDCluster:
-			if err := scanMatroskaCluster(er, int64(elemSize), int64(timecodeScale), stats, audioProbes, videoProbes, applyScan, collectBytes, &globalFrames, maxFrames); err != nil {
+			if err := scanMatroskaCluster(er, int64(elemSize), int64(timecodeScale), stats, audioProbes, videoProbes, applyScan, collectBytes, &globalFrames, maxFrames, needFirstTimes); err != nil {
 				if errors.Is(err, errMatroskaScanLimit) {
 					return stats, len(stats) > 0
 				}
 				return stats, len(stats) > 0
 			}
-			if !applyScan && matroskaProbesComplete(audioProbes, videoProbes) {
+			if !applyScan && matroskaProbesComplete(audioProbes, videoProbes) && matroskaNeedFirstTimesComplete(stats, needFirstTimes) {
 				return stats, len(stats) > 0
 			}
 		default:
@@ -308,6 +308,19 @@ func scanMatroskaClusters(r io.ReaderAt, offset int64, size int64, timecodeScale
 		}
 	}
 	return stats, len(stats) > 0
+}
+
+func matroskaNeedFirstTimesComplete(stats map[uint64]*matroskaTrackStats, need map[uint64]struct{}) bool {
+	if len(need) == 0 {
+		return true
+	}
+	for id := range need {
+		stat := stats[id]
+		if stat == nil || !stat.hasTime {
+			return false
+		}
+	}
+	return true
 }
 
 func matroskaProbesComplete(audioProbes map[uint64]*matroskaAudioProbe, videoProbes map[uint64]*matroskaVideoProbe) bool {
@@ -330,7 +343,7 @@ func matroskaProbesComplete(audioProbes map[uint64]*matroskaAudioProbe, videoPro
 	return true
 }
 
-func scanMatroskaCluster(er *ebmlReader, size int64, timecodeScale int64, stats map[uint64]*matroskaTrackStats, audioProbes map[uint64]*matroskaAudioProbe, videoProbes map[uint64]*matroskaVideoProbe, applyScan bool, collectBytes bool, globalFrames *int64, maxFrames int64) error {
+func scanMatroskaCluster(er *ebmlReader, size int64, timecodeScale int64, stats map[uint64]*matroskaTrackStats, audioProbes map[uint64]*matroskaAudioProbe, videoProbes map[uint64]*matroskaVideoProbe, applyScan bool, collectBytes bool, globalFrames *int64, maxFrames int64, needFirstTimes map[uint64]struct{}) error {
 	start := er.pos
 	var clusterTimecode int64
 	for er.pos-start < size {
@@ -358,7 +371,7 @@ func scanMatroskaCluster(er *ebmlReader, size int64, timecodeScale int64, stats 
 					return errMatroskaScanLimit
 				}
 			}
-			if !applyScan && matroskaProbesComplete(audioProbes, videoProbes) {
+			if !applyScan && matroskaProbesComplete(audioProbes, videoProbes) && matroskaNeedFirstTimesComplete(stats, needFirstTimes) {
 				return nil
 			}
 		case mkvIDBlockGroup:
@@ -372,7 +385,7 @@ func scanMatroskaCluster(er *ebmlReader, size int64, timecodeScale int64, stats 
 					return errMatroskaScanLimit
 				}
 			}
-			if !applyScan && matroskaProbesComplete(audioProbes, videoProbes) {
+			if !applyScan && matroskaProbesComplete(audioProbes, videoProbes) && matroskaNeedFirstTimesComplete(stats, needFirstTimes) {
 				return nil
 			}
 		default:
@@ -1315,6 +1328,59 @@ func deriveCBRAudioStreamSizes(info *MatroskaInfo, fileSize int64) {
 			stream.JSON = map[string]string{}
 		}
 		stream.JSON["StreamSize"] = strconv.FormatInt(bytes, 10)
+	}
+}
+
+func applyMatroskaTrackDelays(info *MatroskaInfo, stats map[uint64]*matroskaTrackStats) {
+	if info == nil || len(info.Tracks) == 0 || len(stats) == 0 {
+		return
+	}
+	baseNs := int64(0)
+	foundBase := false
+	for _, stream := range info.Tracks {
+		if stream.Kind != StreamVideo {
+			continue
+		}
+		trackID := streamTrackNumber(stream)
+		if trackID == 0 {
+			continue
+		}
+		stat := stats[trackID]
+		if stat == nil || !stat.hasTime {
+			continue
+		}
+		if !foundBase || stat.minTimeNs < baseNs {
+			baseNs = stat.minTimeNs
+			foundBase = true
+		}
+	}
+	if !foundBase {
+		return
+	}
+
+	for i := range info.Tracks {
+		stream := &info.Tracks[i]
+		if stream.Kind != StreamVideo && stream.Kind != StreamAudio {
+			continue
+		}
+		trackID := streamTrackNumber(*stream)
+		if trackID == 0 {
+			continue
+		}
+		stat := stats[trackID]
+		if stat == nil || !stat.hasTime {
+			continue
+		}
+		delaySeconds := float64(stat.minTimeNs-baseNs) / 1e9
+		delay := fmt.Sprintf("%.3f", delaySeconds)
+		if stream.JSON == nil {
+			stream.JSON = map[string]string{}
+		}
+		stream.JSON["Delay"] = delay
+		stream.JSON["Delay_Source"] = "Container"
+		if stream.Kind == StreamAudio {
+			stream.JSON["Video_Delay"] = delay
+		}
 	}
 }
 

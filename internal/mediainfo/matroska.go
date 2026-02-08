@@ -40,6 +40,7 @@ const (
 	mkvIDSimpleTag           = 0x67C8
 	mkvIDTagName             = 0x45A3
 	mkvIDTagString           = 0x4487
+	mkvIDTagLanguage         = 0x447A
 	mkvIDTagTrackUID         = 0x63C5
 	mkvIDEditionEntry        = 0x45B9
 	mkvIDChapterAtom         = 0xB6
@@ -55,8 +56,6 @@ const (
 	mkvIDTrackLanguage       = 0x22B59C
 	mkvIDTrackLanguageIETF   = 0x22B59D
 	mkvIDTrackOffset         = 0x537F
-	mkvIDCodecDelay          = 0x56AA
-	mkvIDSeekPreRoll         = 0x56BB
 	mkvIDCodecID             = 0x86
 	mkvIDCodecPrivate        = 0x63A2
 	mkvIDCodecName           = 0x258688
@@ -233,6 +232,16 @@ func ParseMatroskaWithOptions(r io.ReaderAt, size int64, opts AnalyzeOptions) (M
 			var tagSettings map[uint64]string
 			var tagLangs map[uint64]string
 			var tagStats map[uint64]matroskaTagStats
+			needLangs := false
+			for _, stream := range info.Tracks {
+				if stream.Kind != StreamAudio {
+					continue
+				}
+				if stream.JSON == nil || stream.JSON["Language"] == "" {
+					needLangs = true
+					break
+				}
+			}
 
 			// Prefer SeekHead for a precise offset, but some files omit Tags entries.
 			if seekPos, ok := findMatroskaSeekPosition(buf, int(info.SegmentOffset), mkvIDTags); ok {
@@ -259,6 +268,25 @@ func ParseMatroskaWithOptions(r io.ReaderAt, size int64, opts AnalyzeOptions) (M
 						}
 					}
 					tagEncoders, tagSettings, tagLangs, tagStats = parseMatroskaTagsFromBuffer(head, encodedDate)
+				}
+			}
+			// Fallback: some muxers place Tags at EOF. Scan a bounded tail chunk for languages/encoders.
+			if needLangs && len(tagLangs) == 0 && size > (32<<20) {
+				tailSize := min(size, int64(32<<20))
+				if tailSize > 0 {
+					tail := make([]byte, tailSize)
+					if _, err := r.ReadAt(tail, size-tailSize); err == nil || err == io.EOF {
+						enc, settings, langs, _ := parseMatroskaTagsFromBuffer(tail, encodedDate)
+						if len(enc) > 0 {
+							tagEncoders = enc
+						}
+						if len(settings) > 0 {
+							tagSettings = settings
+						}
+						if len(langs) > 0 {
+							tagLangs = langs
+						}
+					}
 				}
 			}
 
@@ -366,10 +394,26 @@ func ParseMatroskaWithOptions(r io.ReaderAt, size int64, opts AnalyzeOptions) (M
 					trackCount++
 				}
 			}
-			if stats, ok := scanMatroskaClusters(r, info.SegmentOffset, info.SegmentSize, info.TimecodeScale, audioProbes, videoProbes, applyScan, applyStats, opts.ParseSpeed, trackCount); ok {
+			needFirstTimes := map[uint64]struct{}{}
+			if !applyScan && opts.ParseSpeed < 1 {
+				// Delay relative to video: require at least one observed block time per track.
+				for _, stream := range info.Tracks {
+					if stream.Kind != StreamVideo && stream.Kind != StreamAudio {
+						continue
+					}
+					if id := streamTrackNumber(stream); id > 0 {
+						needFirstTimes[id] = struct{}{}
+					}
+				}
+			}
+			if len(needFirstTimes) == 0 {
+				needFirstTimes = nil
+			}
+			if stats, ok := scanMatroskaClusters(r, info.SegmentOffset, info.SegmentSize, info.TimecodeScale, audioProbes, videoProbes, applyScan, applyStats, opts.ParseSpeed, trackCount, needFirstTimes); ok {
 				if applyScan {
 					applyMatroskaStats(&info, stats, size)
 				}
+				applyMatroskaTrackDelays(&info, stats)
 				applyMatroskaAudioProbes(&info, audioProbes)
 				applyMatroskaVideoProbes(&info, videoProbes)
 			}
@@ -974,10 +1018,6 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64) (Stream, bool)
 	var trackLanguageIETF string
 	var trackOffset int64
 	var hasTrackOffset bool
-	var codecDelayNs uint64
-	var hasCodecDelay bool
-	var seekPreRollNs uint64
-	var hasSeekPreRoll bool
 	var codecID string
 	var codecPrivate []byte
 	var codecName string
@@ -1068,18 +1108,6 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64) (Stream, bool)
 			if value, ok := readSigned(buf[dataStart:dataEnd]); ok {
 				trackOffset = value
 				hasTrackOffset = true
-			}
-		}
-		if id == mkvIDCodecDelay {
-			if value, ok := readUnsigned(buf[dataStart:dataEnd]); ok {
-				codecDelayNs = value
-				hasCodecDelay = true
-			}
-		}
-		if id == mkvIDSeekPreRoll {
-			if value, ok := readUnsigned(buf[dataStart:dataEnd]); ok {
-				seekPreRollNs = value
-				hasSeekPreRoll = true
 			}
 		}
 		if id == mkvIDBitRate {
@@ -1423,26 +1451,17 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64) (Stream, bool)
 	if languageCode != "" {
 		jsonExtras["Language"] = languageCode
 	}
+	_ = trackOffset
+	_ = hasTrackOffset
 	if aacSBRExplicitNo {
 		// Match official MediaInfo: only emit Format_Settings_SBR when AudioSpecificConfig explicitly signals it.
 		jsonExtras["Format_Settings_SBR"] = "No (Explicit)"
 	}
-	delaySeconds := 0.0
-	// MediaInfo prefers CodecDelay when present; fall back to TrackOffset (signed).
-	// SeekPreRoll is not exposed as Delay/Video_Delay in official JSON.
-	_ = seekPreRollNs
-	_ = hasSeekPreRoll
-	if hasCodecDelay && codecDelayNs > 0 {
-		delaySeconds = float64(codecDelayNs) / 1e9
-	} else if hasTrackOffset {
-		delaySeconds = float64(trackOffset) / 1e9
-	}
 	if kind == StreamVideo || kind == StreamAudio {
-		delay := fmt.Sprintf("%.3f", delaySeconds)
-		jsonExtras["Delay"] = delay
+		jsonExtras["Delay"] = "0.000"
 		jsonExtras["Delay_Source"] = "Container"
 		if kind == StreamAudio {
-			jsonExtras["Video_Delay"] = delay
+			jsonExtras["Video_Delay"] = "0.000"
 		}
 	}
 	if kind == StreamVideo {
@@ -2184,10 +2203,13 @@ func parseMatroskaTags(buf []byte, encodedDate string) (map[uint64]string, map[u
 			dataEnd = len(buf)
 		}
 		if id == mkvIDTag {
-			trackUID, tags := parseMatroskaTag(buf[dataStart:dataEnd])
+			trackUID, tags, tagLanguage := parseMatroskaTag(buf[dataStart:dataEnd])
 			if trackUID > 0 {
 				if lang, ok := tags["LANGUAGE"]; ok && lang != "" && langsByTrackUID[trackUID] == "" {
 					langsByTrackUID[trackUID] = strings.TrimSpace(lang)
+				} else if langsByTrackUID[trackUID] == "" && tagLanguage != "" && normalizeLanguageCode(tagLanguage) != "" {
+					// Some files omit TrackEntry language; mkvmerge Statistics Tags can still carry a tag language (e.g. eng).
+					langsByTrackUID[trackUID] = tagLanguage
 				}
 			}
 			if encoder, ok := tags["ENCODER"]; ok && encoder != "" {
@@ -2195,8 +2217,10 @@ func parseMatroskaTags(buf []byte, encodedDate string) (map[uint64]string, map[u
 				if key == 0 {
 					key = 0
 				}
-				if encodersByTrackUID[key] == "" {
+				if cur := encodersByTrackUID[key]; cur == "" {
 					encodersByTrackUID[key] = encoder
+				} else if better := preferMatroskaEncoder(cur, encoder); better != cur {
+					encodersByTrackUID[key] = better
 				}
 			}
 			if settings, ok := tags["ENCODER_SETTINGS"]; ok && settings != "" {
@@ -2247,8 +2271,13 @@ func parseMatroskaTagsFromBuffer(buf []byte, encodedDate string) (map[uint64]str
 		}
 		tagEncoders, tagSettings, tagLangs, tagStats := parseMatroskaTags(buf[dataStart:dataEnd], encodedDate)
 		for uid, enc := range tagEncoders {
-			if enc != "" && encodersByTrackUID[uid] == "" {
+			if enc == "" {
+				continue
+			}
+			if cur := encodersByTrackUID[uid]; cur == "" {
 				encodersByTrackUID[uid] = enc
+			} else if better := preferMatroskaEncoder(cur, enc); better != cur {
+				encodersByTrackUID[uid] = better
 			}
 		}
 		for uid, settings := range tagSettings {
@@ -2271,9 +2300,44 @@ func parseMatroskaTagsFromBuffer(buf []byte, encodedDate string) (map[uint64]str
 	return encodersByTrackUID, settingsByTrackUID, langsByTrackUID, statsByTrackUID
 }
 
-func parseMatroskaTag(buf []byte) (uint64, map[string]string) {
+func preferMatroskaEncoder(current string, candidate string) string {
+	curScore := matroskaEncoderScore(current)
+	candScore := matroskaEncoderScore(candidate)
+	if candScore > curScore {
+		return candidate
+	}
+	return current
+}
+
+func matroskaEncoderScore(value string) int {
+	lower := strings.ToLower(strings.TrimSpace(value))
+	if lower == "" {
+		return -1000
+	}
+	score := 0
+	if strings.Contains(lower, "x264") {
+		score += 10
+	}
+	if strings.Contains(lower, "x265") {
+		score += 10
+	}
+	if strings.Contains(lower, "core ") {
+		score += 3
+	}
+	if strings.HasPrefix(lower, "x264 - ") || strings.HasPrefix(lower, "x265 - ") {
+		score += 3
+	}
+	// Prefer codec encoder identifiers over muxer/toolchain names.
+	if strings.Contains(lower, "lavc") || strings.Contains(lower, "ffmpeg") {
+		score -= 5
+	}
+	return score
+}
+
+func parseMatroskaTag(buf []byte) (uint64, map[string]string, string) {
 	var trackUID uint64
 	tags := map[string]string{}
+	var tagLanguage string
 	pos := 0
 	for pos < len(buf) {
 		id, idLen, ok := readVintID(buf, pos)
@@ -2295,11 +2359,11 @@ func parseMatroskaTag(buf []byte) (uint64, map[string]string) {
 				trackUID = value
 			}
 		case mkvIDSimpleTag:
-			parseMatroskaSimpleTagTree(buf[dataStart:dataEnd], tags)
+			parseMatroskaSimpleTagTree(buf[dataStart:dataEnd], tags, &tagLanguage)
 		}
 		pos = dataEnd
 	}
-	return trackUID, tags
+	return trackUID, tags, tagLanguage
 }
 
 func parseMatroskaTagTargets(buf []byte) uint64 {
@@ -2449,7 +2513,7 @@ func scanMatroskaAttachmentsFromFile(r io.ReaderAt, offset int64, fileSize int64
 	return out
 }
 
-func parseMatroskaSimpleTagTree(buf []byte, tags map[string]string) {
+func parseMatroskaSimpleTagTree(buf []byte, tags map[string]string, tagLanguage *string) {
 	if tags == nil {
 		return
 	}
@@ -2472,13 +2536,19 @@ func parseMatroskaSimpleTagTree(buf []byte, tags map[string]string) {
 		}
 		payload := buf[dataStart:dataEnd]
 		if id == mkvIDSimpleTag {
-			parseMatroskaSimpleTagTree(payload, tags)
+			parseMatroskaSimpleTagTree(payload, tags, tagLanguage)
 		}
 		if id == mkvIDTagName {
 			name = string(payload)
 		}
 		if id == mkvIDTagString {
 			value = string(payload)
+		}
+		if id == mkvIDTagLanguage && tagLanguage != nil && *tagLanguage == "" {
+			lang := strings.TrimSpace(strings.TrimRight(string(payload), "\x00"))
+			if lang != "" && lang != "und" {
+				*tagLanguage = lang
+			}
 		}
 		pos = dataEnd
 	}
