@@ -438,6 +438,11 @@ func parseEAC3FrameWithOptions(payload []byte, parseJOC bool) (ac3Info, int, boo
 	if !ok {
 		return info, 0, false
 	}
+	// Basic sanity: E-AC-3 bitstream_id is typically >= 10 (and often 16). Rejecting clearly
+	// invalid values reduces false-positive sync matches when scanning concatenated frames.
+	if bsid < 10 {
+		return info, 0, false
+	}
 	// For dependent substreams, the BSI fields we care about for JSON stats may not be present
 	// (or may be at a different position). Only accumulate dialnorm/compr stats from independent
 	// substreams to match official mediainfo behavior on common E-AC-3 layouts.

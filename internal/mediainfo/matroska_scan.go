@@ -804,11 +804,25 @@ func applyMatroskaStats(info *MatroskaInfo, stats map[uint64]*matroskaTrackStats
 		}
 		durationSeconds := matroskaStatsDuration(stat)
 		if info.Tracks[i].Kind == StreamVideo && stat.blockCount > 0 {
+			// MediaInfo sometimes derives Matroska track Duration from FrameCount and FPS (inclusive
+			// of the last frame) when the observed time bounds align to (FrameCount-1)/FPS.
 			fr := findField(info.Tracks[i].Fields, "Frame rate")
+			fps := 0.0
 			if num, den, ok := parseFrameRateRatio(fr); ok && num > 0 && den > 0 {
-				durationSeconds = float64(stat.blockCount) * float64(den) / float64(num)
-			} else if fps, ok := parseFPS(fr); ok && fps > 0 {
-				durationSeconds = float64(stat.blockCount) / fps
+				fps = float64(num) / float64(den)
+			} else if parsed, ok := parseFPS(fr); ok && parsed > 0 {
+				fps = parsed
+			}
+			if fps > 0 {
+				if durationSeconds <= 0 {
+					durationSeconds = float64(stat.blockCount) / fps
+				} else if stat.blockCount > 1 {
+					exclusive := float64(stat.blockCount-1) / fps
+					// Tight tolerance: time bounds are in milliseconds in most Matroska stats sources.
+					if math.Abs(durationSeconds-exclusive) < 0.002 {
+						durationSeconds = float64(stat.blockCount) / fps
+					}
+				}
 			}
 		}
 		if durationSeconds > 0 {
@@ -1013,8 +1027,10 @@ func applyMatroskaTagStats(info *MatroskaInfo, tagStats map[uint64]matroskaTagSt
 			}
 			stream.JSON["BitRate"] = strconv.FormatInt(tag.bitRate, 10)
 		case StreamVideo:
-			// Prefer x264-derived nominal bitrate (and Matroska TrackEntry nominal) over Statistics Tags BPS.
-			if findField(stream.Fields, "Nominal bit rate") != "" || (stream.JSON != nil && stream.JSON["BitRate_Nominal"] != "") {
+			// Prefer stream/header-derived bitrate (x264 nominal, TrackEntry BitRate) over Statistics Tags BPS.
+			if findField(stream.Fields, "Bit rate") != "" ||
+				findField(stream.Fields, "Nominal bit rate") != "" ||
+				(stream.JSON != nil && (stream.JSON["BitRate"] != "" || stream.JSON["BitRate_Nominal"] != "")) {
 				continue
 			}
 			stream.Fields = setFieldValue(stream.Fields, "Bit rate", formatBitrate(bitrate))
@@ -1097,7 +1113,8 @@ func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAud
 				stream.JSON["FrameRate"] = fmt.Sprintf("%.3f", frameRate)
 				stream.JSON["SamplesPerFrame"] = strconv.Itoa(dts.samplesPerFrame)
 			}
-			if dts.bitRateBps > 0 {
+			hasContainerBitrate := findField(stream.Fields, "Bit rate") != "" || (stream.JSON != nil && stream.JSON["BitRate"] != "")
+			if dts.bitRateBps > 0 && !hasContainerBitrate {
 				stream.Fields = setFieldValue(stream.Fields, "Bit rate mode", "Constant")
 				stream.Fields = setFieldValue(stream.Fields, "Bit rate", formatBitrate(float64(dts.bitRateBps)))
 			}
@@ -1109,7 +1126,7 @@ func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAud
 			if dts.bitDepth > 0 {
 				stream.JSON["BitDepth"] = strconv.Itoa(dts.bitDepth)
 			}
-			if dts.bitRateBps > 0 {
+			if dts.bitRateBps > 0 && !hasContainerBitrate {
 				stream.JSON["BitRate"] = strconv.FormatInt(dts.bitRateBps, 10)
 				stream.JSON["BitRate_Mode"] = "CBR"
 			}
@@ -1647,26 +1664,33 @@ func probeMatroskaAudio(probes map[uint64]*matroskaAudioProbe, track uint64, pay
 			okPacket := false
 			offset := 0
 			for framesParsed := 0; framesParsed < 8 && offset+7 <= len(payload); framesParsed++ {
+				// Parse consecutive syncframes only at the expected boundaries. Avoid resync-scanning
+				// inside payload bytes, which can over-count on random 0x0B77 occurrences.
 				sub := payload[offset:]
-				if len(sub) < 2 {
+				if len(sub) < 2 || sub[0] != 0x0B || sub[1] != 0x77 {
 					break
-				}
-				if sub[0] != 0x0B || sub[1] != 0x77 {
-					found := bytes.Index(sub, []byte{0x0B, 0x77})
-					if found < 0 {
-						break
-					}
-					offset += found
-					sub = payload[offset:]
 				}
 				info, frameSize, ok := parseOne(sub)
 				if !ok {
 					break
 				}
-				if packetBytes > 0 {
-					if frameSize <= 0 {
+				// If we didn't read enough bytes for the full frame (common with peek-limited reads),
+				// don't count it toward stats. MediaInfoLib has the full Block payload available.
+				if frameSize <= 0 || frameSize > len(sub) {
+					break
+				}
+				frameEnd := offset + frameSize
+				// Validate that the next syncframe begins exactly at the computed boundary. This
+				// reduces false positives from random 0x0B77 occurrences.
+				if frameEnd+1 < len(payload) {
+					if payload[frameEnd] != 0x0B || payload[frameEnd+1] != 0x77 {
 						break
 					}
+				} else if packetBytes > 0 && int64(len(payload)) < packetBytes {
+					// We only peeked part of the packet: don't assume end-of-packet implies validity.
+					break
+				}
+				if packetBytes > 0 {
 					// For multi-frame packets, allow smaller frames but ensure we don't claim a
 					// frame larger than the container packet.
 					if int64(frameSize) > packetBytes {
@@ -1679,11 +1703,7 @@ func probeMatroskaAudio(probes map[uint64]*matroskaAudioProbe, track uint64, pay
 				} else {
 					packetInfo.mergeFrame(info)
 				}
-				if frameSize > 0 && offset+frameSize <= len(payload) {
-					offset += frameSize
-				} else {
-					break
-				}
+				offset += frameSize
 				if probe.targetFrames > 0 && packetInfo.comprCount >= probe.targetFrames {
 					break
 				}

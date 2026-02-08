@@ -120,10 +120,6 @@ const matroskaEAC3QuickProbeFrames = 1113
 // MediaInfoLib stops stream parsing after PacketCount>=300 when ParseSpeed<1.
 const matroskaEAC3QuickProbePackets = 300
 
-// Official mediainfo reports E-AC-3 compr/dialnorm stats over a bounded sample; align the
-// compr_Count bound (number of frames with compr metadata seen).
-const matroskaEAC3QuickProbeComprValues = 560
-
 // Bound the expensive JOC scan (full-block reads) separately; stats probing continues to PacketCount.
 const matroskaEAC3QuickProbePacketsJOC = 198
 const matroskaHEVCQuickProbePackets = 300
@@ -136,6 +132,7 @@ type MatroskaInfo struct {
 	SegmentOffset int64
 	SegmentSize   int64
 	TimecodeScale uint64
+	durationPrec  int
 	tagStats      map[uint64]matroskaTagStats
 	attachments   []string
 }
@@ -343,7 +340,6 @@ func ParseMatroskaWithOptions(r io.ReaderAt, size int64, opts AnalyzeOptions) (M
 							// Keep Matroska probing bounded (ParseSpeed < 1), but still sample enough
 							// audio frames to match official JSON stats output (dialnorm/compr/JOC).
 							probe.targetPackets = matroskaEAC3QuickProbePackets
-							probe.targetFrames = matroskaEAC3QuickProbeComprValues
 							if probe.parseJOC {
 								probe.jocStopPackets = matroskaEAC3QuickProbePacketsJOC
 							}
@@ -424,25 +420,72 @@ func ParseMatroskaWithOptions(r io.ReaderAt, size int64, opts AnalyzeOptions) (M
 			}
 		}
 	}
-	// Official mediainfo emits Matroska stream Duration at millisecond precision for some files
-	// (notably when an Encoded date is present in the container metadata).
-	if findField(info.General, "Encoded date") != "" {
-		for i := range info.Tracks {
-			stream := &info.Tracks[i]
-			if stream.Kind != StreamVideo && stream.Kind != StreamAudio {
-				continue
-			}
-			if stream.JSON == nil {
-				continue
-			}
-			durStr := stream.JSON["Duration"]
-			if durStr == "" {
-				continue
-			}
-			if seconds, err := strconv.ParseFloat(durStr, 64); err == nil && seconds > 0 {
-				stream.JSON["Duration"] = formatJSONSeconds(seconds)
+	// MediaInfo may derive video Duration from FrameCount and the displayed FrameRate (rounded to
+	// milliseconds) for some Matroska files. This shows up as a small ms-level delta vs Segment Info.
+	for i := range info.Tracks {
+		stream := &info.Tracks[i]
+		if stream.Kind != StreamVideo || stream.JSON == nil {
+			continue
+		}
+		durStr := stream.JSON["Duration"]
+		fcStr := stream.JSON["FrameCount"]
+		frStr := stream.JSON["FrameRate"]
+		if frStr == "" {
+			// FrameRate is usually present as a text field (e.g. "23.976 (24000/1001) FPS"),
+			// not in JSON extras, so parse it from Fields.
+			if parsed, ok := parseFloatValue(findField(stream.Fields, "Frame rate")); ok && parsed > 0 {
+				frStr = formatJSONFloat(parsed)
 			}
 		}
+		if fcStr == "" || frStr == "" {
+			continue
+		}
+		if durStr != "" {
+			if dot := strings.IndexByte(durStr, '.'); dot < 0 || len(durStr)-dot-1 != 3 {
+				// Don't override stats-derived durations which are serialized at higher precision.
+				continue
+			}
+		}
+		frameCount, ok := parseInt(fcStr)
+		if !ok || frameCount <= 0 {
+			continue
+		}
+		frameRate, err := strconv.ParseFloat(frStr, 64)
+		if err != nil || frameRate <= 0 {
+			continue
+		}
+		ms := math.Round((float64(frameCount) * 1000.0) / frameRate)
+		if ms <= 0 {
+			continue
+		}
+		stream.JSON["Duration"] = fmt.Sprintf("%.3f", ms/1000.0)
+	}
+	// MediaInfo reports audio FrameCount when Duration and FrameRate are known (e.g. DTS, AAC).
+	for i := range info.Tracks {
+		stream := &info.Tracks[i]
+		if stream.Kind != StreamAudio {
+			continue
+		}
+		if stream.JSON == nil || stream.JSON["FrameCount"] != "" {
+			continue
+		}
+		durStr := stream.JSON["Duration"]
+		frStr := stream.JSON["FrameRate"]
+		if durStr == "" || frStr == "" {
+			continue
+		}
+		duration, err1 := strconv.ParseFloat(durStr, 64)
+		frameRate, err2 := strconv.ParseFloat(frStr, 64)
+		if err1 != nil || err2 != nil || duration <= 0 || frameRate <= 0 {
+			continue
+		}
+		product := duration * frameRate
+		rounded := math.Round(product)
+		// MediaInfo only emits FrameCount when it is effectively integral at the chosen precision.
+		if math.Abs(product-rounded) > 1e-3 {
+			continue
+		}
+		stream.JSON["FrameCount"] = strconv.FormatInt(int64(rounded), 10)
 	}
 	deriveCBRAudioStreamSizes(&info, size)
 	return info, true
@@ -630,6 +673,7 @@ func parseMatroskaSegment(buf []byte) (MatroskaInfo, bool) {
 			if segInfo, ok := parseMatroskaInfo(buf[dataStart:dataEnd]); ok {
 				info.Container.DurationSeconds = segInfo.Duration
 				info.TimecodeScale = segInfo.TimecodeScale
+				info.durationPrec = segInfo.DurationPrec
 				info.General = append(info.General, segInfo.Fields...)
 			}
 		}
@@ -639,7 +683,7 @@ func parseMatroskaSegment(buf []byte) (MatroskaInfo, bool) {
 			}
 		}
 		if id == mkvIDTracks {
-			if tracks, ok := parseMatroskaTracks(buf[dataStart:dataEnd], info.Container.DurationSeconds); ok {
+			if tracks, ok := parseMatroskaTracks(buf[dataStart:dataEnd], info.Container.DurationSeconds, info.durationPrec); ok {
 				info.Tracks = append(info.Tracks, tracks...)
 			}
 		}
@@ -927,6 +971,7 @@ func formatSegmentUID(payload []byte) string {
 type matroskaSegmentInfo struct {
 	Duration      float64
 	TimecodeScale uint64
+	DurationPrec  int
 	Fields        []Field
 }
 
@@ -934,6 +979,7 @@ func parseMatroskaInfo(buf []byte) (matroskaSegmentInfo, bool) {
 	timecodeScale := uint64(1000000)
 	var durationValue float64
 	var hasDuration bool
+	durationPrec := 0
 	var fields []Field
 
 	pos := 0
@@ -961,6 +1007,14 @@ func parseMatroskaInfo(buf []byte) (matroskaSegmentInfo, bool) {
 			if value, ok := readFloat(payload); ok {
 				durationValue = value
 				hasDuration = true
+				switch len(payload) {
+				case 4:
+					durationPrec = 3
+				case 8:
+					durationPrec = 9
+				default:
+					durationPrec = 3
+				}
 			}
 		case mkvIDSegmentUID:
 			if len(payload) > 0 {
@@ -997,7 +1051,10 @@ func parseMatroskaInfo(buf []byte) (matroskaSegmentInfo, bool) {
 	if seconds <= 0 {
 		return matroskaSegmentInfo{}, false
 	}
-	return matroskaSegmentInfo{Duration: seconds, TimecodeScale: timecodeScale, Fields: fields}, true
+	if durationPrec == 0 {
+		durationPrec = 3
+	}
+	return matroskaSegmentInfo{Duration: seconds, TimecodeScale: timecodeScale, DurationPrec: durationPrec, Fields: fields}, true
 }
 
 func formatMatroskaDateUTC(deltaNs int64) string {
@@ -1006,7 +1063,7 @@ func formatMatroskaDateUTC(deltaNs int64) string {
 	return value.Format("2006-01-02 15:04:05 UTC")
 }
 
-func parseMatroskaTracks(buf []byte, segmentDuration float64) ([]Stream, bool) {
+func parseMatroskaTracks(buf []byte, segmentDuration float64, durationPrec int) ([]Stream, bool) {
 	entries := []Stream{}
 	pos := 0
 	for pos < len(buf) {
@@ -1024,7 +1081,7 @@ func parseMatroskaTracks(buf []byte, segmentDuration float64) ([]Stream, bool) {
 			dataEnd = len(buf)
 		}
 		if id == mkvIDTrackEntry {
-			if stream, ok := parseMatroskaTrackEntry(buf[dataStart:dataEnd], segmentDuration); ok {
+			if stream, ok := parseMatroskaTrackEntry(buf[dataStart:dataEnd], segmentDuration, durationPrec); ok {
 				entries = append(entries, stream)
 			}
 		}
@@ -1033,7 +1090,7 @@ func parseMatroskaTracks(buf []byte, segmentDuration float64) ([]Stream, bool) {
 	return entries, len(entries) > 0
 }
 
-func parseMatroskaTrackEntry(buf []byte, segmentDuration float64) (Stream, bool) {
+func parseMatroskaTrackEntry(buf []byte, segmentDuration float64, durationPrec int) (Stream, bool) {
 	pos := 0
 	var trackType uint64
 	var trackNumber uint64
@@ -1064,6 +1121,7 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64) (Stream, bool)
 	var contentCompAlgo uint64
 	var contentCompSettings []byte
 	var hasContentCompression bool
+	var derivedVideoFrameCount int64
 	for pos < len(buf) {
 		id, idLen, ok := readVintID(buf, pos)
 		if !ok {
@@ -1329,18 +1387,18 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64) (Stream, bool)
 			fields = append(fields, Field{Name: "Frame rate mode", Value: "Constant"})
 			fields = append(fields, Field{Name: "Frame rate", Value: formatFrameRateWithRatio(rate)})
 			if segmentDuration > 0 {
-				frameDuration := float64(defaultDuration) / 1e9
-				frameCount := math.Round(segmentDuration / frameDuration)
-				if frameCount > 0 {
-					fields = addStreamDuration(fields, frameCount*frameDuration)
+				// MediaInfo derives FrameCount from duration and the display FPS value (rounded to 3 decimals).
+				fpsDisplay := math.Round(rate*1000) / 1000
+				if fpsDisplay > 0 {
+					derivedVideoFrameCount = int64(math.Round(segmentDuration * fpsDisplay))
 				}
 			}
 		}
 		if bitRate > 0 {
-			// Treat Matroska TrackEntry BitRate as nominal (matches official JSON behavior).
-			fields = append(fields, Field{Name: "Nominal bit rate", Value: formatBitrate(float64(bitRate))})
-			// Only emit BitRate_Mode when the stream provides HRD mode signaling.
-			// (Some files report BitRate but omit BitRate_Mode in official output.)
+			// Matroska TrackEntry BitRate maps to BitRate in official JSON output (not BitRate_Nominal).
+			fields = append(fields, Field{Name: "Bit rate", Value: formatBitrate(float64(bitRate))})
+			// Only emit BitRate_Mode when the stream provides HRD mode signaling. Some files report
+			// BitRate but omit BitRate_Mode in official output.
 			if spsInfo.HasBitRateCBR {
 				if bitRateNominal {
 					fields = append(fields, Field{Name: "Bit rate mode", Value: "Constant"})
@@ -1577,38 +1635,24 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64) (Stream, bool)
 		}
 	}
 	durationSeconds := 0.0
-	if kind == StreamVideo {
-		if defaultDuration > 0 && segmentDuration > 0 {
-			frameDuration := float64(defaultDuration) / 1e9
-			frameCount := math.Round(segmentDuration / frameDuration)
-			if frameCount > 0 {
-				// Official mediainfo uses the display FPS value (rounded to 3 decimals) for Duration
-				// when FrameCount is derived from DefaultDuration.
-				fps := 1e9 / float64(defaultDuration)
-				fpsDisplay := math.Round(fps*1000) / 1000
-				if fpsDisplay > 0 {
-					durationSeconds = frameCount / fpsDisplay
-				} else {
-					durationSeconds = frameCount * frameDuration
-				}
-				jsonExtras["FrameCount"] = strconv.FormatInt(int64(frameCount), 10)
-			}
-		}
-		if durationSeconds == 0 && segmentDuration > 0 {
-			durationSeconds = segmentDuration
-		}
-	}
-	if kind == StreamAudio && segmentDuration > 0 {
+	if (kind == StreamVideo || kind == StreamAudio) && segmentDuration > 0 {
 		durationSeconds = segmentDuration
 	}
-	if kind == StreamVideo && durationSeconds > 0 && hasTrackTSScale && trackTSScale > 0 {
-		durationSeconds *= trackTSScale
+	_ = hasTrackTSScale
+	_ = trackTSScale
+	if kind == StreamVideo && derivedVideoFrameCount > 0 && jsonExtras["FrameCount"] == "" {
+		jsonExtras["FrameCount"] = strconv.FormatInt(derivedVideoFrameCount, 10)
 	}
 	if durationSeconds > 0 {
-		if kind == StreamVideo {
+		if durationPrec <= 3 {
 			durationSeconds = math.Round(durationSeconds*1000) / 1000
+			jsonExtras["Duration"] = fmt.Sprintf("%.3f", durationSeconds)
+		} else {
+			jsonExtras["Duration"] = fmt.Sprintf("%.9f", durationSeconds)
 		}
-		jsonExtras["Duration"] = fmt.Sprintf("%.9f", durationSeconds)
+		if kind == StreamVideo && findField(fields, "Duration") == "" {
+			fields = addStreamDuration(fields, durationSeconds)
+		}
 	}
 	headerStrip := []byte(nil)
 	if contentCompAlgo == 3 && len(contentCompSettings) > 0 {

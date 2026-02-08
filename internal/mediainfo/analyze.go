@@ -331,7 +331,10 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 				if enc == "" {
 					continue
 				}
-				if bitrate, ok := findX264Bitrate(enc); ok && bitrate > 0 && findField(streams[i].Fields, "Nominal bit rate") == "" {
+				if bitrate, ok := findX264Bitrate(enc); ok && bitrate > 0 &&
+					findField(streams[i].Fields, "Nominal bit rate") == "" &&
+					findField(streams[i].Fields, "Bit rate") == "" &&
+					(streams[i].JSON == nil || streams[i].JSON["BitRate"] == "") {
 					streams[i].Fields = appendFieldUnique(streams[i].Fields, Field{Name: "Nominal bit rate", Value: formatBitrate(bitrate)})
 					if streams[i].JSON == nil {
 						streams[i].JSON = map[string]string{}
