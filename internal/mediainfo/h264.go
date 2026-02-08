@@ -96,6 +96,8 @@ func buildH264Fields(profile string, level string, spsInfo h264SPSInfo, ppsCABAC
 		}
 	}
 	if spsInfo.ChromaFormat != "" {
+		// MediaInfo reports AVC/H.264 as YUV when chroma information is present.
+		fields = append(fields, Field{Name: "Color space", Value: "YUV"})
 		fields = append(fields, Field{Name: "Chroma subsampling", Value: spsInfo.ChromaFormat})
 	}
 	if spsInfo.BitDepth > 0 {
@@ -445,7 +447,7 @@ func parseH264PPSCabac(nal []byte) (bool, bool) {
 	return flag == 1, true
 }
 
-func parseH264AnnexB(payload []byte) ([]Field, uint64, uint64, float64) {
+func parseH264AnnexB(payload []byte) ([]Field, h264SPSInfo, bool) {
 	var spsInfo h264SPSInfo
 	var hasSPS bool
 	var ppsCABAC *bool
@@ -474,33 +476,25 @@ func parseH264AnnexB(payload []byte) ([]Field, uint64, uint64, float64) {
 	})
 
 	if !hasSPS || ppsCABAC == nil || !hasSlice {
-		return nil, 0, 0, 0
+		return nil, h264SPSInfo{}, false
 	}
 
 	profile := mapAVCProfile(spsInfo.ProfileID)
 	if profile == "" || spsInfo.Width == 0 || spsInfo.Height == 0 {
-		return nil, 0, 0, 0
+		return nil, h264SPSInfo{}, false
 	}
 	if !isValidAVCLevel(spsInfo.LevelID) {
-		return nil, 0, 0, 0
+		return nil, h264SPSInfo{}, false
 	}
 	if (profile == "Baseline" || profile == "Extended") && *ppsCABAC {
-		return nil, 0, 0, 0
+		return nil, h264SPSInfo{}, false
 	}
 
 	level := formatAVCLevel(spsInfo.LevelID)
 	fields := buildH264Fields(profile, level, spsInfo, ppsCABAC, h264FieldOptions{
 		scanTypeFirst: true,
 	})
-	width := uint64(0)
-	height := uint64(0)
-	frameRate := 0.0
-	if hasSPS {
-		width = spsInfo.Width
-		height = spsInfo.Height
-		frameRate = spsInfo.FrameRate
-	}
-	return fields, width, height, frameRate
+	return fields, spsInfo, true
 }
 
 func h264SliceCountAnnexB(payload []byte) int {

@@ -25,6 +25,7 @@ type tsStream struct {
 	ac3StatsBytes    uint64
 	width            uint64
 	height           uint64
+	storedHeight     uint64
 	videoFields      []Field
 	hasVideoFields   bool
 	audioProfile     string
@@ -103,12 +104,51 @@ func addPTS(t *ptsTracker, pts uint64) {
 	t.add(pts)
 }
 
+func findTSSyncOffset(file io.ReadSeeker, packetSize int64, tsOffset int64, size int64) (int64, bool) {
+	// Some TS/M2TS files have leading junk bytes and are not packet-aligned at offset 0.
+	// Find the first offset where multiple consecutive packets have the 0x47 sync byte.
+	const need = int64(5)
+	if packetSize <= 0 {
+		return 0, false
+	}
+	probeLen := int64(1 << 20)
+	if size > 0 && size < probeLen {
+		probeLen = size
+	}
+	if probeLen < tsOffset+packetSize*need {
+		return 0, false
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return 0, false
+	}
+	probe := make([]byte, probeLen)
+	n, _ := io.ReadFull(file, probe)
+	if int64(n) < tsOffset+packetSize*need {
+		return 0, false
+	}
+	limit := int64(n) - (tsOffset + packetSize*need)
+	for i := int64(0); i <= limit; i++ {
+		if probe[i+tsOffset] != 0x47 {
+			continue
+		}
+		ok := true
+		for j := int64(1); j < need; j++ {
+			if probe[i+tsOffset+j*packetSize] != 0x47 {
+				ok = false
+				break
+			}
+		}
+		if ok {
+			return i, true
+		}
+	}
+	return 0, false
+}
+
 func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64) (ContainerInfo, []Stream, []Field, bool) {
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		return ContainerInfo{}, nil, nil, false
 	}
-
-	reader := bufio.NewReaderSize(file, 1<<20)
 
 	var primaryPMTPID uint16
 	var primaryProgramNumber uint16
@@ -143,6 +183,18 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64)
 	if packetSize == 192 {
 		tsOffset = 4
 	}
+
+	if off, ok := findTSSyncOffset(file, packetSize, tsOffset, size); ok {
+		if _, err := file.Seek(off, io.SeekStart); err != nil {
+			return ContainerInfo{}, nil, nil, false
+		}
+	} else {
+		if _, err := file.Seek(0, io.SeekStart); err != nil {
+			return ContainerInfo{}, nil, nil, false
+		}
+	}
+
+	reader := bufio.NewReaderSize(file, 1<<20)
 	buf := make([]byte, packetSize*2048)
 	var packetIndex int64
 	var tsPacketCount int64
@@ -390,12 +442,16 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64)
 					entry.pesData = append(entry.pesData[:0], data...)
 				}
 
-				if entry.kind == StreamVideo && !entry.hasVideoFields && len(data) > 0 {
-					if fields, width, height, fps := parseH264FromPES(data); len(fields) > 0 {
+				if entry.kind == StreamVideo && entry.format == "AVC" && !entry.hasVideoFields && len(data) > 0 {
+					if fields, sps, ok := parseH264FromPES(data); ok && len(fields) > 0 {
+						width, height, fps := sps.Width, sps.Height, sps.FrameRate
 						entry.videoFields = fields
 						entry.hasVideoFields = true
 						entry.width = width
 						entry.height = height
+						if sps.CodedHeight > 0 {
+							entry.storedHeight = sps.CodedHeight
+						}
 						if fps > 0 {
 							entry.videoFrameRate = fps
 						}
@@ -443,23 +499,27 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64)
 		}
 	}
 	for _, entry := range streams {
-		if entry.kind != StreamVideo || entry.hasVideoFields {
+		if entry.kind != StreamVideo || entry.format != "AVC" || entry.hasVideoFields {
 			continue
 		}
 		var fields []Field
 		var width uint64
 		var height uint64
+		var storedHeight uint64
 		var fps float64
 		if packetSize == 192 {
-			fields, width, height, fps = scanBDAVForH264(file, entry.pid, size)
+			fields, width, height, storedHeight, fps = scanBDAVForH264(file, entry.pid, size)
 		} else {
-			fields, width, height, fps = scanTSForH264(file, entry.pid, size)
+			fields, width, height, storedHeight, fps = scanTSForH264(file, entry.pid, size)
 		}
 		if len(fields) > 0 {
 			entry.videoFields = fields
 			entry.hasVideoFields = true
 			entry.width = width
 			entry.height = height
+			if storedHeight > 0 {
+				entry.storedHeight = storedHeight
+			}
 			if fps > 0 {
 				entry.videoFrameRate = fps
 			}
@@ -489,8 +549,25 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64)
 			jsonExtras["Delay_Source"] = "Container"
 		}
 		if st.kind == StreamAudio && videoPTS.has() && st.pts.has() {
-			videoDelay := float64(int64(st.pts.min)-int64(videoPTS.min)) / 90000.0
-			jsonExtras["Video_Delay"] = fmt.Sprintf("%.3f", videoDelay)
+			// Match MediaInfo: Video_Delay is computed from millisecond-rounded stream delays.
+			audioDelay := float64(st.pts.min) / 90000.0
+			videoDelay := float64(videoPTS.min) / 90000.0
+			audioDelay = math.Round(audioDelay*1000) / 1000
+			videoDelay = math.Round(videoDelay*1000) / 1000
+			jsonExtras["Video_Delay"] = fmt.Sprintf("%.3f", audioDelay-videoDelay)
+		}
+		if st.kind == StreamVideo && st.height > 0 {
+			storedHeight := st.storedHeight
+			if storedHeight == 0 {
+				storedHeight = st.height
+			}
+			// Match MediaInfo behavior: for AVC, emit a macroblock-aligned Stored_Height when it differs.
+			if st.format == "AVC" && storedHeight == st.height && storedHeight%16 != 0 {
+				storedHeight = ((storedHeight + 15) / 16) * 16
+			}
+			if storedHeight > 0 && storedHeight != st.height {
+				jsonExtras["Stored_Height"] = strconv.FormatUint(storedHeight, 10)
+			}
 		}
 		fields := []Field{{Name: "ID", Value: formatStreamID(st.pid)}}
 		if st.programNumber > 0 {
@@ -700,30 +777,26 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64)
 	}
 
 	info := ContainerInfo{}
+	var overallBitrate float64
 	if pcrSeconds > 0 && pcrBits > 0 && size > 0 {
-		overallBitrate := pcrBits / pcrSeconds
+		overallBitrate = pcrBits / pcrSeconds
 		if overallBitrate > 0 {
-			if packetSize != 192 {
-				info.DurationSeconds = float64(size*8) / overallBitrate
-			}
-			precision := overallBitrate / 9600.0
+			// MediaInfo reports a slightly wider precision band for TS/BDAV overall bitrate.
+			precision := overallBitrate / 7680.0
 			info.OverallBitrateMin = overallBitrate - precision
 			info.OverallBitrateMax = overallBitrate + precision
 		}
 	}
 	if info.DurationSeconds == 0 {
-		if packetSize == 192 {
-			if duration := pcrFull.durationSeconds(); duration > 0 {
-				info.DurationSeconds = duration
-			} else if duration := ptsDuration(videoPTS); duration > 0 {
-				info.DurationSeconds = duration
-			} else if duration := ptsDuration(anyPTS); duration > 0 {
-				info.DurationSeconds = duration
-			}
+		if duration := pcrFull.durationSeconds(); duration > 0 {
+			info.DurationSeconds = duration
 		} else if duration := ptsDuration(videoPTS); duration > 0 {
 			info.DurationSeconds = duration
 		} else if duration := ptsDuration(anyPTS); duration > 0 {
 			info.DurationSeconds = duration
+		} else if overallBitrate > 0 && size > 0 {
+			// Fallback when neither PCR nor PTS is available.
+			info.DurationSeconds = float64(size*8) / overallBitrate
 		}
 	}
 	info.BitrateMode = "Variable"
@@ -975,13 +1048,14 @@ func formatTSCodecID(streamType byte) string {
 	return strconv.FormatUint(uint64(streamType), 10)
 }
 
-func parseH264FromPES(data []byte) ([]Field, uint64, uint64, float64) {
+func parseH264FromPES(data []byte) ([]Field, h264SPSInfo, bool) {
 	return parseH264AnnexB(data)
 }
 
 func processPES(entry *tsStream) {
-	if entry.kind == StreamVideo && !entry.hasVideoFields && len(entry.pesData) > 0 {
-		if fields, width, height, fps := parseH264FromPES(entry.pesData); len(fields) > 0 {
+	if entry.kind == StreamVideo && entry.format == "AVC" && !entry.hasVideoFields && len(entry.pesData) > 0 {
+		if fields, sps, ok := parseH264FromPES(entry.pesData); ok && len(fields) > 0 {
+			width, height, fps := sps.Width, sps.Height, sps.FrameRate
 			entry.videoFields = fields
 			entry.hasVideoFields = true
 			entry.width = width
@@ -1332,19 +1406,18 @@ func mapServiceType(value byte) string {
 	}
 }
 
-func scanTSForH264(file io.ReadSeeker, pid uint16, size int64) ([]Field, uint64, uint64, float64) {
+func scanTSForH264(file io.ReadSeeker, pid uint16, size int64) ([]Field, uint64, uint64, uint64, float64) {
 	return scanTSForH264WithPacketSize(file, pid, size, 188)
 }
 
-func scanBDAVForH264(file io.ReadSeeker, pid uint16, size int64) ([]Field, uint64, uint64, float64) {
+func scanBDAVForH264(file io.ReadSeeker, pid uint16, size int64) ([]Field, uint64, uint64, uint64, float64) {
 	return scanTSForH264WithPacketSize(file, pid, size, 192)
 }
 
-func scanTSForH264WithPacketSize(file io.ReadSeeker, pid uint16, size int64, packetSize int64) ([]Field, uint64, uint64, float64) {
+func scanTSForH264WithPacketSize(file io.ReadSeeker, pid uint16, size int64, packetSize int64) ([]Field, uint64, uint64, uint64, float64) {
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
-		return nil, 0, 0, 0
+		return nil, 0, 0, 0, 0
 	}
-	reader := bufio.NewReaderSize(file, 1<<20)
 	const tsPacketSize = int64(188)
 	if packetSize != tsPacketSize && packetSize != 192 {
 		packetSize = tsPacketSize
@@ -1353,6 +1426,16 @@ func scanTSForH264WithPacketSize(file io.ReadSeeker, pid uint16, size int64, pac
 	if packetSize == 192 {
 		tsOffset = 4
 	}
+	if off, ok := findTSSyncOffset(file, packetSize, tsOffset, size); ok {
+		if _, err := file.Seek(off, io.SeekStart); err != nil {
+			return nil, 0, 0, 0, 0
+		}
+	} else {
+		if _, err := file.Seek(0, io.SeekStart); err != nil {
+			return nil, 0, 0, 0, 0
+		}
+	}
+	reader := bufio.NewReaderSize(file, 1<<20)
 	buf := make([]byte, packetSize*2048)
 	var pesData []byte
 	readPackets := int64(0)
@@ -1401,8 +1484,8 @@ func scanTSForH264WithPacketSize(file io.ReadSeeker, pid uint16, size int64, pac
 			payload := ts[payloadIndex:]
 			if payloadStart && len(payload) >= 9 && payload[0] == 0x00 && payload[1] == 0x00 && payload[2] == 0x01 {
 				if len(pesData) > 0 {
-					if fields, width, height, fps := parseH264AnnexB(pesData); len(fields) > 0 {
-						return fields, width, height, fps
+					if fields, sps, ok := parseH264AnnexB(pesData); ok && len(fields) > 0 {
+						return fields, sps.Width, sps.Height, sps.CodedHeight, sps.FrameRate
 					}
 				}
 				headerLen := int(payload[8])
@@ -1426,9 +1509,9 @@ func scanTSForH264WithPacketSize(file io.ReadSeeker, pid uint16, size int64, pac
 		}
 	}
 	if len(pesData) > 0 {
-		if fields, width, height, fps := parseH264AnnexB(pesData); len(fields) > 0 {
-			return fields, width, height, fps
+		if fields, sps, ok := parseH264AnnexB(pesData); ok && len(fields) > 0 {
+			return fields, sps.Width, sps.Height, sps.CodedHeight, sps.FrameRate
 		}
 	}
-	return nil, 0, 0, 0
+	return nil, 0, 0, 0, 0
 }

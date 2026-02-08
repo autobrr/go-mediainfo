@@ -1270,7 +1270,8 @@ func consumeH264PS(entry *psStream, payload []byte) {
 		entry.videoBuffer = append(entry.videoBuffer[:0], entry.videoBuffer[len(entry.videoBuffer)-maxProbe:]...)
 	}
 	if !entry.videoIsH264 {
-		if fields, width, height, fps := parseH264AnnexB(entry.videoBuffer); len(fields) > 0 {
+		if fields, sps, ok := parseH264AnnexB(entry.videoBuffer); ok && len(fields) > 0 {
+			width, height, fps := sps.Width, sps.Height, sps.FrameRate
 			if width < 64 || height < 64 {
 				return
 			}

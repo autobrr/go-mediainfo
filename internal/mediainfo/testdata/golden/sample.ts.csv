@@ -3,9 +3,9 @@ ID,1 (0x1)
 Complete name,samples/sample.ts
 Format,MPEG-TS
 File size,305 KiB
-Duration,4 s 17 ms
+Duration,3 s 937 ms
 Overall bit rate mode,Variable
-Overall bit rate,621 kb/s
+Overall bit rate,634 kb/s
 
 Video
 ID,256 (0x100)
@@ -22,6 +22,7 @@ Width,640 pixels
 Height,360 pixels
 Display aspect ratio,16:9
 Frame rate mode,Variable
+Color space,YUV
 Chroma subsampling,4:2:0
 Bit depth,8 bits
 Scan type,Progressive

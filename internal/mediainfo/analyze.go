@@ -381,6 +381,11 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 				general.JSON["Duration"] = fmt.Sprintf("%.9f", info.DurationSeconds)
 			}
 			setOverallBitRate(general.JSON, fileSize, info.DurationSeconds)
+			// MediaInfo uses a PCR-derived estimate for TS overall bitrate when available.
+			if info.OverallBitrateMin > 0 && info.OverallBitrateMax > 0 {
+				mid := (info.OverallBitrateMin + info.OverallBitrateMax) / 2
+				general.JSON["OverallBitRate"] = strconv.FormatInt(int64(math.Round(mid)), 10)
+			}
 			if info.OverallBitrateMin > 0 && info.OverallBitrateMax > 0 {
 				minRate := int64(math.Round(info.OverallBitrateMin))
 				maxRate := int64(math.Round(info.OverallBitrateMax))
