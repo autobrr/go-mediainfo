@@ -30,6 +30,7 @@ type matroskaTagStats struct {
 	durationSeconds float64
 	hasDuration     bool
 	durationPrec    int
+	hasWritingDate  bool
 	bitRate         int64
 	hasBitRate      bool
 }
@@ -966,15 +967,21 @@ func applyMatroskaTagStats(info *MatroskaInfo, tagStats map[uint64]matroskaTagSt
 		if !tag.trusted || !tag.hasDuration || tag.durationSeconds <= 0 {
 			continue
 		}
+		if stream.JSON == nil {
+			stream.JSON = map[string]string{}
+		}
+		if tag.hasWritingDate {
+			// When Statistics Tags include a writing date (older mkvmerge style), official mediainfo
+			// emits Duration at millisecond precision.
+			stream.JSON["Duration"] = formatJSONSeconds(tag.durationSeconds)
+			continue
+		}
 		prec := tag.durationPrec
 		if prec < 3 {
 			prec = 3
 		}
 		if prec > 9 {
 			prec = 9
-		}
-		if stream.JSON == nil {
-			stream.JSON = map[string]string{}
 		}
 		stream.JSON["Duration"] = fmt.Sprintf("%.*f", prec, tag.durationSeconds)
 	}

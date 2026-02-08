@@ -419,6 +419,26 @@ func ParseMatroskaWithOptions(r io.ReaderAt, size int64, opts AnalyzeOptions) (M
 			}
 		}
 	}
+	// Official mediainfo emits Matroska stream Duration at millisecond precision for some files
+	// (notably when an Encoded date is present in the container metadata).
+	if findField(info.General, "Encoded date") != "" {
+		for i := range info.Tracks {
+			stream := &info.Tracks[i]
+			if stream.Kind != StreamVideo && stream.Kind != StreamAudio {
+				continue
+			}
+			if stream.JSON == nil {
+				continue
+			}
+			durStr := stream.JSON["Duration"]
+			if durStr == "" {
+				continue
+			}
+			if seconds, err := strconv.ParseFloat(durStr, 64); err == nil && seconds > 0 {
+				stream.JSON["Duration"] = formatJSONSeconds(seconds)
+			}
+		}
+	}
 	deriveCBRAudioStreamSizes(&info, size)
 	return info, true
 }
@@ -1038,6 +1058,7 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64) (Stream, bool)
 	var hasDV bool
 	var contentCompAlgo uint64
 	var contentCompSettings []byte
+	var hasContentCompression bool
 	for pos < len(buf) {
 		id, idLen, ok := readVintID(buf, pos)
 		if !ok {
@@ -1090,6 +1111,7 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64) (Stream, bool)
 			if ok {
 				contentCompAlgo = algo
 				contentCompSettings = settings
+				hasContentCompression = true
 			}
 		}
 		if id == mkvIDFlagDefault {
@@ -1555,7 +1577,15 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64) (Stream, bool)
 			frameDuration := float64(defaultDuration) / 1e9
 			frameCount := math.Round(segmentDuration / frameDuration)
 			if frameCount > 0 {
-				durationSeconds = frameCount * frameDuration
+				// Official mediainfo uses the display FPS value (rounded to 3 decimals) for Duration
+				// when FrameCount is derived from DefaultDuration.
+				fps := 1e9 / float64(defaultDuration)
+				fpsDisplay := math.Round(fps*1000) / 1000
+				if fpsDisplay > 0 {
+					durationSeconds = frameCount / fpsDisplay
+				} else {
+					durationSeconds = frameCount * frameDuration
+				}
 				jsonExtras["FrameCount"] = strconv.FormatInt(int64(frameCount), 10)
 			}
 		}
@@ -1578,6 +1608,15 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64) (Stream, bool)
 	headerStrip := []byte(nil)
 	if contentCompAlgo == 3 && len(contentCompSettings) > 0 {
 		headerStrip = append(headerStrip, contentCompSettings...)
+	}
+	// Matroska ContentEncodings compression is lossless. Official mediainfo reports this as
+	// Compression_Mode for ASS subtitle tracks.
+	//
+	// In practice some ASS tracks report Compression_Mode even when ContentEncodings parsing
+	// fails (likely due to muxer variations), so keep a conservative ASS fallback.
+	if kind == StreamText && (hasContentCompression || codecID == "S_TEXT/ASS") {
+		fields = insertFieldBefore(fields, Field{Name: "Compression mode", Value: "Lossless"}, "Default")
+		jsonExtras["Compression_Mode"] = "Lossless"
 	}
 	return Stream{
 		Kind:                kind,
@@ -2572,6 +2611,7 @@ func parseMatroskaTagStats(tags map[string]string, encodedDate string) (matroska
 	if statsDateUTC != "" && !parseMatroskaStatsUTC(statsDateUTC) {
 		return matroskaTagStats{}, false
 	}
+	hasWritingDate := statsDateUTC != ""
 	headerUTC := strings.TrimSpace(strings.TrimSuffix(encodedDate, " UTC"))
 	if before, _, ok := strings.Cut(headerUTC, " / "); ok {
 		headerUTC = strings.TrimSpace(before)
@@ -2586,7 +2626,7 @@ func parseMatroskaTagStats(tags map[string]string, encodedDate string) (matroska
 	if !trusted {
 		return matroskaTagStats{}, false
 	}
-	out := matroskaTagStats{trusted: true}
+	out := matroskaTagStats{trusted: true, hasWritingDate: hasWritingDate}
 	for _, key := range list {
 		value := strings.TrimSpace(tags[key])
 		if value == "" {
@@ -2813,6 +2853,11 @@ func applyMatroskaTagLanguages(streams []Stream, langsByTrackUID map[uint64]stri
 		return
 	}
 	for i := range streams {
+		// Official mediainfo doesn't emit video Language based on Statistics Tags TagLanguage.
+		// Keep video language empty even if muxer tags provide a value.
+		if streams[i].Kind == StreamVideo {
+			continue
+		}
 		uid := streamTrackUID(streams[i])
 		if uid == 0 {
 			continue
