@@ -7,6 +7,10 @@ Owner: soup
 - Pure Go implementation, no CGO
 - Cross-platform
 
+## Workflow
+- Don't ask for "continue": run parity + perf loops automatically, then commit/push once verified.
+- For `/mnt/storage/...` scans: be polite to disks (sample files; avoid full-tree scans; use `ionice -c3 nice -n 10` when doing bulk comparisons).
+
 ## Learnings / Decisions
 - Command name: mediainfo
 - Parity target: MediaInfo-master in this repo
