@@ -922,6 +922,20 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 				general.Fields = appendFieldUnique(general.Fields, field)
 			}
 			streams = parsedStreams
+			hasVideo := false
+			hasAudio := false
+			for _, s := range streams {
+				if s.Kind == StreamVideo {
+					hasVideo = true
+				}
+				if s.Kind == StreamAudio {
+					hasAudio = true
+				}
+			}
+			if hasVideo && hasAudio {
+				// Official mediainfo marks typical AVI A/V as interleaved.
+				general.JSON["Interleaved"] = "Yes"
+			}
 			if info.DurationSeconds > 0 {
 				jsonDuration := math.Round(info.DurationSeconds*1000) / 1000
 				setOverallBitRate(general.JSON, stat.Size(), jsonDuration)

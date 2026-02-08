@@ -2,9 +2,11 @@ package mediainfo
 
 import (
 	"encoding/binary"
+	"fmt"
 	"io"
 	"math"
 	"strconv"
+	"strings"
 )
 
 const aviMaxVisualScan = 1 << 20
@@ -30,6 +32,12 @@ type aviStream struct {
 	width        uint32
 	height       uint32
 	bitCount     uint16
+	audioTag     uint16
+	audioChans   uint16
+	audioRate    uint32
+	audioAvgBps  uint32
+	audioAlign   uint16
+	audioBits    uint16
 	bytes        uint64
 	writingLib   string
 	profile      string
@@ -107,6 +115,7 @@ func ParseAVIWithOptions(file io.ReadSeeker, size int64, opts AnalyzeOptions) (C
 	streams := []*aviStream{}
 	var writingApp string
 	var videoData []byte
+	var audioData []byte
 	var vopScan vopScanner
 	setFormatSettings := false
 	var moviStart int64
@@ -154,7 +163,7 @@ func ParseAVIWithOptions(file io.ReadSeeker, size int64, opts AnalyzeOptions) (C
 				}
 			case "movi":
 				if opts.ParseSpeed >= 1 {
-					parseAVIMovi(file, listDataStart, dataEnd, streams, &videoData, &vopScan, 0, true)
+					parseAVIMovi(file, listDataStart, dataEnd, streams, &videoData, &audioData, &vopScan, 0, true)
 				} else {
 					moviStart = listDataStart
 					moviEnd = dataEnd
@@ -178,20 +187,32 @@ func ParseAVIWithOptions(file io.ReadSeeker, size int64, opts AnalyzeOptions) (C
 		if collectBytes {
 			maxScanBytes = 0
 		}
-		parseAVIMovi(file, moviStart, moviEnd, streams, &videoData, &vopScan, maxScanBytes, collectBytes)
+		parseAVIMovi(file, moviStart, moviEnd, streams, &videoData, &audioData, &vopScan, maxScanBytes, collectBytes)
 	}
 
 	if len(streams) == 0 {
 		return ContainerInfo{}, nil, nil, false
 	}
 
-	var videoDuration float64
+	var containerDuration float64
 	var streamsOut []Stream
+	var videoFrameRate float64
+	hasVideo := false
+	hasAudio := false
 	for _, st := range streams {
-		if st.kind == StreamVideo {
-			duration := aviStreamDuration(st, main)
-			if duration > 0 {
-				videoDuration = duration
+		switch st.kind {
+		case StreamVideo:
+			hasVideo = true
+			if fr := aviFrameRate(st); fr > 0 {
+				videoFrameRate = fr
+			}
+			if d := aviStreamDuration(st, main); d > containerDuration {
+				containerDuration = d
+			}
+		case StreamAudio:
+			hasAudio = true
+			if d := aviAudioDurationSeconds(st); d > containerDuration {
+				containerDuration = d
 			}
 		}
 	}
@@ -260,7 +281,16 @@ func ParseAVIWithOptions(file io.ReadSeeker, size int64, opts AnalyzeOptions) (C
 				fields = addStreamDuration(fields, duration)
 			}
 			if st.bytes > 0 && duration > 0 {
-				bitrate := (float64(st.bytes) * 8) / duration
+				durationForBitrate := duration
+				if st.length > 0 {
+					if fr := aviFrameRate(st); fr > 0 {
+						frRounded := math.Round(fr*1000) / 1000
+						if frRounded > 0 {
+							durationForBitrate = float64(st.length) / frRounded
+						}
+					}
+				}
+				bitrate := (float64(st.bytes) * 8) / durationForBitrate
 				fields = addStreamBitrate(fields, bitrate)
 				if jsonExtras == nil {
 					jsonExtras = map[string]string{}
@@ -302,6 +332,7 @@ func ParseAVIWithOptions(file io.ReadSeeker, size int64, opts AnalyzeOptions) (C
 				fields = append(fields, Field{Name: "Scan type", Value: st.scanType})
 			}
 			fields = append(fields, Field{Name: "Compression mode", Value: "Lossy"})
+			fields = append(fields, Field{Name: "Delay", Value: "0.000"})
 			if st.bytes > 0 {
 				if streamSize := formatStreamSize(int64(st.bytes), size); streamSize != "" {
 					fields = append(fields, Field{Name: "Stream size", Value: streamSize})
@@ -311,22 +342,107 @@ func ParseAVIWithOptions(file io.ReadSeeker, size int64, opts AnalyzeOptions) (C
 				}
 				jsonExtras["StreamSize"] = strconv.FormatUint(st.bytes, 10)
 			}
+			if jsonExtras == nil {
+				jsonExtras = map[string]string{}
+			}
+			jsonExtras["Delay"] = "0.000"
 			if st.writingLib != "" {
 				fields = append(fields, Field{Name: "Writing library", Value: st.writingLib})
 			}
 			streamsOut = append(streamsOut, Stream{Kind: StreamVideo, Fields: fields, JSON: jsonExtras})
+		} else if st.kind == StreamAudio {
+			fields = append(fields, Field{Name: "ID", Value: strconv.Itoa(st.index)})
+			jsonExtras := map[string]string{}
+
+			format := "Unknown"
+			if st.audioTag == 0x55 {
+				format = "MPEG Audio"
+				jsonExtras["Format_Profile"] = "Layer 3"
+				jsonExtras["Format_Version"] = "1"
+				jsonExtras["Compression_Mode"] = "Lossy"
+				jsonExtras["BitRate_Mode"] = "CBR"
+			}
+			if format != "Unknown" {
+				fields = append(fields, Field{Name: "Format", Value: format})
+			}
+			if st.audioTag != 0 {
+				// Match official JSON: CodecID is rendered as hex without 0x (e.g., 0x55 -> "55").
+				codec := fmt.Sprintf("%X", st.audioTag)
+				fields = append(fields, Field{Name: "Codec ID", Value: codec})
+				jsonExtras["CodecID"] = codec
+			}
+			if st.audioChans > 0 {
+				fields = append(fields, Field{Name: "Channel(s)", Value: formatChannels(uint64(st.audioChans))})
+				jsonExtras["Channels"] = strconv.FormatUint(uint64(st.audioChans), 10)
+			}
+			if st.audioRate > 0 {
+				fields = append(fields, Field{Name: "Sampling rate", Value: formatSampleRate(float64(st.audioRate))})
+				jsonExtras["SamplingRate"] = strconv.FormatUint(uint64(st.audioRate), 10)
+			}
+			if st.audioAvgBps > 0 {
+				bps := uint64(st.audioAvgBps) * 8
+				fields = append(fields, Field{Name: "Bit rate", Value: formatBitrate(float64(bps))})
+				jsonExtras["BitRate"] = strconv.FormatUint(bps, 10)
+			}
+
+			if st.bytes > 0 {
+				jsonExtras["StreamSize"] = strconv.FormatUint(st.bytes, 10)
+				if streamSize := formatStreamSize(int64(st.bytes), size); streamSize != "" {
+					fields = append(fields, Field{Name: "Stream size", Value: streamSize})
+				}
+			}
+			duration := aviAudioDurationSeconds(st)
+			if duration > 0 {
+				fields = addStreamDuration(fields, duration)
+				jsonExtras["Duration"] = formatJSONSeconds(duration)
+			}
+
+			if duration > 0 && st.audioRate > 0 && st.audioTag == 0x55 {
+				// MediaInfo emits SamplingCount but not FrameCount for MP3-in-AVI.
+				samples := int64(math.Round(duration * float64(st.audioRate)))
+				if samples > 0 {
+					jsonExtras["SamplingCount"] = strconv.FormatInt(samples, 10)
+				}
+				frameDur := float64(1152) / float64(st.audioRate)
+				jsonExtras["Interleave_Duration"] = formatJSONFloat(frameDur)
+				jsonExtras["Interleave_Preload"] = formatJSONFloat(frameDur)
+				if videoFrameRate > 0 {
+					v := frameDur * videoFrameRate
+					v = math.Floor(v*100+1e-9) / 100
+					jsonExtras["Interleave_VideoFrames"] = fmt.Sprintf("%.2f", v)
+				}
+			}
+
+			jsonExtras["Alignment"] = "Aligned"
+			jsonExtras["Delay"] = "0.000"
+			jsonExtras["Delay_Source"] = "Stream"
+			jsonExtras["Video_Delay"] = "0.000"
+			if enc := findLAMELibrary(audioData); enc != "" {
+				jsonExtras["Encoded_Library"] = enc
+			}
+			streamsOut = append(streamsOut, Stream{Kind: StreamAudio, Fields: fields, JSON: jsonExtras, JSONSkipComputed: true})
 		}
 	}
 
 	info := ContainerInfo{}
-	if videoDuration > 0 {
-		info.DurationSeconds = videoDuration
+	if containerDuration > 0 {
+		info.DurationSeconds = containerDuration
 	}
 
 	generalFields := []Field{}
 	generalFields = append(generalFields, Field{Name: "Format/Info", Value: "Audio Video Interleave"})
 	if setFormatSettings {
-		generalFields = append(generalFields, Field{Name: "Format settings", Value: "BitmapInfoHeader"})
+		parts := []string{}
+		if hasVideo {
+			parts = append(parts, "BitmapInfoHeader")
+		}
+		if hasAudio {
+			parts = append(parts, "WaveFormatEx")
+		}
+		if len(parts) == 0 {
+			parts = append(parts, "BitmapInfoHeader")
+		}
+		generalFields = append(generalFields, Field{Name: "Format settings", Value: strings.Join(parts, " / ")})
 	}
 	if rate := firstAVIFrameRate(streams); rate > 0 {
 		generalFields = append(generalFields, Field{Name: "Frame rate", Value: formatFrameRate(rate)})
@@ -416,6 +532,16 @@ func parseAVIStrf(payload []byte, stream *aviStream) {
 		stream.bitCount = binary.LittleEndian.Uint16(payload[14:16])
 		compression := binary.LittleEndian.Uint32(payload[16:20])
 		stream.compression = fourCC(compression)
+		return
+	}
+	if stream.kind == StreamAudio {
+		// WAVEFORMATEX.
+		stream.audioTag = binary.LittleEndian.Uint16(payload[0:2])
+		stream.audioChans = binary.LittleEndian.Uint16(payload[2:4])
+		stream.audioRate = binary.LittleEndian.Uint32(payload[4:8])
+		stream.audioAvgBps = binary.LittleEndian.Uint32(payload[8:12])
+		stream.audioAlign = binary.LittleEndian.Uint16(payload[12:14])
+		stream.audioBits = binary.LittleEndian.Uint16(payload[14:16])
 	}
 }
 
@@ -430,10 +556,11 @@ func parseAVIINFO(data []byte) string {
 	return writingApp
 }
 
-func parseAVIMovi(file io.ReadSeeker, start, end int64, streams []*aviStream, videoData *[]byte, vopScan *vopScanner, maxScanBytes int64, collectBytes bool) {
+func parseAVIMovi(file io.ReadSeeker, start, end int64, streams []*aviStream, videoData *[]byte, audioData *[]byte, vopScan *vopScanner, maxScanBytes int64, collectBytes bool) {
 	const aviScanChunk = 256 << 10
 	scanBuf := make([]byte, aviScanChunk)
 	vopScanned := 0
+	const aviMaxAudioScan = 64 << 10
 	offset := start
 	for offset+8 <= end {
 		if maxScanBytes > 0 && offset-start >= maxScanBytes {
@@ -504,6 +631,18 @@ func parseAVIMovi(file io.ReadSeeker, start, end int64, streams []*aviStream, vi
 								readPos += readLen
 							}
 						}
+					} else if stream.kind == StreamAudio && chunkSize > 0 && audioData != nil && len(*audioData) < aviMaxAudioScan {
+						remaining := aviMaxAudioScan - len(*audioData)
+						readLen := int64(remaining)
+						if readLen > chunkSize {
+							readLen = chunkSize
+						}
+						if readLen > 0 {
+							buf := make([]byte, readLen)
+							if _, err := readAt(file, dataStart, buf); err == nil {
+								*audioData = append(*audioData, buf...)
+							}
+						}
 					}
 				}
 			}
@@ -536,6 +675,19 @@ func aviStreamDuration(stream *aviStream, main aviMainHeader) float64 {
 	}
 	if main.microSecPerFrame > 0 && main.totalFrames > 0 {
 		return float64(main.microSecPerFrame*main.totalFrames) / 1e6
+	}
+	return 0
+}
+
+func aviAudioDurationSeconds(stream *aviStream) float64 {
+	if stream.bytes == 0 {
+		return 0
+	}
+	if stream.audioAvgBps > 0 {
+		bps := float64(stream.audioAvgBps) * 8
+		if bps > 0 {
+			return (float64(stream.bytes) * 8) / bps
+		}
 	}
 	return 0
 }

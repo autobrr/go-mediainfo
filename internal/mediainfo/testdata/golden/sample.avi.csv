@@ -2,10 +2,10 @@ General
 Complete name,samples/sample.avi
 Format,AVI
 Format/Info,Audio Video Interleave
-Format settings,BitmapInfoHeader
+Format settings,BitmapInfoHeader / WaveFormatEx
 File size,989 KiB
-Duration,4 s 4 ms
-Overall bit rate,2 024 kb/s
+Duration,4 s 32 ms
+Overall bit rate,2 010 kb/s
 Frame rate,29.970 FPS
 Writing application,Lavf62.3.100
 
@@ -32,4 +32,15 @@ Compression mode,Lossy
 Bits/(Pixel*Frame),0.269
 Stream size,910 KiB (92%)
 Writing library,Lavc62.11.100
+Delay,0.000
+
+Audio
+ID,1
+Format,MPEG Audio
+Codec ID,55
+Duration,4 s 32 ms
+Bit rate,128 kb/s
+Channel(s),1 channel
+Sampling rate,48.0 kHz
+Stream size,63.0 KiB (6%)
 

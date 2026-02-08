@@ -8,18 +8,20 @@
 <media ref="samples/sample.avi">
 <track type="General">
 <VideoCount>1</VideoCount>
+<AudioCount>1</AudioCount>
 <FileExtension>avi</FileExtension>
 <Format>AVI</Format>
-<Format_Settings>BitmapInfoHeader</Format_Settings>
+<Format_Settings>BitmapInfoHeader / WaveFormatEx</Format_Settings>
 <FileSize>1012854</FileSize>
-<Duration>4.004</Duration>
-<OverallBitRate>2023684</OverallBitRate>
+<Duration>4.032</Duration>
+<OverallBitRate>2009631</OverallBitRate>
 <FrameRate>29.970</FrameRate>
 <FrameCount>120</FrameCount>
-<StreamSize>81490</StreamSize>
+<StreamSize>16978</StreamSize>
 <File_Modified_Date><redacted></File_Modified_Date>
 <File_Modified_Date_Local><redacted></File_Modified_Date_Local>
 <Encoded_Application>Lavf62.3.100</Encoded_Application>
+<Interleaved>Yes</Interleaved>
 </track>
 <track type="Video">
 <StreamOrder>0</StreamOrder>
@@ -33,7 +35,7 @@
 <Format_Settings_Matrix>Default (H.263)</Format_Settings_Matrix>
 <CodecID>XVID</CodecID>
 <Duration>4.004</Duration>
-<BitRate>1860867</BitRate>
+<BitRate>1860865</BitRate>
 <Width>640</Width>
 <Height>360</Height>
 <Sampled_Width>640</Sampled_Width>
@@ -49,8 +51,33 @@
 <BitDepth>8</BitDepth>
 <ScanType>Progressive</ScanType>
 <Compression_Mode>Lossy</Compression_Mode>
+<Delay>0.000</Delay>
 <StreamSize>931364</StreamSize>
 <Encoded_Library>Lavc62.11.100</Encoded_Library>
+</track>
+<track type="Audio">
+<StreamOrder>1</StreamOrder>
+<ID>1</ID>
+<Format>MPEG Audio</Format>
+<Format_Version>1</Format_Version>
+<CodecID>55</CodecID>
+<Duration>4.032</Duration>
+<BitRate_Mode>CBR</BitRate_Mode>
+<BitRate>128000</BitRate>
+<Channels>1</Channels>
+<SamplingRate>48000</SamplingRate>
+<SamplingCount>193536</SamplingCount>
+<Compression_Mode>Lossy</Compression_Mode>
+<Delay>0.000</Delay>
+<Delay_Source>Stream</Delay_Source>
+<Video_Delay>0.000</Video_Delay>
+<Encoded_Library>LAME3.100</Encoded_Library>
+<StreamSize>64512</StreamSize>
+<Alignment>Aligned</Alignment>
+<Format_Profile>Layer 3</Format_Profile>
+<Interleave_Duration>0.024</Interleave_Duration>
+<Interleave_Preload>0.024</Interleave_Preload>
+<Interleave_VideoFrames>0.71</Interleave_VideoFrames>
 </track>
 </media>
 </MediaInfo>
