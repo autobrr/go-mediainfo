@@ -18,9 +18,11 @@ var generalFieldOrder = map[string]int{
 	"Frame rate":            11,
 	"Writing application":   12,
 	"Writing library":       13,
-	"FileExtension_Invalid": 14,
-	"Conformance warnings":  15,
-	" General compliance":   16,
+	"Encoded date":          14,
+	"Tagged date":           15,
+	"FileExtension_Invalid": 16,
+	"Conformance warnings":  17,
+	" General compliance":   18,
 }
 
 var streamFieldOrder = map[string]int{
@@ -80,6 +82,8 @@ var streamFieldOrder = map[string]int{
 	"Service kind":                      45,
 	"Writing library":                   46,
 	"Encoding settings":                 47,
+	"Encoded date":                      48,
+	"Tagged date":                       49,
 	"Default":                           48,
 	"Forced":                            49,
 	"Complexity index":                  50,

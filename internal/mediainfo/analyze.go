@@ -68,6 +68,12 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			for _, field := range parsed.General {
 				general.Fields = appendFieldUnique(general.Fields, field)
 			}
+			if encoded := formatMP4UTCTime(parsed.MovieCreation); encoded != "" {
+				general.Fields = appendFieldUnique(general.Fields, Field{Name: "Encoded date", Value: encoded})
+				if tagged := formatMP4UTCTime(parsed.MovieModified); tagged != "" {
+					general.Fields = appendFieldUnique(general.Fields, Field{Name: "Tagged date", Value: tagged})
+				}
+			}
 			if info.DurationSeconds > 0 {
 				// Preserve fractional seconds in JSON (text Duration drops ms for long runtimes).
 				general.JSON["Duration"] = formatJSONSeconds(info.DurationSeconds)
@@ -101,6 +107,20 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 				if track.Format != "" {
 					fields = appendFieldUnique(fields, Field{Name: "Format", Value: track.Format})
 				}
+				// MP4 handler names are frequently generic ("SoundHandler"), but sometimes carry a
+				// meaningful track title (e.g. "AC-3 5.1"). Only surface the latter.
+				if track.Kind == StreamAudio {
+					name := strings.TrimSpace(track.HandlerName)
+					if name != "" && name != "SoundHandler" && name != "VideoHandler" && name != "MetaHandler" {
+						fields = appendFieldUnique(fields, Field{Name: "Title", Value: name})
+					}
+				}
+				if track.LanguageCode != "" {
+					code := normalizeLanguageCode(track.LanguageCode)
+					if lang := formatLanguage(code); lang != "" {
+						fields = appendFieldUnique(fields, Field{Name: "Language", Value: lang})
+					}
+				}
 				for _, field := range track.Fields {
 					fields = appendFieldUnique(fields, field)
 				}
@@ -114,6 +134,18 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 				}
 				if track.Kind == StreamVideo {
 					jsonExtras["Rotation"] = "0.000"
+				}
+				if encoded := formatMP4UTCTime(track.CreationTime); encoded != "" {
+					fields = appendFieldUnique(fields, Field{Name: "Encoded date", Value: encoded})
+					if tagged := formatMP4UTCTime(track.ModificationTime); tagged != "" {
+						fields = appendFieldUnique(fields, Field{Name: "Tagged date", Value: tagged})
+					}
+				}
+				if track.LanguageCode != "" {
+					code := normalizeLanguageCode(track.LanguageCode)
+					if code != "" {
+						jsonExtras["Language"] = code
+					}
 				}
 				if displayDuration > 0 {
 					if track.SampleBytes > 0 {
@@ -140,7 +172,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 							}
 						}
 					}
-					if bitrate > 0 && !(track.Kind == StreamAudio && findField(fields, "Bit rate") != "") {
+					if bitrate > 0 && findField(fields, "Bit rate") == "" {
 						if track.Kind != StreamVideo {
 							if mode := bitrateMode(bitrate); mode != "" {
 								fields = appendFieldUnique(fields, Field{Name: "Bit rate mode", Value: mode})
@@ -212,7 +244,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 					fields = appendFieldUnique(fields, Field{Name: "Frame rate mode", Value: "Constant"})
 					rate := float64(track.SampleCount) / displayDuration
 					if rate > 0 {
-						fields = appendFieldUnique(fields, Field{Name: "Frame rate", Value: formatFrameRate(rate)})
+						fields = appendFieldUnique(fields, Field{Name: "Frame rate", Value: formatFrameRateWithRatio(rate)})
 					}
 					if track.Width > 0 && track.Height > 0 && track.SampleBytes > 0 {
 						pixelBitrate := (float64(track.SampleBytes) * 8) / displayDuration
@@ -221,16 +253,97 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 						}
 					}
 					jsonExtras["FrameCount"] = strconv.FormatUint(track.SampleCount, 10)
-					jsonExtras["FrameRate_Mode_Original"] = "VFR"
+					// Original frame rate mode for MP4 is detected from the AVC bitstream (SPS VUI),
+					// and is filled earlier in the pipeline when present.
 					if generalFrameCount == "" {
 						generalFrameCount = strconv.FormatUint(track.SampleCount, 10)
 					}
 				}
-				if track.Default && track.Kind != StreamVideo {
-					fields = appendFieldUnique(fields, Field{Name: "Default", Value: "Yes"})
+				// MP4 AC-3: probe first frame to match MediaInfo's codec details without scanning the whole file.
+				if track.Kind == StreamAudio && findField(fields, "Codec ID") == "ac-3" &&
+					track.FirstChunkOff > 0 && len(track.SampleSizeHead) > 0 {
+					sz := int(track.SampleSizeHead[0])
+					if sz > 0 && int64(track.FirstChunkOff) > 0 && int64(track.FirstChunkOff) < stat.Size() {
+						if sz > 1<<16 {
+							sz = 1 << 16
+						}
+						buf := make([]byte, sz)
+						if _, err := file.ReadAt(buf, int64(track.FirstChunkOff)); err == nil || err == io.EOF {
+							if ac3, _, ok := parseAC3Frame(buf); ok {
+								if ac3.channels > 0 {
+									fields = setFieldValue(fields, "Channel(s)", formatChannels(ac3.channels))
+								}
+								if ac3.layout != "" {
+									fields = setFieldValue(fields, "Channel layout", ac3.layout)
+								}
+								if ac3.sampleRate > 0 {
+									fields = setFieldValue(fields, "Sampling rate", formatSampleRate(ac3.sampleRate))
+								}
+								if ac3.frameRate > 0 && ac3.spf > 0 {
+									fields = setFieldValue(fields, "Frame rate", formatAudioFrameRate(ac3.frameRate, ac3.spf))
+								}
+								fields = setFieldValue(fields, "Commercial name", "Dolby Digital")
+								fields = insertFieldBefore(fields, Field{Name: "Service kind", Value: ac3.serviceKind}, "Default")
+								// Keep a human-readable string in text, but match official JSON ServiceKind short codes.
+								if code := ac3ServiceKindCode(ac3.bsmod); code != "" {
+									jsonExtras["ServiceKind"] = code
+								}
+								jsonExtras["Format_Settings_Endianness"] = "Big"
+								if ac3.spf > 0 {
+									jsonExtras["SamplesPerFrame"] = strconv.Itoa(ac3.spf)
+								}
+								if ac3.frameRate > 0 {
+									jsonExtras["FrameRate"] = formatJSONFloat(ac3.frameRate)
+								}
+								if durStr := jsonExtras["Duration"]; durStr != "" && ac3.frameRate > 0 {
+									if duration, err := strconv.ParseFloat(durStr, 64); err == nil && duration > 0 {
+										frameCount := int64(math.Round(duration * ac3.frameRate))
+										if frameCount > 0 {
+											jsonExtras["FrameCount"] = strconv.FormatInt(frameCount, 10)
+											if ac3.spf > 0 {
+												jsonExtras["SamplingCount"] = strconv.FormatInt(frameCount*int64(ac3.spf), 10)
+											}
+										}
+									}
+								}
+								if jsonRaw["extra"] == "" {
+									extraFields := []jsonKV{}
+									if ac3.bsid > 0 {
+										extraFields = append(extraFields, jsonKV{Key: "bsid", Val: strconv.Itoa(ac3.bsid)})
+									}
+									if ac3.hasDialnorm {
+										extraFields = append(extraFields, jsonKV{Key: "dialnorm", Val: strconv.Itoa(ac3.dialnorm)})
+									}
+									if ac3.acmod > 0 {
+										extraFields = append(extraFields, jsonKV{Key: "acmod", Val: strconv.Itoa(ac3.acmod)})
+									}
+									if ac3.lfeon >= 0 {
+										extraFields = append(extraFields, jsonKV{Key: "lfeon", Val: strconv.Itoa(ac3.lfeon)})
+									}
+									if avg, minVal, maxVal, ok := ac3.dialnormStats(); ok {
+										extraFields = append(extraFields, jsonKV{Key: "dialnorm_Average", Val: strconv.Itoa(avg)})
+										extraFields = append(extraFields, jsonKV{Key: "dialnorm_Minimum", Val: strconv.Itoa(minVal)})
+										if maxVal != minVal {
+											extraFields = append(extraFields, jsonKV{Key: "dialnorm_Maximum", Val: strconv.Itoa(maxVal)})
+										}
+									}
+									if len(extraFields) > 0 {
+										jsonRaw["extra"] = renderJSONObject(extraFields, false)
+									}
+								}
+							}
+						}
+					}
 				}
 				if track.AlternateGroup > 0 {
 					fields = appendFieldUnique(fields, Field{Name: "Alternate group", Value: strconv.FormatUint(uint64(track.AlternateGroup), 10)})
+					if track.Kind != StreamVideo {
+						if track.Default {
+							fields = appendFieldUnique(fields, Field{Name: "Default", Value: "Yes"})
+						} else {
+							fields = appendFieldUnique(fields, Field{Name: "Default", Value: "No"})
+						}
+					}
 				}
 				if track.Kind == StreamAudio && track.EditMediaTime > 0 && track.Timescale > 0 {
 					delayMs := int64(math.Round(float64(track.EditMediaTime) * 1000 / float64(track.Timescale)))
@@ -240,10 +353,64 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 				}
 				streams = append(streams, Stream{Kind: track.Kind, Fields: fields, JSON: jsonExtras, JSONRaw: jsonRaw})
 			}
+			if len(parsed.Chapters) > 0 {
+				menu := Stream{
+					Kind:                StreamMenu,
+					Fields:              []Field{},
+					JSON:                map[string]string{},
+					JSONRaw:             map[string]string{},
+					JSONSkipStreamOrder: true,
+					JSONSkipComputed:    true,
+				}
+				extras := make([]jsonKV, 0, len(parsed.Chapters))
+				for _, chapter := range parsed.Chapters {
+					textKey := formatMP4ChapterTimeText(chapter.startMs)
+					jsonKey := formatMP4ChapterTimeKey(chapter.startMs)
+					menu.Fields = append(menu.Fields, Field{Name: textKey, Value: chapter.title})
+					extras = append(extras, jsonKV{Key: "_" + jsonKey, Val: chapter.title})
+				}
+				menu.JSONRaw["extra"] = renderJSONObject(extras, false)
+				streams = append(streams, menu)
+			}
 			if generalFrameCount != "" {
 				general.JSON["FrameCount"] = generalFrameCount
 			}
 			applyX264Info(file, streams, x264InfoOptions{})
+			// MPEG-4/QuickTime: when x264 settings provide a nominal bitrate that is close to the
+			// container-derived bitrate, prefer it (matches official MediaInfo output).
+			for i := range streams {
+				if streams[i].Kind != StreamVideo || findField(streams[i].Fields, "Format") != "AVC" {
+					continue
+				}
+				enc := findField(streams[i].Fields, "Encoding settings")
+				if enc == "" {
+					break
+				}
+				x264Bps, ok := findX264Bitrate(enc)
+				if !ok || x264Bps <= 0 {
+					break
+				}
+				existingBps, hasExisting := parseBitrateBps(findField(streams[i].Fields, "Bit rate"))
+				if !hasExisting || existingBps <= 0 {
+					break
+				}
+				delta := math.Abs(float64(existingBps)-x264Bps) / x264Bps
+				if delta >= 0.05 {
+					break
+				}
+				streams[i].Fields = setFieldValue(streams[i].Fields, "Bit rate", formatBitrate(x264Bps))
+				if streams[i].JSON == nil {
+					streams[i].JSON = map[string]string{}
+				}
+				streams[i].JSON["BitRate"] = strconv.FormatInt(int64(math.Round(x264Bps)), 10)
+				width, _ := parsePixels(findField(streams[i].Fields, "Width"))
+				height, _ := parsePixels(findField(streams[i].Fields, "Height"))
+				fps, _ := parseFPS(findField(streams[i].Fields, "Frame rate"))
+				if bits := formatBitsPerPixelFrame(x264Bps, width, height, fps); bits != "" {
+					streams[i].Fields = setFieldValue(streams[i].Fields, "Bits/(Pixel*Frame)", bits)
+				}
+				break
+			}
 			// MP4 General StreamSize: remaining bytes after summing track stream sizes.
 			streamSizeSum := sumStreamSizes(streams, true)
 			setRemainingStreamSize(general.JSON, stat.Size(), streamSizeSum)
@@ -1068,7 +1235,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			continue
 		}
 		if rate := findField(stream.Fields, "Frame rate"); rate != "" {
-			if (format == "MPEG-PS" || format == "MPEG Video" || format == "MPEG-TS" || format == "BDAV" || format == "Matroska") && strings.Contains(rate, "(") {
+			if (format == "MPEG-PS" || format == "MPEG Video" || format == "MPEG-TS" || format == "BDAV" || format == "Matroska" || format == "MPEG-4" || format == "QuickTime") && strings.Contains(rate, "(") {
 				parts := strings.Fields(rate)
 				if len(parts) > 0 {
 					general.Fields = appendFieldUnique(general.Fields, Field{Name: "Frame rate", Value: parts[0] + " FPS"})
@@ -1209,9 +1376,26 @@ func applyX264Info(file io.ReadSeeker, streams []Stream, opts x264InfoOptions) {
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		return
 	}
-	sniff := make([]byte, 1<<20)
+	// MP4 can embed x264 strings inside the first few MB of mdat, not just moov/udta.
+	sniff := make([]byte, 2<<20)
 	n, _ := io.ReadFull(file, sniff)
 	writingLib, encoding := findX264Info(sniff[:n])
+	if writingLib == "" && encoding == "" {
+		// MP4 often stores writing-library strings late in the moov/udta metadata.
+		if end, err := file.Seek(0, io.SeekEnd); err == nil && end > 0 {
+			start := end - int64(len(sniff))
+			if start < 0 {
+				start = 0
+			}
+			if _, err := file.Seek(start, io.SeekStart); err == nil {
+				n2, _ := file.Read(sniff)
+				if n2 > 0 {
+					writingLib, encoding = findX264Info(sniff[:n2])
+				}
+			}
+		}
+		_, _ = file.Seek(0, io.SeekStart)
+	}
 	if writingLib == "" && encoding == "" {
 		return
 	}

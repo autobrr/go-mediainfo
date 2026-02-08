@@ -36,6 +36,12 @@ func mergeSampleInfo(a, b SampleInfo) SampleInfo {
 	if b.LastSampleDelta > 0 {
 		info.LastSampleDelta = b.LastSampleDelta
 	}
+	if b.VariableDeltas {
+		info.VariableDeltas = true
+	}
+	if b.FirstChunkOff > 0 {
+		info.FirstChunkOff = b.FirstChunkOff
+	}
 	if b.Width > 0 {
 		info.Width = b.Width
 	}
@@ -45,15 +51,16 @@ func mergeSampleInfo(a, b SampleInfo) SampleInfo {
 	return info
 }
 
-func parseStts(payload []byte) (uint64, uint32, uint32, bool) {
+func parseStts(payload []byte) (uint64, uint32, uint32, bool, bool) {
 	if len(payload) < 8 {
-		return 0, 0, 0, false
+		return 0, 0, 0, false, false
 	}
 	entryCount := binary.BigEndian.Uint32(payload[4:8])
 	offset := 8
 	var total uint64
 	var firstDelta uint32
 	var lastDelta uint32
+	variable := false
 	for i := 0; i < int(entryCount); i++ {
 		if offset+8 > len(payload) {
 			break
@@ -62,15 +69,20 @@ func parseStts(payload []byte) (uint64, uint32, uint32, bool) {
 		sampleDelta := binary.BigEndian.Uint32(payload[offset+4 : offset+8])
 		if i == 0 {
 			firstDelta = sampleDelta
+		} else if sampleDelta != firstDelta {
+			variable = true
 		}
 		lastDelta = sampleDelta
 		total += uint64(sampleCount)
 		offset += 8
 	}
 	if total == 0 {
-		return 0, 0, 0, false
+		return 0, 0, 0, false, false
 	}
-	return total, firstDelta, lastDelta, true
+	if entryCount > 1 {
+		variable = true
+	}
+	return total, firstDelta, lastDelta, true, variable
 }
 
 func parseMdhd(payload []byte) (float64, uint32, bool) {

@@ -17,6 +17,8 @@ type SampleInfo struct {
 	SampleSizeTail  []uint32
 	SampleDelta     uint32
 	LastSampleDelta uint32
+	VariableDeltas  bool
+	FirstChunkOff   uint64
 	Width           uint64
 	Height          uint64
 }
@@ -164,9 +166,11 @@ func parseVisualSampleEntry(entry []byte, sampleType string) sampleEntryResult {
 			fields = append(fields, Field{Name: "Display aspect ratio", Value: ar})
 		}
 	}
+	var spsInfo h264SPSInfo
 	if sampleType == "avc1" || sampleType == "avc3" {
 		if payload, ok := findMP4ChildBox(entry, mp4VisualSampleEntryHeaderSize, "avcC"); ok {
-			_, avcFields, spsInfo := parseAVCConfig(payload)
+			_, avcFields, parsedSPS := parseAVCConfig(payload)
+			spsInfo = parsedSPS
 			fields = append(fields, avcFields...)
 			fields = append(fields, Field{Name: "Codec configuration box", Value: "avcC"})
 			// Stored dimensions: mediainfo reports a macroblock-aligned Stored_Height for AVC.
@@ -180,8 +184,30 @@ func parseVisualSampleEntry(entry []byte, sampleType string) sampleEntryResult {
 			if storedHeight > 0 && uint64(height) > 0 && storedHeight != uint64(height) {
 				jsonExtras["Stored_Height"] = strconv.FormatUint(storedHeight, 10)
 			}
+			if spsInfo.HasColorRange || spsInfo.HasColorDescription {
+				colorSource := "Container / Stream"
+				jsonExtras["colour_description_present"] = "Yes"
+				jsonExtras["colour_description_present_Source"] = colorSource
+				if spsInfo.ColorRange != "" {
+					jsonExtras["colour_range"] = spsInfo.ColorRange
+					jsonExtras["colour_range_Source"] = colorSource
+				}
+				if spsInfo.ColorPrimaries != "" {
+					jsonExtras["colour_primaries"] = spsInfo.ColorPrimaries
+					jsonExtras["colour_primaries_Source"] = colorSource
+				}
+				if spsInfo.TransferCharacteristics != "" {
+					jsonExtras["transfer_characteristics"] = spsInfo.TransferCharacteristics
+					jsonExtras["transfer_characteristics_Source"] = colorSource
+				}
+				if spsInfo.MatrixCoefficients != "" {
+					jsonExtras["matrix_coefficients"] = spsInfo.MatrixCoefficients
+					jsonExtras["matrix_coefficients_Source"] = colorSource
+				}
+			}
 		} else if payload, ok := findMP4BoxByName(entry, "avcC"); ok {
-			_, avcFields, spsInfo := parseAVCConfig(payload)
+			_, avcFields, parsedSPS := parseAVCConfig(payload)
+			spsInfo = parsedSPS
 			fields = append(fields, avcFields...)
 			fields = append(fields, Field{Name: "Codec configuration box", Value: "avcC"})
 			storedHeight := spsInfo.CodedHeight
@@ -194,8 +220,51 @@ func parseVisualSampleEntry(entry []byte, sampleType string) sampleEntryResult {
 			if storedHeight > 0 && uint64(height) > 0 && storedHeight != uint64(height) {
 				jsonExtras["Stored_Height"] = strconv.FormatUint(storedHeight, 10)
 			}
+			if spsInfo.HasColorRange || spsInfo.HasColorDescription {
+				colorSource := "Container / Stream"
+				jsonExtras["colour_description_present"] = "Yes"
+				jsonExtras["colour_description_present_Source"] = colorSource
+				if spsInfo.ColorRange != "" {
+					jsonExtras["colour_range"] = spsInfo.ColorRange
+					jsonExtras["colour_range_Source"] = colorSource
+				}
+				if spsInfo.ColorPrimaries != "" {
+					jsonExtras["colour_primaries"] = spsInfo.ColorPrimaries
+					jsonExtras["colour_primaries_Source"] = colorSource
+				}
+				if spsInfo.TransferCharacteristics != "" {
+					jsonExtras["transfer_characteristics"] = spsInfo.TransferCharacteristics
+					jsonExtras["transfer_characteristics_Source"] = colorSource
+				}
+				if spsInfo.MatrixCoefficients != "" {
+					jsonExtras["matrix_coefficients"] = spsInfo.MatrixCoefficients
+					jsonExtras["matrix_coefficients_Source"] = colorSource
+				}
+			}
 		}
 		fields = appendFieldUnique(fields, Field{Name: "Color space", Value: "YUV"})
+	}
+	// When AVC bitstream says "not fixed" but container timing is CFR, official MediaInfo keeps CFR
+	// and reports the bitstream hint as FrameRate_Mode_Original=VFR.
+	if spsInfo.HasFixedFrameRate && !spsInfo.FixedFrameRate {
+		jsonExtras["FrameRate_Mode_Original"] = "VFR"
+	}
+	if _, maxRate, avgRate, ok := parseBtrt(entry, mp4VisualSampleEntryHeaderSize); ok {
+		bps := uint64(avgRate)
+		if bps == 0 {
+			bps = uint64(maxRate)
+		}
+		if bps > 0 {
+			fields = appendFieldUnique(fields, Field{Name: "Bit rate", Value: formatBitrate(float64(bps))})
+			// Match official JSON: btrt bitrate is emitted with exact b/s (text is rounded).
+			jsonExtras["BitRate"] = strconv.FormatUint(bps, 10)
+		}
+		// Official MediaInfo omits BitRate_Maximum when it equals the average bitrate.
+		if avgRate > 0 && maxRate > avgRate {
+			fields = appendFieldUnique(fields, Field{Name: "Maximum bit rate", Value: formatBitrate(float64(maxRate))})
+			// Match official JSON: btrt max bitrate is emitted with exact b/s (text is rounded).
+			jsonExtras["BitRate_Maximum"] = strconv.FormatUint(uint64(maxRate), 10)
+		}
 	}
 	if info := mapVideoCodecIDInfo(sampleType); info != "" {
 		fields = append(fields, Field{Name: "Codec ID/Info", Value: info})
@@ -245,6 +314,8 @@ func parseAudioSampleEntry(entry []byte, sampleType string) sampleEntryResult {
 	}
 	if sampleType == "mp4a" {
 		fields = append(fields, Field{Name: "Compression mode", Value: "Lossy"})
+	} else if sampleType == "ac-3" || sampleType == "ec-3" {
+		fields = append(fields, Field{Name: "Compression mode", Value: "Lossy"})
 	}
 	if sampleType == "mp4a" {
 		// Prefer ESDS avgBitrate/maxBitrate (DecoderConfigDescriptor) over container-level btrt.
@@ -262,13 +333,25 @@ func parseAudioSampleEntry(entry []byte, sampleType string) sampleEntryResult {
 		}
 	}
 	if _, maxRate, avgRate, ok := parseBtrt(entry, mp4AudioSampleEntryHeaderSize); ok {
-		bps := avgRate
-		if bps == 0 {
-			bps = maxRate
-		}
-		if bps > 0 {
-			fields = appendFieldUnique(fields, Field{Name: "Bit rate mode", Value: "Constant"})
-			fields = appendFieldUnique(fields, Field{Name: "Bit rate", Value: formatBitrate(float64(bps))})
+		// AAC: if ESDS provided a bitrate, do not override/augment it with btrt.
+		if sampleType == "mp4a" && findField(fields, "Bit rate") != "" {
+			// keep btrt as fallback only
+		} else {
+			bps := uint64(avgRate)
+			if bps == 0 {
+				bps = uint64(maxRate)
+			}
+			if bps > 0 {
+				fields = appendFieldUnique(fields, Field{Name: "Bit rate mode", Value: "Constant"})
+				fields = appendFieldUnique(fields, Field{Name: "Bit rate", Value: formatBitrate(float64(bps))})
+				// Match official JSON: btrt bitrate is emitted with exact b/s (text is rounded).
+				jsonExtras["BitRate"] = strconv.FormatUint(bps, 10)
+			}
+			// Official MediaInfo omits BitRate_Maximum when it equals the average bitrate.
+			if avgRate > 0 && maxRate > avgRate {
+				fields = appendFieldUnique(fields, Field{Name: "Maximum bit rate", Value: formatBitrate(float64(maxRate))})
+				jsonExtras["BitRate_Maximum"] = strconv.FormatUint(uint64(maxRate), 10)
+			}
 		}
 	}
 	fields = append(fields, Field{Name: "Codec ID", Value: codecID})
