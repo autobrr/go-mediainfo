@@ -120,6 +120,10 @@ const matroskaEAC3QuickProbeFrames = 1113
 // MediaInfoLib stops stream parsing after PacketCount>=300 when ParseSpeed<1.
 const matroskaEAC3QuickProbePackets = 300
 
+// Official mediainfo reports E-AC-3 compr/dialnorm stats over a bounded sample; align the
+// compr_Count bound (number of frames with compr metadata seen).
+const matroskaEAC3QuickProbeComprValues = 560
+
 // Bound the expensive JOC scan (full-block reads) separately; stats probing continues to PacketCount.
 const matroskaEAC3QuickProbePacketsJOC = 198
 const matroskaHEVCQuickProbePackets = 300
@@ -339,6 +343,7 @@ func ParseMatroskaWithOptions(r io.ReaderAt, size int64, opts AnalyzeOptions) (M
 							// Keep Matroska probing bounded (ParseSpeed < 1), but still sample enough
 							// audio frames to match official JSON stats output (dialnorm/compr/JOC).
 							probe.targetPackets = matroskaEAC3QuickProbePackets
+							probe.targetFrames = matroskaEAC3QuickProbeComprValues
 							if probe.parseJOC {
 								probe.jocStopPackets = matroskaEAC3QuickProbePacketsJOC
 							}

@@ -700,11 +700,9 @@ func readMatroskaBlockHeader(er *ebmlReader, size int64, audioProbes map[uint64]
 				if audioProbe.parseJOC && audioProbe.jocStopPackets > 0 && audioProbe.packetCount >= audioProbe.jocStopPackets {
 					audioProbe.parseJOC = false
 				}
-				// Some JOC streams effectively finish early in official mediainfo; stop stats probing
-				// at the same bound once JOC metadata is present.
-				if audioProbe.jocStopPackets > 0 && ac3HasJOCInfo(audioProbe.info) && audioProbe.packetCount >= audioProbe.jocStopPackets {
-					audioProbe.collect = false
-				} else if audioProbe.packetCount >= audioProbe.targetPackets {
+				// Keep collecting stats until the full packet cap; official mediainfo still reports
+				// compr/dialnorm stats beyond the point where JOC metadata becomes available.
+				if audioProbe.packetCount >= audioProbe.targetPackets {
 					audioProbe.collect = false
 				}
 			}
@@ -793,6 +791,16 @@ func applyMatroskaStats(info *MatroskaInfo, stats map[uint64]*matroskaTrackStats
 				info.Tracks[i].JSON = map[string]string{}
 			}
 			info.Tracks[i].JSON["StreamSize"] = strconv.FormatInt(stat.dataBytes, 10)
+		}
+		if stat.blockCount > 0 && info.Tracks[i].Kind == StreamAudio {
+			// Official mediainfo reports audio FrameCount for AC-3 / E-AC-3 tracks (from Statistics Tags).
+			format := findField(info.Tracks[i].Fields, "Format")
+			if format == "AC-3" || format == "E-AC-3" {
+				if info.Tracks[i].JSON == nil {
+					info.Tracks[i].JSON = map[string]string{}
+				}
+				info.Tracks[i].JSON["FrameCount"] = strconv.FormatInt(stat.blockCount, 10)
+			}
 		}
 		durationSeconds := matroskaStatsDuration(stat)
 		if info.Tracks[i].Kind == StreamVideo && stat.blockCount > 0 {
@@ -936,10 +944,7 @@ func applyMatroskaTagStats(info *MatroskaInfo, tagStats map[uint64]matroskaTagSt
 			stat.dataBytes = tag.dataBytes
 		}
 		if tag.hasFrameCount && tag.frameCount > 0 {
-			// If we already derived an exact video FrameCount from DefaultDuration, keep it.
-			if !(stream.Kind == StreamVideo && stream.JSON != nil && stream.JSON["FrameCount"] != "") {
-				stat.blockCount = tag.frameCount
-			}
+			stat.blockCount = tag.frameCount
 		}
 		if tag.hasDuration && tag.durationSeconds > 0 {
 			stat.hasTime = true
@@ -1194,6 +1199,11 @@ func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAud
 		if ac3.sampleRate > 0 {
 			if frameCount, ok := parseInt(stream.JSON["FrameCount"]); ok && ac3.spf > 0 {
 				stream.JSON["SamplingCount"] = strconv.FormatInt(frameCount*int64(ac3.spf), 10)
+			} else if durStr := stream.JSON["Duration"]; durStr != "" {
+				if duration, err := strconv.ParseFloat(durStr, 64); err == nil && duration > 0 {
+					samplingCount := int64(math.Round(duration * ac3.sampleRate))
+					stream.JSON["SamplingCount"] = strconv.FormatInt(samplingCount, 10)
+				}
 			} else if duration, ok := parseDurationSeconds(findField(stream.Fields, "Duration")); ok {
 				samplingCount := int64(math.Round(duration * ac3.sampleRate))
 				stream.JSON["SamplingCount"] = strconv.FormatInt(samplingCount, 10)
