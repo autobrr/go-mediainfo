@@ -5,7 +5,6 @@ Format profile,Base Media
 Codec ID,isom (isom/iso2/avc1/mp41)
 File size,271 KiB
 Duration,4 s 0 ms
-Overall bit rate mode,Variable
 Overall bit rate,555 kb/s
 Frame rate,29.970 FPS
 Writing application,Lavf62.3.100
@@ -22,13 +21,12 @@ Codec ID,avc1
 Codec ID/Info,Advanced Video Coding
 Duration,3 s 971 ms
 Bit rate,450 kb/s
-Nominal bit rate,450 kb/s
-Maximum bit rate,450 kb/s
 Width,640 pixels
 Height,360 pixels
 Display aspect ratio,16:9
 Frame rate mode,Constant
 Frame rate,29.970 FPS
+Color space,YUV
 Chroma subsampling,4:2:0
 Bit depth,8 bits
 Scan type,Progressive
@@ -46,15 +44,14 @@ Codec ID,mp4a-40-2
 Duration,4 s 0 ms
 Source duration,4 s 21 ms
 Source_Duration_LastFrame,-11 ms
-Bit rate mode,Variable
-Bit rate,97 kb/s
-Maximum bit rate,97 kb/s
+Bit rate mode,Constant
+Bit rate,96 kb/s
 Channel(s),1 channel
 Channel layout,M
 Sampling rate,48.0 kHz
 Frame rate,46.875 FPS (1024 SPF)
 Compression mode,Lossy
-Stream size,47.0 KiB (17%)
+Stream size,47.2 KiB (17%)
 Source stream size,47.4 KiB (17%)
 Default,Yes
 Alternate group,1

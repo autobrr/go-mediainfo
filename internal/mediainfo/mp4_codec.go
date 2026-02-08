@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"strconv"
 )
 
 type SampleInfo struct {
@@ -12,6 +13,8 @@ type SampleInfo struct {
 	JSON            map[string]string
 	SampleCount     uint64
 	SampleBytes     uint64
+	SampleSizeHead  []uint32
+	SampleSizeTail  []uint32
 	SampleDelta     uint32
 	LastSampleDelta uint32
 	Width           uint64
@@ -55,6 +58,14 @@ func parseStsdForSample(buf []byte) (SampleInfo, bool) {
 			}
 			if result.Height > 0 {
 				info.Height = result.Height
+			}
+			if len(result.JSON) > 0 {
+				if info.JSON == nil {
+					info.JSON = map[string]string{}
+				}
+				for k, v := range result.JSON {
+					info.JSON[k] = v
+				}
 			}
 		}
 		if isAudioSampleEntry(typ) {
@@ -138,6 +149,7 @@ func parseVisualSampleEntry(entry []byte, sampleType string) sampleEntryResult {
 	fields := []Field{
 		{Name: "Codec ID", Value: sampleType},
 	}
+	jsonExtras := map[string]string{}
 	if formatInfo := mapVideoFormatInfo(sampleType); formatInfo != "" {
 		fields = append(fields, Field{Name: "Format/Info", Value: formatInfo})
 	}
@@ -154,27 +166,44 @@ func parseVisualSampleEntry(entry []byte, sampleType string) sampleEntryResult {
 	}
 	if sampleType == "avc1" || sampleType == "avc3" {
 		if payload, ok := findMP4ChildBox(entry, mp4VisualSampleEntryHeaderSize, "avcC"); ok {
-			_, avcFields, _ := parseAVCConfig(payload)
+			_, avcFields, spsInfo := parseAVCConfig(payload)
 			fields = append(fields, avcFields...)
 			fields = append(fields, Field{Name: "Codec configuration box", Value: "avcC"})
+			// Stored dimensions: mediainfo reports a macroblock-aligned Stored_Height for AVC.
+			storedHeight := spsInfo.CodedHeight
+			if storedHeight == 0 && height > 0 {
+				storedHeight = uint64(height)
+				if storedHeight%16 != 0 {
+					storedHeight = ((storedHeight + 15) / 16) * 16
+				}
+			}
+			if storedHeight > 0 && uint64(height) > 0 && storedHeight != uint64(height) {
+				jsonExtras["Stored_Height"] = strconv.FormatUint(storedHeight, 10)
+			}
 		} else if payload, ok := findMP4BoxByName(entry, "avcC"); ok {
-			_, avcFields, _ := parseAVCConfig(payload)
+			_, avcFields, spsInfo := parseAVCConfig(payload)
 			fields = append(fields, avcFields...)
 			fields = append(fields, Field{Name: "Codec configuration box", Value: "avcC"})
+			storedHeight := spsInfo.CodedHeight
+			if storedHeight == 0 && height > 0 {
+				storedHeight = uint64(height)
+				if storedHeight%16 != 0 {
+					storedHeight = ((storedHeight + 15) / 16) * 16
+				}
+			}
+			if storedHeight > 0 && uint64(height) > 0 && storedHeight != uint64(height) {
+				jsonExtras["Stored_Height"] = strconv.FormatUint(storedHeight, 10)
+			}
 		}
+		fields = appendFieldUnique(fields, Field{Name: "Color space", Value: "YUV"})
 	}
 	if info := mapVideoCodecIDInfo(sampleType); info != "" {
 		fields = append(fields, Field{Name: "Codec ID/Info", Value: info})
 	}
-	if _, maxRate, avgRate, ok := parseBtrt(entry, mp4VisualSampleEntryHeaderSize); ok {
-		if maxRate > 0 {
-			fields = append(fields, Field{Name: "Nominal bit rate", Value: formatBitrate(float64(maxRate))})
-			fields = append(fields, Field{Name: "Maximum bit rate", Value: formatBitrate(float64(maxRate))})
-		} else if avgRate > 0 {
-			fields = append(fields, Field{Name: "Nominal bit rate", Value: formatBitrate(float64(avgRate))})
-		}
+	if len(jsonExtras) == 0 {
+		jsonExtras = nil
 	}
-	return sampleEntryResult{Fields: fields, Width: uint64(width), Height: uint64(height)}
+	return sampleEntryResult{Fields: fields, Width: uint64(width), Height: uint64(height), JSON: jsonExtras}
 }
 
 func parseAudioSampleEntry(entry []byte, sampleType string) sampleEntryResult {
@@ -217,11 +246,29 @@ func parseAudioSampleEntry(entry []byte, sampleType string) sampleEntryResult {
 	if sampleType == "mp4a" {
 		fields = append(fields, Field{Name: "Compression mode", Value: "Lossy"})
 	}
+	if sampleType == "mp4a" {
+		// Prefer ESDS avgBitrate/maxBitrate (DecoderConfigDescriptor) over container-level btrt.
+		if avg, max, ok := parseESDSBitrates(entry); ok {
+			bps := avg
+			if bps == 0 {
+				bps = max
+			}
+			if bps > 0 {
+				// Official mediainfo truncates AAC ESDS bitrates to the nearest kb/s.
+				bps = (bps / 1000) * 1000
+				fields = appendFieldUnique(fields, Field{Name: "Bit rate mode", Value: "Constant"})
+				fields = appendFieldUnique(fields, Field{Name: "Bit rate", Value: formatBitrate(float64(bps))})
+			}
+		}
+	}
 	if _, maxRate, avgRate, ok := parseBtrt(entry, mp4AudioSampleEntryHeaderSize); ok {
-		if maxRate > 0 {
-			fields = append(fields, Field{Name: "Maximum bit rate", Value: formatBitrate(float64(maxRate))})
-		} else if avgRate > 0 {
-			fields = append(fields, Field{Name: "Maximum bit rate", Value: formatBitrate(float64(avgRate))})
+		bps := avgRate
+		if bps == 0 {
+			bps = maxRate
+		}
+		if bps > 0 {
+			fields = appendFieldUnique(fields, Field{Name: "Bit rate mode", Value: "Constant"})
+			fields = appendFieldUnique(fields, Field{Name: "Bit rate", Value: formatBitrate(float64(bps))})
 		}
 	}
 	fields = append(fields, Field{Name: "Codec ID", Value: codecID})
@@ -295,6 +342,42 @@ func parseESDSProfile(entry []byte) (string, string, string, bool) {
 		codecID = fmt.Sprintf("mp4a-40-%d", objType)
 	}
 	return profile, codecID, info, sbrExplicitNo
+}
+
+func parseESDSBitrates(entry []byte) (uint32, uint32, bool) {
+	payload, ok := findMP4ChildBox(entry, mp4AudioSampleEntryHeaderSize, "esds")
+	if !ok {
+		payload, ok = findMP4ChildBox(entry, mp4AudioSampleEntryHeaderAlt, "esds")
+	}
+	if !ok {
+		payload, ok = findMP4BoxByName(entry, "esds")
+	}
+	if !ok || len(payload) <= 4 {
+		return 0, 0, false
+	}
+	buf := payload[4:]
+	for i := 0; i < len(buf); i++ {
+		if buf[i] != 0x04 {
+			continue
+		}
+		length, n := readMP4DescriptorLength(buf[i+1:])
+		if n == 0 {
+			continue
+		}
+		start := i + 1 + n
+		if start+length > len(buf) {
+			continue
+		}
+		desc := buf[start : start+length]
+		// DecoderConfigDescriptor: objectType(1), streamType(1), bufferSizeDB(3), maxBitrate(4), avgBitrate(4)
+		if len(desc) < 13 {
+			continue
+		}
+		maxBitrate := binary.BigEndian.Uint32(desc[5:9])
+		avgBitrate := binary.BigEndian.Uint32(desc[9:13])
+		return avgBitrate, maxBitrate, true
+	}
+	return 0, 0, false
 }
 
 func findMP4BoxByName(buf []byte, name string) ([]byte, bool) {

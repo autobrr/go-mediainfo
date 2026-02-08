@@ -16,11 +16,10 @@
 <CodecID_Compatible>isom/iso2/avc1/mp41</CodecID_Compatible>
 <FileSize>277741</FileSize>
 <Duration>4.000</Duration>
-<OverallBitRate_Mode>VBR</OverallBitRate_Mode>
 <OverallBitRate>555482</OverallBitRate>
 <FrameRate>29.970</FrameRate>
 <FrameCount>119</FrameCount>
-<StreamSize>5721</StreamSize>
+<StreamSize>5964</StreamSize>
 <HeaderSize>5713</HeaderSize>
 <DataSize>272028</DataSize>
 <FooterSize>0</FooterSize>
@@ -39,11 +38,10 @@
 <Format_Settings_RefFrames>4</Format_Settings_RefFrames>
 <CodecID>avc1</CodecID>
 <Duration>3.971</Duration>
-<BitRate>450258</BitRate>
-<BitRate_Nominal>450000</BitRate_Nominal>
-<BitRate_Maximum>450000</BitRate_Maximum>
+<BitRate>450257</BitRate>
 <Width>640</Width>
 <Height>360</Height>
+<Stored_Height>368</Stored_Height>
 <Sampled_Width>640</Sampled_Width>
 <Sampled_Height>360</Sampled_Height>
 <PixelAspectRatio>1.000</PixelAspectRatio>
@@ -55,6 +53,7 @@
 <FrameRate_Num>30000</FrameRate_Num>
 <FrameRate_Den>1001</FrameRate_Den>
 <FrameCount>119</FrameCount>
+<ColorSpace>YUV</ColorSpace>
 <ChromaSubsampling>4:2:0</ChromaSubsampling>
 <BitDepth>8</BitDepth>
 <ScanType>Progressive</ScanType>
@@ -77,9 +76,8 @@
 <Duration>4.000</Duration>
 <Source_Duration>4.021</Source_Duration>
 <Source_Duration_LastFrame>-0.011</Source_Duration_LastFrame>
-<BitRate_Mode>VBR</BitRate_Mode>
-<BitRate>96573</BitRate>
-<BitRate_Maximum>97000</BitRate_Maximum>
+<BitRate_Mode>CBR</BitRate_Mode>
+<BitRate>96000</BitRate>
 <Channels>1</Channels>
 <ChannelPositions>Front: C</ChannelPositions>
 <ChannelLayout>M</ChannelLayout>
@@ -90,7 +88,7 @@
 <FrameCount>188</FrameCount>
 <Source_FrameCount>189</Source_FrameCount>
 <Compression_Mode>Lossy</Compression_Mode>
-<StreamSize>48160</StreamSize>
+<StreamSize>48301</StreamSize>
 <Source_StreamSize>48544</Source_StreamSize>
 <Default>Yes</Default>
 <AlternateGroup>1</AlternateGroup>

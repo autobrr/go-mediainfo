@@ -24,6 +24,12 @@ func mergeSampleInfo(a, b SampleInfo) SampleInfo {
 	if b.SampleBytes > 0 {
 		info.SampleBytes = b.SampleBytes
 	}
+	if len(b.SampleSizeHead) > 0 {
+		info.SampleSizeHead = b.SampleSizeHead
+	}
+	if len(b.SampleSizeTail) > 0 {
+		info.SampleSizeTail = b.SampleSizeTail
+	}
 	if b.SampleDelta > 0 {
 		info.SampleDelta = b.SampleDelta
 	}

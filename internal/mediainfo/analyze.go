@@ -73,15 +73,12 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 				general.JSON["HeaderSize"] = strconv.FormatInt(headerSize, 10)
 				general.JSON["DataSize"] = strconv.FormatInt(dataSize, 10)
 				general.JSON["FooterSize"] = strconv.FormatInt(footerSize, 10)
-				streamSize := stat.Size() - (dataSize - int64(mdatCount*8))
-				if streamSize > 0 {
-					general.JSON["StreamSize"] = strconv.FormatInt(streamSize, 10)
-				}
 				if moovBeforeMdat {
 					general.JSON["IsStreamable"] = "Yes"
 				} else {
 					general.JSON["IsStreamable"] = "No"
 				}
+				_ = mdatCount
 			}
 			var generalFrameCount string
 			for _, track := range parsed.Tracks {
@@ -135,21 +132,43 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 							}
 						}
 					}
-					if bitrate > 0 {
+					if bitrate > 0 && !(track.Kind == StreamAudio && findField(fields, "Bit rate") != "") {
 						if track.Kind != StreamVideo {
 							if mode := bitrateMode(bitrate); mode != "" {
 								fields = appendFieldUnique(fields, Field{Name: "Bit rate mode", Value: mode})
 							}
 						}
 						fields = addStreamBitrate(fields, bitrate)
-						jsonExtras["BitRate"] = strconv.FormatInt(int64(math.Round(bitrate)), 10)
+						// Match official mediainfo rounding for derived MP4 bitrates.
+						jsonExtras["BitRate"] = strconv.FormatInt(int64(math.Floor(bitrate)), 10)
 					}
 				}
 				if track.SampleBytes > 0 {
 					streamBytes := int64(track.SampleBytes)
 					displaySamples := 0.0
 					if sourceDuration > 0 && displayDuration > 0 {
-						if track.SampleDelta > 0 && track.SampleCount > 0 && track.Timescale > 0 {
+						if track.Kind == StreamAudio {
+							// Official mediainfo trims edit lists by whole AAC frames for StreamSize.
+							if track.SampleDelta > 0 && track.SampleCount > 0 && track.Timescale > 0 {
+								displaySamples = (displayDuration * float64(track.Timescale)) / float64(track.SampleDelta)
+								wantFrames := int64(math.Round(displaySamples))
+								drop := int64(track.SampleCount) - wantFrames
+								if drop > 0 && drop <= int64(len(track.SampleSizeTail)) {
+									dropped := uint64(0)
+									start := int64(len(track.SampleSizeTail)) - drop
+									for i := start; i < int64(len(track.SampleSizeTail)); i++ {
+										dropped += uint64(track.SampleSizeTail[i])
+									}
+									if track.SampleBytes > dropped {
+										streamBytes = int64(track.SampleBytes - dropped)
+									}
+								} else {
+									streamBytes = int64(math.Round(float64(track.SampleBytes) * displayDuration / sourceDuration))
+								}
+							} else {
+								streamBytes = int64(math.Round(float64(track.SampleBytes) * displayDuration / sourceDuration))
+							}
+						} else if track.SampleDelta > 0 && track.SampleCount > 0 && track.Timescale > 0 {
 							displaySamples = (displayDuration * float64(track.Timescale)) / float64(track.SampleDelta)
 							if displaySamples > 0 {
 								streamBytes = int64(math.Round(float64(track.SampleBytes) * displaySamples / float64(track.SampleCount)))
@@ -164,11 +183,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 						fields = appendFieldUnique(fields, Field{Name: "Stream size", Value: streamSize})
 					}
 					if streamBytes > 0 {
-						jsonStreamBytes := streamBytes
-						if track.Kind == StreamAudio && sourceDuration > 0 {
-							jsonStreamBytes++
-						}
-						jsonExtras["StreamSize"] = strconv.FormatInt(jsonStreamBytes, 10)
+						jsonExtras["StreamSize"] = strconv.FormatInt(streamBytes, 10)
 					}
 					if sourceDuration > 0 {
 						if sourceSize := formatStreamSize(int64(track.SampleBytes), stat.Size()); sourceSize != "" {
@@ -221,6 +236,9 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 				general.JSON["FrameCount"] = generalFrameCount
 			}
 			applyX264Info(file, streams, x264InfoOptions{})
+			// MP4 General StreamSize: remaining bytes after summing track stream sizes.
+			streamSizeSum := sumStreamSizes(streams, true)
+			setRemainingStreamSize(general.JSON, stat.Size(), streamSizeSum)
 		}
 	case "Matroska":
 		if parsed, ok := ParseMatroskaWithOptions(file, stat.Size(), opts); ok {
@@ -925,10 +943,10 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 		bitrate := float64(fileSize*8) / info.DurationSeconds
 		if bitrate > 0 {
 			mode := info.BitrateMode
-			if mode != "" && format != "Matroska" && format != "AVI" && format != "MPEG Audio" {
+			if mode != "" && format != "Matroska" && format != "AVI" && format != "MPEG Audio" && format != "MPEG-4" && format != "QuickTime" {
 				general.Fields = append(general.Fields, Field{Name: "Overall bit rate mode", Value: mode})
 			}
-			if mode == "" && format != "Matroska" && format != "AVI" && format != "MPEG Audio" {
+			if mode == "" && format != "Matroska" && format != "AVI" && format != "MPEG Audio" && format != "MPEG-4" && format != "QuickTime" {
 				if inferred := bitrateMode(bitrate); inferred != "" {
 					general.Fields = append(general.Fields, Field{Name: "Overall bit rate mode", Value: inferred})
 				}

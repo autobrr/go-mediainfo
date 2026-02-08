@@ -15,6 +15,8 @@ type MP4Track struct {
 	JSON            map[string]string
 	SampleCount     uint64
 	SampleBytes     uint64
+	SampleSizeHead  []uint32
+	SampleSizeTail  []uint32
 	SampleDelta     uint32
 	LastSampleDelta uint32
 	DurationSeconds float64
@@ -266,6 +268,8 @@ func parseMdia(buf []byte) (MP4Track, bool) {
 		JSON:            sampleInfo.JSON,
 		SampleCount:     sampleInfo.SampleCount,
 		SampleBytes:     sampleInfo.SampleBytes,
+		SampleSizeHead:  sampleInfo.SampleSizeHead,
+		SampleSizeTail:  sampleInfo.SampleSizeTail,
 		SampleDelta:     sampleInfo.SampleDelta,
 		LastSampleDelta: sampleInfo.LastSampleDelta,
 		DurationSeconds: trackDuration,
@@ -456,8 +460,10 @@ func parseStbl(buf []byte) (SampleInfo, bool) {
 		}
 		if boxType == "stsz" {
 			payload := sliceBox(buf, dataOffset, boxSize-headerSize)
-			if total, ok := parseStsz(payload); ok {
+			if total, head, tail, ok := parseStszWithHead(payload, mp4SampleSizeHeadMax); ok {
 				info.SampleBytes = total
+				info.SampleSizeHead = head
+				info.SampleSizeTail = tail
 			}
 		}
 		offset += boxSize
