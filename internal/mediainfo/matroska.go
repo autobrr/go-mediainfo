@@ -55,6 +55,8 @@ const (
 	mkvIDTrackLanguage       = 0x22B59C
 	mkvIDTrackLanguageIETF   = 0x22B59D
 	mkvIDTrackOffset         = 0x537F
+	mkvIDCodecDelay          = 0x56AA
+	mkvIDSeekPreRoll         = 0x56BB
 	mkvIDCodecID             = 0x86
 	mkvIDCodecPrivate        = 0x63A2
 	mkvIDCodecName           = 0x258688
@@ -972,6 +974,10 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64) (Stream, bool)
 	var trackLanguageIETF string
 	var trackOffset int64
 	var hasTrackOffset bool
+	var codecDelayNs uint64
+	var hasCodecDelay bool
+	var seekPreRollNs uint64
+	var hasSeekPreRoll bool
 	var codecID string
 	var codecPrivate []byte
 	var codecName string
@@ -1062,6 +1068,18 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64) (Stream, bool)
 			if value, ok := readSigned(buf[dataStart:dataEnd]); ok {
 				trackOffset = value
 				hasTrackOffset = true
+			}
+		}
+		if id == mkvIDCodecDelay {
+			if value, ok := readUnsigned(buf[dataStart:dataEnd]); ok {
+				codecDelayNs = value
+				hasCodecDelay = true
+			}
+		}
+		if id == mkvIDSeekPreRoll {
+			if value, ok := readUnsigned(buf[dataStart:dataEnd]); ok {
+				seekPreRollNs = value
+				hasSeekPreRoll = true
 			}
 		}
 		if id == mkvIDBitRate {
@@ -1410,7 +1428,13 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64) (Stream, bool)
 		jsonExtras["Format_Settings_SBR"] = "No (Explicit)"
 	}
 	delaySeconds := 0.0
-	if hasTrackOffset {
+	// MediaInfo prefers CodecDelay when present; fall back to TrackOffset (signed).
+	// SeekPreRoll is not exposed as Delay/Video_Delay in official JSON.
+	_ = seekPreRollNs
+	_ = hasSeekPreRoll
+	if hasCodecDelay && codecDelayNs > 0 {
+		delaySeconds = float64(codecDelayNs) / 1e9
+	} else if hasTrackOffset {
 		delaySeconds = float64(trackOffset) / 1e9
 	}
 	if kind == StreamVideo || kind == StreamAudio {

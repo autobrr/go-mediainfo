@@ -83,9 +83,9 @@
 <SamplingCount>193008</SamplingCount>
 <FrameRate>46.875</FrameRate>
 <Compression_Mode>Lossy</Compression_Mode>
-<Delay>0.000</Delay>
+<Delay>0.021</Delay>
 <Delay_Source>Container</Delay_Source>
-<Video_Delay>0.000</Video_Delay>
+<Video_Delay>0.021</Video_Delay>
 <Encoded_Library>Lavc62.11.100 aac</Encoded_Library>
 <Default>No</Default>
 <Forced>No</Forced>

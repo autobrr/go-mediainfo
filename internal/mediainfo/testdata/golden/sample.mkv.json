@@ -68,9 +68,9 @@
 "SamplingCount":"193008",
 "FrameRate":"46.875",
 "Compression_Mode":"Lossy",
-"Delay":"0.000",
+"Delay":"0.021",
 "Delay_Source":"Container",
-"Video_Delay":"0.000",
+"Video_Delay":"0.021",
 "Encoded_Library":"Lavc62.11.100 aac",
 "Default":"No",
 "Forced":"No"}]}
