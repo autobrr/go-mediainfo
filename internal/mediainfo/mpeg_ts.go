@@ -731,6 +731,18 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64)
 			if duration == 0 {
 				duration = videoDuration
 			}
+			// For TS MPEG-2 video, official mediainfo derives Duration from FrameCount and the
+			// stream's FrameRate ratio (not from PTS deltas).
+			if !isBDAV && hasMPEGVideo && st.format == "MPEG Video" && st.hasMPEG2Info && st.videoFrameCount > 0 {
+				info := st.mpeg2Info
+				if info.FrameRateNumer > 0 && info.FrameRateDenom > 0 {
+					duration = float64(st.videoFrameCount) * float64(info.FrameRateDenom) / float64(info.FrameRateNumer)
+					duration = math.Floor(duration*1000+1e-9) / 1000
+				} else if info.FrameRate > 0 {
+					duration = float64(st.videoFrameCount) / info.FrameRate
+					duration = math.Floor(duration*1000+1e-9) / 1000
+				}
+			}
 			if duration > 0 && st.videoFrameRate > 0 && st.format != "MPEG Video" {
 				duration += 1.0 / st.videoFrameRate
 			}
@@ -741,6 +753,8 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64)
 					if st.videoFrameRate > 0 {
 						jsonExtras["FrameCount"] = strconv.Itoa(int(math.Round(duration * st.videoFrameRate)))
 					}
+				} else if hasMPEGVideo && st.format == "MPEG Video" {
+					jsonExtras["Duration"] = formatJSONSeconds(duration)
 				}
 			}
 			if isBDAV && st.videoFrameRate > 0 {
@@ -834,6 +848,14 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64)
 		}
 		if st.kind == StreamAudio {
 			duration := ptsDuration(st.pts)
+			if st.hasAC3 && st.ac3Info.sampleRate > 0 && st.ac3Info.spf > 0 && st.audioFrames > 0 {
+				rate := int64(st.ac3Info.sampleRate)
+				if rate > 0 {
+					samples := st.audioFrames * uint64(st.ac3Info.spf)
+					durationMs := int64((samples * 1000) / uint64(rate))
+					duration = float64(durationMs) / 1000.0
+				}
+			}
 			if st.audioRate > 0 && st.audioFrames > 0 && st.audioSpf > 0 {
 				rate := int64(st.audioRate)
 				if rate > 0 {
@@ -846,6 +868,8 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64)
 				fields = addStreamDuration(fields, duration)
 				if isBDAV {
 					jsonExtras["Duration"] = fmt.Sprintf("%.3f", duration)
+				} else {
+					jsonExtras["Duration"] = formatJSONSeconds(duration)
 				}
 			}
 

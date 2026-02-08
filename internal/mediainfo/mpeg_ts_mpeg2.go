@@ -154,6 +154,18 @@ func updateCCTrackTS(entry *tsStream, ccType int, ccData1 byte, ccData2 byte, pt
 		track.lastPTS = pts
 		if track.firstCommandPTS == 0 && isCCCommand(ccData1, ccData2) {
 			track.firstCommandPTS = pts
+			if framesBefore > 0 {
+				// Official mediainfo reports Duration_Start_Command aligned to a 0-based frame index:
+				// Delay + (frame_index / fps).
+				//
+				// Empirically, it applies an additional 2-frame offset for CEA-608-in-708 commands.
+				// (E.g. for 59.94fps, first command at frameCount=459 -> frame_index=456.)
+				if framesBefore > 3 {
+					track.firstCommandFrame = framesBefore - 3
+				} else {
+					track.firstCommandFrame = 0
+				}
+			}
 		}
 		if track.firstType == "" && ccData2 == 0x2F {
 			track.firstType = "PopOn"

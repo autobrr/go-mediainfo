@@ -2,6 +2,7 @@ package mediainfo
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strconv"
 )
@@ -16,6 +17,16 @@ func appendTSCaptionStreams(out *[]Stream, video *tsStream) {
 		return
 	}
 	duration := ptsDuration(video.pts)
+	if video.format == "MPEG Video" && video.hasMPEG2Info && video.videoFrameCount > 0 {
+		info := video.mpeg2Info
+		if info.FrameRateNumer > 0 && info.FrameRateDenom > 0 {
+			duration = float64(video.videoFrameCount) * float64(info.FrameRateDenom) / float64(info.FrameRateNumer)
+			duration = math.Floor(duration*1000+1e-9) / 1000
+		} else if info.FrameRate > 0 {
+			duration = float64(video.videoFrameCount) / info.FrameRate
+			duration = math.Floor(duration*1000+1e-9) / 1000
+		}
+	}
 	if duration <= 0 {
 		return
 	}
@@ -23,14 +34,30 @@ func appendTSCaptionStreams(out *[]Stream, video *tsStream) {
 	if video.pts.has() {
 		delay = float64(video.pts.min) / 90000.0
 	}
+	fps := 0.0
+	if video.hasMPEG2Info {
+		if video.mpeg2Info.FrameRateNumer > 0 && video.mpeg2Info.FrameRateDenom > 0 {
+			fps = float64(video.mpeg2Info.FrameRateNumer) / float64(video.mpeg2Info.FrameRateDenom)
+		} else if video.mpeg2Info.FrameRate > 0 {
+			fps = video.mpeg2Info.FrameRate
+		}
+	}
 	menuID := video.programNumber
 	videoPID := video.pid
 
 	if video.ccOdd.found {
-		*out = append(*out, buildTSCaptionStream(videoPID, menuID, delay, duration, "EIA-608", "CC1", video.ccOdd.firstCommandPTS))
+		startCommand := 0.0
+		if fps > 0 && video.ccOdd.firstCommandFrame > 0 {
+			startCommand = delay + float64(video.ccOdd.firstCommandFrame)/fps
+		}
+		*out = append(*out, buildTSCaptionStream(videoPID, menuID, delay, duration, "EIA-608", "CC1", startCommand))
 	}
 	if video.ccEven.found {
-		*out = append(*out, buildTSCaptionStream(videoPID, menuID, delay, duration, "EIA-608", "CC3", video.ccEven.firstCommandPTS))
+		startCommand := 0.0
+		if fps > 0 && video.ccEven.firstCommandFrame > 0 {
+			startCommand = delay + float64(video.ccEven.firstCommandFrame)/fps
+		}
+		*out = append(*out, buildTSCaptionStream(videoPID, menuID, delay, duration, "EIA-608", "CC3", startCommand))
 	}
 	if len(video.dtvccServices) > 0 {
 		services := make([]int, 0, len(video.dtvccServices))
@@ -47,7 +74,7 @@ func appendTSCaptionStreams(out *[]Stream, video *tsStream) {
 	}
 }
 
-func buildTSCaptionStream(videoPID uint16, programNumber uint16, delaySeconds float64, duration float64, format string, service string, firstCommandPTS uint64) Stream {
+func buildTSCaptionStream(videoPID uint16, programNumber uint16, delaySeconds float64, duration float64, format string, service string, startCommandSeconds float64) Stream {
 	idLabel := fmt.Sprintf("%s-%s", formatID(uint64(videoPID)), service)
 	jsonID := fmt.Sprintf("%d-%s", videoPID, service)
 	fields := []Field{
@@ -62,10 +89,6 @@ func buildTSCaptionStream(videoPID uint16, programNumber uint16, delaySeconds fl
 		Field{Name: "Muxing mode, more info", Value: "Muxed in Video #1"},
 		Field{Name: "Duration", Value: formatDuration(duration)},
 	)
-	if format == "EIA-608" && firstCommandPTS > 0 {
-		start := float64(firstCommandPTS) / 90000.0
-		fields = append(fields, Field{Name: "Start time (commands)", Value: formatDuration(start)})
-	}
 	fields = append(fields,
 		Field{Name: "Bit rate mode", Value: "Constant"},
 		Field{Name: "Stream size", Value: "0.00 Byte (0%)"},
@@ -74,6 +97,7 @@ func buildTSCaptionStream(videoPID uint16, programNumber uint16, delaySeconds fl
 	jsonExtras := map[string]string{
 		"ID":          jsonID,
 		"StreamOrder": "0-0",
+		"Duration":    formatJSONSeconds(duration),
 		"StreamSize":  "0",
 		"Video_Delay": "0.000",
 	}
@@ -84,8 +108,8 @@ func buildTSCaptionStream(videoPID uint16, programNumber uint16, delaySeconds fl
 		jsonExtras["Delay"] = fmt.Sprintf("%.9f", delaySeconds)
 		jsonExtras["Delay_Source"] = "Container"
 	}
-	if format == "EIA-608" && firstCommandPTS > 0 {
-		jsonExtras["Duration_Start_Command"] = formatJSONSeconds6(float64(firstCommandPTS) / 90000.0)
+	if format == "EIA-608" && startCommandSeconds > 0 {
+		jsonExtras["Duration_Start_Command"] = formatJSONSeconds6(startCommandSeconds)
 	}
 	jsonRaw := map[string]string{
 		"extra": renderJSONObject([]jsonKV{
