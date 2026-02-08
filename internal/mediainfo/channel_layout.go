@@ -7,13 +7,18 @@ func channelLayout(channels uint64) string {
 	case 2:
 		return "L R"
 	case 3:
-		return "L R C"
+		return "C L R"
 	case 4:
 		return "L R Ls Rs"
 	case 5:
-		return "L R C Ls Rs"
+		return "C L R Ls Rs"
 	case 6:
-		return "L R C LFE Ls Rs"
+		// MediaInfo's canonical 5.1 ordering (LFE last).
+		return "C L R Ls Rs LFE"
+	case 7:
+		return "C L R Ls Rs Lb Rb"
+	case 8:
+		return "C L R Ls Rs Lb Rb LFE"
 	default:
 		return ""
 	}

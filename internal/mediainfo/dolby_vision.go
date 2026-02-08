@@ -80,6 +80,14 @@ func parseDolbyVisionConfigFromPrivate(codecPrivate []byte) string {
 	return formatDolbyVisionHDR(config)
 }
 
+func parseDolbyVisionConfigFromPrivateRaw(codecPrivate []byte) (dolbyVisionConfig, bool) {
+	payload := findDolbyVisionConfig(codecPrivate)
+	if len(payload) == 0 {
+		return dolbyVisionConfig{}, false
+	}
+	return parseDolbyVisionConfig(payload)
+}
+
 func findDolbyVisionConfig(data []byte) []byte {
 	if len(data) < 4 {
 		return nil

@@ -10,6 +10,14 @@ func mergeSampleInfo(a, b SampleInfo) SampleInfo {
 	if len(b.Fields) > 0 {
 		info.Fields = append(info.Fields, b.Fields...)
 	}
+	if len(b.JSON) > 0 {
+		if info.JSON == nil {
+			info.JSON = map[string]string{}
+		}
+		for k, v := range b.JSON {
+			info.JSON[k] = v
+		}
+	}
 	if b.SampleCount > 0 {
 		info.SampleCount = b.SampleCount
 	}

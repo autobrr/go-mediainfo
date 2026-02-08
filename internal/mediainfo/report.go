@@ -26,6 +26,8 @@ type Stream struct {
 	eac3Dec3            eac3Dec3Info
 	nalLengthSize       int
 	mkvHeaderStripBytes []byte
+	mkvDolbyVision      dolbyVisionConfig
+	mkvHasDolbyVision   bool
 }
 
 type Report struct {

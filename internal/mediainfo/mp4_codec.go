@@ -9,6 +9,7 @@ import (
 type SampleInfo struct {
 	Format          string
 	Fields          []Field
+	JSON            map[string]string
 	SampleCount     uint64
 	SampleBytes     uint64
 	SampleDelta     uint32
@@ -22,6 +23,7 @@ type sampleEntryResult struct {
 	Format string
 	Width  uint64
 	Height uint64
+	JSON   map[string]string
 }
 
 func parseStsdForSample(buf []byte) (SampleInfo, bool) {
@@ -60,6 +62,14 @@ func parseStsdForSample(buf []byte) (SampleInfo, bool) {
 			info.Fields = append(info.Fields, result.Fields...)
 			if result.Format != "" {
 				info.Format = result.Format
+			}
+			if len(result.JSON) > 0 {
+				if info.JSON == nil {
+					info.JSON = map[string]string{}
+				}
+				for k, v := range result.JSON {
+					info.JSON[k] = v
+				}
 			}
 		}
 		if info.Format != "" || len(info.Fields) > 0 {
@@ -175,6 +185,7 @@ func parseAudioSampleEntry(entry []byte, sampleType string) sampleEntryResult {
 	sampleRate := binary.BigEndian.Uint32(entry[32:36])
 	codecID := sampleType
 	fields := []Field{}
+	jsonExtras := map[string]string{}
 	fields = appendChannelFields(fields, uint64(channels))
 	if sampleRate > 0 {
 		rate := float64(sampleRate) / 65536
@@ -186,7 +197,7 @@ func parseAudioSampleEntry(entry []byte, sampleType string) sampleEntryResult {
 	}
 	format := ""
 	if sampleType == "mp4a" {
-		if profile, codecIDValue, info := parseESDSProfile(entry); profile != "" {
+		if profile, codecIDValue, info, sbrExplicitNo := parseESDSProfile(entry); profile != "" {
 			if info != "" {
 				fields = append(fields, Field{Name: "Format/Info", Value: info})
 			}
@@ -194,6 +205,9 @@ func parseAudioSampleEntry(entry []byte, sampleType string) sampleEntryResult {
 				codecID = codecIDValue
 			}
 			format = "AAC " + profile
+			if sbrExplicitNo {
+				jsonExtras["Format_Settings_SBR"] = "No (Explicit)"
+			}
 		} else if info := mapAudioFormatInfo(sampleType); info != "" {
 			fields = append(fields, Field{Name: "Format/Info", Value: info})
 		}
@@ -211,7 +225,10 @@ func parseAudioSampleEntry(entry []byte, sampleType string) sampleEntryResult {
 		}
 	}
 	fields = append(fields, Field{Name: "Codec ID", Value: codecID})
-	return sampleEntryResult{Fields: fields, Format: format}
+	if len(jsonExtras) == 0 {
+		jsonExtras = nil
+	}
+	return sampleEntryResult{Fields: fields, Format: format, JSON: jsonExtras}
 }
 
 const (
@@ -253,7 +270,7 @@ func formatAVCLevel(levelID byte) string {
 	return fmt.Sprintf("L%d.%d", major, minor)
 }
 
-func parseESDSProfile(entry []byte) (string, string, string) {
+func parseESDSProfile(entry []byte) (string, string, string, bool) {
 	payload, ok := findMP4ChildBox(entry, mp4AudioSampleEntryHeaderSize, "esds")
 	if !ok {
 		payload, ok = findMP4ChildBox(entry, mp4AudioSampleEntryHeaderAlt, "esds")
@@ -262,17 +279,13 @@ func parseESDSProfile(entry []byte) (string, string, string) {
 		payload, ok = findMP4BoxByName(entry, "esds")
 	}
 	if !ok || len(payload) <= 4 {
-		return "", "", ""
+		return "", "", "", false
 	}
 	decoder := findESDSDecoderSpecificInfo(payload[4:])
 	if len(decoder) == 0 {
-		return "", "", ""
+		return "", "", "", false
 	}
-	objType := int(decoder[0] >> 3)
-	if objType == 31 && len(decoder) > 1 {
-		objType = 32 + int((decoder[0]&0x07)<<3|decoder[1]>>5)
-	}
-	profile := mapAACProfile(objType)
+	profile, objType, sbrExplicitNo := parseAACProfileFromASC(decoder)
 	info := "Advanced Audio Codec"
 	if profile == "LC" {
 		info = "Advanced Audio Codec Low Complexity"
@@ -281,7 +294,7 @@ func parseESDSProfile(entry []byte) (string, string, string) {
 	if objType > 0 {
 		codecID = fmt.Sprintf("mp4a-40-%d", objType)
 	}
-	return profile, codecID, info
+	return profile, codecID, info, sbrExplicitNo
 }
 
 func findMP4BoxByName(buf []byte, name string) ([]byte, bool) {

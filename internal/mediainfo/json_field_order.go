@@ -35,13 +35,11 @@ var jsonGeneralFieldOrder = map[string]int{
 	"File_Modified_Date":          27,
 	"File_Modified_Date_Local":    28,
 	"Encoded_Application":         29,
-	"Encoded_Application_Name":    30,
-	"Encoded_Application_Version": 31,
-	"Encoded_Library":             32,
-	"Encoded_Library_Name":        33,
-	"Encoded_Library_Version":     34,
-	"Encoded_Library_Settings":    35,
-	"extra":                       36,
+	"Encoded_Library":             30,
+	"Encoded_Library_Name":        31,
+	"Encoded_Library_Version":     32,
+	"Encoded_Library_Settings":    33,
+	"extra":                       34,
 }
 
 var jsonVideoFieldOrder = map[string]int{

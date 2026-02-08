@@ -394,7 +394,8 @@ func parseEAC3FrameWithOptions(payload []byte, parseJOC bool) (ac3Info, int, boo
 	if sync, ok := br.readBits(16); !ok || sync != 0x0B77 {
 		return info, 0, false
 	}
-	if _, ok := br.readBits(2); !ok { // strmtyp
+	strmtyp, ok := br.readBits(2) // strmtyp
+	if !ok {
 		return info, 0, false
 	}
 	if _, ok := br.readBits(3); !ok { // substreamid
@@ -410,16 +411,20 @@ func parseEAC3FrameWithOptions(payload []byte, parseJOC bool) (ac3Info, int, boo
 		return info, 0, false
 	}
 	fscod2 := uint32(0)
+	numblkscod := uint32(0)
 	if fscod == 3 {
 		val, ok := br.readBits(2)
 		if !ok {
 			return info, 0, false
 		}
 		fscod2 = val
-	}
-	numblkscod, ok := br.readBits(2)
-	if !ok {
-		return info, 0, false
+		numblkscod = 3
+	} else {
+		val, ok := br.readBits(2)
+		if !ok {
+			return info, 0, false
+		}
+		numblkscod = val
 	}
 	acmod, ok := br.readBits(3)
 	if !ok {
@@ -433,31 +438,39 @@ func parseEAC3FrameWithOptions(payload []byte, parseJOC bool) (ac3Info, int, boo
 	if !ok {
 		return info, 0, false
 	}
-	dialnorm, ok := br.readBits(5)
-	if !ok {
-		return info, 0, false
-	}
-	info.hasDialnorm = true
-	info.dialnorm = ac3DialnormDB(dialnorm)
-	info.dialnormCount = 1
-	info.dialnormSum = math.Pow(10.0, float64(info.dialnorm)/10.0)
-	info.dialnormMin = info.dialnorm
-	info.dialnormMax = info.dialnorm
-	compre, ok := br.readBits(1)
-	if !ok {
-		return info, 0, false
-	}
-	if compre == 1 {
-		compr, ok := br.readBits(8)
+	// For dependent substreams, the BSI fields we care about for JSON stats may not be present
+	// (or may be at a different position). Only accumulate dialnorm/compr stats from independent
+	// substreams to match official mediainfo behavior on common E-AC-3 layouts.
+	if strmtyp == 0 {
+		dialnorm, ok := br.readBits(5)
 		if !ok {
 			return info, 0, false
 		}
-		info.comprDB = ac3ComprDB(uint8(compr))
-		info.comprSum = math.Pow(10.0, info.comprDB/10.0)
-		info.comprCount = 1
-		info.comprMin = info.comprDB
-		info.comprMax = info.comprDB
-		info.hasCompr = true
+		info.hasDialnorm = true
+		info.dialnorm = ac3DialnormDB(dialnorm)
+		info.dialnormCount = 1
+		info.dialnormSum = math.Pow(10.0, float64(info.dialnorm)/10.0)
+		info.dialnormMin = info.dialnorm
+		info.dialnormMax = info.dialnorm
+
+		compre, ok := br.readBits(1)
+		if !ok {
+			return info, 0, false
+		}
+		if compre == 1 {
+			compr, ok := br.readBits(8)
+			if !ok {
+				return info, 0, false
+			}
+			info.comprDB = ac3ComprDB(uint8(compr))
+			if compr != 0xFF {
+				info.comprSum = math.Pow(10.0, info.comprDB/10.0)
+				info.comprCount = 1
+				info.comprMin = info.comprDB
+				info.comprMax = info.comprDB
+			}
+			info.hasCompr = true
+		}
 	}
 
 	sampleRate := eac3SampleRate(int(fscod), int(fscod2))

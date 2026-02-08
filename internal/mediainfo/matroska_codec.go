@@ -24,6 +24,10 @@ func mapMatroskaCodecID(codecID string, trackType uint64) (StreamKind, string) {
 		return StreamAudio, "FLAC"
 	case "A_MPEG/L2":
 		return StreamAudio, "MPEG Audio"
+	case "A_DTS":
+		return StreamAudio, "DTS"
+	case "A_TRUEHD":
+		return StreamAudio, "TrueHD"
 	case "S_TEXT/UTF8":
 		return StreamText, "UTF-8"
 	case "S_TEXT/ASS":
@@ -59,6 +63,10 @@ func mapMatroskaFormatInfo(format string) string {
 		return "Free Lossless Audio Codec"
 	case "MPEG Audio":
 		return "MPEG Audio"
+	case "DTS":
+		return "Digital Theater Systems"
+	case "TrueHD":
+		return "Dolby TrueHD"
 	default:
 		return ""
 	}

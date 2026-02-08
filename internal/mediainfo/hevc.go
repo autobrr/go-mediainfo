@@ -11,9 +11,9 @@ type hevcConfigInfo struct {
 	nalLengthSize int
 }
 
-func parseHEVCConfig(payload []byte) (string, []Field, hevcConfigInfo) {
+func parseHEVCConfig(payload []byte) (string, []Field, hevcConfigInfo, h264SPSInfo) {
 	if len(payload) < 23 {
-		return "", nil, hevcConfigInfo{}
+		return "", nil, hevcConfigInfo{}, h264SPSInfo{}
 	}
 	profileIDC := payload[1] & 0x1F
 	tierFlag := (payload[1] >> 5) & 0x01
@@ -21,11 +21,12 @@ func parseHEVCConfig(payload []byte) (string, []Field, hevcConfigInfo) {
 	chromaFormatIDC := payload[16] & 0x03
 	bitDepthLuma := (payload[17] & 0x07) + 8
 	lengthSizeMinusOne := payload[21] & 0x03
+	tierName := hevcTierName(tierFlag)
 
 	info := hevcConfigInfo{
 		profileName:   hevcProfileName(profileIDC),
 		levelName:     hevcLevelName(levelIDC),
-		tierName:      hevcTierName(tierFlag),
+		tierName:      tierName,
 		chromaFormat:  hevcChromaFormatName(chromaFormatIDC),
 		bitDepth:      bitDepthLuma,
 		nalLengthSize: int(lengthSizeMinusOne) + 1,
@@ -37,18 +38,27 @@ func parseHEVCConfig(payload []byte) (string, []Field, hevcConfigInfo) {
 		if info.levelName != "" {
 			profile = fmt.Sprintf("%s@L%s", profile, info.levelName)
 		}
-		if info.tierName == "High" {
-			profile += "@High"
-		}
 		fields = append(fields, Field{Name: "Format profile", Value: profile})
+	}
+	if tierName == "High" {
+		fields = append(fields, Field{Name: "Format tier", Value: tierName})
 	}
 	if info.chromaFormat != "" {
 		fields = append(fields, Field{Name: "Chroma subsampling", Value: info.chromaFormat})
+		if chromaFormatIDC == 1 {
+			// Match official MediaInfo JSON output for HEVC 4:2:0.
+			fields = append(fields, Field{Name: "Chroma subsampling position", Value: "Type 2"})
+		}
 	}
 	if info.bitDepth > 0 {
 		fields = append(fields, Field{Name: "Bit depth", Value: formatBitDepth(info.bitDepth)})
 	}
-	return info.profileName, fields, info
+
+	spsInfo := h264SPSInfo{}
+	if sps := findHEVCSPSInConfig(payload); len(sps) > 0 {
+		spsInfo = parseHEVCSPS(sps)
+	}
+	return info.profileName, fields, info, spsInfo
 }
 
 func hevcProfileName(idc byte) string {
@@ -91,7 +101,7 @@ func hevcChromaFormatName(idc byte) string {
 	case 0:
 		return "4:0:0"
 	case 1:
-		return "4:2:0 (Type 2)"
+		return "4:2:0"
 	case 2:
 		return "4:2:2"
 	case 3:

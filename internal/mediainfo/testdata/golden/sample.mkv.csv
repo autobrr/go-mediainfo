@@ -20,7 +20,7 @@ Format settings,CABAC / 4 Ref Frames
 Format settings, CABAC,Yes
 Format settings, Reference frames,4 frames
 Codec ID,V_MPEG4/ISO/AVC
-Duration,4 s 4 ms
+Duration,3 s 970 ms
 Width,640 pixels
 Height,360 pixels
 Display aspect ratio,16:9
@@ -30,7 +30,7 @@ Color space,YUV
 Chroma subsampling,4:2:0
 Bit depth,8 bits
 Scan type,Progressive
-Writing library,x264 core 165 r3222 b35605a
+Writing library,Lavc62.11.100 libx264
 Encoding settings,cabac=1 / ref=1 / deblock=1:0:0 / analyse=0x3:0x113 / me=hex / subme=2 / psy=1 / psy_rd=1.00:0.00 / mixed_ref=0 / me_range=16 / chroma_me=1 / trellis=0 / 8x8dct=1 / cqm=0 / deadzone=21,11 / fast_pskip=1 / chroma_qp_offset=0 / threads=11 / lookahead_threads=2 / sliced_threads=0 / nr=0 / decimate=1 / interlaced=0 / bluray_compat=0 / constrained_intra=0 / bframes=3 / b_pyramid=2 / b_adapt=1 / b_bias=0 / direct=1 / weightb=1 / open_gop=0 / weightp=1 / keyint=60 / keyint_min=31 / scenecut=0 / intra_refresh=0 / rc_lookahead=10 / rc=crf / mbtree=1 / crf=28.0 / qcomp=0.60 / qpmin=0 / qpmax=69 / qpstep=4 / ip_ratio=1.40 / aq=1:1.00
 Default,No
 Forced,No
@@ -38,14 +38,14 @@ Color range,Limited
 
 Audio
 ID,2
-Format,AAC LC SBR
+Format,AAC LC
 Format/Info,Advanced Audio Codec Low Complexity
 Codec ID,A_AAC-2
 Duration,4 s 21 ms
 Channel(s),1 channel
 Channel layout,M
-Sampling rate,96.0 kHz
-Frame rate,46.8750 FPS (2048 SPF)
+Sampling rate,48.0 kHz
+Frame rate,46.8750 FPS (1024 SPF)
 Compression mode,Lossy
 Writing library,Lavc62.11.100 aac
 Default,No

@@ -43,24 +43,23 @@ func normalizeLanguageCode(code string) string {
 		lang = mapped
 	}
 	out := []string{lang}
-	i := 1
-	if i < len(parts) && isAlphaString(parts[i]) && len(parts[i]) == 4 {
-		// Script subtag: title case (e.g. Hant, Latn)
-		s := parts[i]
-		out = append(out, strings.ToUpper(s[:1])+strings.ToLower(s[1:]))
-		i++
-	}
-	if i < len(parts) && ((isAlphaString(parts[i]) && len(parts[i]) == 2) || (isDigitString(parts[i]) && len(parts[i]) == 3)) {
-		// Region subtag: upper case (e.g. US, 419)
-		out = append(out, strings.ToUpper(parts[i]))
-		i++
-	}
-	for ; i < len(parts); i++ {
-		p := strings.TrimSpace(parts[i])
-		if p == "" {
+	for i := 1; i < len(parts); i++ {
+		part := strings.TrimSpace(parts[i])
+		if part == "" {
 			continue
 		}
-		out = append(out, strings.ToLower(p))
+		// BCP-47-ish casing:
+		// - script: 4 alpha, Title Case (Hans)
+		// - region: 2 alpha or 3 digit, upper case (US / 419)
+		if len(part) == 4 && isAlpha(part) {
+			out = append(out, strings.ToUpper(part[:1])+strings.ToLower(part[1:]))
+			continue
+		}
+		if (len(part) == 2 && isAlpha(part)) || (len(part) == 3 && isDigit(part)) {
+			out = append(out, strings.ToUpper(part))
+			continue
+		}
+		out = append(out, strings.ToLower(part))
 	}
 	return strings.Join(out, "-")
 }
@@ -81,30 +80,22 @@ func formatLanguage(code string) string {
 	return name
 }
 
-func isAlphaString(s string) bool {
-	if s == "" {
-		return false
-	}
+func isAlpha(s string) bool {
 	for i := 0; i < len(s); i++ {
-		ch := s[i]
-		if (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') {
-			continue
+		c := s[i]
+		if (c < 'A' || c > 'Z') && (c < 'a' || c > 'z') {
+			return false
 		}
-		return false
 	}
 	return true
 }
 
-func isDigitString(s string) bool {
-	if s == "" {
-		return false
-	}
+func isDigit(s string) bool {
 	for i := 0; i < len(s); i++ {
-		ch := s[i]
-		if ch >= '0' && ch <= '9' {
-			continue
+		c := s[i]
+		if c < '0' || c > '9' {
+			return false
 		}
-		return false
 	}
 	return true
 }

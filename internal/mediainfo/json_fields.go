@@ -19,13 +19,14 @@ type jsonKV struct {
 func buildJSONMedia(report Report) jsonMediaOut {
 	tracks := make([]jsonTrackOut, 0, len(report.Streams)+1)
 	tracks = append(tracks, jsonTrackOut{Fields: buildJSONGeneralFields(report)})
+	containerFormat := findField(report.General.Fields, "Format")
 	sorted := orderTracks(report.Streams)
 	forEachStreamWithKindIndex(sorted, func(stream Stream, index, total, order int) {
 		typeOrder := 0
 		if total > 1 {
 			typeOrder = index
 		}
-		tracks = append(tracks, jsonTrackOut{Fields: buildJSONStreamFields(stream, order, typeOrder)})
+		tracks = append(tracks, jsonTrackOut{Fields: buildJSONStreamFields(stream, order, typeOrder, containerFormat)})
 	})
 	return jsonMediaOut{Ref: report.Ref, Tracks: tracks}
 }
@@ -71,7 +72,7 @@ func buildJSONGeneralFields(report Report) []jsonKV {
 	return sortJSONFields(StreamGeneral, fields)
 }
 
-func buildJSONStreamFields(stream Stream, order int, typeOrder int) []jsonKV {
+func buildJSONStreamFields(stream Stream, order int, typeOrder int, containerFormat string) []jsonKV {
 	fields := []jsonKV{{Key: "@type", Val: string(stream.Kind)}}
 	if typeOrder > 0 {
 		fields = append(fields, jsonKV{Key: "@typeorder", Val: strconv.Itoa(typeOrder)})
@@ -81,10 +82,23 @@ func buildJSONStreamFields(stream Stream, order int, typeOrder int) []jsonKV {
 	}
 	fields = append(fields, mapStreamFieldsToJSON(stream.Kind, stream.Fields)...)
 	fields = applyJSONExtras(fields, stream.JSON, stream.JSONRaw)
+	fields = normalizeContainerComputedJSON(stream.Kind, fields, containerFormat)
 	if !stream.JSONSkipComputed {
-		fields = append(fields, buildJSONComputedFields(stream.Kind, fields)...)
+		fields = append(fields, buildJSONComputedFields(stream.Kind, fields, containerFormat)...)
 	}
 	return sortJSONFields(stream.Kind, fields)
+}
+
+func normalizeContainerComputedJSON(kind StreamKind, fields []jsonKV, containerFormat string) []jsonKV {
+	if kind == StreamVideo && strings.EqualFold(containerFormat, "Matroska") {
+		width, _ := strconv.ParseFloat(jsonFieldValue(fields, "Width"), 64)
+		height, _ := strconv.ParseFloat(jsonFieldValue(fields, "Height"), 64)
+		if width > 0 && height > 0 {
+			// Official mediainfo JSON reports the numeric ratio even when the text field snaps to a common value.
+			fields = setJSONField(fields, "DisplayAspectRatio", formatJSONFloat(width/height))
+		}
+	}
+	return fields
 }
 
 func mapStreamFieldsToJSON(kind StreamKind, fields []Field) []jsonKV {
@@ -106,6 +120,8 @@ func mapStreamFieldsToJSON(kind StreamKind, fields []Field) []jsonKV {
 			if level != "" {
 				out = append(out, jsonKV{Key: "Format_Level", Val: level})
 			}
+		case "Format tier":
+			out = append(out, jsonKV{Key: "Format_Tier", Val: field.Value})
 		case "ID":
 			out = append(out, jsonKV{Key: "ID", Val: field.Value})
 		case "Menu ID":
@@ -196,6 +212,10 @@ func mapStreamFieldsToJSON(kind StreamKind, fields []Field) []jsonKV {
 			if value, ok := parseFloatValue(field.Value); ok {
 				out = append(out, jsonKV{Key: "FrameRate", Val: formatJSONFloat(value)})
 			}
+			if num, den, ok := parseFrameRateRatio(field.Value); ok {
+				out = append(out, jsonKV{Key: "FrameRate_Num", Val: strconv.Itoa(num)})
+				out = append(out, jsonKV{Key: "FrameRate_Den", Val: strconv.Itoa(den)})
+			}
 		case "Frame rate mode":
 			out = append(out, jsonKV{Key: "FrameRate_Mode", Val: mapFrameRateMode(field.Value)})
 		case "Width":
@@ -208,6 +228,8 @@ func mapStreamFieldsToJSON(kind StreamKind, fields []Field) []jsonKV {
 			}
 		case "Chroma subsampling":
 			out = append(out, jsonKV{Key: "ChromaSubsampling", Val: field.Value})
+		case "Chroma subsampling position":
+			out = append(out, jsonKV{Key: "ChromaSubsampling_Position", Val: field.Value})
 		case "Color space":
 			out = append(out, jsonKV{Key: "ColorSpace", Val: field.Value})
 		case "Bit depth":
@@ -295,7 +317,7 @@ func mapStreamFieldsToJSON(kind StreamKind, fields []Field) []jsonKV {
 	return out
 }
 
-func buildJSONComputedFields(kind StreamKind, fields []jsonKV) []jsonKV {
+func buildJSONComputedFields(kind StreamKind, fields []jsonKV, containerFormat string) []jsonKV {
 	out := []jsonKV{}
 	format := jsonFieldValue(fields, "Format")
 	duration, _ := strconv.ParseFloat(jsonFieldValue(fields, "Duration"), 64)
@@ -309,7 +331,8 @@ func buildJSONComputedFields(kind StreamKind, fields []jsonKV) []jsonKV {
 			frameCount := int(math.Round(duration * frameRate))
 			out = append(out, jsonKV{Key: "FrameCount", Val: strconv.Itoa(frameCount)})
 		}
-		if jsonFieldValue(fields, "FrameRate_Num") == "" && jsonFieldValue(fields, "FrameRate_Den") == "" {
+		// MediaInfo doesn't emit FrameRate_Num/Den for Matroska; keep this for MPEG-4 only.
+		if containerFormat == "MPEG-4" && jsonFieldValue(fields, "FrameRate_Num") == "" && jsonFieldValue(fields, "FrameRate_Den") == "" {
 			num, den := rationalizeFrameRate(frameRate)
 			if num > 0 && den > 0 {
 				out = append(out, jsonKV{Key: "FrameRate_Num", Val: strconv.Itoa(num)})
@@ -325,9 +348,6 @@ func buildJSONComputedFields(kind StreamKind, fields []jsonKV) []jsonKV {
 			}
 		}
 		if strings.EqualFold(format, "AAC") {
-			if jsonFieldValue(fields, "Format_Settings_SBR") == "" && (strings.HasPrefix(codecID, "mp4a") || strings.HasPrefix(codecID, "a_aac")) {
-				out = append(out, jsonKV{Key: "Format_Settings_SBR", Val: "No (Explicit)"})
-			}
 			if jsonFieldValue(fields, "SamplesPerFrame") == "" {
 				out = append(out, jsonKV{Key: "SamplesPerFrame", Val: "1024"})
 			}
@@ -378,6 +398,16 @@ func jsonFieldValue(fields []jsonKV, key string) string {
 		}
 	}
 	return ""
+}
+
+func setJSONField(fields []jsonKV, key, value string) []jsonKV {
+	for i := range fields {
+		if fields[i].Key == key {
+			fields[i].Val = value
+			return fields
+		}
+	}
+	return append(fields, jsonKV{Key: key, Val: value})
 }
 
 func applyJSONExtras(fields []jsonKV, extras map[string]string, rawExtras map[string]string) []jsonKV {
@@ -457,6 +487,29 @@ func rationalizeFrameRate(rate float64) (int, int) {
 		}
 	}
 	return int(math.Round(rate)), 1
+}
+
+func parseFrameRateRatio(value string) (int, int, bool) {
+	open := strings.IndexByte(value, '(')
+	if open < 0 {
+		return 0, 0, false
+	}
+	close := strings.IndexByte(value[open:], ')')
+	if close < 0 {
+		return 0, 0, false
+	}
+	close = open + close
+	inside := strings.TrimSpace(value[open+1 : close])
+	parts := strings.SplitN(inside, "/", 2)
+	if len(parts) != 2 {
+		return 0, 0, false
+	}
+	num, err1 := strconv.Atoi(strings.TrimSpace(parts[0]))
+	den, err2 := strconv.Atoi(strings.TrimSpace(parts[1]))
+	if err1 != nil || err2 != nil || num <= 0 || den <= 0 {
+		return 0, 0, false
+	}
+	return num, den, true
 }
 
 func countStreams(streams []Stream) map[StreamKind]int {

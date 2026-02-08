@@ -12,6 +12,7 @@ type MP4Track struct {
 	Kind            StreamKind
 	Format          string
 	Fields          []Field
+	JSON            map[string]string
 	SampleCount     uint64
 	SampleBytes     uint64
 	SampleDelta     uint32
@@ -262,6 +263,7 @@ func parseMdia(buf []byte) (MP4Track, bool) {
 		Kind:            kind,
 		Format:          format,
 		Fields:          sampleInfo.Fields,
+		JSON:            sampleInfo.JSON,
 		SampleCount:     sampleInfo.SampleCount,
 		SampleBytes:     sampleInfo.SampleBytes,
 		SampleDelta:     sampleInfo.SampleDelta,

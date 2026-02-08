@@ -706,6 +706,17 @@ func (br *bitReader) readUEWithOk() (int, bool) {
 	return (1 << zeros) - 1 + int(value), true
 }
 
+func (br *bitReader) readSEWithOk() (int, bool) {
+	val, ok := br.readUEWithOk()
+	if !ok {
+		return 0, false
+	}
+	if val%2 == 0 {
+		return -(val / 2), true
+	}
+	return (val + 1) / 2, true
+}
+
 func skipScalingList(br *bitReader, size int) {
 	last := 8
 	next := 8
