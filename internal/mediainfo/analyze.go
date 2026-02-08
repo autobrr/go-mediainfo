@@ -106,6 +106,11 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 				var bitrate float64
 				jsonExtras := map[string]string{}
 				jsonRaw := map[string]string{}
+				if len(track.JSON) > 0 {
+					for k, v := range track.JSON {
+						jsonExtras[k] = v
+					}
+				}
 				if track.Kind == StreamVideo {
 					jsonExtras["Rotation"] = "0.000"
 				}
@@ -230,6 +235,13 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 				general.Fields = appendFieldUnique(general.Fields, field)
 			}
 			streams = append(streams, parsed.Tracks...)
+			if len(parsed.attachments) > 0 {
+				if general.JSONRaw == nil {
+					general.JSONRaw = map[string]string{}
+				}
+				// Match official JSON: attachments are nested under General.extra.Attachments.
+				general.JSONRaw["extra"] = "{\"Attachments\":\"" + strings.Join(parsed.attachments, " / ") + "\"}"
+			}
 			if rawWritingApp != "" {
 				general.JSON["Encoded_Application"] = rawWritingApp
 			}
@@ -239,7 +251,11 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			setOverallBitRate(general.JSON, stat.Size(), info.DurationSeconds)
 			general.JSON["IsStreamable"] = "Yes"
 			streamSizeSum := sumStreamSizes(streams, true)
-			setRemainingStreamSize(general.JSON, stat.Size(), streamSizeSum)
+			// Official mediainfo does not expose large Matroska overhead as General StreamSize when
+			// it's dominated by attachments (fonts).
+			if len(parsed.attachments) == 0 {
+				setRemainingStreamSize(general.JSON, stat.Size(), streamSizeSum)
+			}
 			overallModeField := ""
 			for _, stream := range streams {
 				if stream.Kind != StreamVideo {
@@ -285,7 +301,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			applyX264Info(file, streams, x264InfoOptions{
 				skipWritingLibIfExists: true,
 				skipEncodingIfExists:   true,
-				addNominalBitrate:      false,
+				addNominalBitrate:      true,
 				addBitsPerPixel:        false,
 			})
 			// MediaInfo prefers x264 settings for bitrate/VBV constraints when available.
@@ -297,12 +313,12 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 				if enc == "" {
 					continue
 				}
-				if bitrate, ok := findX264Bitrate(enc); ok && bitrate > 0 {
-					streams[i].Fields = setFieldValue(streams[i].Fields, "Bit rate", formatBitrate(bitrate))
+				if bitrate, ok := findX264Bitrate(enc); ok && bitrate > 0 && findField(streams[i].Fields, "Nominal bit rate") == "" {
+					streams[i].Fields = appendFieldUnique(streams[i].Fields, Field{Name: "Nominal bit rate", Value: formatBitrate(bitrate)})
 					if streams[i].JSON == nil {
 						streams[i].JSON = map[string]string{}
 					}
-					streams[i].JSON["BitRate"] = strconv.FormatInt(int64(math.Round(bitrate)), 10)
+					streams[i].JSON["BitRate_Nominal"] = strconv.FormatInt(int64(math.Round(bitrate)), 10)
 				}
 				// MediaInfo reports VBV constraints only when HRD signaling is enabled.
 				if !strings.Contains(enc, "nal_hrd=none") {

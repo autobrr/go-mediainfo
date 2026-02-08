@@ -60,13 +60,15 @@ func renderXMLMedia(report Report) string {
 
 	buf.WriteString(renderXMLTrack("General", 0, buildJSONGeneralFields(report)))
 
+	containerFormat := findField(report.General.Fields, "Format")
 	sorted := orderTracks(report.Streams)
 	forEachStreamWithKindIndex(sorted, func(stream Stream, index, total, order int) {
 		typeOrder := 0
 		if total > 1 {
 			typeOrder = index
 		}
-		fields := buildJSONStreamFields(stream, order, 0)
+		// typeorder is rendered as a track attribute in XML, so omit @typeorder from fields.
+		fields := buildJSONStreamFields(stream, order, 0, containerFormat)
 		buf.WriteString(renderXMLTrack(string(stream.Kind), typeOrder, fields))
 	})
 

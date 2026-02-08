@@ -299,50 +299,58 @@ var masteringDisplayValues = []masteringDisplayValue{
 }
 
 func masteringDisplayPrimariesName(values [8]uint16) string {
-	rIndex, gIndex, bIndex := 4, 4, 4
-	for c := range 3 {
-		x, okX := primariesAt(values, c*2)
-		y, okY := primariesAt(values, c*2+1)
-		if !okX || !okY {
-			return ""
-		}
-		switch {
-		case x < 17500 && y < 17500:
-			bIndex = c
-		case int(y)-int(x) >= 0:
-			gIndex = c
-		default:
-			rIndex = c
-		}
-	}
-	if rIndex > 2 || gIndex > 2 || bIndex > 2 {
-		gIndex, bIndex, rIndex = 0, 1, 2
+	// Try all permutations of mapping the 3 primaries to (G,B,R) so we don't rely on
+	// heuristics that can fail on real-world streams.
+	perms := [][3]int{
+		{0, 1, 2},
+		{0, 2, 1},
+		{1, 0, 2},
+		{1, 2, 0},
+		{2, 0, 1},
+		{2, 1, 0},
 	}
 	for _, entry := range masteringDisplayValues {
-		match := true
-		for j := range 2 {
-			gVal, ok := primariesAt(values, gIndex*2+j)
-			if !ok || !withinTolerance(gVal, entry.values[0*2+j], 25) {
-				match = false
+		for _, perm := range perms {
+			gIndex, bIndex, rIndex := perm[0], perm[1], perm[2]
+			match := true
+			for j := 0; j < 2; j++ {
+				gVal, ok := primariesAt(values, gIndex*2+j)
+				if !ok || !withinTolerance(gVal, entry.values[0*2+j], 25) {
+					match = false
+				}
+				bVal, ok := primariesAt(values, bIndex*2+j)
+				if !ok || !withinTolerance(bVal, entry.values[1*2+j], 25) {
+					match = false
+				}
+				rVal, ok := primariesAt(values, rIndex*2+j)
+				if !ok || !withinTolerance(rVal, entry.values[2*2+j], 25) {
+					match = false
+				}
+				wVal, ok := primariesAt(values, 3*2+j)
+				if !ok || !withinTolerance(wVal, entry.values[3*2+j], 25) {
+					match = false
+				}
 			}
-			bVal, ok := primariesAt(values, bIndex*2+j)
-			if !ok || !withinTolerance(bVal, entry.values[1*2+j], 25) {
-				match = false
+			if match {
+				return masteringDisplayPrimariesLabel(entry.code)
 			}
-			rVal, ok := primariesAt(values, rIndex*2+j)
-			if !ok || !withinTolerance(rVal, entry.values[2*2+j], 25) {
-				match = false
-			}
-			wVal, ok := primariesAt(values, 3*2+j)
-			if !ok || !withinTolerance(wVal, entry.values[3*2+j], 3) {
-				match = false
-			}
-		}
-		if match {
-			return matroskaColorPrimariesName(uint64(entry.code))
 		}
 	}
 	return ""
+}
+
+func masteringDisplayPrimariesLabel(code uint8) string {
+	switch code {
+	case 1:
+		return "BT.709"
+	case 9:
+		return "BT.2020"
+	case 11, 12:
+		// MediaInfo reports Display P3 for common HDR mastering display metadata values.
+		return "Display P3"
+	default:
+		return ""
+	}
 }
 
 func primariesAt(values [8]uint16, index int) (uint16, bool) {

@@ -28,16 +28,19 @@ func TestParseMatroskaTracks(t *testing.T) {
 	if findField(info.Tracks[0].Fields, "Frame rate") == "" {
 		t.Fatalf("missing frame rate")
 	}
-	if findField(info.Tracks[0].Fields, "Bit rate") == "" {
-		t.Fatalf("missing bit rate")
+	if findField(info.Tracks[0].Fields, "Nominal bit rate") == "" {
+		t.Fatalf("missing nominal bit rate")
 	}
 }
 
 func TestParseMatroskaStatsTags(t *testing.T) {
 	tagsPayload := buildMatroskaTagForStats(123)
-	encoders, stats := parseMatroskaTags(tagsPayload, "mkvmerge v82.0.0", "libebml v1.4.5 + libmatroska v1.7.1")
-	if len(encoders) != 1 || encoders[0] != "Lavf60.3.100" {
-		t.Fatalf("unexpected encoders: %#v", encoders)
+	encoders, settings, stats := parseMatroskaTags(tagsPayload, "")
+	if got := encoders[123]; got != "Lavf60.3.100" {
+		t.Fatalf("unexpected encoder: %q", got)
+	}
+	if got := settings[123]; got != "" {
+		t.Fatalf("unexpected settings: %q", got)
 	}
 	entry := stats[123]
 	if !entry.trusted {
@@ -111,7 +114,7 @@ func TestParseMatroskaTagStatsWithoutDate(t *testing.T) {
 		"DURATION":                "00:42:01.080000000",
 		"NUMBER_OF_FRAMES":        "63027",
 		"NUMBER_OF_BYTES":         "1863676305",
-	}, "mkvmerge v94.0 ('Initiate') 64-bit", "libebml v1.4.5")
+	}, "")
 	if !ok || !stats.trusted {
 		t.Fatalf("expected trusted stats, got: %+v", stats)
 	}
@@ -307,14 +310,20 @@ func TestShouldApplyMatroskaClusterStats(t *testing.T) {
 
 func TestVideoProbeNeedsSample(t *testing.T) {
 	probe := &matroskaVideoProbe{}
+	if videoProbeNeedsSample(probe) {
+		t.Fatalf("expected empty probe to not need samples")
+	}
+
+	probe.codec = "AVC"
 	if !videoProbeNeedsSample(probe) {
-		t.Fatalf("expected probe to need samples")
+		t.Fatalf("expected AVC probe to need samples")
 	}
 	probe.exhausted = true
 	if videoProbeNeedsSample(probe) {
 		t.Fatalf("expected exhausted probe to stop sampling")
 	}
 	probe.exhausted = false
+	probe.codec = "HEVC"
 	probe.hdrInfo = hevcHDRInfo{
 		hasMastering: true,
 		maxCLL:       1000,
