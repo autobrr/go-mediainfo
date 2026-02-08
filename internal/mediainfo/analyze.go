@@ -327,8 +327,9 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			applyX264Info(file, streams, x264InfoOptions{
 				skipWritingLibIfExists: true,
 				skipEncodingIfExists:   true,
-				addNominalBitrate:      true,
-				addBitsPerPixel:        false,
+				// Matroska: only emit Nominal bit rate when Bit rate is absent (handled below).
+				addNominalBitrate: false,
+				addBitsPerPixel:   false,
 			})
 			// MediaInfo prefers x264 settings for bitrate/VBV constraints when available.
 			for i := range streams {
@@ -339,15 +340,41 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 				if enc == "" {
 					continue
 				}
-				if bitrate, ok := findX264Bitrate(enc); ok && bitrate > 0 &&
+
+				x264Bitrate, x264HasBitrate := findX264Bitrate(enc)
+				if x264HasBitrate && x264Bitrate > 0 {
+					// Match official mediainfo: when a container-derived bitrate exists, prefer x264's
+					// nominal bitrate if it's very close, and do not emit BitRate_Nominal.
+					existingBps := int64(0)
+					if parsed, ok := parseBitrateBps(findField(streams[i].Fields, "Bit rate")); ok && parsed > 0 {
+						existingBps = parsed
+					} else if streams[i].JSON != nil && streams[i].JSON["BitRate"] != "" {
+						if parsed, err := strconv.ParseInt(streams[i].JSON["BitRate"], 10, 64); err == nil && parsed > 0 {
+							existingBps = parsed
+						}
+					}
+					if existingBps > 0 {
+						delta := math.Abs(float64(existingBps)-x264Bitrate) / x264Bitrate
+						if delta < 0.02 {
+							streams[i].Fields = setFieldValue(streams[i].Fields, "Bit rate", formatBitrate(x264Bitrate))
+							if streams[i].JSON == nil {
+								streams[i].JSON = map[string]string{}
+							}
+							streams[i].JSON["BitRate"] = strconv.FormatInt(int64(math.Round(x264Bitrate)), 10)
+							delete(streams[i].JSON, "BitRate_Nominal")
+						}
+					}
+				}
+
+				if x264HasBitrate && x264Bitrate > 0 &&
 					findField(streams[i].Fields, "Nominal bit rate") == "" &&
 					findField(streams[i].Fields, "Bit rate") == "" &&
 					(streams[i].JSON == nil || streams[i].JSON["BitRate"] == "") {
-					streams[i].Fields = appendFieldUnique(streams[i].Fields, Field{Name: "Nominal bit rate", Value: formatBitrate(bitrate)})
+					streams[i].Fields = appendFieldUnique(streams[i].Fields, Field{Name: "Nominal bit rate", Value: formatBitrate(x264Bitrate)})
 					if streams[i].JSON == nil {
 						streams[i].JSON = map[string]string{}
 					}
-					streams[i].JSON["BitRate_Nominal"] = strconv.FormatInt(int64(math.Round(bitrate)), 10)
+					streams[i].JSON["BitRate_Nominal"] = strconv.FormatInt(int64(math.Round(x264Bitrate)), 10)
 				}
 				// MediaInfo reports VBV constraints only when HRD signaling is enabled.
 				if !strings.Contains(enc, "nal_hrd=none") {

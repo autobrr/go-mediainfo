@@ -471,6 +471,17 @@ func ParseMatroskaWithOptions(r io.ReaderAt, size int64, opts AnalyzeOptions) (M
 		}
 		durStr := stream.JSON["Duration"]
 		frStr := stream.JSON["FrameRate"]
+		if frStr == "" {
+			if parsed, ok := parseFloatValue(findField(stream.Fields, "Frame rate")); ok && parsed > 0 {
+				frStr = formatJSONFloat(parsed)
+			}
+		}
+		if durStr == "" {
+			// Duration is often present as a text field only.
+			if seconds, ok := parseDurationSeconds(findField(stream.Fields, "Duration")); ok && seconds > 0 {
+				durStr = formatJSONSeconds(seconds)
+			}
+		}
 		if durStr == "" || frStr == "" {
 			continue
 		}

@@ -926,6 +926,14 @@ func applyMatroskaStats(info *MatroskaInfo, stats map[uint64]*matroskaTrackStats
 		if info.Tracks[i].Kind == StreamAudio {
 			if durationSeconds > 0 && stat.dataBytes > 0 && findField(info.Tracks[i].Fields, "Bit rate") == "" {
 				bitrate := (float64(stat.dataBytes) * 8) / durationSeconds
+				// Official MediaInfo reports AAC bitrates quantized to 8 kb/s steps when derived
+				// from statistics (StreamSize/Duration).
+				format := findField(info.Tracks[i].Fields, "Format")
+				codecID := findField(info.Tracks[i].Fields, "Codec ID")
+				isAAC := strings.Contains(format, "AAC") || strings.HasPrefix(codecID, "A_AAC")
+				if isAAC && bitrate >= 8000 {
+					bitrate = math.Round(bitrate/8000) * 8000
+				}
 				info.Tracks[i].Fields = setFieldValue(info.Tracks[i].Fields, "Bit rate", formatBitrate(bitrate))
 				if info.Tracks[i].JSON == nil {
 					info.Tracks[i].JSON = map[string]string{}
@@ -1047,9 +1055,24 @@ func applyMatroskaTagStats(info *MatroskaInfo, tagStats map[uint64]matroskaTagSt
 				stream.Fields = setFieldValue(stream.Fields, "Bits/(Pixel*Frame)", bits)
 			}
 		case StreamAudio:
-			if findField(stream.Fields, "Bit rate") == "" {
+			// Official MediaInfo quantizes AAC bitrates to 8 kb/s steps.
+			audioBps := tag.bitRate
+			format := findField(stream.Fields, "Format")
+			codecID := findField(stream.Fields, "Codec ID")
+			isAAC := strings.Contains(format, "AAC") || strings.HasPrefix(codecID, "A_AAC")
+			if isAAC && audioBps >= 8000 {
+				audioBps = int64(math.Round(float64(audioBps)/8000) * 8000)
+			}
+			bitrate = float64(audioBps)
+			if isAAC || findField(stream.Fields, "Bit rate") == "" {
 				stream.Fields = setFieldValue(stream.Fields, "Bit rate", formatBitrate(bitrate))
 			}
+			// Match official JSON: when Statistics Tags provide BPS for audio, emit BitRate even if
+			// we also derived a bitrate earlier from StreamSize/Duration.
+			if stream.JSON == nil {
+				stream.JSON = map[string]string{}
+			}
+			stream.JSON["BitRate"] = strconv.FormatInt(int64(math.Round(bitrate)), 10)
 		}
 	}
 	return matroskaHasCompleteTagStats(info.Tracks, tagStats)
@@ -1130,6 +1153,10 @@ func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAud
 			}
 			if dts.bitRateBps > 0 && !hasContainerBitrate {
 				stream.JSON["BitRate"] = strconv.FormatInt(dts.bitRateBps, 10)
+				stream.JSON["BitRate_Mode"] = "CBR"
+			}
+			// Official mediainfo reports DTS as constant bitrate when BitRate is present.
+			if stream.JSON["BitRate"] != "" && stream.JSON["BitRate_Mode"] == "" {
 				stream.JSON["BitRate_Mode"] = "CBR"
 			}
 			stream.JSON["Format_Settings_Endianness"] = "Big"
