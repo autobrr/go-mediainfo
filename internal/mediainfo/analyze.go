@@ -1133,8 +1133,6 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			general.JSON = map[string]string{}
 			general.Fields = appendFieldUnique(general.Fields, Field{Name: "Format version", Value: "Version 2"})
 			general.Fields = appendFieldUnique(general.Fields, Field{Name: "FileExtension_Invalid", Value: "mpgv mpv mp1v m1v mp2v m2v"})
-			general.Fields = appendFieldUnique(general.Fields, Field{Name: "Conformance warnings", Value: "Yes"})
-			general.Fields = appendFieldUnique(general.Fields, Field{Name: " General compliance", Value: "File name extension is not expected for this file format (actual mpg, expected mpgv mpv mp1v m1v mp2v m2v)"})
 			if info.DurationSeconds > 0 {
 				jsonDuration := math.Round(info.DurationSeconds*1000) / 1000
 				setOverallBitRate(general.JSON, stat.Size(), jsonDuration)
@@ -1154,7 +1152,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			streamSizeSum := sumStreamSizes(streams, false)
 			setRemainingStreamSize(general.JSON, stat.Size(), streamSizeSum)
 			general.JSONRaw = map[string]string{
-				"extra": "{\"FileExtension_Invalid\":\"mpgv mpv mp1v m1v mp2v m2v\",\"ConformanceWarnings\":[{\"GeneralCompliance\":\"File name extension is not expected for this file format (actual mpg, expected mpgv mpv mp1v m1v mp2v m2v)\"}]}",
+				"extra": "{\"FileExtension_Invalid\":\"mpgv mpv mp1v m1v mp2v m2v\"}",
 			}
 		}
 	case "AVI":

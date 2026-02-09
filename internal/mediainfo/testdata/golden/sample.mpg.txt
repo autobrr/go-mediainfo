@@ -8,8 +8,6 @@ Overall bit rate mode                    : Variable
 Overall bit rate                         : 1 421 kb/s
 Frame rate                               : 29.970 FPS
 FileExtension_Invalid                    : mpgv mpv mp1v m1v mp2v m2v
-Conformance warnings                     : Yes
- General compliance                      : File name extension is not expected for this file format (actual mpg, expected mpgv mpv mp1v m1v mp2v m2v)
 
 Video
 Format                                   : MPEG Video

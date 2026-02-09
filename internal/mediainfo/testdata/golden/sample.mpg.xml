@@ -22,9 +22,6 @@
 <File_Modified_Date_Local><redacted></File_Modified_Date_Local>
 <extra>
 <FileExtension_Invalid>mpgv mpv mp1v m1v mp2v m2v</FileExtension_Invalid>
-<ConformanceWarnings>
-<GeneralCompliance>File name extension is not expected for this file format (actual mpg, expected mpgv mpv mp1v m1v mp2v m2v)</GeneralCompliance>
-</ConformanceWarnings>
 </extra>
 </track>
 <track type="Video">
