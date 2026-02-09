@@ -3,15 +3,16 @@ Complete name,samples/sample.ogg
 Format,Ogg
 File size,67.4 KiB
 Duration,4 s 7 ms
-Overall bit rate mode,Variable
 Overall bit rate,138 kb/s
+Writing application,Lavc62.11.100 libopus
 
 Audio
+ID,110100118
 Format,Opus
 Duration,4 s 7 ms
-Bit rate mode,Variable
-Bit rate,137 kb/s
 Channel(s),1 channel
 Channel layout,M
 Sampling rate,48.0 kHz
+Compression mode,Lossy
+Writing library,Lavf62.3.100
 

@@ -1243,9 +1243,26 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			}
 		}
 	case "Ogg":
-		if parsedInfo, parsedStreams, ok := ParseOgg(file, stat.Size()); ok {
+		if parsedInfo, parsedStreams, generalFields, generalJSON, ok := ParseOgg(file, stat.Size()); ok {
 			info = parsedInfo
 			streams = parsedStreams
+			if len(generalFields) > 0 {
+				for _, field := range generalFields {
+					general.Fields = appendFieldUnique(general.Fields, field)
+				}
+			}
+			// Match official mediainfo JSON: OverallBitRate uses full file size (not rounded kb/s from text).
+			if general.JSON == nil {
+				general.JSON = map[string]string{}
+			}
+			if info.DurationSeconds > 0 {
+				setOverallBitRate(general.JSON, stat.Size(), info.DurationSeconds)
+			}
+			for k, v := range generalJSON {
+				if v != "" {
+					general.JSON[k] = v
+				}
+			}
 		}
 	case "MPEG Video":
 		if parsedInfo, parsedStreams, ok := ParseMPEGVideo(file, stat.Size()); ok {
@@ -1371,10 +1388,10 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 		bitrate := float64(fileSize*8) / info.DurationSeconds
 		if bitrate > 0 {
 			mode := info.BitrateMode
-			if mode != "" && format != "Matroska" && format != "AVI" && format != "MPEG Audio" && format != "MPEG-4" && format != "QuickTime" {
+			if mode != "" && format != "Matroska" && format != "AVI" && format != "MPEG Audio" && format != "Ogg" && format != "MPEG-4" && format != "QuickTime" {
 				general.Fields = append(general.Fields, Field{Name: "Overall bit rate mode", Value: mode})
 			}
-			if mode == "" && format != "Matroska" && format != "AVI" && format != "MPEG Audio" && format != "MPEG-4" && format != "QuickTime" {
+			if mode == "" && format != "Matroska" && format != "AVI" && format != "MPEG Audio" && format != "Ogg" && format != "MPEG-4" && format != "QuickTime" {
 				if inferred := bitrateMode(bitrate); inferred != "" {
 					general.Fields = append(general.Fields, Field{Name: "Overall bit rate mode", Value: inferred})
 				}

@@ -5,16 +5,17 @@
 "Format":"Ogg",
 "FileSize":"68981",
 "Duration":"4.007",
-"OverallBitRate_Mode":"VBR",
-"OverallBitRate":"138000",
+"OverallBitRate":"137721",
 "File_Modified_Date":"<redacted>",
-"File_Modified_Date_Local":"<redacted>"},{"@type":"Audio","StreamOrder":"0",
+"File_Modified_Date_Local":"<redacted>",
+"Encoded_Application":"Lavc62.11.100 libopus"},{"@type":"Audio","ID":"110100118",
 "Format":"Opus",
 "Duration":"4.007",
-"BitRate_Mode":"VBR",
-"BitRate":"137000",
 "Channels":"1",
 "ChannelPositions":"Front: C",
 "ChannelLayout":"M",
-"SamplingRate":"48000"}]}
+"SamplingRate":"48000",
+"SamplingCount":"192336",
+"Compression_Mode":"Lossy",
+"Encoded_Library":"Lavf62.3.100"}]}
 }
