@@ -96,10 +96,14 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 				fields := []Field{}
 				displayDuration := track.DurationSeconds
 				sourceDuration := 0.0
+				// Edit lists: use the edit duration as the displayed duration when it differs from mdhd duration,
+				// but only expose Source_* fields when there is an actual edit offset (media time > 0).
 				if track.EditDuration > 0 && track.DurationSeconds > 0 {
 					if math.Abs(track.EditDuration-track.DurationSeconds) > 0.0005 {
 						displayDuration = track.EditDuration
-						sourceDuration = track.DurationSeconds
+						if track.EditMediaTime > 0 {
+							sourceDuration = track.DurationSeconds
+						}
 					}
 				}
 				if track.ID > 0 {
@@ -262,6 +266,9 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 								jsonExtras["Source_FrameCount"] = strconv.FormatUint(track.SampleCount, 10)
 							}
 						}
+					} else if track.Kind == StreamAudio && track.SampleCount > 0 && jsonExtras["FrameCount"] == "" {
+						// No edit list: MediaInfo reports AAC FrameCount from the MP4 sample table.
+						jsonExtras["FrameCount"] = strconv.FormatUint(track.SampleCount, 10)
 					}
 				}
 				if track.Kind == StreamVideo && track.SampleCount > 0 && displayDuration > 0 {
