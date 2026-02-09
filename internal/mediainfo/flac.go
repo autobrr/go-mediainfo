@@ -388,6 +388,10 @@ func flacTagsToGeneralJSON(tags map[string]string, encoder string) (map[string]s
 		set("Composer", v)
 		mapped["COMPOSER"] = true
 	}
+	if v := tags["COPYRIGHT"]; v != "" {
+		set("Copyright", v)
+		mapped["COPYRIGHT"] = true
+	}
 	if v := tags["ISRC"]; v != "" {
 		set("ISRC", v)
 		mapped["ISRC"] = true
