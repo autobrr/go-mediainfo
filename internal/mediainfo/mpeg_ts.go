@@ -60,6 +60,10 @@ type tsStream struct {
 	videoStarted        bool
 	writingLibrary      string
 	encoding            string
+	// XDS state is not per-field; MediaInfoLib tracks a single XDS packet state machine
+	// (it may see packet bytes on either field in GA94/A53 user data).
+	xds          eia608XDS
+	xdsLawRating string
 }
 
 func ParseMPEGTS(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, []Field, bool) {
@@ -1083,6 +1087,19 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64)
 	generalFields := []Field{}
 	if primaryProgramNumber > 0 {
 		generalFields = append(generalFields, Field{Name: "ID", Value: formatID(uint64(primaryProgramNumber))})
+	}
+	// General metadata from EIA-608 XDS (carried in GA94 user data) matches official mediainfo.
+	if !isBDAV {
+		for _, pid := range streamOrder {
+			st := streams[pid]
+			if st == nil || st.kind != StreamVideo {
+				continue
+			}
+			if st.xdsLawRating != "" {
+				generalFields = append(generalFields, Field{Name: "Law rating", Value: st.xdsLawRating})
+			}
+			break
+		}
 	}
 
 	// MediaInfo only emits a Menu track for TS when DVB service descriptors are present (SDT).

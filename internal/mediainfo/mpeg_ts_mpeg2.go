@@ -173,6 +173,15 @@ func updateCCTrackTS(entry *tsStream, ccType int, ccData1 byte, ccData2 byte, pt
 			track.firstFrame = framesBefore
 		}
 	}
+
+	// EIA-608 XDS is carried on the 608 channel bytes; parse it for General metadata parity.
+	// MediaInfoLib tracks XDS state across both fields (single XDS_Level), so do the same here.
+	if title, rating, ok := entry.xds.feed(ccData1, ccData2); ok {
+		if rating != "" {
+			entry.xdsLawRating = rating
+		}
+		_ = title // keep decode side-effects local; Title is not reliable in TS without full EPG parity.
+	}
 }
 
 func mpeg2CommercialNameTS(info mpeg2VideoInfo) string {
