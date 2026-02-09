@@ -64,39 +64,43 @@ func formatMPEG2MatrixHex(m [64]byte) string {
 }
 
 type mpeg2VideoInfo struct {
-	Width             uint64
-	Height            uint64
-	AspectRatio       string
-	FrameRate         float64
-	FrameRateNumer    uint32
-	FrameRateDenom    uint32
-	Profile           string
-	Version           string
-	BitRate           int64
-	BitRateMode       string
-	MaxBitRateKbps    int64
-	BVOP              *bool
-	Matrix            string
-	GOPLength         int
-	GOPVariable       bool
-	GOPM              int
-	GOPN              int
-	GOPLengthFirst    int
-	GOPOpenClosed     string
-	GOPFirstClosed    string
-	GOPDropFrame      *bool
-	GOPClosed         *bool
-	GOPBrokenLink     *bool
-	TimeCode          string
-	TimeCodeSource    string
-	ColorSpace        string
-	ChromaSubsampling string
-	BitDepth          string
-	ScanType          string
-	ScanOrder         string
-	MatrixData        string
-	BufferSize        int64
-	IntraDCPrecision  int
+	Width                    uint64
+	Height                   uint64
+	AspectRatio              string
+	FrameRate                float64
+	FrameRateNumer           uint32
+	FrameRateDenom           uint32
+	Profile                  string
+	Version                  string
+	BitRate                  int64
+	BitRateMode              string
+	MaxBitRateKbps           int64
+	BVOP                     *bool
+	Matrix                   string
+	GOPLength                int
+	GOPVariable              bool
+	GOPM                     int
+	GOPN                     int
+	GOPLengthFirst           int
+	GOPOpenClosed            string
+	GOPFirstClosed           string
+	GOPDropFrame             *bool
+	GOPClosed                *bool
+	GOPBrokenLink            *bool
+	TimeCode                 string
+	TimeCodeSource           string
+	ColourDescriptionPresent bool
+	ColourPrimaries          string
+	TransferCharacteristics  string
+	MatrixCoefficients       string
+	ColorSpace               string
+	ChromaSubsampling        string
+	BitDepth                 string
+	ScanType                 string
+	ScanOrder                string
+	MatrixData               string
+	BufferSize               int64
+	IntraDCPrecision         int
 }
 
 type mpeg2VideoParser struct {
@@ -316,6 +320,28 @@ func (p *mpeg2VideoParser) parseExtension(data []byte) {
 		p.progressiveSeq = progressive == 1
 		p.info.ChromaSubsampling = mapMPEG2Chroma(chromaFormat)
 		p.gotSeqExt = true
+	case 2:
+		// Sequence display extension.
+		// ISO/IEC 13818-2: video_format (3), colour_description (1),
+		// colour_primaries (8), transfer_characteristics (8), matrix_coefficients (8)
+		// then display sizes. We only need the color description values for parity.
+		_ = br.readBitsValue(3) // video_format
+		colourDesc := br.readBitsValue(1)
+		if colourDesc == ^uint64(0) {
+			return
+		}
+		if colourDesc == 1 {
+			primaries := br.readBitsValue(8)
+			transfer := br.readBitsValue(8)
+			matrix := br.readBitsValue(8)
+			if primaries == ^uint64(0) || transfer == ^uint64(0) || matrix == ^uint64(0) {
+				return
+			}
+			p.info.ColourDescriptionPresent = true
+			p.info.ColourPrimaries = mapMPEG2ColourPrimaries(byte(primaries))
+			p.info.TransferCharacteristics = mapMPEG2TransferCharacteristics(byte(transfer))
+			p.info.MatrixCoefficients = mapMPEG2MatrixCoefficients(byte(matrix))
+		}
 	case 8:
 		fcode := br.readBitsValue(16)
 		if fcode == ^uint64(0) {
@@ -536,6 +562,10 @@ func (p *mpeg2VideoParser) finalize() mpeg2VideoInfo {
 	} else if p.info.ScanType == "" {
 		p.info.ScanType = "Interlaced"
 	}
+	if p.info.ScanOrder == "" && p.topFieldFirst > 0 && p.pictureCount > 0 {
+		// Official mediainfo still surfaces TFF in some Progressive streams (e.g. DVD menu VOBs).
+		p.info.ScanOrder = "TFF"
+	}
 	if p.progressiveSeq && p.repeatFirstField > 0 && p.info.FrameRate > 0 {
 		if (p.info.FrameRateNumer == 30000 && p.info.FrameRateDenom == 1001) || math.Abs(p.info.FrameRate-29.97) < 0.02 {
 			p.info.FrameRate = 24000.0 / 1001.0
@@ -572,6 +602,70 @@ func mapMPEG2Standard(frameRate float64) string {
 		return "NTSC"
 	case frameRate > 0 && math.Abs(frameRate-25.0) < 0.01:
 		return "PAL"
+	default:
+		return ""
+	}
+}
+
+func mapMPEG2ColourPrimaries(code byte) string {
+	switch code {
+	case 1:
+		return "BT.709"
+	case 4:
+		return "BT.470 M"
+	case 5:
+		return "BT.470 BG"
+	case 6:
+		// SMPTE 170M
+		return "BT.601 NTSC"
+	case 7:
+		return "SMPTE 240M"
+	case 9:
+		return "BT.2020"
+	default:
+		return ""
+	}
+}
+
+func mapMPEG2TransferCharacteristics(code byte) string {
+	switch code {
+	case 1:
+		return "BT.709"
+	case 4:
+		return "Gamma 2.2"
+	case 5:
+		return "Gamma 2.8"
+	case 6:
+		// SMPTE 170M
+		return "BT.601"
+	case 7:
+		return "SMPTE 240M"
+	case 13:
+		return "sRGB"
+	case 14:
+		return "BT.2020 (10-bit)"
+	case 15:
+		return "BT.2020 (12-bit)"
+	default:
+		return ""
+	}
+}
+
+func mapMPEG2MatrixCoefficients(code byte) string {
+	switch code {
+	case 1:
+		return "BT.709"
+	case 5:
+		return "BT.470 BG"
+	case 6:
+		// SMPTE 170M
+		return "BT.601"
+	case 7:
+		return "SMPTE 240M"
+	case 9:
+		return "BT.2020 non-constant"
+	case 10:
+		return "BT.2020 constant"
 	default:
 		return ""
 	}

@@ -729,6 +729,22 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 				if info.IntraDCPrecision > 0 {
 					jsonRaw["extra"] = renderJSONObject([]jsonKV{{Key: "intra_dc_precision", Val: strconv.Itoa(info.IntraDCPrecision)}}, false)
 				}
+				if info.ColourDescriptionPresent {
+					jsonExtras["colour_description_present"] = "Yes"
+					jsonExtras["colour_description_present_Source"] = "Stream"
+					if info.ColourPrimaries != "" {
+						jsonExtras["colour_primaries"] = info.ColourPrimaries
+						jsonExtras["colour_primaries_Source"] = "Stream"
+					}
+					if info.TransferCharacteristics != "" {
+						jsonExtras["transfer_characteristics"] = info.TransferCharacteristics
+						jsonExtras["transfer_characteristics_Source"] = "Stream"
+					}
+					if info.MatrixCoefficients != "" {
+						jsonExtras["matrix_coefficients"] = info.MatrixCoefficients
+						jsonExtras["matrix_coefficients_Source"] = "Stream"
+					}
+				}
 			}
 		case StreamAudio:
 			duration := audioDurationPS(st, opts)

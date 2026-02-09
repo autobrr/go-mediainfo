@@ -992,7 +992,12 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			audioBitRateSum := float64(0)
 			textBitRateSum := float64(0)
 			bitratesOK := true
+			short := info.DurationSeconds > 0 && info.DurationSeconds < 1
 			for i := range streams {
+				if short {
+					// MediaInfo omits StreamOrder for ultra-short MPEG-PS (e.g. 1-frame DVD menu VOBs).
+					streams[i].JSONSkipStreamOrder = true
+				}
 				if streams[i].Kind == StreamMenu {
 					streams[i].JSONSkipStreamOrder = true
 					continue
@@ -1086,8 +1091,46 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 					}
 				}
 			}
-			streamSizeSum := sumStreamSizes(streams, false)
-			setRemainingStreamSize(general.JSON, psSize, streamSizeSum)
+
+			// MediaInfo only fills General StreamSize when stream sizes are present for all
+			// non-menu streams. Align this behavior to avoid false overhead on very short PS.
+			canComputeOverhead := true
+			for i := range streams {
+				if streams[i].Kind == StreamMenu {
+					continue
+				}
+				if streams[i].JSON == nil {
+					canComputeOverhead = false
+					break
+				}
+				if streams[i].JSON["StreamSize"] == "" && streams[i].JSON["Source_StreamSize"] == "" && streams[i].JSON["StreamSize_Encoded"] == "" {
+					canComputeOverhead = false
+					break
+				}
+			}
+			if short && videoIndex >= 0 {
+				// Official mediainfo doesn't derive bitrate/stream size for 1-frame DVD menu VOBs.
+				if streams[videoIndex].JSON != nil {
+					delete(streams[videoIndex].JSON, "BitRate")
+					delete(streams[videoIndex].JSON, "StreamSize")
+				}
+				filtered := streams[videoIndex].Fields[:0]
+				for _, f := range streams[videoIndex].Fields {
+					if f.Name == "Bit rate" || f.Name == "Stream size" {
+						continue
+					}
+					filtered = append(filtered, f)
+				}
+				streams[videoIndex].Fields = filtered
+				canComputeOverhead = false
+			}
+
+			if canComputeOverhead {
+				streamSizeSum := sumStreamSizes(streams, false)
+				if streamSizeSum > 0 && streamSizeSum < psSize {
+					setRemainingStreamSize(general.JSON, psSize, streamSizeSum)
+				}
+			}
 		}
 	case "MPEG Audio":
 		if parsedInfo, parsedStreams, tagJSON, tagJSONRaw, ok := ParseMP3(file, stat.Size()); ok {
