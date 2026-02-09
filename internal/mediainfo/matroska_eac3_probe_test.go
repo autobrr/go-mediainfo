@@ -21,18 +21,18 @@ func buildEAC3Frame(frameSize int, dialnorm uint64, comprByte uint64) []byte {
 	frmsiz := uint64(frameSize/2 - 1)
 	out := make([]byte, frameSize)
 	pos := 0
-	putBits(out, &pos, 0x0B77, 16)     // syncword
-	putBits(out, &pos, 0, 2)           // strmtyp (independent)
-	putBits(out, &pos, 0, 3)           // substreamid
-	putBits(out, &pos, frmsiz, 11)     // frmsiz
-	putBits(out, &pos, 0, 2)           // fscod (48kHz)
-	putBits(out, &pos, 3, 2)           // numblkscod (6 blocks => 1536 samples)
-	putBits(out, &pos, 2, 3)           // acmod
-	putBits(out, &pos, 0, 1)           // lfeon
-	putBits(out, &pos, 16, 5)          // bsid (>=10)
-	putBits(out, &pos, dialnorm, 5)    // dialnorm
-	putBits(out, &pos, 1, 1)           // compre
-	putBits(out, &pos, comprByte, 8)   // compr (0xFF would mean "unset")
+	putBits(out, &pos, 0x0B77, 16)   // syncword
+	putBits(out, &pos, 0, 2)         // strmtyp (independent)
+	putBits(out, &pos, 0, 3)         // substreamid
+	putBits(out, &pos, frmsiz, 11)   // frmsiz
+	putBits(out, &pos, 0, 2)         // fscod (48kHz)
+	putBits(out, &pos, 3, 2)         // numblkscod (6 blocks => 1536 samples)
+	putBits(out, &pos, 2, 3)         // acmod
+	putBits(out, &pos, 0, 1)         // lfeon
+	putBits(out, &pos, 16, 5)        // bsid (>=10)
+	putBits(out, &pos, dialnorm, 5)  // dialnorm
+	putBits(out, &pos, 1, 1)         // compre
+	putBits(out, &pos, comprByte, 8) // compr (0xFF would mean "unset")
 	return out
 }
 
@@ -72,4 +72,3 @@ func TestProbeMatroskaAudio_EAC3MultiFramePacket(t *testing.T) {
 		}
 	})
 }
-
