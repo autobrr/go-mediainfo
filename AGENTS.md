@@ -173,3 +173,18 @@ Owner: soup
 
 ## Notes
 - Update this file as we learn more about CLI behavior, formats, and edge cases.
+- Loop-to-done: no “continue?” prompts. Run parity/bench cycles until 1:1 vs official + tests green.
+- IO: avoid full-dataset sweeps on `/mnt/storage/torrents*`; sample a few files per type; stop runaway jobs fast.
+
+- Status (2026-02-09):
+- Parity: MP4 fixed for udta `Description` + AVC SAR (PixelAspectRatio / DisplayAspectRatio(_Original)) + non-x264 encoder string -> Encoded_Library.
+- Parity: AVI MP3-in-AVI fixed for Duration/SamplingCount + Alignment (Split vs Aligned) based on WAVEFORMATEX blockAlign.
+- Matroska: E-AC-3 probe regression prevented (packetAligned gate) + audio Duration JSON consistency test.
+- Remaining big diffs: TS Title/Movie + TS/BDAV size accounting + AC-3 stats sampling; DVD/VOB duration/framecount/streamsize/GOP semantics; AVI container/video codec details (DivX/XviD specifics).
+
+- Perf notes:
+- Small files: startup dominates; go can be slower than `/usr/bin/mediainfo` (measure with multi-run median).
+- Large MKV (2160p sample): go can be faster than official at ParseSpeed=0.5.
+
+- Verification method:
+- Compare official `/usr/bin/mediainfo --Output=JSON --Language=raw --ParseSpeed=0.5` vs `/tmp/go-mediainfo --output=JSON --language=raw`, normalize with `jq -S` and `del(.creatingLibrary)`, then `diff -u`.
