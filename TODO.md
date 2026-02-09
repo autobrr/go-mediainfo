@@ -10,6 +10,13 @@
 - CSV parity: sample set now matches upstream (section headers, raw values, spacing, numbering)
 - Implement MediaInfo JSON/XML/CSV schema parity (raw field names/values, missing fields, exact formatting) where still missing
 - JSON parity: sample set complete (MP4/MKV/TS/AVI/MPEG Video)
+- TS parity (real-world samples; not covered by `samples/sample.ts`):
+  - ATSC PSIP-derived General metadata: Title/Movie/LawRating (e.g. `Disney Channel Movie`, `TV-PG`)
+  - Per-stream `StreamSize`/`BitRate` deltas for MPEG-2 Video PID accounting (ours matches `TS payload - PES header`, official smaller)
+  - AC-3 stats parity: `compr_*` / `dynrng_*` counts and extrema still differ on some broadcasts
+- BDAV/M2TS parity (real-world clips):
+  - General `FrameCount/TextCount/StreamSize` diffs, plus Video `StreamSize/BitRate` behavior
+  - Likely shared root with TS PID size accounting; then BDAV-specific fields
 - MPEG-PS/VOB JSON: VTS_02_1.VOB small diffs (General Duration/OverallBitRate, Video BitRate rounding, AC-3 extra stats, field order for MuxingMode/Delay_Source)
 - MPEG-PS/VOB JSON: recheck sample_ac3.vob after AC-3 duration tweak (+1 frame)
 - MPEG-PS/VOB: verify RLE subtitle Delay/Duration (first/last PTS) on more DVD samples
