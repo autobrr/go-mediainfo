@@ -228,12 +228,10 @@ func parseAC3Frame(payload []byte) (ac3Info, int, bool) {
 		info.hasComprField = true
 		info.hasCompr = true
 		info.comprDB = info.comprFieldDB
-		if compr != 0xFF {
-			info.comprSum = math.Pow(10.0, info.comprDB/10.0)
-			info.comprCount = 1
-			info.comprMin = info.comprDB
-			info.comprMax = info.comprDB
-		}
+		info.comprSum = math.Pow(10.0, info.comprDB/10.0)
+		info.comprCount = 1
+		info.comprMin = info.comprDB
+		info.comprMax = info.comprDB
 	}
 	langcode, ok := br.readBits(1)
 	if !ok {
@@ -306,20 +304,13 @@ func parseAC3Frame(payload []byte) (ac3Info, int, bool) {
 	if dynrnge, code, ok := parseAC3Dynrng(&br, int(acmod)); ok {
 		if dynrnge {
 			info.dynrngeSeen = true
-			if code != 0xFF {
-				value := ac3DynrngDB(code)
-				info.dynrngDB = value
-				info.hasDynrng = true
-				info.dynrngSum = math.Pow(10.0, value/10.0)
-				info.dynrngCount = 1
-				info.dynrngMin = value
-				info.dynrngMax = value
-			}
-		} else {
-			info.dynrngSum = 1
+			value := ac3DynrngDB(code)
+			info.dynrngDB = value
+			info.hasDynrng = true
+			info.dynrngSum = math.Pow(10.0, value/10.0)
 			info.dynrngCount = 1
-			info.dynrngMin = 0
-			info.dynrngMax = 0
+			info.dynrngMin = value
+			info.dynrngMax = value
 		}
 	}
 
