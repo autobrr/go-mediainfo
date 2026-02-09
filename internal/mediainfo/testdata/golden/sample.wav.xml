@@ -10,24 +10,29 @@
 <AudioCount>1</AudioCount>
 <FileExtension>wav</FileExtension>
 <Format>Wave</Format>
+<Format_Settings>PcmWaveformat</Format_Settings>
 <FileSize>384078</FileSize>
 <Duration>4.000</Duration>
 <OverallBitRate_Mode>CBR</OverallBitRate_Mode>
-<OverallBitRate>768000</OverallBitRate>
+<OverallBitRate>768156</OverallBitRate>
+<StreamSize>78</StreamSize>
 <File_Modified_Date><redacted></File_Modified_Date>
 <File_Modified_Date_Local><redacted></File_Modified_Date_Local>
+<Encoded_Application>Lavf62.3.100</Encoded_Application>
 </track>
 <track type="Audio">
-<StreamOrder>0</StreamOrder>
 <Format>PCM</Format>
+<Format_Settings_Endianness>Little</Format_Settings_Endianness>
+<CodecID>1</CodecID>
 <Duration>4.000</Duration>
 <BitRate_Mode>CBR</BitRate_Mode>
 <BitRate>768000</BitRate>
 <Channels>1</Channels>
-<ChannelPositions>Front: C</ChannelPositions>
-<ChannelLayout>M</ChannelLayout>
 <SamplingRate>48000</SamplingRate>
+<SamplingCount>192000</SamplingCount>
+<StreamSize>384000</StreamSize>
 <BitDepth>16</BitDepth>
+<Format_Settings_Sign>Signed</Format_Settings_Sign>
 </track>
 </media>
 </MediaInfo>

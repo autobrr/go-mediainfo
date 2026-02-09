@@ -1218,9 +1218,29 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			}
 		}
 	case "Wave":
-		if parsedInfo, parsedStreams, ok := ParseWAV(file, stat.Size()); ok {
+		if parsedInfo, parsedStreams, generalFields, generalJSON, ok := ParseWAV(file, stat.Size()); ok {
 			info = parsedInfo
 			streams = parsedStreams
+			if len(generalFields) > 0 {
+				for _, field := range generalFields {
+					general.Fields = appendFieldUnique(general.Fields, field)
+				}
+			}
+			// Match official mediainfo JSON: OverallBitRate uses full file size; StreamSize is RIFF overhead.
+			if general.JSON == nil {
+				general.JSON = map[string]string{}
+			}
+			if info.DurationSeconds > 0 {
+				setOverallBitRate(general.JSON, stat.Size(), info.DurationSeconds)
+			}
+			if info.StreamOverheadBytes > 0 {
+				general.JSON["StreamSize"] = strconv.FormatInt(info.StreamOverheadBytes, 10)
+			}
+			for k, v := range generalJSON {
+				if v != "" {
+					general.JSON[k] = v
+				}
+			}
 		}
 	case "Ogg":
 		if parsedInfo, parsedStreams, ok := ParseOgg(file, stat.Size()); ok {
