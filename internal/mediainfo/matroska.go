@@ -1616,9 +1616,13 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64, durationPrec i
 			jsonExtras["colour_description_present_Source"] = colorSource
 			if videoInfo.colorRange != "" {
 				jsonExtras["colour_range"] = videoInfo.colorRange
-				// Match MediaInfo: when both container and stream color metadata exist, most Source
-				// fields are reported as "Container / Stream", but colour_range_Source remains specific.
-				jsonExtras["colour_range_Source"] = matroskaColorSource(videoInfo.colorRangeSource, colorSource)
+				// Match MediaInfo: when both container and stream color metadata exist, Source fields
+				// are reported as "Container / Stream".
+				if strings.Contains(colorSource, "/") {
+					jsonExtras["colour_range_Source"] = colorSource
+				} else {
+					jsonExtras["colour_range_Source"] = matroskaColorSource(videoInfo.colorRangeSource, colorSource)
+				}
 			}
 			if videoInfo.colorPrimaries != "" {
 				jsonExtras["colour_primaries"] = videoInfo.colorPrimaries
@@ -2924,9 +2928,9 @@ func applyMatroskaTagLanguages(streams []Stream, langsByTrackUID map[uint64]stri
 		return
 	}
 	for i := range streams {
-		// Official mediainfo doesn't emit video Language based on Statistics Tags TagLanguage.
-		// Keep video language empty even if muxer tags provide a value.
-		if streams[i].Kind == StreamVideo {
+		// Official mediainfo doesn't emit video/text Language based on Statistics Tags TagLanguage.
+		// Keep video/text language empty even if muxer tags provide a value.
+		if streams[i].Kind == StreamVideo || streams[i].Kind == StreamText {
 			continue
 		}
 		uid := streamTrackUID(streams[i])

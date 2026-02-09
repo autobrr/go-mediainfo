@@ -660,7 +660,7 @@ func readMatroskaBlockHeader(er *ebmlReader, size int64, audioProbes map[uint64]
 					} else if frameCount == 1 {
 						// Non-laced packets may contain multiple E-AC-3 frames; read a bit more so we
 						// can stay in sync and match official compr stats.
-						peek = 2048
+						peek = 8192
 					}
 				}
 				peek = min(size, peek)
@@ -1325,6 +1325,10 @@ func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAud
 		}
 		if ac3.lfeon >= 0 {
 			extraFields = append(extraFields, jsonKV{Key: "lfeon", Val: strconv.Itoa(ac3.lfeon)})
+		}
+		// Match official: dsurmod appears for 2/0 even on E-AC-3 (commonly 0).
+		if ac3.acmod == 2 && (ac3.hasDsurmod || probe.format == "E-AC-3") {
+			extraFields = append(extraFields, jsonKV{Key: "dsurmod", Val: strconv.Itoa(ac3.dsurmod)})
 		}
 		if avg, minVal, maxVal, ok := ac3.dialnormStats(); ok {
 			extraFields = append(extraFields, jsonKV{Key: "dialnorm_Average", Val: strconv.Itoa(avg)})
