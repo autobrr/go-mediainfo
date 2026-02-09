@@ -330,7 +330,6 @@ func buildJSONComputedFields(kind StreamKind, fields []jsonKV, containerFormat s
 	frameRate, _ := strconv.ParseFloat(jsonFieldValue(fields, "FrameRate"), 64)
 	sampleRate, _ := strconv.ParseFloat(jsonFieldValue(fields, "SamplingRate"), 64)
 	channels := jsonFieldValue(fields, "Channels")
-	codecID := strings.ToLower(jsonFieldValue(fields, "CodecID"))
 
 	if kind == StreamVideo && duration > 0 && frameRate > 0 {
 		if jsonFieldValue(fields, "FrameCount") == "" {
@@ -364,9 +363,24 @@ func buildJSONComputedFields(kind StreamKind, fields []jsonKV, containerFormat s
 				samples := int(math.Round(duration * sampleRate))
 				out = append(out, jsonKV{Key: "SamplingCount", Val: strconv.Itoa(samples)})
 			}
-			if duration > 0 && sampleRate > 0 && jsonFieldValue(fields, "FrameCount") == "" && strings.HasPrefix(codecID, "mp4a") {
-				frameCount := int(math.Round(duration * sampleRate / 1024.0))
-				out = append(out, jsonKV{Key: "FrameCount", Val: strconv.Itoa(frameCount)})
+			if jsonFieldValue(fields, "FrameCount") == "" {
+				// MediaInfo emits AAC FrameCount in Matroska too (CodecID e.g. A_AAC-2),
+				// so don't gate on the codec ID.
+				spf := 1024.0
+				if v := jsonFieldValue(fields, "SamplesPerFrame"); v != "" {
+					if parsed, err := strconv.ParseFloat(v, 64); err == nil && parsed > 0 {
+						spf = parsed
+					}
+				}
+				if v := jsonFieldValue(fields, "SamplingCount"); v != "" {
+					if samples, err := strconv.ParseFloat(v, 64); err == nil && samples > 0 && spf > 0 {
+						frameCount := int(math.Round(samples / spf))
+						out = append(out, jsonKV{Key: "FrameCount", Val: strconv.Itoa(frameCount)})
+					}
+				} else if duration > 0 && sampleRate > 0 && spf > 0 {
+					frameCount := int(math.Round(duration * sampleRate / spf))
+					out = append(out, jsonKV{Key: "FrameCount", Val: strconv.Itoa(frameCount)})
+				}
 			}
 			if src := jsonFieldValue(fields, "Source_Duration"); src != "" && jsonFieldValue(fields, "Source_FrameCount") == "" {
 				if srcDur, err := strconv.ParseFloat(src, 64); err == nil && sampleRate > 0 {

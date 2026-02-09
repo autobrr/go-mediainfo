@@ -2317,15 +2317,7 @@ func parseMatroskaTags(buf []byte, encodedDate string) (map[uint64]string, map[u
 			dataEnd = len(buf)
 		}
 		if id == mkvIDTag {
-			trackUID, tags, tagLanguage := parseMatroskaTag(buf[dataStart:dataEnd])
-			if trackUID > 0 {
-				if lang, ok := tags["LANGUAGE"]; ok && lang != "" && langsByTrackUID[trackUID] == "" {
-					langsByTrackUID[trackUID] = strings.TrimSpace(lang)
-				} else if langsByTrackUID[trackUID] == "" && tagLanguage != "" && normalizeLanguageCode(tagLanguage) != "" {
-					// Some files omit TrackEntry language; mkvmerge Statistics Tags can still carry a tag language (e.g. eng).
-					langsByTrackUID[trackUID] = tagLanguage
-				}
-			}
+			trackUID, tags, _ := parseMatroskaTag(buf[dataStart:dataEnd])
 			if encoder, ok := tags["ENCODER"]; ok && encoder != "" {
 				key := trackUID
 				if key == 0 {

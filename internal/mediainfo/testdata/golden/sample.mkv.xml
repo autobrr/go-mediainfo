@@ -84,6 +84,7 @@
 <SamplingRate>48000</SamplingRate>
 <SamplingCount>193008</SamplingCount>
 <FrameRate>46.875</FrameRate>
+<FrameCount>188</FrameCount>
 <Compression_Mode>Lossy</Compression_Mode>
 <Delay>0.000</Delay>
 <Delay_Source>Container</Delay_Source>

@@ -69,6 +69,7 @@
 "SamplingRate":"48000",
 "SamplingCount":"193008",
 "FrameRate":"46.875",
+"FrameCount":"188",
 "Compression_Mode":"Lossy",
 "Delay":"0.000",
 "Delay_Source":"Container",
