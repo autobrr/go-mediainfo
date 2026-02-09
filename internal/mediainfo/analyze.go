@@ -36,7 +36,8 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 
 	format := DetectFormat(header, path)
 
-	if opts.TestContinuousFileNames && (format == "BDAV" || format == "MPEG-TS") {
+	// MediaInfo CLI does not apply continuous file name aggregation to BDAV (.m2ts) streams by default.
+	if opts.TestContinuousFileNames && format == "MPEG-TS" {
 		if set, ok := detectContinuousFileSet(path); ok {
 			completeNameLast = set.LastPath
 			fileSize = set.TotalSize
