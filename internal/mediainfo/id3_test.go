@@ -31,4 +31,3 @@ func TestID3WXXXAllowsEmptyDescription(t *testing.T) {
 		t.Fatalf("url=%q want %q", url, "http://x")
 	}
 }
-

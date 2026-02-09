@@ -39,4 +39,3 @@ func TestMP3ModeExtensionUsesSecondFrameWhenAvailable(t *testing.T) {
 		t.Fatalf("Format_Settings_ModeExtension=%q want %q", got, "MS Stereo")
 	}
 }
-
