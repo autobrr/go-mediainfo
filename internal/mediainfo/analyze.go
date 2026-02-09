@@ -1318,41 +1318,61 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			}
 		}
 	case "AVI":
-		if parsedInfo, parsedStreams, generalFields, ok := ParseAVIWithOptions(file, stat.Size(), opts); ok {
+		if parsedInfo, parsedStreams, generalFields, interleaved, ok := ParseAVIWithOptions(file, stat.Size(), opts); ok {
 			info = parsedInfo
 			general.JSON = map[string]string{}
+			var rawWritingApp string
+			var rawWritingLib string
 			for _, field := range generalFields {
+				if field.Name == "Writing application" {
+					rawWritingApp = field.Value
+				}
+				if field.Name == "Writing library" {
+					rawWritingLib = field.Value
+				}
 				general.Fields = appendFieldUnique(general.Fields, field)
 			}
 			streams = parsedStreams
-			hasVideo := false
-			hasAudio := false
-			for _, s := range streams {
-				if s.Kind == StreamVideo {
-					hasVideo = true
-				}
-				if s.Kind == StreamAudio {
-					hasAudio = true
-				}
+			if interleaved != "" {
+				general.JSON["Interleaved"] = interleaved
 			}
-			if hasVideo && hasAudio {
-				// Official mediainfo marks typical AVI A/V as interleaved.
-				general.JSON["Interleaved"] = "Yes"
+			if rawWritingApp != "" {
+				// Preserve raw string in JSON (some formats normalize Writing application).
+				general.JSON["Encoded_Application"] = rawWritingApp
+			}
+			if rawWritingLib != "" {
+				general.JSON["Encoded_Library"] = rawWritingLib
 			}
 			if info.DurationSeconds > 0 {
 				jsonDuration := math.Round(info.DurationSeconds*1000) / 1000
+				general.JSON["Duration"] = formatJSONSeconds(jsonDuration)
 				setOverallBitRate(general.JSON, stat.Size(), jsonDuration)
 			}
 			var frameCount string
+			hasVBR := false
 			for _, stream := range streams {
-				if stream.Kind == StreamVideo {
-					if count, ok := frameCountFromFields(stream.Fields); ok {
-						frameCount = count
+				if stream.Kind == StreamVideo && frameCount == "" && stream.JSON != nil {
+					frameCount = stream.JSON["FrameCount"]
+				}
+				if stream.Kind == StreamAudio && stream.JSON != nil && stream.JSON["BitRate_Mode"] == "VBR" {
+					hasVBR = true
+				}
+			}
+			if frameCount == "" {
+				for _, stream := range streams {
+					if stream.Kind == StreamVideo {
+						if count, ok := frameCountFromFields(stream.Fields); ok {
+							frameCount = count
+							break
+						}
 					}
 				}
 			}
 			if frameCount != "" {
 				general.JSON["FrameCount"] = frameCount
+			}
+			if hasVBR {
+				general.JSON["OverallBitRate_Mode"] = "VBR"
 			}
 			streamSizeSum := sumStreamSizes(streams, false)
 			setRemainingStreamSize(general.JSON, stat.Size(), streamSizeSum)

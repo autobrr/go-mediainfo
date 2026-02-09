@@ -15,6 +15,7 @@ const aviMaxVOPScan = 32 << 20
 type aviMainHeader struct {
 	microSecPerFrame uint32
 	maxBytesPerSec   uint32
+	flags            uint32
 	totalFrames      uint32
 	streams          uint32
 	width            uint32
@@ -39,12 +40,14 @@ type aviStream struct {
 	audioAlign   uint16
 	audioBits    uint16
 	bytes        uint64
+	packetCount  uint32
 	writingLib   string
 	profile      string
 	bvop         *bool
 	qpel         *bool
 	gmc          string
 	matrix       string
+	matrixData   string
 	colorSpace   string
 	chroma       string
 	bitDepth     string
@@ -92,28 +95,30 @@ func (s *vopScanner) feed(data []byte) {
 }
 
 func ParseAVI(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, []Field, bool) {
-	return ParseAVIWithOptions(file, size, defaultAnalyzeOptions())
+	info, streams, fields, _, ok := ParseAVIWithOptions(file, size, defaultAnalyzeOptions())
+	return info, streams, fields, ok
 }
 
-func ParseAVIWithOptions(file io.ReadSeeker, size int64, opts AnalyzeOptions) (ContainerInfo, []Stream, []Field, bool) {
+func ParseAVIWithOptions(file io.ReadSeeker, size int64, opts AnalyzeOptions) (ContainerInfo, []Stream, []Field, string, bool) {
 	opts = normalizeAnalyzeOptions(opts)
 	if size < 12 {
-		return ContainerInfo{}, nil, nil, false
+		return ContainerInfo{}, nil, nil, "", false
 	}
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
-		return ContainerInfo{}, nil, nil, false
+		return ContainerInfo{}, nil, nil, "", false
 	}
 	header := make([]byte, 12)
 	if _, err := io.ReadFull(file, header); err != nil {
-		return ContainerInfo{}, nil, nil, false
+		return ContainerInfo{}, nil, nil, "", false
 	}
 	if string(header[0:4]) != "RIFF" || string(header[8:12]) != "AVI " {
-		return ContainerInfo{}, nil, nil, false
+		return ContainerInfo{}, nil, nil, "", false
 	}
 
 	var main aviMainHeader
 	streams := []*aviStream{}
 	var writingApp string
+	var writingLib string
 	var videoData []byte
 	var audioData []byte
 	var vopScan vopScanner
@@ -121,6 +126,8 @@ func ParseAVIWithOptions(file io.ReadSeeker, size int64, opts AnalyzeOptions) (C
 	var moviStart int64
 	var moviEnd int64
 	haveIndex := false
+	var interleaved string
+	var audioFirstBytes uint64
 
 	offset := int64(12)
 	for offset+8 <= size {
@@ -160,6 +167,7 @@ func ParseAVIWithOptions(file io.ReadSeeker, size int64, opts AnalyzeOptions) (C
 				}
 				if app := parseAVIINFO(listData); app != "" {
 					writingApp = app
+					writingLib = aviGeneralEncodedLibrary(app)
 				}
 			case "movi":
 				if opts.ParseSpeed >= 1 {
@@ -174,8 +182,14 @@ func ParseAVIWithOptions(file io.ReadSeeker, size int64, opts AnalyzeOptions) (C
 			if _, err := readAt(file, dataStart, indexData); err != nil {
 				break
 			}
-			if parseAVIIndex(indexData, streams) {
+			if ok, stats := parseAVIIndex(indexData, streams); ok {
 				haveIndex = true
+				if stats.interleaved != "" {
+					interleaved = stats.interleaved
+				}
+				if stats.audioFirstBytes > 0 {
+					audioFirstBytes = stats.audioFirstBytes
+				}
 			}
 		}
 		pad := chunkSize % 2
@@ -191,7 +205,7 @@ func ParseAVIWithOptions(file io.ReadSeeker, size int64, opts AnalyzeOptions) (C
 	}
 
 	if len(streams) == 0 {
-		return ContainerInfo{}, nil, nil, false
+		return ContainerInfo{}, nil, nil, "", false
 	}
 
 	var containerDuration float64
@@ -234,6 +248,7 @@ func ParseAVIWithOptions(file io.ReadSeeker, size int64, opts AnalyzeOptions) (C
 				st.bvop = info.BVOP
 				st.gmc = info.GMC
 				st.matrix = info.Matrix
+				st.matrixData = info.MatrixData
 				st.colorSpace = info.ColorSpace
 				st.chroma = info.ChromaSubsampling
 				st.bitDepth = info.BitDepth
@@ -262,7 +277,14 @@ func ParseAVIWithOptions(file io.ReadSeeker, size int64, opts AnalyzeOptions) (C
 				fields = append(fields, Field{Name: "Format profile", Value: st.profile})
 			}
 			if st.bvop != nil {
-				fields = append(fields, Field{Name: "Format settings, BVOP", Value: formatYesNo(*st.bvop)})
+				value := formatYesNo(*st.bvop)
+				// MediaInfo uses "1" for MPEG-4 Visual when BVOP is enabled.
+				if mapAVICompression(st) == "MPEG-4 Visual" && *st.bvop {
+					value = "1"
+				} else if mapAVICompression(st) == "MPEG-4 Visual" && !*st.bvop {
+					value = "No"
+				}
+				fields = append(fields, Field{Name: "Format settings, BVOP", Value: value})
 			}
 			if st.qpel != nil {
 				fields = append(fields, Field{Name: "Format settings, QPel", Value: formatYesNo(*st.qpel)})
@@ -279,6 +301,11 @@ func ParseAVIWithOptions(file io.ReadSeeker, size int64, opts AnalyzeOptions) (C
 			duration := aviStreamDuration(st, main)
 			if duration > 0 {
 				fields = addStreamDuration(fields, duration)
+				if jsonExtras == nil {
+					jsonExtras = map[string]string{}
+				}
+				// Preserve ms precision in JSON (text Duration drops ms for long runtimes).
+				jsonExtras["Duration"] = formatJSONSeconds(duration)
 			}
 			if st.bytes > 0 && duration > 0 {
 				durationForBitrate := duration
@@ -318,6 +345,12 @@ func ParseAVIWithOptions(file io.ReadSeeker, size int64, opts AnalyzeOptions) (C
 			}
 			if frameRate := aviFrameRate(st); frameRate > 0 {
 				fields = append(fields, Field{Name: "Frame rate", Value: formatFrameRateRatio(st.rate, st.scale)})
+				if st.length > 0 {
+					if jsonExtras == nil {
+						jsonExtras = map[string]string{}
+					}
+					jsonExtras["FrameCount"] = strconv.FormatUint(uint64(st.length), 10)
+				}
 			}
 			if st.colorSpace != "" {
 				fields = append(fields, Field{Name: "Color space", Value: st.colorSpace})
@@ -346,6 +379,20 @@ func ParseAVIWithOptions(file io.ReadSeeker, size int64, opts AnalyzeOptions) (C
 				jsonExtras = map[string]string{}
 			}
 			jsonExtras["Delay"] = "0.000"
+			if st.matrixData != "" {
+				jsonExtras["Format_Settings_Matrix_Data"] = st.matrixData
+			}
+			if st.writingLib != "" && strings.HasPrefix(st.writingLib, "XviD") && !strings.Contains(st.writingLib, "build=") {
+				if version, date, ok := xvidLibraryVersionDate(st.writingLib); ok {
+					jsonExtras["Encoded_Library_Name"] = "XviD"
+					if version != "" {
+						jsonExtras["Encoded_Library_Version"] = version
+					}
+					if date != "" {
+						jsonExtras["Encoded_Library_Date"] = date
+					}
+				}
+			}
 			if st.writingLib != "" {
 				fields = append(fields, Field{Name: "Writing library", Value: st.writingLib})
 			}
@@ -383,6 +430,13 @@ func ParseAVIWithOptions(file io.ReadSeeker, size int64, opts AnalyzeOptions) (C
 				bps := uint64(st.audioAvgBps) * 8
 				fields = append(fields, Field{Name: "Bit rate", Value: formatBitrate(float64(bps))})
 				jsonExtras["BitRate"] = strconv.FormatUint(bps, 10)
+				if st.audioTag == 0x55 {
+					if isMP3CBRBitrate(int64(bps)) {
+						jsonExtras["BitRate_Mode"] = "CBR"
+					} else {
+						jsonExtras["BitRate_Mode"] = "VBR"
+					}
+				}
 			}
 
 			if st.bytes > 0 {
@@ -392,24 +446,44 @@ func ParseAVIWithOptions(file io.ReadSeeker, size int64, opts AnalyzeOptions) (C
 				}
 			}
 			duration := aviAudioDurationSeconds(st)
+			if st.audioTag == 0x55 && st.packetCount > 0 && st.audioRate > 0 {
+				// MediaInfo: MP3-in-AVI SamplingCount is based on packet count (1 packet ~= 1 frame).
+				samples := int64(st.packetCount) * 1152
+				jsonExtras["SamplingCount"] = strconv.FormatInt(samples, 10)
+				duration = float64(samples) / float64(st.audioRate)
+			}
 			if duration > 0 {
 				fields = addStreamDuration(fields, duration)
 				jsonExtras["Duration"] = formatJSONSeconds(duration)
 			}
 
-			if duration > 0 && st.audioRate > 0 && st.audioTag == 0x55 {
-				// MediaInfo emits SamplingCount but not FrameCount for MP3-in-AVI.
-				samples := int64(math.Round(duration * float64(st.audioRate)))
-				if samples > 0 {
-					jsonExtras["SamplingCount"] = strconv.FormatInt(samples, 10)
+			if st.audioTag == 0x55 && st.packetCount > 0 {
+				if hdr, ok := findFirstMP3Header(audioData); ok && hdr.channels == 2 && hdr.channelMode == 0x01 {
+					jsonExtras["Format_Settings_Mode"] = "Joint stereo"
+					if (hdr.modeExt & 0x02) != 0 {
+						jsonExtras["Format_Settings_ModeExtension"] = "MS Stereo"
+					} else if (hdr.modeExt & 0x01) != 0 {
+						jsonExtras["Format_Settings_ModeExtension"] = "Intensity Stereo"
+					}
 				}
-				frameDur := float64(1152) / float64(st.audioRate)
-				jsonExtras["Interleave_Duration"] = formatJSONFloat(frameDur)
-				jsonExtras["Interleave_Preload"] = formatJSONFloat(frameDur)
 				if videoFrameRate > 0 {
-					v := frameDur * videoFrameRate
-					v = math.Floor(v*100+1e-9) / 100
-					jsonExtras["Interleave_VideoFrames"] = fmt.Sprintf("%.2f", v)
+					// MediaInfo: Interleave_VideoFrames = video_packets / audio_packets.
+					videoPackets := float64(0)
+					for _, vst := range streams {
+						if vst.kind == StreamVideo && vst.packetCount > 0 {
+							videoPackets = float64(vst.packetCount)
+							break
+						}
+					}
+					if videoPackets > 0 {
+						ratio := videoPackets / float64(st.packetCount)
+						jsonExtras["Interleave_VideoFrames"] = fmt.Sprintf("%.2f", math.Round(ratio*100)/100)
+						jsonExtras["Interleave_Duration"] = formatJSONFloat(ratio / videoFrameRate)
+						if audioFirstBytes > 0 && st.audioAvgBps > 0 {
+							preload := float64(audioFirstBytes) / float64(st.audioAvgBps)
+							jsonExtras["Interleave_Preload"] = formatJSONFloat(preload)
+						}
+					}
 				}
 			}
 
@@ -450,8 +524,11 @@ func ParseAVIWithOptions(file io.ReadSeeker, size int64, opts AnalyzeOptions) (C
 	if writingApp != "" {
 		generalFields = append(generalFields, Field{Name: "Writing application", Value: writingApp})
 	}
+	if writingLib != "" {
+		generalFields = append(generalFields, Field{Name: "Writing library", Value: writingLib})
+	}
 
-	return info, streamsOut, generalFields, true
+	return info, streamsOut, generalFields, interleaved, true
 }
 
 func parseAVIHDRL(data []byte, main *aviMainHeader, streams *[]*aviStream) {
@@ -463,6 +540,7 @@ func parseAVIHDRL(data []byte, main *aviMainHeader, streams *[]*aviStream) {
 			}
 			main.microSecPerFrame = binary.LittleEndian.Uint32(payload[0:4])
 			main.maxBytesPerSec = binary.LittleEndian.Uint32(payload[4:8])
+			main.flags = binary.LittleEndian.Uint32(payload[12:16])
 			main.totalFrames = binary.LittleEndian.Uint32(payload[16:20])
 			main.streams = binary.LittleEndian.Uint32(payload[24:28])
 			main.width = binary.LittleEndian.Uint32(payload[32:36])
@@ -512,6 +590,7 @@ func parseAVIStrh(payload []byte, stream *aviStream) {
 	switch fccType {
 	case "vids":
 		stream.kind = StreamVideo
+		stream.handler = strings.ToUpper(strings.TrimSpace(stream.handler))
 	case "auds":
 		stream.kind = StreamAudio
 	case "txts":
@@ -531,7 +610,7 @@ func parseAVIStrf(payload []byte, stream *aviStream) {
 		stream.height = binary.LittleEndian.Uint32(payload[8:12])
 		stream.bitCount = binary.LittleEndian.Uint16(payload[14:16])
 		compression := binary.LittleEndian.Uint32(payload[16:20])
-		stream.compression = fourCC(compression)
+		stream.compression = strings.ToUpper(fourCC(compression))
 		return
 	}
 	if stream.kind == StreamAudio {
@@ -554,6 +633,11 @@ func parseAVIINFO(data []byte) string {
 		writingApp = trimNullString(payload)
 	})
 	return writingApp
+}
+
+type aviIndexStats struct {
+	interleaved     string
+	audioFirstBytes uint64
 }
 
 func parseAVIMovi(file io.ReadSeeker, start, end int64, streams []*aviStream, videoData *[]byte, audioData *[]byte, vopScan *vopScanner, maxScanBytes int64, collectBytes bool) {
@@ -652,21 +736,87 @@ func parseAVIMovi(file io.ReadSeeker, start, end int64, streams []*aviStream, vi
 	}
 }
 
-func parseAVIIndex(data []byte, streams []*aviStream) bool {
+func parseAVIIndex(data []byte, streams []*aviStream) (bool, aviIndexStats) {
 	found := false
 	pos := 0
+	stats := aviIndexStats{}
+
+	var first00, second00 uint32
+	var first01, second01 uint32
+	hasFirst00 := false
+	hasSecond00 := false
+	hasFirst01 := false
+	hasSecond01 := false
+	seenFirstVideo := false
 	for pos+16 <= len(data) {
 		id := string(data[pos : pos+4])
 		if index, ok := parseAVIStreamIndex(id); ok {
 			if index >= 0 && index < len(streams) {
+				offset := binary.LittleEndian.Uint32(data[pos+8 : pos+12])
 				size := binary.LittleEndian.Uint32(data[pos+12 : pos+16])
 				streams[index].bytes += uint64(size)
+				suffix := ""
+				if len(id) == 4 {
+					suffix = id[2:4]
+				}
+				switch streams[index].kind {
+				case StreamVideo:
+					if suffix == "dc" || suffix == "db" {
+						streams[index].packetCount++
+					}
+				case StreamAudio:
+					if suffix == "wb" {
+						streams[index].packetCount++
+					}
+				}
+
+				// Interleaved detection (MediaInfo): based on relative ordering of the first and
+				// second packets for streams 00 and 01.
+				if strings.HasPrefix(id, "00") {
+					if !hasFirst00 {
+						first00 = offset
+						hasFirst00 = true
+					} else if !hasSecond00 {
+						second00 = offset
+						hasSecond00 = true
+					}
+				} else if strings.HasPrefix(id, "01") {
+					if !hasFirst01 {
+						first01 = offset
+						hasFirst01 = true
+					} else if !hasSecond01 {
+						second01 = offset
+						hasSecond01 = true
+					}
+				}
+				// Interleave preload: sum audio bytes before first video packet.
+				if !seenFirstVideo {
+					if strings.HasPrefix(id, "00") && (suffix == "dc" || suffix == "db") {
+						seenFirstVideo = true
+					} else if strings.HasPrefix(id, "01") {
+						stats.audioFirstBytes += uint64(size)
+					}
+				}
 				found = true
 			}
 		}
 		pos += 16
 	}
-	return found
+	if found {
+		for _, st := range streams {
+			if st.kind == StreamVideo && st.packetCount > 0 {
+				st.length = st.packetCount
+			}
+		}
+	}
+	if hasFirst00 && hasSecond00 && hasFirst01 && hasSecond01 {
+		if (first00 < first01 && second00 > first01) || (first01 < first00 && second01 > first00) {
+			stats.interleaved = "Yes"
+		} else {
+			stats.interleaved = "No"
+		}
+	}
+	return found, stats
 }
 
 func aviStreamDuration(stream *aviStream, main aviMainHeader) float64 {
@@ -725,6 +875,42 @@ func mapAVICompression(stream *aviStream) string {
 	default:
 		return code
 	}
+}
+
+func aviGeneralEncodedLibrary(writingApp string) string {
+	// MediaInfo: for some applications (e.g., VirtualDubMod), Encoded_Library is derived
+	// from the Writing application string.
+	writingApp = strings.TrimSpace(writingApp)
+	if strings.HasPrefix(writingApp, "VirtualDubMod") {
+		if i := strings.IndexByte(writingApp, '('); i >= 0 {
+			if j := strings.IndexByte(writingApp[i+1:], ')'); j >= 0 {
+				inside := strings.TrimSpace(writingApp[i+1 : i+1+j])
+				if inside != "" {
+					return "VirtualDubMod " + inside
+				}
+			}
+		}
+	}
+	return ""
+}
+
+func isMP3CBRBitrate(bps int64) bool {
+	// Common Layer III bitrates (bps). Used for AVI MP3 mode detection.
+	switch bps {
+	case 8000, 16000, 24000, 32000, 40000, 48000, 56000, 64000, 80000, 96000, 112000, 128000, 144000, 160000, 192000, 224000, 256000, 320000:
+		return true
+	default:
+		return false
+	}
+}
+
+func findFirstMP3Header(data []byte) (mp3HeaderInfo, bool) {
+	for i := 0; i+4 <= len(data); i++ {
+		if h, ok := parseMP3Header(data[i : i+4]); ok {
+			return h, true
+		}
+	}
+	return mp3HeaderInfo{}, false
 }
 
 func parseAVIStreamIndex(id string) (int, bool) {

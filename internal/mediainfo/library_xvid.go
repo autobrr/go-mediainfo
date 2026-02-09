@@ -1,0 +1,105 @@
+package mediainfo
+
+import (
+	"strings"
+)
+
+type xvidLibEntry struct {
+	Version string
+	Date    string
+}
+
+// Source: MediaInfoLib DataBase Library_XviD.csv (trimmed and embedded).
+const xvidLibraryCSV = `1;0.0.01;2002-10-17
+2;0.0.02;2002-10-30
+3;0.0.03;2002-12-09
+4;0.0.04;2003-01
+5;0.0.05;2003-01-11
+6;0.0.06;2003-01-12
+7;0.0.07;2003-01-13
+8;0.0.08;2003-01-14
+9;0.0.09;2003-03-25
+10;0.0.10;2003-06-09
+11;0.0.11;2003-06-09
+12;0.0.12;2003-06-11
+13;0.0.13;2003-06-11
+14;0.0.14;2003-06-28
+15;0.0.15;2003-07-28
+16;0.0.16;2003-07-28
+17;0.0.17;2003-08-06
+18;0.0.18;2003-09-04
+19;0.0.19;2003-09-28
+20;0.0.20;2003-10-09
+21;1.0.0 Beta1 (Aloha);2003-11-29
+22;1.0.0 Beta1.5;2003-12-03
+23;1.0.0 Beta2 (Ciao);2003-12-06
+24;1.0.0 Beta2.5;2003-12-18
+25;1.0.0 Beta3 (Selam);2003-12-27
+26;1.0.0 RC1 (Niltze);2004-01-26
+27;1.0.0 RC1b;2004-01-30
+28;1.0.0 RC2 (Jambo);2004-02-01
+29;1.0.0 RC3 (Nihao);2004-03-22
+30;1.0.0 RC4 (Hola);2004-04-05
+31;1.0.0 RC4b;2004-04-15
+32;1.0.0 RC4c;2004-05-02
+33;1.0.0 RC4d;2004-05-03
+34;1.0.0;2004-05-09
+35;1.0.1;2004-06-05
+36;1.0.2;2004-08-29
+37;1.0.3;2004-12-20
+38;1.1.0 Beta1;2005-01-16
+39;1.1.0 Beta2;2005-04-04
+40;1.1.0 RC;2005-11-22
+41;1.1.0;2005-11-22
+42;1.2.0.dev42;2005-12
+43;1.2.0SMP;2006-01-08
+44;1.1.1;2006-07-10
+45;1.2.0.dev45;2006-07-10
+46;1.1.2;2006-11-01
+47;1.2.0.dev47;2006-11-01
+48;1.2.0.dev48;
+49;1.2.0.dev49;
+50;1.2.1;2008-12-04
+55;1.3.0.dev55;`
+
+var xvidLibrary = func() map[string]xvidLibEntry {
+	m := map[string]xvidLibEntry{}
+	for _, line := range strings.Split(xvidLibraryCSV, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, ";", 3)
+		if len(parts) < 2 {
+			continue
+		}
+		key := strings.TrimSpace(parts[0])
+		ver := strings.TrimSpace(parts[1])
+		date := ""
+		if len(parts) == 3 {
+			date = strings.TrimSpace(parts[2])
+		}
+		if key == "" || ver == "" {
+			continue
+		}
+		m[key] = xvidLibEntry{Version: ver, Date: date}
+	}
+	return m
+}()
+
+func xvidLibraryVersionDate(lib string) (version string, date string, ok bool) {
+	if !strings.HasPrefix(lib, "XviD") {
+		return "", "", false
+	}
+	key := strings.TrimPrefix(lib, "XviD")
+	key = strings.ReplaceAll(key, "C", "")
+	key = strings.TrimLeft(key, "0")
+	if key == "" {
+		return "", "", false
+	}
+	if entry, ok2 := xvidLibrary[key]; ok2 {
+		return entry.Version, entry.Date, true
+	}
+	// MediaInfo falls back to the raw key when unknown.
+	return key, "", true
+}

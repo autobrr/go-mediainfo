@@ -19,7 +19,7 @@ func TestParseAVIIndex(t *testing.T) {
 	data := append(entry("00dc", 1200), entry("01wb", 400)...)
 	data = append(data, entry("JUNK", 999)...)
 
-	if !parseAVIIndex(data, streams) {
+	if ok, _ := parseAVIIndex(data, streams); !ok {
 		t.Fatalf("expected index parse to find stream entries")
 	}
 	if streams[0].bytes != 1200 {
@@ -32,7 +32,7 @@ func TestParseAVIIndex(t *testing.T) {
 
 func TestParseAVIIndexNoEntries(t *testing.T) {
 	streams := []*aviStream{{index: 0}}
-	if parseAVIIndex([]byte("short"), streams) {
+	if ok, _ := parseAVIIndex([]byte("short"), streams); ok {
 		t.Fatalf("expected no index entries")
 	}
 	if streams[0].bytes != 0 {
