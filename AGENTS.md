@@ -11,6 +11,13 @@ Owner: soup
 - Don't ask for "continue": run parity + perf loops automatically, then commit/push once verified.
 - For `/mnt/storage/...` scans: be polite to disks (sample files; avoid full-tree scans; use `ionice -c3 nice -n 10` when doing bulk comparisons).
 
+## Status (2026-02-09)
+- CI: green on `main` (recent runs: MP4/AVI/MPEG-PS fixes).
+- Parity: verified 1:1 JSON raw vs `/usr/bin/mediainfo` (MediaInfoLib v23.04) for:
+- Matroska samples (incl. 4K sample)
+- MP4 sample
+- VOB sample (`VTS_01_2.vob`) after `fix(mpeg-ps): improve VOB parity`
+
 ## Learnings / Decisions
 - Command name: mediainfo
 - Parity target: MediaInfo-master in this repo
