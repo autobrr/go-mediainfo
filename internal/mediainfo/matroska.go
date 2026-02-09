@@ -1340,21 +1340,43 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64, durationPrec i
 	if videoInfo.displayHeight == 0 && spsInfo.Height > 0 {
 		videoInfo.displayHeight = spsInfo.Height
 	}
-	if videoInfo.colorRange == "" && spsInfo.HasColorRange {
-		videoInfo.colorRange = spsInfo.ColorRange
-		videoInfo.colorRangeSource = "Stream"
+	if spsInfo.HasColorRange {
+		if videoInfo.colorRange == "" {
+			videoInfo.colorRange = spsInfo.ColorRange
+			videoInfo.colorRangeSource = "Stream"
+		} else if strings.Contains(videoInfo.colorRangeSource, "Container") && videoInfo.colorRange == spsInfo.ColorRange {
+			videoInfo.colorRangeSource = "Container / Stream"
+		}
 	}
-	if videoInfo.colorPrimaries == "" && spsInfo.ColorPrimaries != "" {
-		videoInfo.colorPrimaries = spsInfo.ColorPrimaries
-		videoInfo.colorPrimariesSource = "Stream"
+	if spsInfo.ColorPrimaries != "" {
+		if videoInfo.colorPrimaries == "" {
+			videoInfo.colorPrimaries = spsInfo.ColorPrimaries
+			videoInfo.colorPrimariesSource = "Stream"
+		} else if strings.Contains(videoInfo.colorPrimariesSource, "Container") && videoInfo.colorPrimaries == spsInfo.ColorPrimaries {
+			videoInfo.colorPrimariesSource = "Container / Stream"
+		}
 	}
-	if videoInfo.transferCharacteristics == "" && spsInfo.TransferCharacteristics != "" {
-		videoInfo.transferCharacteristics = spsInfo.TransferCharacteristics
-		videoInfo.transferSource = "Stream"
+	if spsInfo.TransferCharacteristics != "" {
+		if videoInfo.transferCharacteristics == "" {
+			videoInfo.transferCharacteristics = spsInfo.TransferCharacteristics
+			videoInfo.transferSource = "Stream"
+		} else if strings.Contains(videoInfo.transferSource, "Container") && videoInfo.transferCharacteristics == spsInfo.TransferCharacteristics {
+			videoInfo.transferSource = "Container / Stream"
+		}
 	}
-	if videoInfo.matrixCoefficients == "" && spsInfo.MatrixCoefficients != "" {
-		videoInfo.matrixCoefficients = spsInfo.MatrixCoefficients
-		videoInfo.matrixSource = "Stream"
+	if spsInfo.MatrixCoefficients != "" {
+		if videoInfo.matrixCoefficients == "" {
+			videoInfo.matrixCoefficients = spsInfo.MatrixCoefficients
+			// MediaInfo reports matrix_coefficients_Source as "Container / Stream" for some Matroska
+			// files where container-level color metadata is present and the SPS provides the matrix.
+			if matroskaHasContainerColor(videoInfo) {
+				videoInfo.matrixSource = "Container / Stream"
+			} else {
+				videoInfo.matrixSource = "Stream"
+			}
+		} else if strings.Contains(videoInfo.matrixSource, "Container") && videoInfo.matrixCoefficients == spsInfo.MatrixCoefficients {
+			videoInfo.matrixSource = "Container / Stream"
+		}
 	}
 	if kind == StreamVideo {
 		bitRateNominal := spsInfo.HasBitRateCBR && spsInfo.BitRateCBR
@@ -1616,29 +1638,15 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64, durationPrec i
 			jsonExtras["colour_description_present_Source"] = colorSource
 			if videoInfo.colorRange != "" {
 				jsonExtras["colour_range"] = videoInfo.colorRange
-				// Match MediaInfo: when both container and stream color metadata exist, Source fields
-				// are reported as "Container / Stream".
-				if strings.Contains(colorSource, "/") {
-					jsonExtras["colour_range_Source"] = colorSource
-				} else {
-					jsonExtras["colour_range_Source"] = matroskaColorSource(videoInfo.colorRangeSource, colorSource)
-				}
+				jsonExtras["colour_range_Source"] = matroskaColorSource(videoInfo.colorRangeSource, colorSource)
 			}
 			if videoInfo.colorPrimaries != "" {
 				jsonExtras["colour_primaries"] = videoInfo.colorPrimaries
-				if strings.Contains(colorSource, "/") {
-					jsonExtras["colour_primaries_Source"] = colorSource
-				} else {
-					jsonExtras["colour_primaries_Source"] = matroskaColorSource(videoInfo.colorPrimariesSource, colorSource)
-				}
+				jsonExtras["colour_primaries_Source"] = matroskaColorSource(videoInfo.colorPrimariesSource, colorSource)
 			}
 			if videoInfo.transferCharacteristics != "" {
 				jsonExtras["transfer_characteristics"] = videoInfo.transferCharacteristics
-				if strings.Contains(colorSource, "/") {
-					jsonExtras["transfer_characteristics_Source"] = colorSource
-				} else {
-					jsonExtras["transfer_characteristics_Source"] = matroskaColorSource(videoInfo.transferSource, colorSource)
-				}
+				jsonExtras["transfer_characteristics_Source"] = matroskaColorSource(videoInfo.transferSource, colorSource)
 			}
 			// MediaInfo JSON sometimes includes transfer_characteristics_Source even when the value itself
 			// is absent (e.g. BT.709 defaults). Only do this when stream color metadata is present.
@@ -1647,11 +1655,7 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64, durationPrec i
 			}
 			if videoInfo.matrixCoefficients != "" {
 				jsonExtras["matrix_coefficients"] = videoInfo.matrixCoefficients
-				if strings.Contains(colorSource, "/") {
-					jsonExtras["matrix_coefficients_Source"] = colorSource
-				} else {
-					jsonExtras["matrix_coefficients_Source"] = matroskaColorSource(videoInfo.matrixSource, colorSource)
-				}
+				jsonExtras["matrix_coefficients_Source"] = matroskaColorSource(videoInfo.matrixSource, colorSource)
 			}
 		}
 		if spsInfo.HasBufferSize && spsInfo.BufferSize > 0 {
@@ -2276,17 +2280,17 @@ func matroskaIsMasterID(id uint64) bool {
 }
 
 func matroskaHasStreamColor(info matroskaVideoInfo) bool {
-	return info.colorRangeSource == "Stream" ||
-		info.colorPrimariesSource == "Stream" ||
-		info.transferSource == "Stream" ||
-		info.matrixSource == "Stream"
+	return strings.Contains(info.colorRangeSource, "Stream") ||
+		strings.Contains(info.colorPrimariesSource, "Stream") ||
+		strings.Contains(info.transferSource, "Stream") ||
+		strings.Contains(info.matrixSource, "Stream")
 }
 
 func matroskaHasContainerColor(info matroskaVideoInfo) bool {
-	return info.colorRangeSource == "Container" ||
-		info.colorPrimariesSource == "Container" ||
-		info.transferSource == "Container" ||
-		info.matrixSource == "Container"
+	return strings.Contains(info.colorRangeSource, "Container") ||
+		strings.Contains(info.colorPrimariesSource, "Container") ||
+		strings.Contains(info.transferSource, "Container") ||
+		strings.Contains(info.matrixSource, "Container")
 }
 
 func matroskaColorSource(value string, fallback string) string {
