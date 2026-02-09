@@ -1616,15 +1616,25 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64, durationPrec i
 			jsonExtras["colour_description_present_Source"] = colorSource
 			if videoInfo.colorRange != "" {
 				jsonExtras["colour_range"] = videoInfo.colorRange
+				// Match MediaInfo: when both container and stream color metadata exist, most Source
+				// fields are reported as "Container / Stream", but colour_range_Source remains specific.
 				jsonExtras["colour_range_Source"] = matroskaColorSource(videoInfo.colorRangeSource, colorSource)
 			}
 			if videoInfo.colorPrimaries != "" {
 				jsonExtras["colour_primaries"] = videoInfo.colorPrimaries
-				jsonExtras["colour_primaries_Source"] = matroskaColorSource(videoInfo.colorPrimariesSource, colorSource)
+				if strings.Contains(colorSource, "/") {
+					jsonExtras["colour_primaries_Source"] = colorSource
+				} else {
+					jsonExtras["colour_primaries_Source"] = matroskaColorSource(videoInfo.colorPrimariesSource, colorSource)
+				}
 			}
 			if videoInfo.transferCharacteristics != "" {
 				jsonExtras["transfer_characteristics"] = videoInfo.transferCharacteristics
-				jsonExtras["transfer_characteristics_Source"] = matroskaColorSource(videoInfo.transferSource, colorSource)
+				if strings.Contains(colorSource, "/") {
+					jsonExtras["transfer_characteristics_Source"] = colorSource
+				} else {
+					jsonExtras["transfer_characteristics_Source"] = matroskaColorSource(videoInfo.transferSource, colorSource)
+				}
 			}
 			// MediaInfo JSON sometimes includes transfer_characteristics_Source even when the value itself
 			// is absent (e.g. BT.709 defaults). Only do this when stream color metadata is present.
@@ -1633,7 +1643,11 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64, durationPrec i
 			}
 			if videoInfo.matrixCoefficients != "" {
 				jsonExtras["matrix_coefficients"] = videoInfo.matrixCoefficients
-				jsonExtras["matrix_coefficients_Source"] = matroskaColorSource(videoInfo.matrixSource, colorSource)
+				if strings.Contains(colorSource, "/") {
+					jsonExtras["matrix_coefficients_Source"] = colorSource
+				} else {
+					jsonExtras["matrix_coefficients_Source"] = matroskaColorSource(videoInfo.matrixSource, colorSource)
+				}
 			}
 		}
 		if spsInfo.HasBufferSize && spsInfo.BufferSize > 0 {
@@ -2272,9 +2286,6 @@ func matroskaHasContainerColor(info matroskaVideoInfo) bool {
 }
 
 func matroskaColorSource(value string, fallback string) string {
-	if strings.Contains(fallback, "/") {
-		return fallback
-	}
 	if value != "" {
 		return value
 	}

@@ -855,6 +855,31 @@ func applyMatroskaStats(info *MatroskaInfo, stats map[uint64]*matroskaTrackStats
 				}
 			}
 		}
+		// Match MediaInfo: when both StreamSize and Duration are known, BitRate is derived from them.
+		// This avoids using nominal/tagged bitrates for Matroska AAC/Opus where MediaInfo prefers average.
+		if info.Tracks[i].Kind == StreamAudio && stat.dataBytes > 0 {
+			dur := 0.0
+			if info.Tracks[i].JSON != nil && info.Tracks[i].JSON["Duration"] != "" {
+				if v, err := strconv.ParseFloat(info.Tracks[i].JSON["Duration"], 64); err == nil && v > 0 {
+					dur = v
+				}
+			}
+			if dur <= 0 {
+				if v, ok := parseDurationSeconds(findField(info.Tracks[i].Fields, "Duration")); ok && v > 0 {
+					dur = v
+				}
+			}
+			if dur > 0 {
+				// Match MediaInfo: truncate (not round) to integer b/s.
+				bps := int64(math.Floor((float64(stat.dataBytes)*8)/dur + 1e-9))
+				if bps > 0 {
+					if info.Tracks[i].JSON == nil {
+						info.Tracks[i].JSON = map[string]string{}
+					}
+					info.Tracks[i].JSON["BitRate"] = strconv.FormatInt(bps, 10)
+				}
+			}
+		}
 		if stat.blockCount > 0 && (info.Tracks[i].Kind == StreamVideo || info.Tracks[i].Kind == StreamText) {
 			if info.Tracks[i].JSON == nil {
 				info.Tracks[i].JSON = map[string]string{}
@@ -1055,6 +1080,27 @@ func applyMatroskaTagStats(info *MatroskaInfo, tagStats map[uint64]matroskaTagSt
 				stream.Fields = setFieldValue(stream.Fields, "Bits/(Pixel*Frame)", bits)
 			}
 		case StreamAudio:
+			// Prefer derived average bitrate (StreamSize/Duration) over Statistics Tags for audio.
+			// MediaInfo reports exact BitRate in JSON (e.g. 241184) even when Statistics Tags carry
+			// quantized values (e.g. 240000).
+			if stream.JSON != nil {
+				if bytes, ok := parseInt(stream.JSON["StreamSize"]); ok && bytes > 0 {
+					if dur, err := strconv.ParseFloat(stream.JSON["Duration"], 64); err == nil && dur > 0 {
+						bps := int64(math.Floor((float64(bytes)*8)/dur + 1e-9))
+						if bps > 0 {
+							stream.JSON["BitRate"] = strconv.FormatInt(bps, 10)
+							stream.Fields = setFieldValue(stream.Fields, "Bit rate", formatBitrate(float64(bps)))
+							continue
+						}
+					}
+				}
+				if stream.JSON["BitRate"] != "" {
+					if bps, ok := parseInt(stream.JSON["BitRate"]); ok && bps > 0 {
+						stream.Fields = setFieldValue(stream.Fields, "Bit rate", formatBitrate(float64(bps)))
+					}
+					continue
+				}
+			}
 			// Official MediaInfo quantizes AAC bitrates to 8 kb/s steps.
 			audioBps := tag.bitRate
 			format := findField(stream.Fields, "Format")
@@ -1399,9 +1445,11 @@ func applyMatroskaTrackDelays(info *MatroskaInfo, stats map[uint64]*matroskaTrac
 		return
 	}
 	baseNs := int64(0)
+	videoBaseNs := int64(0)
 	foundBase := false
+	foundVideo := false
 	for _, stream := range info.Tracks {
-		if stream.Kind != StreamVideo {
+		if stream.Kind != StreamVideo && stream.Kind != StreamAudio {
 			continue
 		}
 		trackID := streamTrackNumber(stream)
@@ -1416,8 +1464,14 @@ func applyMatroskaTrackDelays(info *MatroskaInfo, stats map[uint64]*matroskaTrac
 			baseNs = stat.minTimeNs
 			foundBase = true
 		}
+		if stream.Kind == StreamVideo {
+			if !foundVideo || stat.minTimeNs < videoBaseNs {
+				videoBaseNs = stat.minTimeNs
+				foundVideo = true
+			}
+		}
 	}
-	if !foundBase {
+	if !foundBase || !foundVideo {
 		return
 	}
 
@@ -1442,7 +1496,9 @@ func applyMatroskaTrackDelays(info *MatroskaInfo, stats map[uint64]*matroskaTrac
 		stream.JSON["Delay"] = delay
 		stream.JSON["Delay_Source"] = "Container"
 		if stream.Kind == StreamAudio {
-			stream.JSON["Video_Delay"] = delay
+			// MediaInfo: audio Delay is relative to the earliest stream; Video_Delay is relative to video.
+			videoDelaySeconds := float64(stat.minTimeNs-videoBaseNs) / 1e9
+			stream.JSON["Video_Delay"] = fmt.Sprintf("%.3f", videoDelaySeconds)
 		}
 	}
 }
