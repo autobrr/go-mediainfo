@@ -95,13 +95,25 @@ func parseID3v2(file io.ReadSeeker) (id3v2Data, bool) {
 
 		data := rd[10 : 10+size]
 		switch id {
-		case "TIT2", "TALB", "TPE1", "TPE2", "TENC", "TRCK", "TYER", "TDRC", "TCON", "TPUB", "TPOS", "TDAT", "TSSE":
+		case "TIT2", "TALB", "TPE1", "TPE2", "TPE3", "TPE4", "TENC", "TRCK", "TYER", "TDRC", "TCON", "TCOM", "TEXT", "TPUB", "TPOS", "TDAT", "TSSE", "TCOP", "TOLY", "TOPE", "TRSN":
 			if v := decodeID3Text(data); v != "" {
 				text[id] = normalizeID3Multi(v)
 			}
 		case "TXXX":
 			if desc, value, ok := parseID3TXXX(data); ok && desc != "" && value != "" {
 				text["TXXX:"+desc] = normalizeID3Multi(value)
+			}
+		case "WXXX":
+			if desc, url, ok := parseID3WXXX(data); ok && desc != "" && url != "" {
+				text["WXXX:"+desc] = normalizeID3Multi(url)
+			}
+		case "COMM":
+			if comment, ok := parseID3COMM(data); ok && comment != "" {
+				text["COMM"] = normalizeID3Multi(comment)
+			}
+		case "USLT":
+			if lyrics, ok := parseID3USLT(data); ok && lyrics != "" {
+				text["USLT"] = normalizeID3Multi(lyrics)
 			}
 		case "APIC":
 			if pic, ok := parseID3APIC(data); ok {
@@ -188,6 +200,21 @@ func normalizeID3Multi(s string) string {
 	return strings.TrimSpace(s)
 }
 
+func normalizeID3Lines(s string) string {
+	// MediaInfo renders multi-line ID3 strings as " / " separated lines, keeping blank lines.
+	// Normalize CRLF/CR to LF, trim per-line, then join.
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	s = strings.ReplaceAll(s, "\r", "\n")
+	if !strings.Contains(s, "\n") {
+		return strings.TrimSpace(s)
+	}
+	parts := strings.Split(s, "\n")
+	for i := range parts {
+		parts[i] = strings.TrimSpace(parts[i])
+	}
+	return strings.Join(parts, " / ")
+}
+
 func parseID3APIC(data []byte) (id3Picture, bool) {
 	if len(data) < 4 {
 		return id3Picture{}, false
@@ -233,6 +260,94 @@ func parseID3APIC(data []byte) (id3Picture, bool) {
 		DataHead:    append([]byte(nil), head...),
 		DataSize:    int64(len(rd)),
 	}, true
+}
+
+func splitID3EncodedString(enc byte, rd []byte) (string, []byte, bool) {
+	// Returns decoded string, rest after terminator.
+	if len(rd) == 0 {
+		return "", nil, false
+	}
+	if enc == 0x00 || enc == 0x03 {
+		if i := bytes.IndexByte(rd, 0x00); i >= 0 {
+			s := decodeID3Text(append([]byte{enc}, rd[:i]...))
+			return s, rd[i+1:], true
+		}
+		s := decodeID3Text(append([]byte{enc}, rd...))
+		return s, nil, true
+	}
+	if i := bytes.Index(rd, []byte{0x00, 0x00}); i >= 0 {
+		s := decodeID3Text(append([]byte{enc}, rd[:i]...))
+		return s, rd[i+2:], true
+	}
+	s := decodeID3Text(append([]byte{enc}, rd...))
+	return s, nil, true
+}
+
+func parseID3COMM(data []byte) (string, bool) {
+	// https://id3.org/id3v2.3.0#Comments
+	// [encoding][language(3)][short desc][00][comment text]
+	if len(data) < 5 {
+		return "", false
+	}
+	enc := data[0]
+	rd := data[1:]
+	if len(rd) < 3 {
+		return "", false
+	}
+	rd = rd[3:] // language
+	_, rest, ok := splitID3EncodedString(enc, rd)
+	if !ok {
+		return "", false
+	}
+	if len(rest) == 0 {
+		return "", false
+	}
+	comment := decodeID3Text(append([]byte{enc}, rest...))
+	comment = normalizeID3Lines(comment)
+	return strings.TrimSpace(comment), comment != ""
+}
+
+func parseID3USLT(data []byte) (string, bool) {
+	// https://id3.org/id3v2.3.0#Unsychronised_lyrics.2Ftext_transcription
+	// [encoding][language(3)][content descriptor][00][lyrics text]
+	if len(data) < 5 {
+		return "", false
+	}
+	enc := data[0]
+	rd := data[1:]
+	if len(rd) < 3 {
+		return "", false
+	}
+	rd = rd[3:] // language
+	_, rest, ok := splitID3EncodedString(enc, rd)
+	if !ok {
+		return "", false
+	}
+	if len(rest) == 0 {
+		return "", false
+	}
+	lyrics := decodeID3Text(append([]byte{enc}, rest...))
+	lyrics = normalizeID3Lines(lyrics)
+	return strings.TrimSpace(lyrics), lyrics != ""
+}
+
+func parseID3WXXX(data []byte) (string, string, bool) {
+	// https://id3.org/id3v2.3.0#User_defined_URL_link_frame
+	// [encoding][desc][00][url]
+	if len(data) < 2 {
+		return "", "", false
+	}
+	enc := data[0]
+	desc, rest, ok := splitID3EncodedString(enc, data[1:])
+	if !ok {
+		return "", "", false
+	}
+	url := strings.TrimSpace(string(bytes.TrimRight(rest, "\x00")))
+	desc = strings.TrimSpace(desc)
+	if desc == "" {
+		desc = "URL"
+	}
+	return desc, url, url != ""
 }
 
 func parseID3TXXX(data []byte) (string, string, bool) {
