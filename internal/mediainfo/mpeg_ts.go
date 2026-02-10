@@ -749,10 +749,10 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64)
 				info := st.mpeg2Info
 				if info.FrameRateNumer > 0 && info.FrameRateDenom > 0 {
 					duration = float64(st.videoFrameCount) * float64(info.FrameRateDenom) / float64(info.FrameRateNumer)
-					duration = math.Floor(duration*1000+1e-9) / 1000
+					duration = math.Round(duration*1000) / 1000
 				} else if info.FrameRate > 0 {
 					duration = float64(st.videoFrameCount) / info.FrameRate
-					duration = math.Floor(duration*1000+1e-9) / 1000
+					duration = math.Round(duration*1000) / 1000
 				}
 			}
 			if duration > 0 && st.videoFrameRate > 0 && st.format != "MPEG Video" {
@@ -1082,6 +1082,81 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64)
 	if tsPacketCount > 0 {
 		base := tsPacketCount * (tsOffset + 4)
 		info.StreamOverheadBytes = base + psiBytes
+	}
+
+	// Parity: MediaInfoLib derives MPEG-TS video bitrate/stream size from OverallBitRate minus
+	// audio/text bitrates, using MPEG-TS-specific ratios (default container overhead).
+	// This impacts both Video.StreamSize and General.StreamSize (overhead = FileSize - sum(stream sizes)).
+	if !isBDAV && hasMPEGVideo {
+		overallMid := overallBitrate
+		if info.OverallBitrateMin > 0 && info.OverallBitrateMax > 0 {
+			overallMid = (info.OverallBitrateMin + info.OverallBitrateMax) / 2
+		}
+		// MediaInfoLib uses the (integer) General_OverallBitRate value as the base for this derivation.
+		overallMid = float64(int64(math.Round(overallMid)))
+		if overallMid > 0 && info.DurationSeconds >= 1 {
+			videoCount := 0
+			var mpegVideo *tsStream
+			audioBitratesOK := true
+			audioSumAdjusted := 0.0
+			for _, pid := range streamOrder {
+				st := streams[pid]
+				if st == nil {
+					continue
+				}
+				if st.kind == StreamVideo {
+					videoCount++
+					if st.format == "MPEG Video" {
+						mpegVideo = st
+					}
+				}
+				if st.kind == StreamAudio {
+					if st.audioBitRateKbps <= 0 {
+						audioBitratesOK = false
+						continue
+					}
+					audioBps := float64(st.audioBitRateKbps) * 1000
+					audioSumAdjusted += audioBps / 0.96
+				}
+			}
+			if videoCount == 1 && mpegVideo != nil && audioBitratesOK {
+				videoBR := (overallMid*0.98 - audioSumAdjusted) * 0.97
+				if videoBR >= 10000 {
+					durationMs := info.DurationSeconds * 1000
+					if mpegVideo.videoFrameCount > 0 {
+						fps := 0.0
+						if mpegVideo.mpeg2Info.FrameRateNumer > 0 && mpegVideo.mpeg2Info.FrameRateDenom > 0 {
+							fps = float64(mpegVideo.mpeg2Info.FrameRateNumer) / float64(mpegVideo.mpeg2Info.FrameRateDenom)
+						} else if mpegVideo.mpeg2Info.FrameRate > 0 {
+							fps = mpegVideo.mpeg2Info.FrameRate
+						}
+						if fps > 0 {
+							// Match MediaInfoLib: it uses the formatted (rounded) FrameRate value for stable sizing.
+							fps = math.Round(fps*1000) / 1000
+							durationMs = float64(mpegVideo.videoFrameCount) * 1000 / fps
+						}
+					}
+					videoBitRateInt := int64(math.Round(videoBR))
+					videoStreamSize := int64(math.Round(videoBR / 8 * durationMs / 1000))
+					if videoBitRateInt > 0 && videoStreamSize > 0 {
+						videoID := strconv.FormatUint(uint64(mpegVideo.pid), 10)
+						for i := range streamsOut {
+							if streamsOut[i].Kind != StreamVideo || streamsOut[i].JSON == nil {
+								continue
+							}
+							if streamsOut[i].JSON["ID"] != videoID {
+								continue
+							}
+							streamsOut[i].JSON["BitRate"] = strconv.FormatInt(videoBitRateInt, 10)
+							streamsOut[i].JSON["StreamSize"] = strconv.FormatInt(videoStreamSize, 10)
+							streamsOut[i].Fields = setFieldValue(streamsOut[i].Fields, "Bit rate", formatBitrate(float64(videoBitRateInt)))
+							streamsOut[i].Fields = setFieldValue(streamsOut[i].Fields, "Stream size", formatStreamSize(videoStreamSize, size))
+							break
+						}
+					}
+				}
+			}
+		}
 	}
 
 	generalFields := []Field{}
