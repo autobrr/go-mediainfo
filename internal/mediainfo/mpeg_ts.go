@@ -934,15 +934,15 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 			}
 		}
 		if isBDAV && st.kind == StreamVideo {
-			// Match MediaInfoLib: BDAV video streams expose extra.format_identifier=HDMV.
-			if jsonRaw == nil {
-				jsonRaw = map[string]string{}
-			}
-			if _, ok := jsonRaw["extra"]; !ok {
-				jsonRaw["extra"] = "{\"format_identifier\":\"HDMV\"}"
-			}
 			// MediaInfo reports these Blu-ray-oriented constraints for AVC streams.
 			if st.format == "AVC" {
+				// Match MediaInfoLib: BDAV AVC streams expose extra.format_identifier=HDMV.
+				if jsonRaw == nil {
+					jsonRaw = map[string]string{}
+				}
+				if _, ok := jsonRaw["extra"]; !ok {
+					jsonRaw["extra"] = "{\"format_identifier\":\"HDMV\"}"
+				}
 				if hasTrueHDAudio {
 					jsonExtras["BitRate_Maximum"] = "38999808"
 				} else {
@@ -964,7 +964,7 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 		if format != "" {
 			fields = append(fields, Field{Name: "Format", Value: format})
 		}
-		if st.kind == StreamVideo && !isBDAV && hasMPEGVideo && st.format == "MPEG Video" && st.hasMPEG2Info {
+		if st.kind == StreamVideo && hasMPEGVideo && st.format == "MPEG Video" && st.hasMPEG2Info {
 			info := st.mpeg2Info
 			if name := mpeg2CommercialNameTS(info); name != "" {
 				fields = append(fields, Field{Name: "Commercial name", Value: name})
@@ -1040,7 +1040,7 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 			}
 			// For TS MPEG-2 video, official mediainfo derives Duration from FrameCount and the
 			// stream's FrameRate ratio (not from PTS deltas).
-			if !partialScan && !isBDAV && hasMPEGVideo && st.format == "MPEG Video" && st.hasMPEG2Info && st.videoFrameCount > 0 {
+			if !partialScan && hasMPEGVideo && st.format == "MPEG Video" && st.hasMPEG2Info && st.videoFrameCount > 0 {
 				info := st.mpeg2Info
 				if info.FrameRateNumer > 0 && info.FrameRateDenom > 0 {
 					duration = float64(st.videoFrameCount) * float64(info.FrameRateDenom) / float64(info.FrameRateNumer)
@@ -1050,7 +1050,7 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 					duration = math.Round(duration*1000) / 1000
 				}
 			}
-			if partialScan && !isBDAV && hasMPEGVideo && st.format == "MPEG Video" && st.hasMPEG2Info && duration > 0 {
+			if partialScan && hasMPEGVideo && st.format == "MPEG Video" && st.hasMPEG2Info && duration > 0 {
 				info := st.mpeg2Info
 				fps := 0.0
 				if info.FrameRateNumer > 0 && info.FrameRateDenom > 0 {
@@ -1081,7 +1081,7 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 			if isBDAV && st.videoFrameRate > 0 {
 				fields = append(fields, Field{Name: "Frame rate", Value: formatFrameRateWithRatio(st.videoFrameRate)})
 			}
-			if !isBDAV && hasMPEGVideo && st.format == "MPEG Video" && st.hasMPEG2Info && duration > 0 {
+			if hasMPEGVideo && st.format == "MPEG Video" && st.hasMPEG2Info && duration > 0 {
 				info := st.mpeg2Info
 				if info.IntraDCPrecision > 0 {
 					intra := info.IntraDCPrecision
@@ -1101,6 +1101,22 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 				if maxKbps := info.MaxBitRateKbps; maxKbps > 0 {
 					fields = append(fields, Field{Name: "Maximum bit rate", Value: formatBitrate(float64(maxKbps) * 1000)})
 					jsonExtras["BitRate_Maximum"] = strconv.FormatInt(maxKbps*1000, 10)
+				}
+				if info.ColourDescriptionPresent {
+					jsonExtras["colour_description_present"] = "Yes"
+					jsonExtras["colour_description_present_Source"] = "Stream"
+				}
+				if info.ColourPrimaries != "" {
+					jsonExtras["colour_primaries"] = info.ColourPrimaries
+					jsonExtras["colour_primaries_Source"] = "Stream"
+				}
+				if info.TransferCharacteristics != "" {
+					jsonExtras["transfer_characteristics"] = info.TransferCharacteristics
+					jsonExtras["transfer_characteristics_Source"] = "Stream"
+				}
+				if info.MatrixCoefficients != "" {
+					jsonExtras["matrix_coefficients"] = info.MatrixCoefficients
+					jsonExtras["matrix_coefficients_Source"] = "Stream"
 				}
 				if info.BufferSize > 0 {
 					jsonExtras["BufferSize"] = strconv.FormatInt(info.BufferSize, 10)
@@ -1149,10 +1165,18 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 			if st.height > 0 {
 				fields = append(fields, Field{Name: "Height", Value: formatPixels(st.height)})
 			}
-			if ar := formatAspectRatio(st.width, st.height); ar != "" {
+			if st.format == "MPEG Video" && st.hasMPEG2Info && st.mpeg2Info.AspectRatio != "" {
+				fields = append(fields, Field{Name: "Display aspect ratio", Value: st.mpeg2Info.AspectRatio})
+				if dar, ok := parseRatioFloat(st.mpeg2Info.AspectRatio); ok && dar > 0 && st.width > 0 && st.height > 0 {
+					par := dar / (float64(st.width) / float64(st.height))
+					if par > 0 {
+						jsonExtras["PixelAspectRatio"] = formatJSONFloat(par)
+					}
+				}
+			} else if ar := formatAspectRatio(st.width, st.height); ar != "" {
 				fields = append(fields, Field{Name: "Display aspect ratio", Value: ar})
 			}
-			if !isBDAV && hasMPEGVideo && st.format == "MPEG Video" && st.hasMPEG2Info {
+			if hasMPEGVideo && st.format == "MPEG Video" && st.hasMPEG2Info {
 				info := st.mpeg2Info
 				if info.FrameRateNumer > 0 && info.FrameRateDenom > 0 {
 					fields = append(fields, Field{Name: "Frame rate", Value: formatFrameRateRatio(info.FrameRateNumer, info.FrameRateDenom)})
@@ -1174,6 +1198,11 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 				if info.ScanOrder != "" {
 					fields = append(fields, Field{Name: "Scan order", Value: info.ScanOrder})
 				}
+				if isBDAV {
+					if standard := mapMPEG2Standard(info.FrameRate); standard != "" {
+						fields = append(fields, Field{Name: "Standard", Value: standard})
+					}
+				}
 				fields = append(fields, Field{Name: "Compression mode", Value: "Lossy"})
 				if duration > 0 && st.width > 0 && st.height > 0 && st.videoFrameRate > 0 {
 					bitrate := (float64(st.bytes) * 8) / duration
@@ -1183,6 +1212,10 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 				}
 				if info.TimeCode != "" {
 					fields = append(fields, Field{Name: "Time code of first frame", Value: info.TimeCode})
+					if tc, ok := parseMPEGTimecodeSeconds(info.TimeCode, info.FrameRateNumer, info.FrameRateDenom, info.FrameRate); ok {
+						jsonExtras["Delay_Original"] = fmt.Sprintf("%.3f", tc)
+						jsonExtras["Delay_Original_Source"] = "Stream"
+					}
 				}
 				if info.TimeCodeSource != "" {
 					fields = append(fields, Field{Name: "Time code source", Value: info.TimeCodeSource})
@@ -1746,6 +1779,43 @@ func psiSectionBytes(payload []byte) int {
 		return 0
 	}
 	return 3 + sectionLen
+}
+
+func parseMPEGTimecodeSeconds(tc string, frameRateNumer, frameRateDenom uint32, fallbackFPS float64) (float64, bool) {
+	parts := strings.FieldsFunc(tc, func(r rune) bool {
+		return r == ':' || r == ';'
+	})
+	if len(parts) != 4 {
+		return 0, false
+	}
+	hh, err := strconv.Atoi(parts[0])
+	if err != nil || hh < 0 {
+		return 0, false
+	}
+	mm, err := strconv.Atoi(parts[1])
+	if err != nil || mm < 0 {
+		return 0, false
+	}
+	ss, err := strconv.Atoi(parts[2])
+	if err != nil || ss < 0 {
+		return 0, false
+	}
+	ff, err := strconv.Atoi(parts[3])
+	if err != nil || ff < 0 {
+		return 0, false
+	}
+	fps := fallbackFPS
+	if frameRateNumer > 0 && frameRateDenom > 0 {
+		fps = float64(frameRateNumer) / float64(frameRateDenom)
+	}
+	if fps <= 0 {
+		return 0, false
+	}
+	seconds := float64(hh*3600+mm*60+ss) + float64(ff)/fps
+	if seconds < 0 {
+		return 0, false
+	}
+	return seconds, true
 }
 
 type patProgram struct {

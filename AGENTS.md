@@ -29,6 +29,7 @@ Owner: soup
 - Extended TS sweep (`/mnt/storage/torrents/keepalive/Halloween 2014 Promos and Bumpers Pack`, 12-file sample):
 - Diff range `13..64`; recurring gaps are AC-3 `dynrng_*` count windows, MPEG-2 `Format_Settings_Matrix`/`intra_dc_precision`, caption service mapping (extra/misaligned text tracks), and missing General `Title`/`Movie` on some captures.
 - GOP experiment note: forcing `Variable` on interlaced TS improves some Cartoon Network captures but regresses Nick captures; reverted for now.
+- `ptp-archive` spot checks (ParseSpeed=0.5): `VTS_01_0.IFO=0`, `VTS_01_1.VOB=28`, `KAUTOKEINO 00011.m2ts: 62->27`, `KAUTOKEINO 00012.m2ts: 66->27` after BDAV MPEG-2 field parity expansion.
 - Remaining highest-impact work:
 - TS/BDAV AC-3 stats parity (`compr_*`/`dynrng_*` counts + averaging windows).
 - BDAV/TS tiny General vs Video `StreamSize` byte-allocation parity (1-3 byte deltas).
