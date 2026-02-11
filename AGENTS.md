@@ -183,11 +183,12 @@ Owner: soup
 - Loop-to-done: no “continue?” prompts. Run parity/bench cycles until 1:1 vs official + tests green.
 - IO: avoid full-dataset sweeps on `/mnt/storage/torrents*`; sample a few files per type; stop runaway jobs fast.
 
-- Status (2026-02-09):
-- Parity: MP4 fixed for udta `Description` + AVC SAR (PixelAspectRatio / DisplayAspectRatio(_Original)) + non-x264 encoder string -> Encoded_Library.
-- Parity: AVI MP3-in-AVI fixed for Duration/SamplingCount + Alignment (Split vs Aligned) based on WAVEFORMATEX blockAlign.
-- Matroska: E-AC-3 probe regression prevented (packetAligned gate) + audio Duration JSON consistency test.
-- Remaining big diffs: TS Title/Movie + TS/BDAV size accounting + AC-3 stats sampling; DVD/VOB duration/framecount/streamsize/GOP semantics; AVI container/video codec details (DivX/XviD specifics).
+- Status (2026-02-11):
+- Parity snapshot (`mediainfo --Output=JSON --Language=raw --ParseSpeed=0.5`):
+- TS: `Nickelodeon - Halloween Bumper 2.ts` diff=0, `Evermoor Behind The Scenes.ts` diff=25 (mostly AC-3 stats).
+- BDAV/M2TS: `01099.m2ts` diff=4 (2-byte General/Video `StreamSize` split), `01007.m2ts` diff improved `44 -> 21`.
+- BDAV TrueHD bridge landed: detect TrueHD sync in 0x83-style streams; emit `Format=MLP FBA`, `MuxingMode=Stream extension`, TrueHD channel layout/positions while keeping AC-3 core extras.
+- Remaining big diffs: TS AC-3 stats sampling/count window parity; TS ATSC `Title`/`Movie` on some captures; BDAV video max bitrate/size edge cases; DVD/VOB duration/framecount/streamsize/GOP semantics; AVI container/video codec details (DivX/XviD specifics).
 
 - Perf notes:
 - Small files: startup dominates; go can be slower than `/usr/bin/mediainfo` (measure with multi-run median).
