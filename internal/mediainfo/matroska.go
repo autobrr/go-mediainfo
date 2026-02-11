@@ -466,6 +466,10 @@ func ParseMatroskaWithOptions(r io.ReaderAt, size int64, opts AnalyzeOptions) (M
 		if stream.Kind != StreamAudio {
 			continue
 		}
+		formatName := strings.ToUpper(strings.TrimSpace(findField(stream.Fields, "Format")))
+		if strings.HasPrefix(formatName, "AAC") {
+			continue
+		}
 		if stream.JSON == nil || stream.JSON["FrameCount"] != "" {
 			continue
 		}

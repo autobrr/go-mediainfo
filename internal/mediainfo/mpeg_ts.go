@@ -1200,7 +1200,7 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 				}
 				if st.audioRate > 0 && st.audioSpf > 0 {
 					frameRate := st.audioRate / float64(st.audioSpf)
-					if frameRate > 0 {
+					if frameRate > 0 && !strings.HasPrefix(st.format, "AAC") {
 						jsonExtras["FrameCount"] = strconv.Itoa(int(math.Round(duration * frameRate)))
 					}
 				}
@@ -1217,7 +1217,7 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 				}
 				if st.audioRate > 0 && st.audioSpf > 0 {
 					frameRate := st.audioRate / float64(st.audioSpf)
-					if frameRate > 0 {
+					if frameRate > 0 && !strings.HasPrefix(st.format, "AAC") {
 						jsonExtras["FrameCount"] = strconv.Itoa(int(math.Round(duration * frameRate)))
 					}
 				} else if st.hasAC3 && st.ac3Info.sampleRate > 0 && st.ac3Info.spf > 0 {
@@ -1280,7 +1280,7 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 				if st.ac3Info.serviceKind != "" {
 					fields = append(fields, Field{Name: "Service kind", Value: st.ac3Info.serviceKind})
 				}
-				if !partialScan && !isBDAV && hasMPEGVideo && st.audioFrames > 0 && jsonExtras["FrameCount"] == "" {
+				if !partialScan && !isBDAV && hasMPEGVideo && st.audioFrames > 0 && st.hasAC3 && jsonExtras["FrameCount"] == "" {
 					jsonExtras["FrameCount"] = strconv.FormatUint(st.audioFrames, 10)
 				}
 
@@ -1331,6 +1331,9 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 					}
 					jsonRaw["extra"] = renderJSONObject(extraFields, false)
 				}
+			}
+			if strings.HasPrefix(st.format, "AAC") {
+				delete(jsonExtras, "FrameCount")
 			}
 			if !isBDAV && hasMPEGVideo && st.bytes > 0 && size > 0 {
 				if value := formatStreamSize(int64(st.bytes), size); value != "" {

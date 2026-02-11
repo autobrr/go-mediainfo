@@ -381,25 +381,8 @@ func buildJSONComputedFields(kind StreamKind, fields []jsonKV, containerFormat s
 				samples := int(math.Round(duration * sampleRate))
 				out = append(out, jsonKV{Key: "SamplingCount", Val: strconv.Itoa(samples)})
 			}
-			if jsonFieldValue(fields, "FrameCount") == "" {
-				// MediaInfo emits AAC FrameCount in Matroska too (CodecID e.g. A_AAC-2),
-				// so don't gate on the codec ID.
-				spf := 1024.0
-				if v := jsonFieldValue(fields, "SamplesPerFrame"); v != "" {
-					if parsed, err := strconv.ParseFloat(v, 64); err == nil && parsed > 0 {
-						spf = parsed
-					}
-				}
-				if v := jsonFieldValue(fields, "SamplingCount"); v != "" {
-					if samples, err := strconv.ParseFloat(v, 64); err == nil && samples > 0 && spf > 0 {
-						frameCount := int(math.Round(samples / spf))
-						out = append(out, jsonKV{Key: "FrameCount", Val: strconv.Itoa(frameCount)})
-					}
-				} else if duration > 0 && sampleRate > 0 && spf > 0 {
-					frameCount := int(math.Round(duration * sampleRate / spf))
-					out = append(out, jsonKV{Key: "FrameCount", Val: strconv.Itoa(frameCount)})
-				}
-			}
+			// Keep AAC SamplingCount/SamplesPerFrame, but don't synthesize FrameCount.
+			// Official MediaInfo commonly omits AAC FrameCount in TS/Matroska outputs.
 			if src := jsonFieldValue(fields, "Source_Duration"); src != "" && jsonFieldValue(fields, "Source_FrameCount") == "" {
 				if srcDur, err := strconv.ParseFloat(src, 64); err == nil && sampleRate > 0 {
 					srcFrames := int(math.Round(srcDur * sampleRate / 1024.0))
