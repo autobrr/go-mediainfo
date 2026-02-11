@@ -484,7 +484,6 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 								existing.language = st.language
 								if pending, ok := pendingPTS[st.pid]; ok {
 									existing.pts = *pending
-									existing.seenPTS = true
 									if st.kind == StreamVideo {
 										videoPTS.add(pending.min)
 										videoPTS.add(pending.max)
@@ -495,7 +494,6 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 								entry := st
 								if pending, ok := pendingPTS[st.pid]; ok {
 									entry.pts = *pending
-									entry.seenPTS = true
 									if st.kind == StreamVideo {
 										videoPTS.add(pending.min)
 										videoPTS.add(pending.max)
@@ -683,12 +681,10 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 					if entry.kind == StreamAudio && len(data) > 0 {
 						headEnd := syncOff + ac3StatsHeadBytes
 						inHead := !ac3StatsBounded || packetOffset < headEnd
-						// Parity: MediaInfoLib fills stream stats at the end of the initial (head) scan
-						// when ParseSpeed<0.8, then seeks to the end for duration/PTS. Keep AC-3 stats
-						// collection bounded to the head window in that mode.
+						// MediaInfoLib samples AC-3 metadata from both begin/end windows at default
+						// ParseSpeed, with stats emission still gated on a valid timeline.
 						collectAC3Stats := inHead && (!ac3StatsBounded || entry.seenPTS)
-						// Blu-ray TrueHD (stream_type 0x83) stats are sourced from both head and tail windows.
-						if !inHead && ac3StatsBounded && entry.seenPTS && (entry.streamType == 0x83 || entry.hasTrueHD) {
+						if !inHead && ac3StatsBounded && entry.seenPTS {
 							collectAC3Stats = true
 						}
 						// Audio frames can be recovered mid-PES by resyncing on codec sync words.
@@ -739,7 +735,7 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 					headEnd := syncOff + ac3StatsHeadBytes
 					inHead := !ac3StatsBounded || packetOffset < headEnd
 					collectAC3Stats := inHead && (!ac3StatsBounded || entry.seenPTS)
-					if !inHead && ac3StatsBounded && entry.seenPTS && (entry.streamType == 0x83 || entry.hasTrueHD) {
+					if !inHead && ac3StatsBounded && entry.seenPTS {
 						collectAC3Stats = true
 					}
 					entry.bytes += uint64(len(payloadData))
