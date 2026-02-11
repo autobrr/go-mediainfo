@@ -1521,7 +1521,7 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 						durationMs = float64(mpegVideo.videoFrameCount) * 1000 / fps
 					}
 					videoBitRateInt := int64(math.Round(videoBR))
-					videoStreamSize := int64(math.Round(videoBR / 8 * durationMs / 1000))
+					videoStreamSize := int64(math.Round((float64(videoBitRateInt) / 8) * (durationMs / 1000)))
 					if videoBitRateInt > 0 && videoStreamSize > 0 {
 						videoID := strconv.FormatUint(uint64(mpegVideo.pid), 10)
 						for i := range streamsOut {
