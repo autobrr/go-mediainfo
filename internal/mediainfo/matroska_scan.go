@@ -54,6 +54,7 @@ type dtsInfo struct {
 	bitDepth        int
 	sampleRate      int
 	samplesPerFrame int
+	channels        int
 }
 
 type matroskaVideoProbe struct {
@@ -1917,6 +1918,10 @@ var dtsBitRates = [...]int64{
 }
 
 var dtsResolutions = [...]int{16, 20, 24, 24}
+var dtsChannelCounts = [...]int{
+	2, 1, 2, 3, 3, 4, 4, 5,
+	4, 6, 4, 5, 5, 6, 6, 7,
+}
 
 func parseDTSCoreFrame(payload []byte) (dtsInfo, bool) {
 	if len(payload) < 12 {
@@ -1933,7 +1938,7 @@ func parseDTSCoreFrame(payload []byte) (dtsInfo, bool) {
 	crcPresent := br.readBitsValue(1) == 1
 	nblks := int(br.readBitsValue(7)) + 1 // Number of PCM sample blocks
 	_ = br.readBitsValue(14)              // Primary frame byte size minus 1
-	_ = br.readBitsValue(6)               // Audio channel arrangement
+	amode := int(br.readBitsValue(6))     // Audio channel arrangement
 	sfCode := int(br.readBitsValue(4))    // Core audio sampling frequency
 	brCode := int(br.readBitsValue(5))    // Transmission bit rate
 	_ = br.readBitsValue(1)               // Embedded Down Mix Enabled
@@ -1944,7 +1949,7 @@ func parseDTSCoreFrame(payload []byte) (dtsInfo, bool) {
 	_ = br.readBitsValue(3)               // Extension Audio Descriptor
 	_ = br.readBitsValue(1)               // Extended Coding
 	_ = br.readBitsValue(1)               // Audio Sync Word Insertion
-	_ = br.readBitsValue(2)               // Low Frequency Effects
+	lfe := br.readBitsValue(2)            // Low Frequency Effects
 	_ = br.readBitsValue(1)               // Predictor History
 	if crcPresent {
 		_ = br.readBitsValue(16) // Header CRC Check
@@ -1966,11 +1971,24 @@ func parseDTSCoreFrame(payload []byte) (dtsInfo, bool) {
 	if resCode >= 0 && resCode < len(dtsResolutions) {
 		bitDepth = dtsResolutions[resCode]
 	}
-	if sampleRate <= 0 || bitRate <= 0 || bitDepth <= 0 || nblks <= 0 {
+	channels := 0
+	if amode >= 0 && amode < len(dtsChannelCounts) {
+		channels = dtsChannelCounts[amode]
+	}
+	if lfe > 0 {
+		channels++
+	}
+	if sampleRate <= 0 || bitRate <= 0 || bitDepth <= 0 || nblks <= 0 || channels <= 0 {
 		return dtsInfo{}, false
 	}
 	spf := nblks * 32
-	return dtsInfo{bitRateBps: bitRate, bitDepth: bitDepth, sampleRate: sampleRate, samplesPerFrame: spf}, true
+	return dtsInfo{
+		bitRateBps:      bitRate,
+		bitDepth:        bitDepth,
+		sampleRate:      sampleRate,
+		samplesPerFrame: spf,
+		channels:        channels,
+	}, true
 }
 
 func matroskaStatsDuration(stat *matroskaTrackStats) float64 {
