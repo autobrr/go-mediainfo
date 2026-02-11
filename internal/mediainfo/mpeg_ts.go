@@ -146,17 +146,17 @@ func normalizeTSStreamOrder(order []uint16, streams map[uint16]*tsStream, isBDAV
 	return normalized
 }
 
-func mpeg2TSGOPValue(info mpeg2VideoInfo) string {
-	if info.GOPVariable {
-		return "Variable"
+func mergeTSStreamFromPMT(existing *tsStream, parsed tsStream) {
+	if existing == nil {
+		return
 	}
-	if info.ScanType == "Interlaced" && info.GOPM > 0 && info.GOPN > 0 {
-		return fmt.Sprintf("M=%d, N=%d", info.GOPM, info.GOPN)
+	existing.kind = parsed.kind
+	existing.format = parsed.format
+	existing.streamType = parsed.streamType
+	existing.programNumber = parsed.programNumber
+	if parsed.language != "" {
+		existing.language = parsed.language
 	}
-	if info.GOPLength > 0 {
-		return formatGOPLength(info.GOPLength)
-	}
-	return ""
 }
 
 type mpeg2UserDataPacket struct {
@@ -540,11 +540,7 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 						}
 						for _, st := range parsed {
 							if existing, exists := streams[st.pid]; exists {
-								existing.kind = st.kind
-								existing.format = st.format
-								existing.streamType = st.streamType
-								existing.programNumber = st.programNumber
-								existing.language = st.language
+								mergeTSStreamFromPMT(existing, st)
 								if pending, ok := pendingPTS[st.pid]; ok {
 									existing.pts = *pending
 									if st.kind == StreamVideo {
@@ -1053,8 +1049,12 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 			if info.Matrix == "Custom" && info.MatrixData != "" {
 				jsonExtras["Format_Settings_Matrix_Data"] = info.MatrixData
 			}
-			if gop := mpeg2TSGOPValue(info); gop != "" {
-				fields = append(fields, Field{Name: "Format settings, GOP", Value: gop})
+			if info.ScanType == "Interlaced" && info.GOPM > 0 && info.GOPN > 0 {
+				fields = append(fields, Field{Name: "Format settings, GOP", Value: fmt.Sprintf("M=%d, N=%d", info.GOPM, info.GOPN)})
+			} else if info.GOPVariable {
+				fields = append(fields, Field{Name: "Format settings, GOP", Value: "Variable"})
+			} else if info.GOPLength > 0 {
+				fields = append(fields, Field{Name: "Format settings, GOP", Value: formatGOPLength(info.GOPLength)})
 			}
 			if info.ScanType == "Interlaced" && info.PictureStructure != "" {
 				fields = append(fields, Field{Name: "Format settings, Picture structure", Value: info.PictureStructure})

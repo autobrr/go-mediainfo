@@ -209,8 +209,8 @@ Owner: soup
 - `ptp-archive` BDAV sweep (40-file sample): `old_avg=24.60 -> new_avg=15.05`, `improved=18 same=22 worse=0`.
 - New focused diffs after DTS + AVC tweaks: `00001.m2ts=50` (from 90), `00003.m2ts=31` (from 71), `00206.m2ts=22` (from 44), `00201.m2ts=22` (from 44).
 - BDAV stream-order parity tweak landed: normalize output order to `Video -> Audio -> Text` (PID tie-break) for BDAV/M2TS, matching official ordering in PMT-missing cases.
-- TS MPEG-2 GOP text parity tweak landed: `Format settings, GOP` now prefers `Variable` when parser marks variable GOP lengths (before interlaced `M=, N=` fallback).
-- Focused recheck vs previous commit (`HEAD~1`): improved `00001.m2ts 149->139`, `00003.m2ts 126->83`, `00201.m2ts 92->80`, `00206.m2ts 92->80`; unchanged `01007.m2ts 29`, `01099.m2ts 18`, and sampled TS files (`Nickelodeon Bumper 2`, `Evermoor`, `Generic Halloween Promo`, `Halloweentown BRB`).
+- Focused recheck vs previous commit (`HEAD~1`, line-diff metric): improved `00001.m2ts 149->139`, `00003.m2ts 126->83`, `00201.m2ts 92->80`, `00206.m2ts 92->80`; unchanged `01007.m2ts 29`, `01099.m2ts 18`.
+- TS safety sweep (71 files in `keepalive/Halloween 2014 Promos and Bumpers Pack`): `improved=0 same=71 worse=0` vs previous commit.
 - Remaining big diffs: TS AC-3 stats sampling/count window parity; TS ATSC `Title`/`Movie` on some captures; BDAV video max bitrate/size edge cases; DVD/VOB duration/framecount/streamsize/GOP semantics; AVI container/video codec details (DivX/XviD specifics).
 
 - Perf notes:

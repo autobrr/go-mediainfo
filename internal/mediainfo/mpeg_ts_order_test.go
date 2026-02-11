@@ -42,3 +42,43 @@ func TestNormalizeTSStreamOrderTSKeepsDiscoveryOrder(t *testing.T) {
 		}
 	}
 }
+
+func TestMergeTSStreamFromPMTPreservesLanguageOnEmptyUpdate(t *testing.T) {
+	existing := &tsStream{
+		pid:      4611,
+		kind:     StreamText,
+		format:   "PGS",
+		language: "zho",
+	}
+	mergeTSStreamFromPMT(existing, tsStream{
+		pid:           4611,
+		kind:          StreamText,
+		format:        "PGS",
+		streamType:    0x90,
+		programNumber: 1,
+		language:      "",
+	})
+	if existing.language != "zho" {
+		t.Fatalf("mergeTSStreamFromPMT() language=%q, want %q", existing.language, "zho")
+	}
+}
+
+func TestMergeTSStreamFromPMTUpdatesLanguageWhenPresent(t *testing.T) {
+	existing := &tsStream{
+		pid:      4611,
+		kind:     StreamText,
+		format:   "PGS",
+		language: "",
+	}
+	mergeTSStreamFromPMT(existing, tsStream{
+		pid:           4611,
+		kind:          StreamText,
+		format:        "PGS",
+		streamType:    0x90,
+		programNumber: 1,
+		language:      "zho",
+	})
+	if existing.language != "zho" {
+		t.Fatalf("mergeTSStreamFromPMT() language=%q, want %q", existing.language, "zho")
+	}
+}
