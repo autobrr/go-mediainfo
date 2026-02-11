@@ -652,17 +652,34 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 					general.JSON["FrameCount"] = fc
 				}
 				// TS MPEG-2 parity: MediaInfo stream size aligns with BitRate * (FrameCount / FrameRate).
-				if mpeg2Video.JSON != nil {
-					if br, ok := parseInt(mpeg2Video.JSON["BitRate"]); ok && br > 0 {
-						if fr, err := strconv.ParseFloat(mpeg2Video.JSON["FrameRate"], 64); err == nil && fr > 0 {
-							if fc, ok := parseInt(mpeg2Video.JSON["FrameCount"]); ok && fc > 0 {
-								videoSS := int64(math.Round((float64(br) / 8.0) * (float64(fc) / fr)))
-								if videoSS > 0 {
-									mpeg2Video.JSON["StreamSize"] = strconv.FormatInt(videoSS, 10)
-									mpeg2Video.Fields = setFieldValue(mpeg2Video.Fields, "Stream size", formatStreamSize(videoSS, fileSize))
-								}
-							}
+				if mpeg2Video.JSON == nil {
+					mpeg2Video.JSON = map[string]string{}
+				}
+				br, brOK := parseInt(mpeg2Video.JSON["BitRate"])
+				if !brOK || br <= 0 {
+					if parsed, ok := parseBitrateBps(findField(mpeg2Video.Fields, "Bit rate")); ok && parsed > 0 {
+						br, brOK = parsed, true
+					}
+				}
+				fr, frOK := parseFloatValue(mpeg2Video.JSON["FrameRate"])
+				if !frOK || fr <= 0 {
+					if parsed, ok := parseFloatValue(findField(mpeg2Video.Fields, "Frame rate")); ok && parsed > 0 {
+						fr, frOK = parsed, true
+					}
+				}
+				fc, fcOK := parseInt(mpeg2Video.JSON["FrameCount"])
+				if !fcOK || fc <= 0 {
+					if count, ok := frameCountFromFields(mpeg2Video.Fields); ok {
+						if parsed, ok := parseInt(count); ok && parsed > 0 {
+							fc, fcOK = parsed, true
 						}
+					}
+				}
+				if brOK && frOK && fcOK && br > 0 && fr > 0 && fc > 0 {
+					videoSS := int64(math.Round((float64(br) / 8.0) * (float64(fc) / fr)))
+					if videoSS > 0 {
+						mpeg2Video.JSON["StreamSize"] = strconv.FormatInt(videoSS, 10)
+						mpeg2Video.Fields = setFieldValue(mpeg2Video.Fields, "Stream size", formatStreamSize(videoSS, fileSize))
 					}
 				}
 				sum := int64(0)
