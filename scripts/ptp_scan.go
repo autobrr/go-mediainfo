@@ -65,6 +65,7 @@ type candidate struct {
 	SizeBytes    int64  `json:"size_bytes,omitempty"`
 	Snatched     bool   `json:"snatched,omitempty"`
 	Permalink    string `json:"permalink,omitempty"`
+	DownloadURL  string `json:"download_url,omitempty"`
 }
 
 type queryPreset struct {
@@ -559,6 +560,9 @@ func extractCandidates(payload map[string]any, baseURL, query string, page int) 
 					c.Permalink += "&torrentid=" + strconv.Itoa(c.TorrentID)
 				}
 			}
+			if c.TorrentID > 0 {
+				c.DownloadURL = fmt.Sprintf("%s/torrents.php?id=%d&action=download", strings.TrimRight(baseURL, "/"), c.TorrentID)
+			}
 			out = append(out, c)
 		}
 	}
@@ -685,7 +689,7 @@ func pickBool(m map[string]any, keys ...string) bool {
 }
 
 func isTargetCandidate(c candidate) bool {
-	hay := strings.ToLower(strings.Join([]string{c.Media, c.Source, c.Container, c.Codec, c.Title, c.Permalink}, " "))
+	hay := strings.ToLower(strings.Join([]string{c.Media, c.Source, c.Container, c.Codec, c.Title, c.Permalink, c.DownloadURL}, " "))
 	if strings.Contains(hay, ".m2ts") || strings.Contains(hay, " m2ts") {
 		return true
 	}

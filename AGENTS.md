@@ -212,6 +212,7 @@ Owner: soup
 - Focused recheck vs previous commit (`HEAD~1`, line-diff metric): improved `00001.m2ts 149->139`, `00003.m2ts 126->83`, `00201.m2ts 92->80`, `00206.m2ts 92->80`; unchanged `01007.m2ts 29`, `01099.m2ts 18`.
 - TS safety sweep (71 files in `keepalive/Halloween 2014 Promos and Bumpers Pack`): `improved=0 same=71 worse=0` vs previous commit.
 - Added safe PTP candidate scanner: `scripts/ptp_scan.go` (API headers only; no scrape endpoints), with hard throttles/backoff (`403 halt`, `429/5xx backoff`), request caps, and local state cache.
+- PTP scanner output now includes direct `download_url` (`torrents.php?id=<torrent_id>&action=download`) alongside group permalink for exact snatches.
 - Remaining big diffs: TS AC-3 stats sampling/count window parity; TS ATSC `Title`/`Movie` on some captures; BDAV video max bitrate/size edge cases; DVD/VOB duration/framecount/streamsize/GOP semantics; AVI container/video codec details (DivX/XviD specifics).
 
 - Perf notes:
