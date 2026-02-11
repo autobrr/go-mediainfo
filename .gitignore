@@ -1,1 +1,9 @@
 MediaInfo-master/
+
+# PTP scanner local secrets/state
+.env.ptp
+scripts/ptp_scan.local.env
+scripts/ptp_scan.local.json
+.cache/ptp-scan/
+ptp_scan.state.json
+ptp_scan_candidates.jsonl
