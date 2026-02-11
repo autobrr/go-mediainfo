@@ -11,7 +11,7 @@ func appendTSCaptionStreams(out *[]Stream, video *tsStream) {
 	if out == nil || video == nil || video.kind != StreamVideo {
 		return
 	}
-	has608 := video.ccOdd.found || video.ccEven.found
+	has608 := video.hasValidCEA608()
 	has708 := len(video.dtvccServices) > 0
 	if !has608 && !has708 {
 		return

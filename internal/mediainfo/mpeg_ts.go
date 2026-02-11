@@ -82,6 +82,19 @@ type tsStream struct {
 	xdsTitleCounts map[string]int
 }
 
+func (s *tsStream) hasValidCEA608() bool {
+	if s == nil {
+		return false
+	}
+	if s.ccOdd.found && (s.ccOdd.firstCommandPTS != 0 || s.ccOdd.firstCommandFrame > 0 || s.ccOdd.firstType != "") {
+		return true
+	}
+	if s.ccEven.found && (s.ccEven.firstCommandPTS != 0 || s.ccEven.firstCommandFrame > 0 || s.ccEven.firstType != "") {
+		return true
+	}
+	return false
+}
+
 type mpeg2UserDataPacket struct {
 	temporalReference uint16
 	data              []byte
@@ -1533,13 +1546,17 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 			if st == nil || st.kind != StreamVideo {
 				continue
 			}
-			if st.xdsLawRating != "" {
+			// Keep XDS-derived General metadata only when 608 data is sufficiently synced.
+			// This avoids false positives on streams where random GA94 bytes mimic XDS packets.
+			if st.hasValidCEA608() && st.xdsLawRating != "" {
 				generalFields = append(generalFields, Field{Name: "Law rating", Value: st.xdsLawRating})
 			}
 			// MediaInfoLib sets Title/Movie to the last Program Name observed.
-			if title := st.xdsLastTitle; title != "" {
-				generalFields = append(generalFields, Field{Name: "Title", Value: title})
-				generalFields = append(generalFields, Field{Name: "Movie", Value: title})
+			if st.hasValidCEA608() {
+				if title := st.xdsLastTitle; title != "" {
+					generalFields = append(generalFields, Field{Name: "Title", Value: title})
+					generalFields = append(generalFields, Field{Name: "Movie", Value: title})
+				}
 			}
 			break
 		}
