@@ -43,6 +43,10 @@ Owner: soup
 - `.../Infernal.../STREAM/00000.m2ts` diff `272`; `.../PLAYLIST/00999.mpls` diff `13468`.
 - `.../Intruders.../STREAM/50201.m2ts` diff `507`; `.../PLAYLIST/00020.mpls` diff `6699`.
 - `.../Network.../STREAM/00007.m2ts` diff `214`; `.../PLAYLIST/00002.mpls` diff `1390`.
+- Additional availability sweep (non-cross-seed canonical paths):
+- `A.Beautiful.Mind.../STREAM/00068.m2ts` diff `312`; `.../PLAYLIST/00020.mpls` diff `3091`.
+- `Now You See Me.../STREAM/00000.m2ts` diff `406`; `.../PLAYLIST/00101.mpls` diff `27074`.
+- `Through.the.Looking.Glass.../STREAM/00003.m2ts` diff `164`; `.../PLAYLIST/00001.mpls` diff `1159`.
 - Continuous filename parity:
 - `detectContinuousFileSet` now includes sparse numeric sets (not just strict contiguous sequence) and picks highest numbered matching file.
 - `detectContinuousFileSet` sparse matching retained for explicit `--File_TestContinuousFileNames=1` flows; default remains off.
