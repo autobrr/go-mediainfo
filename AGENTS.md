@@ -76,6 +76,9 @@ Owner: soup
 - `internal/mediainfo/mpeg_ts_captions.go`: suppress early service-2-only caption detection when CC1 is not emitted and computed first command start is `<0.5s`.
 - Validation vs `684b8f8` (Halloween 71-file TS sweep): `improved=1 same=70 worse=0` (`Halloweentown Be Right Back.ts: 45->10`).
 - Targeted non-TS/BDAV sanity sample set (13 files incl. `00007.m2ts`, `50201.m2ts`, `00068.m2ts`, `00003.m2ts`): unchanged (`worse=0`).
+- TS XDS metadata guard (same outlier path):
+- `internal/mediainfo/mpeg_ts.go`: emit XDS-derived General `Title`/`Movie`/`LawRating` only when a Text stream is actually emitted for that video PID.
+- Combined validation vs `684b8f8` (Halloween 71-file TS sweep): `improved=1 same=70 worse=0` (`Halloweentown Be Right Back.ts: 45->7`).
 - I/O note: some UHD `mediainfo` probes on `/mnt/storage/torrents` entered kernel `D` state (blocked I/O); reruns exclude those exact paths to avoid runaway disk stalls.
 
 ## Learnings / Decisions

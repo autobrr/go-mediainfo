@@ -1805,13 +1805,14 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 			if st == nil || st.kind != StreamVideo {
 				continue
 			}
+			hasCaption := hasTSCaptionStreamForPID(streamsOut, st.pid)
 			// Keep XDS-derived General metadata only when 608 data is sufficiently synced.
 			// This avoids false positives on streams where random GA94 bytes mimic XDS packets.
-			if st.hasValidCEA608() && st.xdsLawRating != "" {
+			if hasCaption && st.hasValidCEA608() && st.xdsLawRating != "" {
 				generalFields = append(generalFields, Field{Name: "Law rating", Value: st.xdsLawRating})
 			}
 			// MediaInfoLib sets Title/Movie to the last Program Name observed.
-			if st.hasValidCEA608() {
+			if hasCaption && st.hasValidCEA608() {
 				if title := st.xdsLastTitle; title != "" {
 					generalFields = append(generalFields, Field{Name: "Title", Value: title})
 					generalFields = append(generalFields, Field{Name: "Movie", Value: title})
@@ -2678,6 +2679,28 @@ func mapServiceType(value byte) string {
 	default:
 		return ""
 	}
+}
+
+func hasTSCaptionStreamForPID(streams []Stream, pid uint16) bool {
+	prefix := strconv.FormatUint(uint64(pid), 10) + "-"
+	for _, stream := range streams {
+		if stream.Kind != StreamText {
+			continue
+		}
+		id := ""
+		if stream.JSON != nil {
+			id = stream.JSON["ID"]
+		}
+		if id == "" {
+			if fieldID := findField(stream.Fields, "ID"); fieldID != "" {
+				id = fieldID
+			}
+		}
+		if strings.HasPrefix(id, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func formatMPEG2GOPSetting(info mpeg2VideoInfo) string {
