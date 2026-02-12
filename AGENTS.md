@@ -57,6 +57,10 @@ Owner: soup
 - Largest wins: `New Thursdays 169->144`, `Generic Week of Eeek 135->99`, `Regular Show IV Promo 130->94`.
 - Control set unchanged: `Nick=41`, `Evermoor=45`, `01007.m2ts=31`, `01099.m2ts=20`, `KAUTOKEINO 00007.m2ts=55`.
 - Remaining 708 mismatch in this sweep: `Halloweentown Be Right Back.ts` (official none vs ours service `2`).
+- TS GOP parity win:
+- `internal/mediainfo/mpeg_ts.go`: GOP field output now prefers `"Variable"` when parser flags variable GOP, before interlaced `M/N`.
+- `internal/mediainfo/mpeg2_video.go`: TS GOP variability now uses strict dominant-length threshold (`>=95%`) before collapsing to fixed length, preventing false Variable/Fixed flips on controls.
+- Validation sweep (19 files; Halloween TS controls + UHD M2TS samples): `improved=11 same=8 worse=0` vs previous `main` (`f4fda3a`) using official JSON as reference.
 
 ## Learnings / Decisions
 - Command name: mediainfo

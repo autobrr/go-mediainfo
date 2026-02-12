@@ -1060,12 +1060,8 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 			if info.Matrix == "Custom" && info.MatrixData != "" {
 				jsonExtras["Format_Settings_Matrix_Data"] = info.MatrixData
 			}
-			if info.ScanType == "Interlaced" && info.GOPM > 0 && info.GOPN > 0 {
-				fields = append(fields, Field{Name: "Format settings, GOP", Value: fmt.Sprintf("M=%d, N=%d", info.GOPM, info.GOPN)})
-			} else if info.GOPVariable {
-				fields = append(fields, Field{Name: "Format settings, GOP", Value: "Variable"})
-			} else if info.GOPLength > 0 {
-				fields = append(fields, Field{Name: "Format settings, GOP", Value: formatGOPLength(info.GOPLength)})
+			if gop := formatMPEG2GOPSetting(info); gop != "" {
+				fields = append(fields, Field{Name: "Format settings, GOP", Value: gop})
 			}
 			if info.ScanType == "Interlaced" && info.PictureStructure != "" {
 				fields = append(fields, Field{Name: "Format settings, Picture structure", Value: info.PictureStructure})
@@ -2682,6 +2678,19 @@ func mapServiceType(value byte) string {
 	default:
 		return ""
 	}
+}
+
+func formatMPEG2GOPSetting(info mpeg2VideoInfo) string {
+	if info.GOPVariable {
+		return "Variable"
+	}
+	if info.ScanType == "Interlaced" && info.GOPM > 0 && info.GOPN > 0 {
+		return fmt.Sprintf("M=%d, N=%d", info.GOPM, info.GOPN)
+	}
+	if info.GOPLength > 0 {
+		return formatGOPLength(info.GOPLength)
+	}
+	return ""
 }
 
 func scanTSForH264(file io.ReadSeeker, pid uint16, size int64) ([]Field, uint64, uint64, uint64, float64) {

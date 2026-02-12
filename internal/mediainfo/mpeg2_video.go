@@ -672,12 +672,26 @@ func (p *mpeg2VideoParser) finalize() mpeg2VideoInfo {
 
 func (p *mpeg2VideoParser) finalizeTS() mpeg2VideoInfo {
 	info := p.finalize()
-	// TS parity: MediaInfo prefers "Variable" GOP when multiple lengths are observed.
+	// TS parity: keep the dominant GOP length when variation is sparse; use "Variable"
+	// only when no clear dominant mode emerges.
 	if len(p.gopLengthCounts) > 0 {
 		mode, variable := modeValue(p.gopLengthCounts)
 		if variable {
-			info.GOPVariable = true
-			info.GOPLength = 0
+			total := 0
+			modeCount := 0
+			for key, count := range p.gopLengthCounts {
+				total += count
+				if key == mode {
+					modeCount = count
+				}
+			}
+			if total > 0 && float64(modeCount)/float64(total) >= 0.95 {
+				info.GOPVariable = false
+				info.GOPLength = mode
+			} else {
+				info.GOPVariable = true
+				info.GOPLength = 0
+			}
 		} else {
 			info.GOPVariable = false
 			info.GOPLength = mode
