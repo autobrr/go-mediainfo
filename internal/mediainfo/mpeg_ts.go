@@ -159,6 +159,17 @@ func mergeTSStreamFromPMT(existing *tsStream, parsed tsStream) {
 	}
 }
 
+func normalizeBDAVDTSDuration(duration, videoDuration float64, isBDAV bool, format string) float64 {
+	// BDAV DTS edge case: some discs expose sparse/non-monotonic DTS PTS and we only
+	// latch codec info from the first valid core frame, which can collapse computed
+	// audio duration to a single-frame value (~10 ms). In this narrow case, MediaInfo
+	// aligns DTS duration to the container/video timeline.
+	if isBDAV && format == "DTS" && videoDuration > 1.0 && duration > 0 && duration < 1.0 {
+		return videoDuration
+	}
+	return duration
+}
+
 type mpeg2UserDataPacket struct {
 	temporalReference uint16
 	data              []byte
@@ -1320,6 +1331,7 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 					duration = float64(durationMs) / 1000.0
 				}
 			}
+			duration = normalizeBDAVDTSDuration(duration, videoDuration, isBDAV, st.format)
 			if duration > 0 {
 				fields = addStreamDuration(fields, duration)
 				if isBDAV {

@@ -213,6 +213,7 @@ Owner: soup
 - TS safety sweep (71 files in `keepalive/Halloween 2014 Promos and Bumpers Pack`): `improved=0 same=71 worse=0` vs previous commit.
 - Added safe PTP candidate scanner: `scripts/ptp_scan.go` (API headers only; no scrape endpoints), with hard throttles/backoff (`403 halt`, `429/5xx backoff`), request caps, and local state cache.
 - PTP scanner output now includes direct `download_url` (`torrents.php?id=<torrent_id>&action=download`) alongside group permalink for exact snatches.
+- BDAV DTS duration guard landed: when DTS duration collapses to sub-second on long BDAV clips, use video/container duration fallback; validated on `A.Bras.Ouverts .../STREAM/00001.m2ts` (`Audio.Duration 0.010 -> 28.417`, official `28.437`) with no regressions on TS/BDAV control set.
 - Remaining big diffs: TS AC-3 stats sampling/count window parity; TS ATSC `Title`/`Movie` on some captures; BDAV video max bitrate/size edge cases; DVD/VOB duration/framecount/streamsize/GOP semantics; AVI container/video codec details (DivX/XviD specifics).
 
 - Perf notes:
