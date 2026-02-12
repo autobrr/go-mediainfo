@@ -1112,6 +1112,9 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 				parts := []string{codecID}
 				if st.audioObject > 0 {
 					parts = append(parts, strconv.Itoa(st.audioObject))
+				} else if st.streamType == 0x11 {
+					// MediaInfo reports LATM AAC as CodecID "17-2" when object type isn't decoded.
+					parts = append(parts, "2")
 				}
 				fields = append(fields, Field{Name: "Codec ID", Value: strings.Join(parts, "-")})
 			}
@@ -1232,10 +1235,10 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 			if st.format != "MPEG Video" && !isBDAV {
 				fields = append(fields, Field{Name: "Frame rate mode", Value: "Variable"})
 			}
-			if isBDAV {
+			if isBDAV && st.format != "HEVC" {
 				fields = append(fields, Field{Name: "Bit rate mode", Value: "Variable"})
 			}
-			if isBDAV && duration > 0 && st.bytes > 0 {
+			if isBDAV && st.format != "HEVC" && duration > 0 && st.bytes > 0 {
 				bitrate := (float64(st.bytes) * 8) / duration
 				if bitrate > 0 {
 					fields = append(fields, Field{Name: "Bit rate", Value: formatBitrate(bitrate)})
@@ -2053,6 +2056,7 @@ func parsePMT(payload []byte, programNumber uint16) ([]tsStream, uint16, int, in
 		pid := binary.BigEndian.Uint16(section[pos+1:pos+3]) & 0x1FFF
 		esInfoLen := int(binary.BigEndian.Uint16(section[pos+3:pos+5]) & 0x0FFF)
 		language := ""
+		hasDVBSubtitleDescriptor := false
 		formatID := programFormatID
 		descStart := pos + 5
 		descEnd := descStart + esInfoLen
@@ -2074,11 +2078,21 @@ func parsePMT(payload []byte, programNumber uint16) ([]tsStream, uint16, int, in
 					if language == "" {
 						language = strings.TrimSpace(code)
 					}
+				} else if tag == 0x59 && length >= 8 {
+					// DVB subtitling descriptor.
+					hasDVBSubtitleDescriptor = true
+					if language == "" {
+						language = strings.TrimSpace(string(descs[i : i+3]))
+					}
 				}
 				i += length
 			}
 		}
 		kind, format := mapTSStream(streamType, formatID)
+		if streamType == 0x06 && hasDVBSubtitleDescriptor {
+			kind = StreamText
+			format = "DVB Subtitle"
+		}
 		if kind != "" {
 			streams = append(streams, tsStream{pid: pid, programNumber: programNumber, streamType: streamType, kind: kind, format: format, language: language})
 		}
