@@ -72,6 +72,10 @@ Owner: soup
 - TS caption parity cleanup (follow-up):
 - `internal/mediainfo/mpeg_ts_captions.go`: emit CC1 only when command timing exists (matches official `Duration_Start_Command` behavior on sampled broadcasts).
 - Validation vs `23ae163` (Halloween 71-file TS sweep): `improved=9 same=62 worse=0`.
+- TS caption parity cleanup (outlier guard):
+- `internal/mediainfo/mpeg_ts_captions.go`: suppress early service-2-only caption detection when CC1 is not emitted and computed first command start is `<0.5s`.
+- Validation vs `684b8f8` (Halloween 71-file TS sweep): `improved=1 same=70 worse=0` (`Halloweentown Be Right Back.ts: 45->10`).
+- Targeted non-TS/BDAV sanity sample set (13 files incl. `00007.m2ts`, `50201.m2ts`, `00068.m2ts`, `00003.m2ts`): unchanged (`worse=0`).
 - I/O note: some UHD `mediainfo` probes on `/mnt/storage/torrents` entered kernel `D` state (blocked I/O); reruns exclude those exact paths to avoid runaway disk stalls.
 
 ## Learnings / Decisions

@@ -37,6 +37,9 @@ func appendTSCaptionStreams(out *[]Stream, video *tsStream) {
 		duration += 1.0 / fps
 		duration = math.Round(duration*1000) / 1000
 	}
+	if shouldSuppressEarlyService2Only(video, delay, fps) {
+		return
+	}
 	menuID := video.programNumber
 	videoPID := video.pid
 	// MediaInfoLib suppresses Text_Lines_Count when it has jumped/unsynched during parsing.
@@ -86,6 +89,30 @@ func appendTSCaptionStreams(out *[]Stream, video *tsStream) {
 			*out = append(*out, buildTSCaptionStream(videoPID, menuID, delay, duration, "EIA-708", strconv.Itoa(svc), 0, emitLinesCount))
 		}
 	}
+}
+
+func shouldSuppressEarlyService2Only(video *tsStream, delay, fps float64) bool {
+	if video == nil || shouldEmitTSCC1(video) || !video.ccEven.found {
+		return false
+	}
+	if len(video.dtvccServices) != 1 {
+		return false
+	}
+	if _, ok := video.dtvccServices[2]; !ok {
+		return false
+	}
+	start := 0.0
+	if fps > 0 && video.ccEven.firstCommandPTS != 0 {
+		ptsSec := float64(video.ccEven.firstCommandPTS) / 90000.0
+		frame := int64(math.Round((ptsSec-delay)*fps)) - 1
+		if frame < 0 {
+			frame = 0
+		}
+		start = delay + float64(frame)/fps
+	} else if fps > 0 && video.ccEven.firstCommandFrame > 0 {
+		start = delay + float64(video.ccEven.firstCommandFrame)/fps
+	}
+	return start > 0 && start < 0.5
 }
 
 func shouldEmitTSCC3(video *tsStream) bool {
