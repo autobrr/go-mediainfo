@@ -1919,8 +1919,9 @@ var dtsBitRates = [...]int64{
 
 var dtsResolutions = [...]int{16, 20, 24, 24}
 var dtsChannelCounts = [...]int{
-	2, 1, 2, 3, 3, 4, 4, 5,
-	4, 6, 4, 5, 5, 6, 6, 7,
+	// MediaInfoLib mapping (DTS_Channels in File_Dts.cpp), without LFE. LFE is added separately.
+	1, 2, 2, 2, 2, 3, 3, 4,
+	4, 5, 6, 6, 6, 7, 8, 8,
 }
 
 func parseDTSCoreFrame(payload []byte) (dtsInfo, bool) {

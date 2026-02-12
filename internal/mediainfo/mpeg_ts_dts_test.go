@@ -68,7 +68,8 @@ func TestConsumeDTSCoreAndHDExtension(t *testing.T) {
 	if entry.dtsHD {
 		t.Fatalf("expected core-only payload to keep dtsHD=false")
 	}
-	if entry.audioRate != 48000 || entry.audioSpf != 512 || entry.audioChannels != 6 {
+	// MediaInfoLib channel mapping (DTS_Channels) yields AMODE=7 => 4ch plus LFE => 5ch.
+	if entry.audioRate != 48000 || entry.audioSpf != 512 || entry.audioChannels != 5 {
 		t.Fatalf("unexpected core parse: rate=%v spf=%d channels=%d", entry.audioRate, entry.audioSpf, entry.audioChannels)
 	}
 	if entry.audioBitRateMode != "Constant" || entry.audioBitRateKbps != 768 {
