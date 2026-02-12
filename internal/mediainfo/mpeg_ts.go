@@ -971,20 +971,14 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 		var jsonRaw map[string]string
 		jsonExtras["ID"] = strconv.FormatUint(uint64(st.pid), 10)
 		jsonExtras["StreamOrder"] = fmt.Sprintf("0-%d", i)
-		if isBDAV && !partialScan && st.bytes > 0 && st.kind == StreamVideo {
-			jsonExtras["StreamSize"] = strconv.FormatUint(st.bytes, 10)
-		}
-		// MediaInfoLib does not emit StreamSize for DTS streams in BDAV at default ParseSpeed.
-		if isBDAV && !partialScan && st.bytes > 0 && st.kind == StreamAudio && st.format != "DTS" {
-			jsonExtras["StreamSize"] = strconv.FormatUint(st.bytes, 10)
-		}
 		if !isBDAV && hasMPEGVideo && !partialScan && st.bytes > 0 && (st.kind == StreamVideo || st.kind == StreamAudio) {
 			jsonExtras["StreamSize"] = strconv.FormatUint(st.bytes, 10)
 		}
 		if st.programNumber > 0 {
 			jsonExtras["MenuID"] = strconv.FormatUint(uint64(st.programNumber), 10)
 		}
-		if st.pts.has() {
+		// MediaInfoLib does not emit Delay/Video_Delay for BDAV PGS streams.
+		if st.pts.has() && !(isBDAV && st.kind == StreamText) {
 			delay := float64(st.pts.first) / 90000.0
 			jsonExtras["Delay"] = fmt.Sprintf("%.9f", delay)
 			jsonExtras["Delay_Source"] = "Container"
@@ -997,7 +991,7 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 			videoDelay = math.Round(videoDelay*1000) / 1000
 			jsonExtras["Video_Delay"] = fmt.Sprintf("%.3f", audioDelay-videoDelay)
 		}
-		if st.kind == StreamText && videoPTS.has() && st.pts.has() {
+		if st.kind == StreamText && !isBDAV && videoPTS.has() && st.pts.has() {
 			textDelay := float64(st.pts.first) / 90000.0
 			videoDelay := float64(videoPTS.first) / 90000.0
 			textDelay = math.Round(textDelay*1000) / 1000
@@ -1276,13 +1270,8 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 				fields = append(fields, Field{Name: "Frame rate mode", Value: "Variable"})
 			}
 			if isBDAV && st.format != "HEVC" {
+				// Match MediaInfo: BDAV video reports BitRate_Mode=VBR even when BitRate/StreamSize are omitted.
 				fields = append(fields, Field{Name: "Bit rate mode", Value: "Variable"})
-			}
-			if isBDAV && st.format != "HEVC" && duration > 0 && st.bytes > 0 {
-				bitrate := (float64(st.bytes) * 8) / duration
-				if bitrate > 0 {
-					fields = append(fields, Field{Name: "Bit rate", Value: formatBitrate(bitrate)})
-				}
 			}
 			if st.width > 0 {
 				fields = append(fields, Field{Name: "Width", Value: formatPixels(st.width)})
@@ -1366,7 +1355,9 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 					duration = float64(durationMs) / 1000.0
 				}
 			}
-			if !isTrueHD && !partialScan && st.audioRate > 0 && st.audioFrames > 0 && st.audioSpf > 0 {
+			// BDAV DTS(-HD): prefer PTS-derived duration; frame-count-based duration is sensitive to
+			// scan/window boundaries and can undercount vs MediaInfo.
+			if !isTrueHD && !partialScan && st.audioRate > 0 && st.audioFrames > 0 && st.audioSpf > 0 && !(isBDAV && st.format == "DTS") {
 				rate := int64(st.audioRate)
 				if rate > 0 {
 					samples := st.audioFrames * uint64(st.audioSpf)
@@ -1613,13 +1604,18 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 					channels = 6
 				}
 				jsonExtras["Channels"] = strconv.FormatUint(channels, 10)
+				// MediaInfoLib uses the millisecond-rounded stream duration for DTS-HD count fields.
+				durationForCounts := duration
+				if durationForCounts > 0 {
+					durationForCounts = math.Round(durationForCounts*1000) / 1000
+				}
 				if st.audioSpf > 0 {
 					jsonExtras["SamplesPerFrame"] = strconv.Itoa(st.audioSpf)
 				}
 				if st.audioRate > 0 {
 					jsonExtras["SamplingRate"] = strconv.FormatInt(int64(math.Round(st.audioRate)), 10)
-					if duration > 0 {
-						samplingCount := int64(math.Round(duration * st.audioRate))
+					if durationForCounts > 0 {
+						samplingCount := int64(math.Round(durationForCounts * st.audioRate))
 						if samplingCount > 0 {
 							jsonExtras["SamplingCount"] = strconv.FormatInt(samplingCount, 10)
 						}
@@ -1628,8 +1624,8 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 						frameRate := st.audioRate / float64(st.audioSpf)
 						if frameRate > 0 {
 							jsonExtras["FrameRate"] = fmt.Sprintf("%.3f", frameRate)
-							if duration > 0 {
-								jsonExtras["FrameCount"] = strconv.Itoa(int(math.Round(duration * frameRate)))
+							if durationForCounts > 0 {
+								jsonExtras["FrameCount"] = strconv.Itoa(int(math.Round(durationForCounts * frameRate)))
 							}
 						}
 					}

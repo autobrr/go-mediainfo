@@ -891,7 +891,9 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			// subtracting audio + text overhead, then set General StreamSize as the remainder.
 			appliedBDAVSizing := false
 			overallInt, ok := parseInt(general.JSON["OverallBitRate"])
-			if ok && overallInt > 0 && info.DurationSeconds > 0 && fileSize > 0 {
+			// Only attempt this when we have at least one audio StreamSize; MediaInfo omits these
+			// derived StreamSize fields for BDAV when audio sizing isn't available (e.g. DTS-HD-only).
+			if ok && overallInt > 0 && info.DurationSeconds > 0 && fileSize > 0 && audioSum > 0 {
 				overall := float64(overallInt)
 				const (
 					generalRatio = 0.98
@@ -999,7 +1001,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 					}
 				}
 			}
-			if !appliedBDAVSizing {
+			if !appliedBDAVSizing && audioSum > 0 {
 				overhead := info.StreamOverheadBytes
 				if overhead > 0 {
 					general.JSON["StreamSize"] = strconv.FormatInt(overhead, 10)
