@@ -768,7 +768,7 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 						if !entry.audioStarted {
 							entry.audioStarted = true
 						}
-						consumeAudio(entry, data, collectAC3Stats, inHead)
+						consumeAudio(entry, data, collectAC3Stats, inHead, ac3StatsBounded)
 					}
 
 					if _, ok := videoPIDs[pid]; ok {
@@ -816,7 +816,7 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 					}
 					entry.bytes += uint64(len(payloadData))
 					pidPayloadBytes[pid] += int64(len(payloadData))
-					consumeAudio(entry, payloadData, collectAC3Stats, inHead)
+					consumeAudio(entry, payloadData, collectAC3Stats, inHead, ac3StatsBounded)
 				}
 				if entry.kind != StreamAudio && len(payloadData) > 0 {
 					entry.bytes += uint64(len(payloadData))
@@ -861,9 +861,8 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 	shouldJump := ac3StatsBounded && size > 0 && jumpBytes > 0 && syncOff+jumpBytes < size-jumpBytes
 	if shouldJump || headStoppedEarly {
 		partialScan = true
-		// Start slightly before the official tail window so PES/audio resync has context.
-		// Stats collection remains bounded by packetOffset>=size-jumpBytes.
-		tailStart := size - jumpBytes - (1 << 20)
+		// Match MediaInfoLib: start tail scan at the official tail window boundary.
+		tailStart := size - jumpBytes
 		if tailStart < syncOff {
 			tailStart = syncOff
 		}
@@ -1344,7 +1343,7 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 		if st.kind == StreamAudio {
 			duration := ptsDuration(st.pts)
 			// PTS deltas cover (N-1) frame intervals; official mediainfo reports full duration (N intervals).
-			if !isBDAV && hasMPEGVideo && st.hasAC3 && st.ac3Info.sampleRate > 0 && st.ac3Info.spf > 0 && duration > 0 {
+			if st.hasAC3 && st.ac3Info.sampleRate > 0 && st.ac3Info.spf > 0 && duration > 0 {
 				duration += float64(st.ac3Info.spf) / float64(st.ac3Info.sampleRate)
 			}
 			if !isTrueHD && !partialScan && st.hasAC3 && st.ac3Info.sampleRate > 0 && st.ac3Info.spf > 0 && st.audioFrames > 0 {
@@ -1748,7 +1747,10 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 			}
 			estAVPayload := avPayload
 			if partialScan && tsPacketCount > 0 && totalPackets > 0 {
-				estAVPayload = int64(math.Round(float64(avPayload) * float64(totalPackets) / float64(tsPacketCount)))
+				// MediaInfoLib's partial-scan overhead estimation tends to bias slightly toward
+				// a larger A/V payload (smaller overhead). Use ceil to avoid underestimating
+				// payload by a few bytes at window boundaries.
+				estAVPayload = int64(math.Ceil(float64(avPayload) * float64(totalPackets) / float64(tsPacketCount)))
 			}
 			if estAVPayload < 0 {
 				estAVPayload = 0
@@ -2269,7 +2271,7 @@ func processPES(entry *tsStream) {
 	entry.pesData = entry.pesData[:0]
 }
 
-func consumeAudio(entry *tsStream, payload []byte, collectAC3Stats bool, ac3StatsHead bool) {
+func consumeAudio(entry *tsStream, payload []byte, collectAC3Stats bool, ac3StatsHead bool, ac3StatsBounded bool) {
 	switch entry.format {
 	case "AAC":
 		if entry.audioSpf == 0 {
@@ -2283,12 +2285,12 @@ func consumeAudio(entry *tsStream, payload []byte, collectAC3Stats bool, ac3Stat
 		if entry.audioBitRateMode == "" {
 			entry.audioBitRateMode = "Constant"
 		}
-		consumeAC3(entry, payload, collectAC3Stats, ac3StatsHead)
+		consumeAC3(entry, payload, collectAC3Stats, ac3StatsHead, ac3StatsBounded)
 	case "E-AC-3":
 		if entry.audioBitRateMode == "" {
 			entry.audioBitRateMode = "Variable"
 		}
-		consumeEAC3(entry, payload, collectAC3Stats, ac3StatsHead)
+		consumeEAC3(entry, payload, collectAC3Stats, ac3StatsHead, ac3StatsBounded)
 	case "DTS":
 		if entry.audioBitRateMode == "" {
 			entry.audioBitRateMode = "Variable"
@@ -2505,7 +2507,7 @@ func orderedAC3Tail(entry *tsStream) []ac3Info {
 	return out
 }
 
-func consumeAC3(entry *tsStream, payload []byte, collectStats bool, statsHead bool) {
+func consumeAC3(entry *tsStream, payload []byte, collectStats bool, statsHead bool, statsBounded bool) {
 	if len(payload) == 0 {
 		return
 	}
@@ -2560,7 +2562,7 @@ func consumeAC3(entry *tsStream, payload []byte, collectStats bool, statsHead bo
 	}
 }
 
-func consumeEAC3(entry *tsStream, payload []byte, collectStats bool, statsHead bool) {
+func consumeEAC3(entry *tsStream, payload []byte, collectStats bool, statsHead bool, statsBounded bool) {
 	if len(payload) == 0 {
 		return
 	}
@@ -2608,6 +2610,41 @@ func consumeEAC3(entry *tsStream, payload []byte, collectStats bool, statsHead b
 	if i > 0 {
 		entry.audioBuffer = append(entry.audioBuffer[:0], entry.audioBuffer[i:]...)
 	}
+}
+
+func finalizeBoundedAC3Stats(entry *tsStream) {
+	if entry == nil || !entry.hasAC3 {
+		return
+	}
+	head := entry.ac3Head
+	tail := orderedAC3Tail(entry)
+	if len(head) == 0 && len(tail) == 0 {
+		return
+	}
+	// MediaInfo scans begin/end windows at default ParseSpeed. To avoid biasing stats to only one
+	// window, split the capped sample budget across head and tail (tail = end of file).
+	want := ac3SampleMax
+	headMax := want / 2
+	takeHead := min(len(head), headMax)
+	takeTail := min(len(tail), want-takeHead)
+	if need := want - (takeHead + takeTail); need > 0 {
+		takeHead += min(len(head)-takeHead, need)
+	}
+	samples := make([]ac3Info, 0, takeHead+takeTail)
+	if takeHead > 0 {
+		samples = append(samples, head[:takeHead]...)
+	}
+	if takeTail > 0 {
+		samples = append(samples, tail[len(tail)-takeTail:]...)
+	}
+	if len(samples) == 0 {
+		return
+	}
+	stats := ac3Info{}
+	for _, f := range samples {
+		stats.mergeFrame(f)
+	}
+	entry.ac3Stats = stats
 }
 
 func hasTrueHDSync(payload []byte) bool {

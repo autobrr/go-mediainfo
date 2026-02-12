@@ -951,6 +951,8 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 				}
 
 				if valid && videoBitrate >= 10000 {
+					// MediaInfoLib appears to size BDAV video streams using the float bitrate before
+					// rounding it for display/JSON. This can differ by a few bytes on short clips.
 					videoBps := int64(math.Round(videoBitrate))
 					var frameRate float64
 					var frameCount int64
@@ -979,7 +981,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 						// MediaInfo uses the rounded FrameRate value for more stable (but slightly imprecise) sizing.
 						durationMs = float64(frameCount) * 1000 / frameRate
 					}
-					videoSS := int64(math.Round((float64(videoBps) / 8.0) * (durationMs / 1000.0)))
+					videoSS := int64(math.Round((videoBitrate / 8.0) * (durationMs / 1000.0)))
 					if videoSS > 0 {
 						for i := range streams {
 							if streams[i].Kind != StreamVideo {
