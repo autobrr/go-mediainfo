@@ -23,23 +23,25 @@ type h264SPSInfo struct {
 	HasColorDescription     bool
 	ProfileID               byte
 	LevelID                 byte
-	Width                   uint64
-	Height                  uint64
-	CodedWidth              uint64
-	CodedHeight             uint64
-	FrameRate               float64
-	FixedFrameRate          bool
-	HasFixedFrameRate       bool
-	BitRate                 int64
-	HasBitRate              bool
-	BitRateCBR              bool
-	HasBitRateCBR           bool
-	BufferSize              int64
-	HasBufferSize           bool
-	BufferSizeNAL           int64
-	HasBufferSizeNAL        bool
-	BufferSizeVCL           int64
-	HasBufferSizeVCL        bool
+	// HEVC-only: tier name ("Main" or "High") when available.
+	HEVCTier          string
+	Width             uint64
+	Height            uint64
+	CodedWidth        uint64
+	CodedHeight       uint64
+	FrameRate         float64
+	FixedFrameRate    bool
+	HasFixedFrameRate bool
+	BitRate           int64
+	HasBitRate        bool
+	BitRateCBR        bool
+	HasBitRateCBR     bool
+	BufferSize        int64
+	HasBufferSize     bool
+	BufferSizeNAL     int64
+	HasBufferSizeNAL  bool
+	BufferSizeVCL     int64
+	HasBufferSizeVCL  bool
 }
 
 func parseAVCConfig(payload []byte) (string, []Field, h264SPSInfo) {

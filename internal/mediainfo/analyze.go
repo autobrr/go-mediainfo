@@ -728,8 +728,31 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			if info.DurationSeconds > 0 {
 				general.JSON["Duration"] = fmt.Sprintf("%.9f", info.DurationSeconds)
 			}
+			hasHEVC := false
+			hasPCM := false
+			for _, st := range streams {
+				switch st.Kind {
+				case StreamVideo:
+					if findField(st.Fields, "Format") == "HEVC" {
+						hasHEVC = true
+					}
+				case StreamAudio:
+					if findField(st.Fields, "Format") == "PCM" {
+						hasPCM = true
+					}
+				}
+			}
 			// Blu-ray max mux rate (per MediaInfo output).
-			general.JSON["OverallBitRate_Maximum"] = "48000000"
+			// UHD BD: MediaInfo reports 109 Mb/s, or 127.9 Mb/s when LPCM is present.
+			if hasHEVC {
+				if hasPCM {
+					general.JSON["OverallBitRate_Maximum"] = "127900000"
+				} else {
+					general.JSON["OverallBitRate_Maximum"] = "109000000"
+				}
+			} else {
+				general.JSON["OverallBitRate_Maximum"] = "48000000"
+			}
 			// MediaInfo uses a PCR-derived estimate for BDAV overall bitrate.
 			if info.OverallBitrateMin > 0 && info.OverallBitrateMax > 0 {
 				mid := (info.OverallBitrateMin + info.OverallBitrateMax) / 2
@@ -887,146 +910,158 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 				}
 			}
 
-			// MediaInfo BDAV behavior: derive video bitrate/size from overall bitrate,
-			// subtracting audio + text overhead, then set General StreamSize as the remainder.
-			appliedBDAVSizing := false
-			overallInt, ok := parseInt(general.JSON["OverallBitRate"])
-			// Only attempt this when we have at least one audio StreamSize; MediaInfo omits these
-			// derived StreamSize fields for BDAV when audio sizing isn't available (e.g. DTS-HD-only).
-			if ok && overallInt > 0 && info.DurationSeconds > 0 && fileSize > 0 && audioSum > 0 {
-				overall := float64(overallInt)
-				const (
-					generalRatio = 0.98
-					generalMinus = 5000
-					videoRatio   = 0.98
-					videoMinus   = 2000
-					audioRatio   = 0.98
-					audioMinus   = 2000
-					textRatio    = 0.98
-					textMinus    = 2000
-				)
-
-				videoBitrate := overall*generalRatio - generalMinus
-				valid := true
-				for i := range streams {
-					if streams[i].Kind != StreamAudio {
-						continue
-					}
-					br := int64(0)
-					if streams[i].JSON != nil {
-						if parsed, ok := parseInt(streams[i].JSON["BitRate"]); ok && parsed > 0 {
-							br = parsed
-						}
-					}
-					if br == 0 {
-						if parsed, ok := parseBitrateBps(findField(streams[i].Fields, "Bit rate")); ok && parsed > 0 {
-							br = parsed
-						}
-					}
-					if br == 0 {
-						valid = false
-						break
-					}
-					videoBitrate -= float64(br)/audioRatio + audioMinus
-				}
-				if valid {
-					for i := range streams {
-						if streams[i].Kind != StreamText {
-							continue
-						}
-						textBR := float64(0)
-						if streams[i].JSON != nil {
-							if parsed, ok := parseInt(streams[i].JSON["BitRate"]); ok && parsed > 0 {
-								textBR = float64(parsed)
-							}
-						}
-						if textBR == 0 {
-							if parsed, ok := parseBitrateBps(findField(streams[i].Fields, "Bit rate")); ok && parsed > 0 {
-								textBR = float64(parsed)
-							}
-						}
-						videoBitrate -= textBR/textRatio + textMinus
-					}
-					videoBitrate = videoBitrate*videoRatio - videoMinus
-				}
-
-				if valid && videoBitrate >= 10000 {
-					// MediaInfoLib appears to size BDAV video streams using the float bitrate before
-					// rounding it for display/JSON. This can differ by a few bytes on short clips.
-					videoBps := int64(math.Round(videoBitrate))
-					var frameRate float64
-					var frameCount int64
-					for i := range streams {
-						if streams[i].Kind != StreamVideo || streams[i].JSON == nil {
-							continue
-						}
-						if parsed, err := strconv.ParseFloat(streams[i].JSON["FrameRate"], 64); err == nil && parsed > 0 {
-							frameRate = parsed
-						} else if frField := findField(streams[i].Fields, "Frame rate"); frField != "" {
-							// Match MediaInfoLib: use the numeric FrameRate float value first, not the (Num/Den) ratio.
-							// The ratio is exposed separately as FrameRate_Num/Den in JSON.
-							if frValue := extractLeadingNumber(frField); frValue != "" {
-								if fr, err := strconv.ParseFloat(frValue, 64); err == nil && fr > 0 {
-									frameRate = fr
-								}
-							}
-						}
-						if parsed, ok := parseInt(streams[i].JSON["FrameCount"]); ok && parsed > 0 {
-							frameCount = parsed
-						}
-						break
-					}
-					durationMs := float64(int64(math.Round(info.DurationSeconds * 1000)))
-					if frameRate > 0 && frameCount > 0 {
-						// MediaInfo uses the rounded FrameRate value for more stable (but slightly imprecise) sizing.
-						durationMs = float64(frameCount) * 1000 / frameRate
-					}
-					videoSS := int64(math.Round((videoBitrate / 8.0) * (durationMs / 1000.0)))
-					if videoSS > 0 {
-						for i := range streams {
-							if streams[i].Kind != StreamVideo {
-								continue
-							}
-							if streams[i].JSON == nil {
-								streams[i].JSON = map[string]string{}
-							}
-							streams[i].JSON["BitRate"] = strconv.FormatInt(videoBps, 10)
-							streams[i].JSON["StreamSize"] = strconv.FormatInt(videoSS, 10)
-							streams[i].Fields = setFieldValue(streams[i].Fields, "Bit rate", formatBitrate(float64(videoBps)))
-							break
-						}
-						generalSS := fileSize - videoSS - audioSum
-						if generalSS > 0 {
-							general.JSON["StreamSize"] = strconv.FormatInt(generalSS, 10)
-							appliedBDAVSizing = true
-						}
-					}
+			primaryVideoFormat := ""
+			for _, stream := range streams {
+				if stream.Kind == StreamVideo {
+					primaryVideoFormat = findField(stream.Fields, "Format")
+					break
 				}
 			}
-			if !appliedBDAVSizing && audioSum > 0 {
-				overhead := info.StreamOverheadBytes
-				if overhead > 0 {
-					general.JSON["StreamSize"] = strconv.FormatInt(overhead, 10)
-				}
-				if fileSize > 0 && overhead > 0 {
-					videoSS := fileSize - overhead - audioSum
-					if videoSS > 0 {
+
+			// MediaInfo BDAV behavior: derive StreamSize (and sometimes BitRate) only for AVC/MPEG-2
+			// BDAV. UHD/HEVC BDAV typically omits these derived StreamSize fields.
+			if primaryVideoFormat != "HEVC" {
+				// MediaInfo BDAV behavior: derive video bitrate/size from overall bitrate,
+				// subtracting audio + text overhead, then set General StreamSize as the remainder.
+				appliedBDAVSizing := false
+				overallInt, ok := parseInt(general.JSON["OverallBitRate"])
+				// Only attempt this when we have at least one audio StreamSize; MediaInfo omits these
+				// derived StreamSize fields for BDAV when audio sizing isn't available (e.g. DTS-HD-only).
+				if ok && overallInt > 0 && info.DurationSeconds > 0 && fileSize > 0 && audioSum > 0 {
+					overall := float64(overallInt)
+					const (
+						generalRatio = 0.98
+						generalMinus = 5000
+						videoRatio   = 0.98
+						videoMinus   = 2000
+						audioRatio   = 0.98
+						audioMinus   = 2000
+						textRatio    = 0.98
+						textMinus    = 2000
+					)
+
+					videoBitrate := overall*generalRatio - generalMinus
+					valid := true
+					for i := range streams {
+						if streams[i].Kind != StreamAudio {
+							continue
+						}
+						br := int64(0)
+						if streams[i].JSON != nil {
+							if parsed, ok := parseInt(streams[i].JSON["BitRate"]); ok && parsed > 0 {
+								br = parsed
+							}
+						}
+						if br == 0 {
+							if parsed, ok := parseBitrateBps(findField(streams[i].Fields, "Bit rate")); ok && parsed > 0 {
+								br = parsed
+							}
+						}
+						if br == 0 {
+							valid = false
+							break
+						}
+						videoBitrate -= float64(br)/audioRatio + audioMinus
+					}
+					if valid {
 						for i := range streams {
-							if streams[i].Kind != StreamVideo {
+							if streams[i].Kind != StreamText {
 								continue
 							}
-							if streams[i].JSON == nil {
-								streams[i].JSON = map[string]string{}
-							}
-							streams[i].JSON["StreamSize"] = strconv.FormatInt(videoSS, 10)
-							if info.DurationSeconds > 0 {
-								br := int64(math.Round((float64(videoSS) * 8) / info.DurationSeconds))
-								if br > 0 {
-									streams[i].JSON["BitRate"] = strconv.FormatInt(br, 10)
-									streams[i].Fields = setFieldValue(streams[i].Fields, "Bit rate", formatBitrate(float64(br)))
+							textBR := float64(0)
+							if streams[i].JSON != nil {
+								if parsed, ok := parseInt(streams[i].JSON["BitRate"]); ok && parsed > 0 {
+									textBR = float64(parsed)
 								}
 							}
+							if textBR == 0 {
+								if parsed, ok := parseBitrateBps(findField(streams[i].Fields, "Bit rate")); ok && parsed > 0 {
+									textBR = float64(parsed)
+								}
+							}
+							videoBitrate -= textBR/textRatio + textMinus
+						}
+						videoBitrate = videoBitrate*videoRatio - videoMinus
+					}
+
+					if valid && videoBitrate >= 10000 {
+						// MediaInfoLib appears to size BDAV video streams using the float bitrate before
+						// rounding it for display/JSON. This can differ by a few bytes on short clips.
+						videoBps := int64(math.Round(videoBitrate))
+						var frameRate float64
+						var frameCount int64
+						for i := range streams {
+							if streams[i].Kind != StreamVideo || streams[i].JSON == nil {
+								continue
+							}
+							if parsed, err := strconv.ParseFloat(streams[i].JSON["FrameRate"], 64); err == nil && parsed > 0 {
+								frameRate = parsed
+							} else if frField := findField(streams[i].Fields, "Frame rate"); frField != "" {
+								// Match MediaInfoLib: use the numeric FrameRate float value first, not the (Num/Den) ratio.
+								// The ratio is exposed separately as FrameRate_Num/Den in JSON.
+								if frValue := extractLeadingNumber(frField); frValue != "" {
+									if fr, err := strconv.ParseFloat(frValue, 64); err == nil && fr > 0 {
+										frameRate = fr
+									}
+								}
+							}
+							if parsed, ok := parseInt(streams[i].JSON["FrameCount"]); ok && parsed > 0 {
+								frameCount = parsed
+							}
 							break
+						}
+						durationMs := float64(int64(math.Round(info.DurationSeconds * 1000)))
+						if frameRate > 0 && frameCount > 0 {
+							// MediaInfo uses the rounded FrameRate value for more stable (but slightly imprecise) sizing.
+							durationMs = float64(frameCount) * 1000 / frameRate
+						}
+						videoSS := int64(math.Round((videoBitrate / 8.0) * (durationMs / 1000.0)))
+						if videoSS > 0 {
+							for i := range streams {
+								if streams[i].Kind != StreamVideo {
+									continue
+								}
+								if streams[i].JSON == nil {
+									streams[i].JSON = map[string]string{}
+								}
+								streams[i].JSON["StreamSize"] = strconv.FormatInt(videoSS, 10)
+								streams[i].JSON["BitRate"] = strconv.FormatInt(videoBps, 10)
+								streams[i].Fields = setFieldValue(streams[i].Fields, "Bit rate", formatBitrate(float64(videoBps)))
+								break
+							}
+							generalSS := fileSize - videoSS - audioSum
+							if generalSS > 0 {
+								general.JSON["StreamSize"] = strconv.FormatInt(generalSS, 10)
+								appliedBDAVSizing = true
+							}
+						}
+					}
+				}
+				if !appliedBDAVSizing && audioSum > 0 {
+					overhead := info.StreamOverheadBytes
+					if overhead > 0 {
+						general.JSON["StreamSize"] = strconv.FormatInt(overhead, 10)
+					}
+					if fileSize > 0 && overhead > 0 {
+						videoSS := fileSize - overhead - audioSum
+						if videoSS > 0 {
+							for i := range streams {
+								if streams[i].Kind != StreamVideo {
+									continue
+								}
+								if streams[i].JSON == nil {
+									streams[i].JSON = map[string]string{}
+								}
+								streams[i].JSON["StreamSize"] = strconv.FormatInt(videoSS, 10)
+								if info.DurationSeconds > 0 {
+									br := int64(math.Round((float64(videoSS) * 8) / info.DurationSeconds))
+									if br > 0 {
+										streams[i].JSON["BitRate"] = strconv.FormatInt(br, 10)
+										streams[i].Fields = setFieldValue(streams[i].Fields, "Bit rate", formatBitrate(float64(br)))
+									}
+								}
+								break
+							}
 						}
 					}
 				}

@@ -60,7 +60,8 @@ func parseHEVCSPS(nal []byte) h264SPSInfo {
 	if br.readBitsValue(1) == ^uint64(0) { // sps_temporal_id_nesting_flag
 		return h264SPSInfo{}
 	}
-	if !skipHEVCProfileTierLevel(br, maxSubLayersMinus1) {
+	profileIDC, tierName, levelIDC, ok := readHEVCProfileTierLevel(br, maxSubLayersMinus1)
+	if !ok {
 		return h264SPSInfo{}
 	}
 	if _, ok := br.readUEWithOk(); !ok { // sps_seq_parameter_set_id
@@ -105,8 +106,9 @@ func parseHEVCSPS(nal []byte) h264SPSInfo {
 		}
 	}
 
-	_, _ = br.readUEWithOk() // bit_depth_luma_minus8
+	bitDepthLumaMinus8, _ := br.readUEWithOk()
 	_, _ = br.readUEWithOk() // bit_depth_chroma_minus8
+	bitDepth := int(bitDepthLumaMinus8) + 8
 	log2MaxPicOrderCntLSBMinus4, ok := br.readUEWithOk()
 	if !ok {
 		return h264SPSInfo{}
@@ -221,9 +223,10 @@ func parseHEVCSPS(nal []byte) h264SPSInfo {
 	transfer := ""
 	matrix := ""
 	hasColorDescription := false
+	frameRate := float64(0)
 
 	if br.readBitsValue(1) == 1 { // vui_parameters_present_flag
-		colorRange, hasColorRange, colorPrimaries, transfer, matrix, hasColorDescription = parseHEVCVUI(br)
+		colorRange, hasColorRange, colorPrimaries, transfer, matrix, hasColorDescription, frameRate, _ = parseHEVCVUI(br)
 	}
 
 	// Conformance window cropping.
@@ -258,36 +261,48 @@ func parseHEVCSPS(nal []byte) h264SPSInfo {
 	}
 
 	info := h264SPSInfo{
+		ChromaFormat:            hevcChromaFormatName(byte(chromaFormatIDC)),
+		BitDepth:                bitDepth,
 		ColorRange:              colorRange,
 		HasColorRange:           hasColorRange,
 		ColorPrimaries:          colorPrimaries,
 		TransferCharacteristics: transfer,
 		MatrixCoefficients:      matrix,
 		HasColorDescription:     hasColorDescription,
+		ProfileID:               profileIDC,
+		LevelID:                 levelIDC,
+		HEVCTier:                tierName,
 		Width:                   uint64(width),
 		Height:                  uint64(height),
 		CodedWidth:              uint64(picWidth),
 		CodedHeight:             uint64(picHeight),
+		FrameRate:               frameRate,
 	}
 	return info
 }
 
-func skipHEVCProfileTierLevel(br *bitReader, maxSubLayersMinus1 int) bool {
+func readHEVCProfileTierLevel(br *bitReader, maxSubLayersMinus1 int) (byte, string, byte, bool) {
 	// general_profile_space (2), general_tier_flag (1), general_profile_idc (5)
-	if br.readBitsValue(2) == ^uint64(0) || br.readBitsValue(1) == ^uint64(0) || br.readBitsValue(5) == ^uint64(0) {
-		return false
+	if br.readBitsValue(2) == ^uint64(0) {
+		return 0, "", 0, false
+	}
+	tierFlag := br.readBitsValue(1)
+	profileIDC := br.readBitsValue(5)
+	if tierFlag == ^uint64(0) || profileIDC == ^uint64(0) {
+		return 0, "", 0, false
 	}
 	// general_profile_compatibility_flags (32)
 	if br.readBitsValue(32) == ^uint64(0) {
-		return false
+		return 0, "", 0, false
 	}
 	// general_constraint_indicator_flags (48)
 	if br.readBitsValue(48) == ^uint64(0) {
-		return false
+		return 0, "", 0, false
 	}
 	// general_level_idc (8)
-	if br.readBitsValue(8) == ^uint64(0) {
-		return false
+	levelIDC := br.readBitsValue(8)
+	if levelIDC == ^uint64(0) {
+		return 0, "", 0, false
 	}
 
 	subProfilePresent := make([]bool, maxSubLayersMinus1)
@@ -295,41 +310,41 @@ func skipHEVCProfileTierLevel(br *bitReader, maxSubLayersMinus1 int) bool {
 	for i := 0; i < maxSubLayersMinus1; i++ {
 		v := br.readBitsValue(1)
 		if v == ^uint64(0) {
-			return false
+			return 0, "", 0, false
 		}
 		subProfilePresent[i] = v == 1
 		v = br.readBitsValue(1)
 		if v == ^uint64(0) {
-			return false
+			return 0, "", 0, false
 		}
 		subLevelPresent[i] = v == 1
 	}
 	if maxSubLayersMinus1 > 0 {
 		for i := maxSubLayersMinus1; i < 8; i++ {
 			if br.readBitsValue(2) == ^uint64(0) {
-				return false
+				return 0, "", 0, false
 			}
 		}
 	}
 	for i := 0; i < maxSubLayersMinus1; i++ {
 		if subProfilePresent[i] {
 			if br.readBitsValue(2) == ^uint64(0) || br.readBitsValue(1) == ^uint64(0) || br.readBitsValue(5) == ^uint64(0) {
-				return false
+				return 0, "", 0, false
 			}
 			if br.readBitsValue(32) == ^uint64(0) {
-				return false
+				return 0, "", 0, false
 			}
 			if br.readBitsValue(48) == ^uint64(0) {
-				return false
+				return 0, "", 0, false
 			}
 		}
 		if subLevelPresent[i] {
 			if br.readBitsValue(8) == ^uint64(0) {
-				return false
+				return 0, "", 0, false
 			}
 		}
 	}
-	return true
+	return byte(profileIDC), hevcTierName(byte(tierFlag)), byte(levelIDC), true
 }
 
 func skipHEVCScalingListData(br *bitReader) bool {
@@ -445,13 +460,15 @@ func skipHEVCShortTermRefPicSet(br *bitReader, idx int, sets []hevcShortTermRPS)
 	return numNeg + numPos, true
 }
 
-func parseHEVCVUI(br *bitReader) (string, bool, string, string, string, bool) {
+func parseHEVCVUI(br *bitReader) (string, bool, string, string, string, bool, float64, bool) {
 	colorRange := ""
 	hasColorRange := false
 	colorPrimaries := ""
 	transfer := ""
 	matrix := ""
 	hasColorDescription := false
+	frameRate := float64(0)
+	hasTiming := false
 
 	if br.readBitsValue(1) == 1 { // aspect_ratio_info_present_flag
 		aspectRatioIDC := br.readBitsValue(8)
@@ -497,15 +514,20 @@ func parseHEVCVUI(br *bitReader) (string, bool, string, string, string, bool) {
 		_, _ = br.readUEWithOk()
 	}
 	if br.readBitsValue(1) == 1 { // vui_timing_info_present_flag
-		_ = br.readBitsValue(32)      // num_units_in_tick
-		_ = br.readBitsValue(32)      // time_scale
+		numUnitsInTick := br.readBitsValue(32)
+		timeScale := br.readBitsValue(32)
+		if numUnitsInTick != ^uint64(0) && timeScale != ^uint64(0) && numUnitsInTick > 0 && timeScale > 0 {
+			// HEVC VUI: frame rate = time_scale / num_units_in_tick (unlike AVC which uses /2).
+			frameRate = float64(timeScale) / float64(numUnitsInTick)
+			hasTiming = true
+		}
 		if br.readBitsValue(1) == 1 { // poc_proportional_to_timing_flag
 			_, _ = br.readUEWithOk()
 		}
 		if br.readBitsValue(1) == 1 { // hrd_parameters_present_flag
 			// Skip hrd_parameters() - not needed for Matroska parity work right now.
 			// If present, abort VUI parsing to avoid desync.
-			return colorRange, hasColorRange, colorPrimaries, transfer, matrix, hasColorDescription
+			return colorRange, hasColorRange, colorPrimaries, transfer, matrix, hasColorDescription, frameRate, hasTiming
 		}
 	}
 	if br.readBitsValue(1) == 1 { // bitstream_restriction_flag
@@ -520,5 +542,5 @@ func parseHEVCVUI(br *bitReader) (string, bool, string, string, string, bool) {
 		_, _ = br.readUEWithOk()
 	}
 
-	return colorRange, hasColorRange, colorPrimaries, transfer, matrix, hasColorDescription
+	return colorRange, hasColorRange, colorPrimaries, transfer, matrix, hasColorDescription, frameRate, hasTiming
 }

@@ -41,8 +41,12 @@ type tsStream struct {
 	mpeg2Info           mpeg2VideoInfo
 	hasMPEG2Info        bool
 	// AVC/H.264 SPS info for TS/BDAV streams (used for JSON extras like colour_primaries and HRD).
-	h264SPS          h264SPSInfo
-	hasH264SPS       bool
+	h264SPS    h264SPSInfo
+	hasH264SPS bool
+	// HEVC SPS/HDR info for TS/BDAV streams.
+	hevcSPS          h264SPSInfo
+	hasHEVCSPS       bool
+	hevcHDR          hevcHDRInfo
 	videoCCCarry     []byte
 	videoFrameCount  int
 	ccFound          bool
@@ -59,6 +63,7 @@ type tsStream struct {
 	audioRate        float64
 	audioChannels    uint64
 	audioBitDepth    int
+	pcmChanAssign    byte
 	hasAudioInfo     bool
 	audioFrames      uint64
 	// DTS-HD ExSS metadata (used to match MediaInfoLib channels/layout/positions when available).
@@ -764,7 +769,11 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 					} else {
 						pidPayloadBytes[pid] += int64(len(data))
 					}
-					if entry.kind == StreamVideo && entry.format == "AVC" && len(data) > 0 {
+					if entry.kind == StreamVideo && (entry.format == "AVC" || entry.format == "HEVC") && len(data) > 0 {
+						const maxPES = 512 * 1024
+						if len(data) > maxPES {
+							data = data[:maxPES]
+						}
 						entry.pesData = append(entry.pesData[:0], data...)
 					}
 
@@ -790,10 +799,9 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 						headEnd := syncOff + ac3StatsHeadBytes
 						inHead := !ac3StatsBounded || packetOffset < headEnd
 						// MediaInfoLib samples AC-3 metadata from both begin/end windows at default
-						// ParseSpeed, with stats emission still gated on a valid timeline.
-						statsTimelineOK := !ac3StatsBounded || entry.seenPTS
-						collectAC3Stats := inHead && statsTimelineOK
-						if !inHead && ac3StatsBounded && statsTimelineOK {
+						// ParseSpeed; emission is gated later on a valid timeline.
+						collectAC3Stats := inHead
+						if !inHead && ac3StatsBounded {
 							collectAC3Stats = true
 						}
 						// Audio frames can be recovered mid-PES by resyncing on codec sync words.
@@ -819,8 +827,17 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 					continue
 				}
 
-				if entry.kind == StreamVideo && entry.format == "AVC" && len(entry.pesData) > 0 {
-					entry.pesData = append(entry.pesData, payload...)
+				if entry.kind == StreamVideo && (entry.format == "AVC" || entry.format == "HEVC") && len(entry.pesData) > 0 {
+					const maxPES = 512 * 1024
+					if len(entry.pesData) < maxPES {
+						remaining := maxPES - len(entry.pesData)
+						if remaining > 0 {
+							if len(payload) > remaining {
+								payload = payload[:remaining]
+							}
+							entry.pesData = append(entry.pesData, payload...)
+						}
+					}
 				}
 				payloadData := payload
 				if entry.pesPayloadKnown {
@@ -847,9 +864,8 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 							continue
 						}
 					}
-					statsTimelineOK := !ac3StatsBounded || entry.seenPTS
-					collectAC3Stats := inHead && statsTimelineOK
-					if !inHead && ac3StatsBounded && statsTimelineOK {
+					collectAC3Stats := inHead
+					if !inHead && ac3StatsBounded {
 						collectAC3Stats = true
 					}
 					entry.bytes += uint64(len(payloadData))
@@ -890,16 +906,14 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 			if st == nil || !st.hasAC3 {
 				continue
 			}
-			if !st.ac3Stats.dynrngeSeen {
-				if st.ac3StatsComprHead < headThreshold {
-					st.audioFramesStatsMax = 0
-				} else {
-					st.audioFramesStatsMax = st.audioFramesStatsHead
-				}
-				continue
-			}
 			headFrames := st.audioFramesStatsHead
 			if headFrames < headThreshold {
+				st.audioFramesStatsMax = 0
+				continue
+			}
+			// MediaInfoLib ParseSpeed<0.8: stats sampling window is derived from the number of
+			// frames observed in the head window, even when dynrng is not present.
+			if !st.ac3Stats.dynrngeSeen && st.ac3StatsComprHead < headThreshold {
 				st.audioFramesStatsMax = 0
 				continue
 			}
@@ -1082,6 +1096,13 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 				}
 			}
 		}
+		if isBDAV && st.kind == StreamText && st.pts.has() {
+			// MediaInfo reports Duration for BDAV PGS text streams.
+			// Prefer raw PTS span (max-min) even if PTS has discontinuities.
+			if d := st.pts.duration(); d > 0 {
+				jsonExtras["Duration"] = fmt.Sprintf("%.3f", d)
+			}
+		}
 		if st.kind == StreamVideo && st.height > 0 {
 			storedHeight := st.storedHeight
 			if storedHeight == 0 {
@@ -1147,6 +1168,61 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 						jsonExtras["BitRate_Maximum"] = "39959808"
 						jsonExtras["BufferSize"] = "30000000 / 30000000"
 					}
+				}
+			}
+			if st.format == "HEVC" {
+				// Match MediaInfoLib: BDAV HEVC streams expose extra.format_identifier=HDMV.
+				if jsonRaw == nil {
+					jsonRaw = map[string]string{}
+				}
+				if _, ok := jsonRaw["extra"]; !ok {
+					jsonRaw["extra"] = "{\"format_identifier\":\"HDMV\"}"
+				}
+
+				if st.hasHEVCSPS {
+					if st.hevcSPS.HasColorRange || st.hevcSPS.HasColorDescription {
+						jsonExtras["colour_description_present"] = "Yes"
+						jsonExtras["colour_description_present_Source"] = "Stream"
+						if st.hevcSPS.ColorRange != "" {
+							jsonExtras["colour_range"] = st.hevcSPS.ColorRange
+							jsonExtras["colour_range_Source"] = "Stream"
+						}
+						if st.hevcSPS.ColorPrimaries != "" {
+							jsonExtras["colour_primaries"] = st.hevcSPS.ColorPrimaries
+							jsonExtras["colour_primaries_Source"] = "Stream"
+						}
+						if st.hevcSPS.TransferCharacteristics != "" {
+							jsonExtras["transfer_characteristics"] = st.hevcSPS.TransferCharacteristics
+							jsonExtras["transfer_characteristics_Source"] = "Stream"
+						}
+						if st.hevcSPS.MatrixCoefficients != "" {
+							jsonExtras["matrix_coefficients"] = st.hevcSPS.MatrixCoefficients
+							jsonExtras["matrix_coefficients_Source"] = "Stream"
+						}
+					}
+				}
+
+				hdr := st.hevcHDR
+				if hdr.masteringPrimaries != "" {
+					jsonExtras["HDR_Format"] = "SMPTE ST 2086"
+					jsonExtras["HDR_Format_Compatibility"] = "HDR10"
+					jsonExtras["MasteringDisplay_ColorPrimaries"] = hdr.masteringPrimaries
+					jsonExtras["MasteringDisplay_ColorPrimaries_Source"] = "Stream"
+				}
+				if hdr.masteringLuminanceMin > 0 && hdr.masteringLuminanceMax > 0 {
+					lum := formatMasteringLuminance(hdr.masteringLuminanceMin, hdr.masteringLuminanceMax)
+					jsonExtras["MasteringDisplay_Luminance"] = lum
+					jsonExtras["MasteringDisplay_Luminance_Source"] = "Stream"
+				}
+				if hdr.maxCLL > 0 {
+					max := fmt.Sprintf("%d cd/m2", hdr.maxCLL)
+					jsonExtras["MaxCLL"] = max
+					jsonExtras["MaxCLL_Source"] = "Stream"
+				}
+				if hdr.maxFALL > 0 {
+					max := fmt.Sprintf("%d cd/m2", hdr.maxFALL)
+					jsonExtras["MaxFALL"] = max
+					jsonExtras["MaxFALL_Source"] = "Stream"
 				}
 			}
 		}
@@ -1500,7 +1576,65 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 				}
 			}
 
-			if st.audioRate > 0 && st.audioChannels > 0 {
+			if isBDAV && st.format == "PCM" && st.audioRate > 0 && st.audioChannels > 0 && st.audioBitDepth > 0 {
+				// MediaInfoLib exposes detailed LPCM metadata for BDAV.
+				if jsonRaw == nil {
+					jsonRaw = map[string]string{}
+				}
+				if _, ok := jsonRaw["extra"]; !ok {
+					jsonRaw["extra"] = "{\"format_identifier\":\"HDMV\"}"
+				}
+
+				durationRounded := duration
+				if durationRounded > 0 {
+					durationRounded = math.Round(durationRounded*1000) / 1000
+					jsonExtras["Duration"] = fmt.Sprintf("%.3f", durationRounded)
+				}
+
+				bps := int64(math.Round(st.audioRate)) * int64(st.audioChannels) * int64(st.audioBitDepth)
+				encodedChannels := st.audioChannels
+				if encodedChannels%2 == 1 {
+					encodedChannels++
+				}
+				bpsEnc := int64(math.Round(st.audioRate)) * int64(encodedChannels) * int64(st.audioBitDepth)
+
+				fields = append(fields, Field{Name: "Bit rate mode", Value: "Constant"})
+				fields = append(fields, Field{Name: "Bit rate", Value: formatBitrate(float64(bps))})
+				fields = append(fields, Field{Name: "Channel(s)", Value: formatChannels(st.audioChannels)})
+				if layout := pcmVOBChannelLayout(st.pcmChanAssign); layout != "" {
+					fields = append(fields, Field{Name: "Channel layout", Value: layout})
+				}
+				if pos := pcmVOBChannelPositions(st.pcmChanAssign); pos != "" {
+					jsonExtras["ChannelPositions"] = pos
+				}
+				fields = append(fields, Field{Name: "Sampling rate", Value: formatSampleRate(st.audioRate)})
+				fields = append(fields, Field{Name: "Bit depth", Value: fmt.Sprintf("%d bits", st.audioBitDepth)})
+
+				jsonExtras["Format_Settings_Endianness"] = "Big"
+				jsonExtras["Format_Settings_Sign"] = "Signed"
+				jsonExtras["MuxingMode"] = "Blu-ray"
+				if bpsEnc > 0 {
+					jsonExtras["BitRate_Encoded"] = strconv.FormatInt(bpsEnc, 10)
+				}
+				if durationRounded > 0 {
+					samplingCount := int64(math.Round(durationRounded * st.audioRate))
+					if samplingCount > 0 {
+						jsonExtras["SamplingCount"] = strconv.FormatInt(samplingCount, 10)
+					}
+					if bps > 0 {
+						ss := int64(math.Round(float64(bps) * durationRounded / 8.0))
+						if ss > 0 {
+							jsonExtras["StreamSize"] = strconv.FormatInt(ss, 10)
+						}
+					}
+					if bpsEnc > 0 {
+						ss := int64(math.Round(float64(bpsEnc) * durationRounded / 8.0))
+						if ss > 0 {
+							jsonExtras["StreamSize_Encoded"] = strconv.FormatInt(ss, 10)
+						}
+					}
+				}
+			} else if st.audioRate > 0 && st.audioChannels > 0 {
 				mode := st.audioBitRateMode
 				if mode == "" {
 					mode = "Variable"
@@ -1661,11 +1795,14 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 					extraFields = append(extraFields, jsonKV{Key: "compr_Maximum", Val: fmt.Sprintf("%.2f", maxVal)})
 					extraFields = append(extraFields, jsonKV{Key: "compr_Count", Val: strconv.Itoa(count)})
 				}
-				if avg, minVal, maxVal, count, ok := st.ac3Stats.dynrngStats(); ok {
-					extraFields = append(extraFields, jsonKV{Key: "dynrng_Average", Val: fmt.Sprintf("%.2f", avg)})
-					extraFields = append(extraFields, jsonKV{Key: "dynrng_Minimum", Val: fmt.Sprintf("%.2f", minVal)})
-					extraFields = append(extraFields, jsonKV{Key: "dynrng_Maximum", Val: fmt.Sprintf("%.2f", maxVal)})
-					extraFields = append(extraFields, jsonKV{Key: "dynrng_Count", Val: strconv.Itoa(count)})
+				// MediaInfo uses first-frame-only dynrng presence to decide whether to expose dynrng_* stats.
+				if st.ac3Info.hasDynrng {
+					if avg, minVal, maxVal, count, ok := st.ac3Stats.dynrngStats(); ok {
+						extraFields = append(extraFields, jsonKV{Key: "dynrng_Average", Val: fmt.Sprintf("%.2f", avg)})
+						extraFields = append(extraFields, jsonKV{Key: "dynrng_Minimum", Val: fmt.Sprintf("%.2f", minVal)})
+						extraFields = append(extraFields, jsonKV{Key: "dynrng_Maximum", Val: fmt.Sprintf("%.2f", maxVal)})
+						extraFields = append(extraFields, jsonKV{Key: "dynrng_Count", Val: strconv.Itoa(count)})
+					}
 				}
 				if len(extraFields) > 0 {
 					if jsonRaw == nil {
@@ -2332,6 +2469,47 @@ func processPES(entry *tsStream) {
 			entry.hasH264SPS = true
 		}
 	}
+	if entry.kind == StreamVideo && entry.format == "HEVC" && len(entry.pesData) > 0 {
+		fields, sps, hdr, ok := parseHEVCAnnexBMeta(entry.pesData)
+		if entry.hevcHDR.masteringPrimaries == "" && hdr.masteringPrimaries != "" {
+			entry.hevcHDR.masteringPrimaries = hdr.masteringPrimaries
+		}
+		if entry.hevcHDR.masteringLuminanceMin == 0 && hdr.masteringLuminanceMin > 0 {
+			entry.hevcHDR.masteringLuminanceMin = hdr.masteringLuminanceMin
+		}
+		if entry.hevcHDR.masteringLuminanceMax == 0 && hdr.masteringLuminanceMax > 0 {
+			entry.hevcHDR.masteringLuminanceMax = hdr.masteringLuminanceMax
+		}
+		if entry.hevcHDR.maxCLL == 0 && hdr.maxCLL > 0 {
+			entry.hevcHDR.maxCLL = hdr.maxCLL
+		}
+		if entry.hevcHDR.maxFALL == 0 && hdr.maxFALL > 0 {
+			entry.hevcHDR.maxFALL = hdr.maxFALL
+		}
+		if !entry.hevcHDR.hdr10Plus && hdr.hdr10Plus {
+			entry.hevcHDR.hdr10Plus = true
+			entry.hevcHDR.hdr10PlusVersion = hdr.hdr10PlusVersion
+			entry.hevcHDR.hdr10PlusToneMapping = hdr.hdr10PlusToneMapping
+		}
+
+		if ok {
+			entry.hevcSPS = sps
+			entry.hasHEVCSPS = true
+			if sps.Width > 0 {
+				entry.width = sps.Width
+			}
+			if sps.Height > 0 {
+				entry.height = sps.Height
+			}
+			if sps.FrameRate > 0 {
+				entry.videoFrameRate = sps.FrameRate
+			}
+			if !entry.hasVideoFields && len(fields) > 0 {
+				entry.videoFields = fields
+				entry.hasVideoFields = true
+			}
+		}
+	}
 	if entry.kind == StreamVideo && entry.format == "AVC" && !entry.hasVideoFields && len(entry.pesData) > 0 {
 		if fields, sps, ok := parseH264FromPES(entry.pesData); ok && len(fields) > 0 {
 			width, height, fps := sps.Width, sps.Height, sps.FrameRate
@@ -2383,6 +2561,21 @@ func consumeAudio(entry *tsStream, payload []byte, collectAC3Stats bool, ac3Stat
 			entry.audioBitRateMode = "Variable"
 		}
 		consumeDTS(entry, payload)
+	case "PCM":
+		if entry.audioBitRateMode == "" {
+			entry.audioBitRateMode = "Constant"
+		}
+		if !entry.hasAudioInfo {
+			if ch, sr, bd, assign, ok := parsePCMM2TSHeader(payload); ok {
+				entry.audioChannels = uint64(ch)
+				entry.audioRate = float64(sr)
+				entry.audioBitDepth = int(bd)
+				entry.pcmChanAssign = assign
+				bps := int64(sr) * int64(ch) * int64(bd)
+				entry.audioBitRateKbps = int64(math.Round(float64(bps) / 1000.0))
+				entry.hasAudioInfo = true
+			}
+		}
 	default:
 	}
 }
@@ -2563,7 +2756,9 @@ func consumeDTS(entry *tsStream, payload []byte) {
 	}
 }
 
-const ac3SampleMax = 512
+// MediaInfoLib can report AC-3/E-AC-3 stats counts above 1024 at ParseSpeed=0.5 on BDAV/TS,
+// so keep a larger head+tail sample buffer.
+const ac3SampleMax = 1024
 
 func pushAC3Sample(entry *tsStream, info ac3Info, head bool) {
 	if head {
@@ -2738,11 +2933,6 @@ func consumeEAC3(entry *tsStream, payload []byte, collectStats bool, statsHead b
 
 func finalizeBoundedAC3Stats(entry *tsStream) {
 	if entry == nil || !entry.hasAC3 {
-		return
-	}
-	// Only override stats when dynrng metadata exists. For compr-only streams, the current
-	// incremental stats behavior matches MediaInfo better than fixed sampling.
-	if !entry.ac3Stats.dynrngeSeen {
 		return
 	}
 	if entry.audioFramesStatsMax == 0 {
