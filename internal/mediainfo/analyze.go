@@ -651,35 +651,38 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 				if fc := mpeg2Video.JSON["FrameCount"]; fc != "" {
 					general.JSON["FrameCount"] = fc
 				}
-				// TS MPEG-2 parity: MediaInfo stream size aligns with BitRate * (FrameCount / FrameRate).
+				// TS MPEG-2: prefer demux-counted StreamSize from the TS parser. Only fall back to
+				// deriving StreamSize from BitRate/FrameCount/FrameRate when StreamSize is missing.
 				if mpeg2Video.JSON == nil {
 					mpeg2Video.JSON = map[string]string{}
 				}
-				br, brOK := parseInt(mpeg2Video.JSON["BitRate"])
-				if !brOK || br <= 0 {
-					if parsed, ok := parseBitrateBps(findField(mpeg2Video.Fields, "Bit rate")); ok && parsed > 0 {
-						br, brOK = parsed, true
-					}
-				}
-				fr, frOK := parseFloatValue(mpeg2Video.JSON["FrameRate"])
-				if !frOK || fr <= 0 {
-					if parsed, ok := parseFloatValue(findField(mpeg2Video.Fields, "Frame rate")); ok && parsed > 0 {
-						fr, frOK = parsed, true
-					}
-				}
-				fc, fcOK := parseInt(mpeg2Video.JSON["FrameCount"])
-				if !fcOK || fc <= 0 {
-					if count, ok := frameCountFromFields(mpeg2Video.Fields); ok {
-						if parsed, ok := parseInt(count); ok && parsed > 0 {
-							fc, fcOK = parsed, true
+				if mpeg2Video.JSON["StreamSize"] == "" {
+					br, brOK := parseInt(mpeg2Video.JSON["BitRate"])
+					if !brOK || br <= 0 {
+						if parsed, ok := parseBitrateBps(findField(mpeg2Video.Fields, "Bit rate")); ok && parsed > 0 {
+							br, brOK = parsed, true
 						}
 					}
-				}
-				if brOK && frOK && fcOK && br > 0 && fr > 0 && fc > 0 {
-					videoSS := int64(math.Round((float64(br) / 8.0) * (float64(fc) / fr)))
-					if videoSS > 0 {
-						mpeg2Video.JSON["StreamSize"] = strconv.FormatInt(videoSS, 10)
-						mpeg2Video.Fields = setFieldValue(mpeg2Video.Fields, "Stream size", formatStreamSize(videoSS, fileSize))
+					fr, frOK := parseFloatValue(mpeg2Video.JSON["FrameRate"])
+					if !frOK || fr <= 0 {
+						if parsed, ok := parseFloatValue(findField(mpeg2Video.Fields, "Frame rate")); ok && parsed > 0 {
+							fr, frOK = parsed, true
+						}
+					}
+					fc, fcOK := parseInt(mpeg2Video.JSON["FrameCount"])
+					if !fcOK || fc <= 0 {
+						if count, ok := frameCountFromFields(mpeg2Video.Fields); ok {
+							if parsed, ok := parseInt(count); ok && parsed > 0 {
+								fc, fcOK = parsed, true
+							}
+						}
+					}
+					if brOK && frOK && fcOK && br > 0 && fr > 0 && fc > 0 {
+						videoSS := int64(math.Round((float64(br) / 8.0) * (float64(fc) / fr)))
+						if videoSS > 0 {
+							mpeg2Video.JSON["StreamSize"] = strconv.FormatInt(videoSS, 10)
+							mpeg2Video.Fields = setFieldValue(mpeg2Video.Fields, "Stream size", formatStreamSize(videoSS, fileSize))
+						}
 					}
 				}
 				sum := int64(0)
@@ -950,7 +953,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 				overallInt, ok := parseInt(general.JSON["OverallBitRate"])
 				// Only attempt this when all audio streams have StreamSize; MediaInfo omits these derived
 				// StreamSize fields for BDAV when audio sizing isn't available (e.g. DTS-HD present but unsized).
-				if ok && overallInt > 0 && info.DurationSeconds > 0 && fileSize > 0 && audioSum > 0 && audioCount > 0 && audioSizedCount == audioCount {
+				if ok && overallInt > 0 && info.DurationSeconds > 0 && fileSize > 0 && (audioCount == 0 || (audioSum > 0 && audioCount > 0 && audioSizedCount == audioCount)) {
 					overall := float64(overallInt)
 					const (
 						generalRatio = 0.98

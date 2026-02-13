@@ -738,7 +738,11 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 					data := payload[dataStart:]
 					entry.pesPayloadKnown = false
 					entry.pesPayloadRemaining = 0
-					if entry.kind == StreamAudio || (entry.kind == StreamVideo && (entry.format == "MPEG Video" || entry.format == "VC-1")) {
+					// MediaInfoLib caps PES payload consumption to PES_packet_length when it is non-zero for TS.
+					// This affects StreamSize/overhead accounting for captures where H.264/H.265 PES packets
+					// carry stuffing bytes at the end.
+					// BDAV parity: don't apply this cap to video, as it under-counts A/V payload vs MediaInfoLib.
+					if entry.kind == StreamAudio || (!isBDAV && entry.kind == StreamVideo) {
 						if len(payload) >= 6 {
 							pesLen := int(binary.BigEndian.Uint16(payload[4:6]))
 							if pesLen > 0 {
@@ -825,12 +829,18 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 				}
 
 				if entry.kind == StreamVideo && !entry.videoStarted {
-					// File may start mid-PES. Don't count bytes until we see a PES start, but still
-					// let the MPEG-2 parser inspect early bytes for matrices/GOP/intra_dc_precision.
+					// File may start mid-PES.
+					// TS parity: don't count bytes until we see a PES start, or we inflate StreamSize/overhead.
+					// BDAV parity: count bytes even before the first PES start, as MediaInfoLib accounts them
+					// toward A/V payload.
 					if entry.format == "MPEG Video" && len(payload) > 0 {
+						// Still let the MPEG-2 parser inspect early bytes for matrices/GOP/intra_dc_precision.
 						consumeMPEG2TSVideo(entry, payload, entry.lastPTS, entry.hasLastPTS)
 					}
-					continue
+					if !isBDAV {
+						continue
+					}
+					entry.videoStarted = true
 				}
 
 				if entry.kind == StreamVideo && (entry.format == "AVC" || entry.format == "HEVC") && len(entry.pesData) > 0 {
@@ -1461,7 +1471,7 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 					}
 				}
 			}
-			if !isBDAV && st.format == "AVC" && st.h264GOPM > 0 && st.h264GOPN > 0 {
+			if (!isBDAV || !partialScan) && st.format == "AVC" && st.h264GOPM > 0 && st.h264GOPN > 0 {
 				gop := fmt.Sprintf("M=%d, N=%d", st.h264GOPM, st.h264GOPN)
 				jsonExtras["Format_Settings_GOP"] = gop
 			}
@@ -2233,29 +2243,8 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 			if videoCount == 1 && mpegVideo != nil && audioBitratesOK {
 				videoBR := (overallMid*0.98 - audioSumAdjusted) * 0.97
 				if videoBR >= 10000 {
-					durationMs := info.DurationSeconds * 1000
-					fps := 0.0
-					if mpegVideo.mpeg2Info.FrameRateNumer > 0 && mpegVideo.mpeg2Info.FrameRateDenom > 0 {
-						fps = float64(mpegVideo.mpeg2Info.FrameRateNumer) / float64(mpegVideo.mpeg2Info.FrameRateDenom)
-					} else if mpegVideo.mpeg2Info.FrameRate > 0 {
-						fps = mpegVideo.mpeg2Info.FrameRate
-					}
-					if partialScan {
-						if d := ptsDuration(mpegVideo.pts); d > 0 {
-							if fps > 0 {
-								d += 1.0 / fps
-								d = math.Round(d*1000) / 1000
-							}
-							durationMs = d * 1000
-						}
-					} else if mpegVideo.videoFrameCount > 0 && fps > 0 {
-						// Match MediaInfoLib: it uses the formatted (rounded) FrameRate value for stable sizing.
-						fps = math.Round(fps*1000) / 1000
-						durationMs = float64(mpegVideo.videoFrameCount) * 1000 / fps
-					}
 					videoBitRateInt := int64(math.Round(videoBR))
-					videoStreamSize := int64(math.Round((float64(videoBitRateInt) / 8) * (durationMs / 1000)))
-					if videoBitRateInt > 0 && videoStreamSize > 0 {
+					if videoBitRateInt > 0 {
 						videoID := strconv.FormatUint(uint64(mpegVideo.pid), 10)
 						for i := range streamsOut {
 							if streamsOut[i].Kind != StreamVideo || streamsOut[i].JSON == nil {
@@ -2264,10 +2253,40 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 							if streamsOut[i].JSON["ID"] != videoID {
 								continue
 							}
-							streamsOut[i].JSON["BitRate"] = strconv.FormatInt(videoBitRateInt, 10)
-							streamsOut[i].JSON["StreamSize"] = strconv.FormatInt(videoStreamSize, 10)
-							streamsOut[i].Fields = setFieldValue(streamsOut[i].Fields, "Bit rate", formatBitrate(float64(videoBitRateInt)))
-							streamsOut[i].Fields = setFieldValue(streamsOut[i].Fields, "Stream size", formatStreamSize(videoStreamSize, size))
+
+							durationMs := info.DurationSeconds * 1000
+							// Match MediaInfoLib: prefer duration derived from FrameCount and formatted FrameRate.
+							// For MPEG-2 TS, the formatted FrameRate is the 3-decimal-rounded ratio.
+							fps := 0.0
+							if mpegVideo.mpeg2Info.FrameRateNumer > 0 && mpegVideo.mpeg2Info.FrameRateDenom > 0 {
+								fps = float64(mpegVideo.mpeg2Info.FrameRateNumer) / float64(mpegVideo.mpeg2Info.FrameRateDenom)
+							} else if mpegVideo.mpeg2Info.FrameRate > 0 {
+								fps = mpegVideo.mpeg2Info.FrameRate
+							}
+							fpsRounded := math.Round(fps*1000) / 1000
+							if fc, err := strconv.ParseFloat(streamsOut[i].JSON["FrameCount"], 64); err == nil && fc > 0 && fpsRounded > 0 {
+								durationMs = (fc * 1000) / fpsRounded
+							}
+							if partialScan && durationMs == info.DurationSeconds*1000 {
+								// Fallback: derive from PTS when FrameCount/FrameRate are absent.
+								if d := ptsDuration(mpegVideo.pts); d > 0 {
+									if fps > 0 {
+										d += 1.0 / fps
+										d = math.Round(d*1000) / 1000
+									}
+									durationMs = d * 1000
+								}
+							}
+
+							// MediaInfoLib derives StreamSize from the float bitrate (not the rounded integer),
+							// which can shift StreamSize by a couple of bytes while keeping BitRate stable.
+							videoStreamSize := int64(math.Round((videoBR / 8) * (durationMs / 1000)))
+							if videoStreamSize > 0 {
+								streamsOut[i].JSON["BitRate"] = strconv.FormatInt(videoBitRateInt, 10)
+								streamsOut[i].JSON["StreamSize"] = strconv.FormatInt(videoStreamSize, 10)
+								streamsOut[i].Fields = setFieldValue(streamsOut[i].Fields, "Bit rate", formatBitrate(float64(videoBitRateInt)))
+								streamsOut[i].Fields = setFieldValue(streamsOut[i].Fields, "Stream size", formatStreamSize(videoStreamSize, size))
+							}
 							break
 						}
 					}
