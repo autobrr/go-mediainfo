@@ -90,6 +90,7 @@ Owner: soup
 - BDAV spot checks:
 - `Intruders .../00061.m2ts`: diff `0`.
 - `Network ... UHD .../00007.m2ts`: diff `0`.
+- `Network ... 1080p AVC LPCM .../00007.m2ts`: diff `4` (remaining: AC-3 `compr_*` stats window/counts).
 - `Static .../00004.m2ts`: diff `0`.
 - `Sabrina .../00007.m2ts` (video-only clip): diff `0` (BDAV derived `StreamSize`/`BitRate` parity fixed).
 - TS/BDAV AC-3 parity:
@@ -98,7 +99,7 @@ Owner: soup
 - TS bounded ParseSpeed stats: reduced TS tail contribution vs BDAV to better match `compr_*`/`dynrng_*` counts/averages.
 - Current focused diffs (same official command):
 - `Nickelodeon - Saturday Morning Promo.ts`: diff `8` (remaining: AC-3 `compr_*`/`dynrng_*` stats window/counts).
-- `Nickelodeon - Generic Halloween Promo.ts`: diff `8` (remaining: AC-3 `compr_*`/`dynrng_*` stats window/counts).
+- `Nickelodeon - Generic Halloween Promo.ts`: diff `6` (remaining: AC-3 `compr_*`/`dynrng_*` stats window/counts).
 - `Disney Channel - Evermoor Behind The Scenes.ts`: diff `12` (remaining: AC-3 stats window/counts across both audio tracks).
 
 ## Learnings / Decisions
