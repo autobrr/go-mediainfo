@@ -1669,22 +1669,25 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 			if st.format == "AAC" && st.audioRate > 0 && st.audioSpf > 0 && duration > 0 {
 				duration += float64(st.audioSpf) / st.audioRate
 			}
-			if !isTrueHD && !partialScan && st.hasAC3 && st.ac3Info.sampleRate > 0 && st.ac3Info.spf > 0 && st.audioFrames > 0 {
-				rate := int64(st.ac3Info.sampleRate)
-				if rate > 0 {
-					samples := st.audioFrames * uint64(st.ac3Info.spf)
-					durationMs := int64((samples * 1000) / uint64(rate))
-					duration = float64(durationMs) / 1000.0
-				}
-			}
-			// BDAV DTS(-HD): prefer PTS-derived duration; frame-count-based duration is sensitive to
-			// scan/window boundaries and can undercount vs MediaInfo.
-			if !isTrueHD && !partialScan && st.audioRate > 0 && st.audioFrames > 0 && st.audioSpf > 0 && !(isBDAV && st.format == "DTS") {
-				rate := int64(st.audioRate)
-				if rate > 0 {
-					samples := st.audioFrames * uint64(st.audioSpf)
-					durationMs := int64((samples * 1000) / uint64(rate))
-					duration = float64(durationMs) / 1000.0
+			// MediaInfo prefers PTS-derived duration for TS/BDAV. Only fall back to frame-count-derived
+			// duration when PTS is missing.
+			if duration <= 0 && !isTrueHD && !partialScan {
+				if st.hasAC3 && st.ac3Info.sampleRate > 0 && st.ac3Info.spf > 0 && st.audioFrames > 0 {
+					rate := int64(st.ac3Info.sampleRate)
+					if rate > 0 {
+						samples := st.audioFrames * uint64(st.ac3Info.spf)
+						durationMs := int64((samples * 1000) / uint64(rate))
+						duration = float64(durationMs) / 1000.0
+					}
+				} else if st.audioRate > 0 && st.audioFrames > 0 && st.audioSpf > 0 && !(isBDAV && st.format == "DTS") {
+					// BDAV DTS(-HD): prefer PTS-derived duration; frame-count-based duration is sensitive to
+					// scan/window boundaries and can undercount vs MediaInfo.
+					rate := int64(st.audioRate)
+					if rate > 0 {
+						samples := st.audioFrames * uint64(st.audioSpf)
+						durationMs := int64((samples * 1000) / uint64(rate))
+						duration = float64(durationMs) / 1000.0
+					}
 				}
 			}
 			duration = normalizeBDAVDTSDuration(duration, videoDuration, isBDAV, st.format)
@@ -3121,16 +3124,20 @@ func consumeAC3(entry *tsStream, payload []byte, collectStats bool, statsHead bo
 		if i+frameSize > len(entry.audioBuffer) {
 			break
 		}
-		// Avoid false-positive sync matches by requiring the next frame sync when available.
-		if i+frameSize+1 < len(entry.audioBuffer) {
-			if entry.audioBuffer[i+frameSize] != 0x0B || entry.audioBuffer[i+frameSize+1] != 0x77 {
-				i++
-				continue
-			}
-			// Tighten AC-3 resync validation: the following frame header must parse too.
-			if _, _, ok := parseAC3Frame(entry.audioBuffer[i+frameSize:]); !ok {
-				i++
-				continue
+		// When we start parsing mid-PES (BDAV tail window), tighten resync validation to avoid
+		// false-positive AC-3 sync words. Once we've seen a PES start for the PID, allow gaps
+		// between frames (not all real-world streams are byte-contiguous).
+		if !entry.audioStarted {
+			if i+frameSize+1 < len(entry.audioBuffer) {
+				if entry.audioBuffer[i+frameSize] != 0x0B || entry.audioBuffer[i+frameSize+1] != 0x77 {
+					i++
+					continue
+				}
+				// Tighten AC-3 resync validation: the following frame header must parse too.
+				if _, _, ok := parseAC3Frame(entry.audioBuffer[i+frameSize:]); !ok {
+					i++
+					continue
+				}
 			}
 		}
 		entry.audioFrames++
@@ -3186,11 +3193,15 @@ func consumeEAC3(entry *tsStream, payload []byte, collectStats bool, statsHead b
 		if i+frameSize > len(entry.audioBuffer) {
 			break
 		}
-		// Avoid false-positive sync matches by requiring the next frame sync when available.
-		if i+frameSize+1 < len(entry.audioBuffer) {
-			if entry.audioBuffer[i+frameSize] != 0x0B || entry.audioBuffer[i+frameSize+1] != 0x77 {
-				i++
-				continue
+		// When we start parsing mid-PES (BDAV tail window), tighten resync validation to avoid
+		// false-positive sync words. Once we've seen a PES start for the PID, allow non-contiguous
+		// framing between E-AC-3 frames.
+		if !entry.audioStarted {
+			if i+frameSize+1 < len(entry.audioBuffer) {
+				if entry.audioBuffer[i+frameSize] != 0x0B || entry.audioBuffer[i+frameSize+1] != 0x77 {
+					i++
+					continue
+				}
 			}
 		}
 		entry.audioFrames++

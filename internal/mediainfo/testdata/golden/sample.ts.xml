@@ -68,14 +68,14 @@
 <Format_AdditionalFeatures>LC</Format_AdditionalFeatures>
 <MuxingMode>ADTS</MuxingMode>
 <CodecID>15-2</CodecID>
-<Duration>4.032</Duration>
+<Duration>3.968</Duration>
 <BitRate_Mode>VBR</BitRate_Mode>
 <Channels>1</Channels>
 <ChannelPositions>Front: C</ChannelPositions>
 <ChannelLayout>M</ChannelLayout>
 <SamplesPerFrame>1024</SamplesPerFrame>
 <SamplingRate>48000</SamplingRate>
-<SamplingCount>193536</SamplingCount>
+<SamplingCount>190464</SamplingCount>
 <FrameRate>46.875</FrameRate>
 <Compression_Mode>Lossy</Compression_Mode>
 <Delay>1.445400000</Delay>
