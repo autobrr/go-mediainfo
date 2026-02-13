@@ -379,7 +379,8 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 		}
 		// MediaInfoLib uses a time-based bound (~30s default) for the initial scan when ParseSpeed<0.8,
 		// and may shrink the begin/end byte windows once all PCR streams have exceeded it.
-		if packetOffset*2 >= size {
+		// Only relevant while we are still within the initial head window.
+		if packetOffset >= syncOff+int64(tsStatsMaxOffset) {
 			return
 		}
 		if len(pcrSpans) == 0 {
@@ -391,7 +392,29 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 				over++
 			}
 		}
-		if over == 0 || over != len(pcrSpans) {
+		// MediaInfoLib locks the begin scan as soon as a valid PCR timeline exceeds the bound.
+		// Requiring all PCR PIDs to exceed it can overscan and inflate bounded audio stats.
+		if over == 0 {
+			return
+		}
+		if packetOffset < syncOff {
+			return
+		}
+		rel := packetOffset - syncOff
+		ac3StatsHeadBytes = min(int64(tsStatsMaxOffset), rel+packetSize)
+		ac3StatsHeadLocked = true
+	}
+
+	maybeLockAC3HeadByPTS := func(packetOffset int64) {
+		if !ac3StatsBounded || ac3StatsHeadLocked || size <= 0 {
+			return
+		}
+		// Match MediaInfoLib's ~30s begin scan bound even when PCR isn't available/parsed early.
+		if ptsDuration(anyPTS) < 30 {
+			return
+		}
+		// Only relevant while we are still within the initial head window.
+		if packetOffset >= syncOff+int64(tsStatsMaxOffset) {
 			return
 		}
 		if packetOffset < syncOff {
@@ -626,6 +649,7 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 					if flags&0x80 != 0 {
 						if pts, ok := parsePTS(payload[9:]); ok {
 							addPTSMode(&anyPTS, pts, !partialScan)
+							maybeLockAC3HeadByPTS(packetOffset)
 							if entry, ok := streams[pid]; ok {
 								if entry.kind == StreamText {
 									addPTSTextMode(&entry.pts, pts, !partialScan)
@@ -3149,6 +3173,11 @@ func consumeAC3(entry *tsStream, payload []byte, collectStats bool, statsHead bo
 		if i+frameSize > len(entry.audioBuffer) {
 			break
 		}
+		// Match MediaInfoLib: validate frame CRC to reject false-positive syncwords in TS payloads.
+		if !ac3CRCValid(entry.audioBuffer[i:i+frameSize], info.bsid) {
+			i++
+			continue
+		}
 		// When we start parsing mid-PES (BDAV tail window), tighten resync validation to avoid
 		// false-positive AC-3 sync words. Once we've seen a PES start for the PID, allow gaps
 		// between frames (not all real-world streams are byte-contiguous).
@@ -3217,6 +3246,11 @@ func consumeEAC3(entry *tsStream, payload []byte, collectStats bool, statsHead b
 		}
 		if i+frameSize > len(entry.audioBuffer) {
 			break
+		}
+		// Match MediaInfoLib: validate frame CRC to reject false-positive syncwords in TS payloads.
+		if !ac3CRCValid(entry.audioBuffer[i:i+frameSize], info.bsid) {
+			i++
+			continue
 		}
 		// When we start parsing mid-PES (BDAV tail window), tighten resync validation to avoid
 		// false-positive sync words. Once we've seen a PES start for the PID, allow non-contiguous
