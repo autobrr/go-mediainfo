@@ -112,6 +112,7 @@ Owner: soup
 - `Disney Channel - Evermoor Behind The Scenes.ts`: diff `12` (AC-3 stats windows).
 - Local dev hygiene:
 - `internal/mediainfo/z_debug_*.go` ignored via `.gitignore` (avoid accidental commits).
+- AC-3 bit parsing now bounds the bit reader to the syncframe when enough bytes are buffered (correctness guard; no parity change yet).
 - ARIB/ISDB sample confirmation:
 - `Reigen Ohatsu - Furueru Iwa (2024).ts`: contains `arib_caption` subtitle PID (ffprobe); still diff `524` (ARIB/ISDB metadata + subtitle parsing not implemented).
 - MediaInfoLib note (likely relevant to remaining TS stats parity):

@@ -175,6 +175,11 @@ func parseAC3Frame(payload []byte) (ac3Info, int, bool) {
 	if frameSize == 0 {
 		return info, 0, false
 	}
+	// Don't let bit parsing run past the frame boundary. MediaInfoLib parses within the syncframe;
+	// reading beyond can smear values across frame boundaries and skew TS/BDAV stats.
+	if len(payload) >= frameSize {
+		br.limit = frameSize * 8
+	}
 	bsid, ok := br.readBits(5)
 	if !ok {
 		return info, 0, false
@@ -507,6 +512,10 @@ func parseEAC3FrameWithOptions(payload []byte, parseJOC bool) (ac3Info, int, boo
 		return info, 0, false
 	}
 	frameSize := int((frmsiz + 1) * 2)
+	// Bound bit parsing to this syncframe when we have enough bytes buffered.
+	if len(payload) >= frameSize {
+		br.limit = frameSize * 8
+	}
 	fscod, ok := br.readBits(2)
 	if !ok {
 		return info, 0, false
