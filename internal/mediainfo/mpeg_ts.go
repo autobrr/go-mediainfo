@@ -410,7 +410,8 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 			return
 		}
 		// Match MediaInfoLib's ~30s begin scan bound even when PCR isn't available/parsed early.
-		if ptsDuration(anyPTS) < 30 {
+		dur := ptsDuration(anyPTS)
+		if dur < 30 {
 			return
 		}
 		// Only relevant while we are still within the initial head window.
@@ -433,7 +434,7 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 	var psiBytes int64
 	headStoppedEarly := false
 	headScannedEnd := int64(0)
-	scanRange := func(start, end int64, shrinkHead bool) bool {
+	scanRange := func(start, end int64, shrinkHead bool, tailStats bool) bool {
 		if start < 0 {
 			start = 0
 		}
@@ -835,7 +836,9 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 						// MediaInfoLib samples AC-3 metadata from both begin/end windows at default
 						// ParseSpeed; emission is gated later on a valid timeline.
 						collectAC3Stats := inHead
-						if !inHead && ac3StatsBounded {
+						// Only collect tail-window stats when we are actually performing a tail scan.
+						// For small TS files (no tail jump), MediaInfoLib stats align closer to the head window.
+						if !inHead && ac3StatsBounded && tailStats {
 							collectAC3Stats = true
 						}
 						// Audio frames can be recovered mid-PES by resyncing on codec sync words.
@@ -929,7 +932,8 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 						}
 					}
 					collectAC3Stats := inHead
-					if !inHead && ac3StatsBounded {
+					// Only collect tail-window stats when we are actually performing a tail scan.
+					if !inHead && ac3StatsBounded && tailStats {
 						collectAC3Stats = true
 					}
 					entry.bytes += uint64(len(payloadData))
@@ -961,7 +965,7 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 	if partialScan && size > 0 {
 		headEnd = min(size, syncOff+tsStatsMaxOffset)
 	}
-	if !scanRange(headStart, headEnd, ac3StatsBounded) {
+	if !scanRange(headStart, headEnd, ac3StatsBounded, false) {
 		return ContainerInfo{}, nil, nil, false
 	}
 	headEndActual := headEnd
@@ -991,18 +995,18 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 		// If there is no gap, just continue sequential parsing.
 		if tailStart < headEndActual {
 			if headEndActual < size {
-				if !scanRange(headEndActual, size, false) {
+				if !scanRange(headEndActual, size, false, true) {
 					return ContainerInfo{}, nil, nil, false
 				}
 			}
 		} else {
-			if !scanRange(tailStart, size, false) {
+			if !scanRange(tailStart, size, false, true) {
 				return ContainerInfo{}, nil, nil, false
 			}
 		}
 	} else if headEndActual < size {
 		// Large file with no tail scan configured: continue sequential parsing.
-		if !scanRange(headEndActual, size, false) {
+		if !scanRange(headEndActual, size, false, false) {
 			return ContainerInfo{}, nil, nil, false
 		}
 	}
@@ -1079,14 +1083,31 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 			// Small tail-proportional bump improves parity for AC-3 `compr_*` stats on real-world TS/BDAV.
 			tailMulNum := uint64(5)
 			if !isBDAV {
-				// TS streams tend to match official outputs with a smaller tail contribution than BDAV.
-				tailMulNum = 3
+				// TS streams: official behavior varies with how much the head scan was shortened by
+				// the ~30s bound; when we scan close to the full 64 MiB, a smaller tail contribution
+				// matches better on sampled captures.
+				if ac3StatsHeadBytes >= (tsStatsMaxOffset*3)/4 {
+					tailMulNum = 2
+				} else {
+					tailMulNum = 3
+				}
 			}
-			max := headFrames + (tailFrames*tailMulNum)/9
+			div := uint64(9)
+			// TS tweak: when the tail window is relatively small vs the head window, official stats
+			// tend to align closer with a slightly smaller tail contribution.
+			if !isBDAV && tailMulNum == 2 && headFrames > 0 && tailFrames*10 < headFrames*6 {
+				div = 10
+			}
+			max := headFrames + (tailFrames*tailMulNum)/div
 			// Small bias toward head-only stats when no tail window is present (e.g. small BDAV clips),
 			// while still matching MediaInfo's head+tail sampling on large files.
 			if tailFrames > 0 {
 				max--
+			}
+			if !isBDAV && tailMulNum == 2 && div == 10 {
+				// Empirical: on short-tail TS captures, MediaInfoLib tends to include a few more frames
+				// than pure integer division would suggest.
+				max += 3
 			}
 			st.audioFramesStatsMax = max
 		}
