@@ -110,6 +110,8 @@ Owner: soup
 - `Nickelodeon - Saturday Morning Promo.ts`: diff `4` (only `extra.compr_*`).
 - `Nickelodeon - Generic Halloween Promo.ts`: diff `0`.
 - `Disney Channel - Evermoor Behind The Scenes.ts`: diff `12` (AC-3 stats windows).
+- Local dev hygiene:
+- `internal/mediainfo/z_debug_*.go` ignored via `.gitignore` (avoid accidental commits).
 - ARIB/ISDB sample confirmation:
 - `Reigen Ohatsu - Furueru Iwa (2024).ts`: contains `arib_caption` subtitle PID (ffprobe); still diff `524` (ARIB/ISDB metadata + subtitle parsing not implemented).
 - MediaInfoLib note (likely relevant to remaining TS stats parity):

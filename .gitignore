@@ -7,3 +7,6 @@ scripts/ptp_scan.local.json
 .cache/ptp-scan/
 ptp_scan.state.json
 ptp_scan_candidates.jsonl
+
+# Local debug helpers (never commit)
+internal/mediainfo/z_debug_*.go
