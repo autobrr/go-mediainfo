@@ -104,6 +104,17 @@ Owner: soup
 - `Nickelodeon - Generic Halloween Promo.ts`: diff `0`.
 - `Disney Channel - Evermoor Behind The Scenes.ts`: diff `12` (remaining: AC-3 stats window/counts across both audio tracks).
 
+## Status (2026-02-14)
+- CI: `gofmt` clean; `go test ./...` green.
+- TS parity controls unchanged:
+- `Nickelodeon - Saturday Morning Promo.ts`: diff `4` (only `extra.compr_*`).
+- `Nickelodeon - Generic Halloween Promo.ts`: diff `0`.
+- `Disney Channel - Evermoor Behind The Scenes.ts`: diff `12` (AC-3 stats windows).
+- ARIB/ISDB sample confirmation:
+- `Reigen Ohatsu - Furueru Iwa (2024).ts`: contains `arib_caption` subtitle PID (ffprobe); still diff `524` (ARIB/ISDB metadata + subtitle parsing not implemented).
+- MediaInfoLib note (likely relevant to remaining TS stats parity):
+- `File_MpegTs.cpp`: when begin+end windows overlap, MediaInfo sets `MpegTs_JumpTo_End=0` (no end jump); current Go implementation still uses bounded head/tail sampling heuristics for stats.
+
 ## Learnings / Decisions
 - Command name: mediainfo
 - Parity target: MediaInfo-master in this repo
