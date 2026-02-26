@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -148,29 +149,31 @@ func TestFacadeRenderersSmoke(t *testing.T) {
 		name string
 		out  string
 	}{
-		{name: "text", out: mediainfo.RenderText(reports)},
-		{name: "json", out: mediainfo.RenderJSON(reports)},
-		{name: "xml", out: mediainfo.RenderXML(reports)},
-		{name: "html", out: mediainfo.RenderHTML(reports)},
-		{name: "csv", out: mediainfo.RenderCSV(reports)},
-		{name: "ebucore", out: mediainfo.RenderEBUCore(reports)},
-		{name: "pbcore", out: mediainfo.RenderPBCore(reports)},
-		{name: "graph-svg", out: mediainfo.RenderGraphSVG(reports)},
-		{name: "graph-dot", out: mediainfo.RenderGraphDOT(reports)},
+		{name: "RenderText", out: mediainfo.RenderText(reports)},
+		{name: "RenderJSON", out: mediainfo.RenderJSON(reports)},
+		{name: "RenderXML", out: mediainfo.RenderXML(reports)},
+		{name: "RenderHTML", out: mediainfo.RenderHTML(reports)},
+		{name: "RenderCSV", out: mediainfo.RenderCSV(reports)},
+		{name: "RenderEBUCore", out: mediainfo.RenderEBUCore(reports)},
+		{name: "RenderPBCore", out: mediainfo.RenderPBCore(reports)},
+		{name: "RenderGraphSVG", out: mediainfo.RenderGraphSVG(reports)},
+		{name: "RenderGraphDOT", out: mediainfo.RenderGraphDOT(reports)},
 	}
+	renderedMap := make(map[string]string, len(rendered))
 	for _, item := range rendered {
 		if strings.TrimSpace(item.out) == "" {
 			t.Fatalf("%s renderer output is empty", item.name)
 		}
+		renderedMap[item.name] = item.out
 	}
-	if !json.Valid([]byte(rendered[1].out)) {
-		t.Fatalf("RenderJSON output is invalid JSON: %q", rendered[1].out)
+	if !json.Valid([]byte(renderedMap["RenderJSON"])) {
+		t.Fatalf("RenderJSON output is invalid JSON: %q", renderedMap["RenderJSON"])
 	}
-	if !strings.Contains(rendered[7].out, "<svg") {
-		t.Fatalf("RenderGraphSVG output=%q, want SVG tag", rendered[7].out)
+	if !strings.Contains(renderedMap["RenderGraphSVG"], "<svg") {
+		t.Fatalf("RenderGraphSVG output=%q, want SVG tag", renderedMap["RenderGraphSVG"])
 	}
-	if !strings.Contains(rendered[8].out, "digraph") {
-		t.Fatalf("RenderGraphDOT output=%q, want digraph", rendered[8].out)
+	if !strings.Contains(renderedMap["RenderGraphDOT"], "digraph") {
+		t.Fatalf("RenderGraphDOT output=%q, want digraph", renderedMap["RenderGraphDOT"])
 	}
 }
 
@@ -187,8 +190,10 @@ func TestFacadeMetadataExports(t *testing.T) {
 }
 
 func TestStreamKindAlias(t *testing.T) {
-	var kind mediainfo.StreamKind = mediainfo.StreamVideo
-	if kind != mediainfo.StreamVideo {
-		t.Fatalf("kind=%q, want %q", kind, mediainfo.StreamVideo)
+	if reflect.TypeOf(mediainfo.StreamVideo) != reflect.TypeOf(mediainfo.StreamKind("")) {
+		t.Fatalf("StreamVideo type=%v, want %v", reflect.TypeOf(mediainfo.StreamVideo), reflect.TypeOf(mediainfo.StreamKind("")))
+	}
+	if mediainfo.StreamVideo != mediainfo.StreamKind("Video") {
+		t.Fatalf("StreamVideo=%q, want %q", mediainfo.StreamVideo, mediainfo.StreamKind("Video"))
 	}
 }
