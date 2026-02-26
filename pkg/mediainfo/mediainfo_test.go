@@ -8,11 +8,11 @@ import (
 	"strings"
 	"testing"
 
-	mediainfo "github.com/autobrr/go-mediainfo"
+	mediainfo "github.com/autobrr/go-mediainfo/pkg/mediainfo"
 )
 
 func samplePath() string {
-	return filepath.Join("samples", "sample.ts")
+	return filepath.Join("..", "..", "samples", "sample.ts")
 }
 
 func findField(fields []mediainfo.Field, name string) (string, bool) {

@@ -12,8 +12,8 @@ import (
 	"github.com/creativeprojects/go-selfupdate"
 	"github.com/spf13/cobra"
 
-	mediainfo "github.com/autobrr/go-mediainfo"
 	"github.com/autobrr/go-mediainfo/internal/cli"
+	mediainfo "github.com/autobrr/go-mediainfo/pkg/mediainfo"
 )
 
 var version = "dev"

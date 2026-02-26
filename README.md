@@ -86,7 +86,7 @@ package main
 import (
   "fmt"
 
-  "github.com/autobrr/go-mediainfo"
+  "github.com/autobrr/go-mediainfo/pkg/mediainfo"
 )
 
 func main() {
