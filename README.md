@@ -77,3 +77,24 @@ Footer includes `ReportBy : go-mediainfo - vX.Y.Z`.
 
 - `update` (self-update this binary; release builds only)
 - `version` (print go-mediainfo version)
+
+## Public API (Go)
+
+```go
+package main
+
+import (
+  "fmt"
+
+  "github.com/autobrr/go-mediainfo"
+)
+
+func main() {
+  report, err := mediainfo.AnalyzeFile("sample.mp4")
+  if err != nil {
+    panic(err)
+  }
+
+  fmt.Print(mediainfo.RenderJSON([]mediainfo.Report{report}))
+}
+```
