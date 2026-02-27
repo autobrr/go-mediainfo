@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/autobrr/go-mediainfo/internal/mediainfo"
+	mediainfo "github.com/autobrr/go-mediainfo"
 )
 
 const (
@@ -200,63 +200,43 @@ func writeLogFile(path, output string, includeBOM bool) error {
 }
 
 func runCore(opts Options, files []string) (string, int, error) {
+	outputFormat := mediainfo.OutputText
 	if opts.Output != "" {
 		if strings.Contains(opts.Output, ";") || strings.HasPrefix(strings.ToLower(opts.Output), "file://") {
 			return "", 0, fmt.Errorf("output template not implemented: %s", opts.Output)
 		}
 
-		outputName := strings.ToUpper(strings.TrimSpace(opts.Output))
-		switch outputName {
-		case "TEXT", "JSON", "XML", "OLDXML", "HTML", "CSV", "EBUCORE", "EBUCORE_JSON", "PBCORE", "PBCORE2", "GRAPH_SVG", "GRAPH_DOT":
+		outputFormat = mediainfo.OutputFormat(strings.ToUpper(strings.TrimSpace(opts.Output)))
+		switch outputFormat {
+		case mediainfo.OutputText, mediainfo.OutputJSON, mediainfo.OutputXML, mediainfo.OutputOldXML, mediainfo.OutputHTML, mediainfo.OutputCSV,
+			mediainfo.OutputEBUCore, mediainfo.OutputEBUCoreJSON, mediainfo.OutputPBCore, mediainfo.OutputPBCore2, mediainfo.OutputGraphSVG, mediainfo.OutputGraphDOT:
 		default:
 			return "", 0, fmt.Errorf("output format not implemented: %s", opts.Output)
 		}
 	}
 
-	analyzeOpts := mediainfo.AnalyzeOptions{}
+	var analyzeOpts []mediainfo.AnalyzeOption
 	for _, opt := range opts.CoreOptions {
 		if strings.EqualFold(opt.Name, "parsespeed") {
 			if value, err := strconv.ParseFloat(strings.TrimSpace(opt.Value), 64); err == nil {
-				analyzeOpts.ParseSpeed = value
-				analyzeOpts.HasParseSpeed = true
+				analyzeOpts = append(analyzeOpts, mediainfo.WithParseSpeed(value))
 			}
 			continue
 		}
 		if strings.EqualFold(opt.Name, "file_testcontinuousfilenames") {
 			value := strings.TrimSpace(opt.Value)
-			analyzeOpts.TestContinuousFileNames = value != "0"
-			analyzeOpts.HasTestContinuousFileNames = true
+			analyzeOpts = append(analyzeOpts, mediainfo.WithTestContinuousFileNames(value != "0"))
 			continue
 		}
 	}
-	reports, count, err := mediainfo.AnalyzeFilesWithOptions(files, analyzeOpts)
+	reports, count, err := mediainfo.AnalyzeFilesWithCount(files, analyzeOpts...)
 	if err != nil {
 		return "", 0, err
 	}
 
-	if strings.EqualFold(opts.Output, "JSON") {
-		return mediainfo.RenderJSON(reports), count, nil
+	output, err := mediainfo.Render(reports, outputFormat)
+	if err != nil {
+		return "", 0, err
 	}
-	if strings.EqualFold(opts.Output, "XML") || strings.EqualFold(opts.Output, "OLDXML") {
-		return mediainfo.RenderXML(reports), count, nil
-	}
-	if strings.EqualFold(opts.Output, "CSV") {
-		return mediainfo.RenderCSV(reports), count, nil
-	}
-	if strings.EqualFold(opts.Output, "EBUCORE") || strings.EqualFold(opts.Output, "EBUCORE_JSON") {
-		return mediainfo.RenderEBUCore(reports), count, nil
-	}
-	if strings.EqualFold(opts.Output, "PBCORE") || strings.EqualFold(opts.Output, "PBCORE2") {
-		return mediainfo.RenderPBCore(reports), count, nil
-	}
-	if strings.EqualFold(opts.Output, "GRAPH_SVG") {
-		return mediainfo.RenderGraphSVG(reports), count, nil
-	}
-	if strings.EqualFold(opts.Output, "GRAPH_DOT") {
-		return mediainfo.RenderGraphDOT(reports), count, nil
-	}
-	if strings.EqualFold(opts.Output, "HTML") {
-		return mediainfo.RenderHTML(reports), count, nil
-	}
-	return mediainfo.RenderText(reports), count, nil
+	return output, count, nil
 }

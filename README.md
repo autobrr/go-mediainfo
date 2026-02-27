@@ -37,6 +37,36 @@ go install github.com/autobrr/go-mediainfo/cmd/mediainfo@latest
 curl -sL "$(curl -s https://api.github.com/repos/autobrr/go-mediainfo/releases/latest | grep browser_download_url | grep linux_amd64 | cut -d\" -f4)" | tar -xz -C /usr/local/bin
 ```
 
+## Library Usage (Go)
+
+```sh
+go get github.com/autobrr/go-mediainfo@latest
+```
+
+```go
+import (
+	"fmt"
+
+	mediainfo "github.com/autobrr/go-mediainfo"
+)
+
+func main() {
+	reports, err := mediainfo.AnalyzeFiles(
+		[]string{"movie.mkv"},
+		mediainfo.WithParseSpeed(0.5),
+	)
+	if err != nil {
+		panic(err)
+	}
+
+	out, err := mediainfo.Render(reports, mediainfo.OutputJSON)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(out)
+}
+```
+
 ## Usage
 
 Recommended (likely what you want):
@@ -77,3 +107,7 @@ Footer includes `ReportBy : go-mediainfo - vX.Y.Z`.
 
 - `update` (self-update this binary; release builds only)
 - `version` (print go-mediainfo version)
+
+## License
+
+GPL-2.0-or-later. See [LICENSE](LICENSE).
