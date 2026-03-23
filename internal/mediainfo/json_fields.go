@@ -292,9 +292,6 @@ func mapStreamFieldsToJSON(kind StreamKind, fields []Field) []jsonKV {
 			out = append(out, jsonKV{Key: "Language", Val: field.Value})
 		case "Title":
 			out = append(out, jsonKV{Key: "Title", Val: field.Value})
-			if kind == StreamGeneral {
-				out = append(out, jsonKV{Key: "Movie", Val: field.Value})
-			}
 		case "Law rating":
 			out = append(out, jsonKV{Key: "LawRating", Val: field.Value})
 		case "Channel(s)":
@@ -715,6 +712,13 @@ func parseFloatValue(value string) (float64, bool) {
 
 func parseRatioFloat(value string) (float64, bool) {
 	parts := strings.Split(value, ":")
+	if len(parts) == 1 {
+		parsed, err := strconv.ParseFloat(strings.TrimSpace(value), 64)
+		if err != nil || parsed <= 0 {
+			return 0, false
+		}
+		return parsed, true
+	}
 	if len(parts) != 2 {
 		return 0, false
 	}

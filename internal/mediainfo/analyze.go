@@ -513,6 +513,10 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			if rawWritingApp != "" {
 				general.JSON["Encoded_Application"] = rawWritingApp
 			}
+			// MediaInfo emits both Title and Movie for Matroska Segment/Info/Title.
+			if title := findField(general.Fields, "Title"); title != "" {
+				general.JSON["Movie"] = title
+			}
 			if info.DurationSeconds > 0 {
 				general.JSON["Duration"] = formatJSONFloat(info.DurationSeconds)
 			}
@@ -529,6 +533,25 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			// DTS-HD MA (XLL) and other VBR audio codecs signal Variable overall mode.
 			if overallModeField == "" {
 				overallModeField = overallBitRateModeForKind(streams, StreamAudio)
+			}
+			// When video doesn't provide a bit rate mode, check audio streams.
+			// DTS-HD MA (XLL) and other VBR audio codecs signal Variable overall mode.
+			if overallModeField == "" {
+				for _, stream := range streams {
+					if stream.Kind != StreamAudio {
+						continue
+					}
+					if mode := findField(stream.Fields, "Bit rate mode"); strings.EqualFold(mode, "Variable") {
+						overallModeField = "Variable"
+						break
+					}
+					if stream.JSON != nil {
+						if mode := stream.JSON["BitRate_Mode"]; strings.ToUpper(mode) == "VBR" {
+							overallModeField = "Variable"
+							break
+						}
+					}
+				}
 			}
 			if overallModeField == "Variable" {
 				general.Fields = appendFieldUnique(general.Fields, Field{Name: "Overall bit rate mode", Value: overallModeField})

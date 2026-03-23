@@ -18,3 +18,13 @@ func TestExtractLeadingNumber(t *testing.T) {
 		}
 	}
 }
+
+func TestMapStreamFieldsToJSONDisplayAspectRatioDecimal(t *testing.T) {
+	fields := []Field{{Name: "Display aspect ratio", Value: "1.200"}}
+
+	got := mapStreamFieldsToJSON(StreamVideo, fields)
+
+	if value := jsonFieldValue(got, "DisplayAspectRatio"); value != "1.200" {
+		t.Fatalf("DisplayAspectRatio=%q want %q", value, "1.200")
+	}
+}

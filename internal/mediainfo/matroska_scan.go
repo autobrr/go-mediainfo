@@ -61,6 +61,7 @@ type dtsInfo struct {
 	hdBitDepth      int
 	hdChannels      int
 	hdSpeakerMask   uint16
+	hdSampleRate    int
 	hasSpeakerMask  bool
 }
 
@@ -727,8 +728,8 @@ func readMatroskaBlockHeader(er *ebmlReader, size int64, audioProbes map[uint64]
 					peek = int64(matroskaVideoProbeMaxBytes)
 				} else if needAudio && audioProbe != nil && audioProbe.format == "DTS" {
 					// DTS-HD extension substream (ExSS) follows the core frame, which can be several KB.
-					// Read the full block to detect XLL/ExSS sync words.
-					peek = size
+					// Cap at 32 KB to avoid large allocations on oversized blocks.
+					peek = 32768
 				} else if needAudio && audioProbe != nil && audioProbe.format == "E-AC-3" {
 					// In the final packet, skip probing additional laces to match official behavior.
 					if stopAfterThisPacket && maxLacesToProbe > 0 && i >= maxLacesToProbe {
@@ -1280,8 +1281,7 @@ func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAud
 					stream.JSON["Format_AdditionalFeatures"] = "XBR"
 					stream.JSON["Format_Commercial_IfAny"] = "DTS-HD High Resolution Audio"
 				} else {
-					// DTS-HD with ExSS but unknown extension type; default to HD labeling.
-					stream.Fields = setFieldValue(stream.Fields, "Format", "DTS ES")
+					// DTS-HD with ExSS but unknown extension type; keep base format, only set commercial name.
 					stream.Fields = insertFieldAfter(stream.Fields, Field{Name: "Commercial name", Value: "DTS-HD"}, "Format/Info")
 					stream.JSON["Format_Commercial_IfAny"] = "DTS-HD"
 				}
@@ -1290,18 +1290,33 @@ func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAud
 			if dts.hd && dts.hdBitDepth > 0 {
 				bitDepth = dts.hdBitDepth
 			}
+			channels := dts.channels
+			if dts.hd && dts.hdChannels > 0 {
+				channels = dts.hdChannels
+			}
+			if channels > 0 {
+				stream.Fields = setFieldValue(stream.Fields, "Channel(s)", formatChannels(uint64(channels)))
+				if dts.hd && dts.hasSpeakerMask {
+					layout := dtsHDSpeakerActivityMaskChannelLayout(dts.hdSpeakerMask)
+					if layout != "" {
+						stream.Fields = setFieldValue(stream.Fields, "Channel layout", layout)
+					}
+				} else {
+					stream.Fields = setFieldValue(stream.Fields, "Channel layout", channelLayout(uint64(channels)))
+				}
+			}
 			if bitDepth > 0 {
 				stream.Fields = setFieldValue(stream.Fields, "Bit depth", fmt.Sprintf("%d bits", bitDepth))
 			}
-			if dts.channels > 0 {
-				stream.Fields = setFieldValue(stream.Fields, "Channel(s)", formatChannels(uint64(dts.channels)))
-				stream.Fields = setFieldValue(stream.Fields, "Channel layout", channelLayout(uint64(dts.channels)))
+			sampleRate := dts.sampleRate
+			if dts.hd && dts.hdSampleRate > 0 {
+				sampleRate = dts.hdSampleRate
 			}
-			if dts.sampleRate > 0 {
-				stream.Fields = setFieldValue(stream.Fields, "Sampling rate", formatSampleRate(float64(dts.sampleRate)))
+			if sampleRate > 0 {
+				stream.Fields = setFieldValue(stream.Fields, "Sampling rate", formatSampleRate(float64(sampleRate)))
 			}
-			if dts.sampleRate > 0 && dts.samplesPerFrame > 0 {
-				frameRate := float64(dts.sampleRate) / float64(dts.samplesPerFrame)
+			if sampleRate > 0 && dts.samplesPerFrame > 0 {
+				frameRate := float64(sampleRate) / float64(dts.samplesPerFrame)
 				stream.Fields = setFieldValue(stream.Fields, "Frame rate", formatAudioFrameRate(frameRate, dts.samplesPerFrame))
 				if stream.JSON == nil {
 					stream.JSON = map[string]string{}
@@ -1339,16 +1354,25 @@ func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAud
 			} else {
 				stream.JSON["Compression_Mode"] = "Lossy"
 			}
-			if dts.channels > 0 {
-				chStr := strconv.Itoa(dts.channels)
-				stream.JSON["Channels"] = chStr
-				stream.JSON["ChannelLayout"] = channelLayout(uint64(dts.channels))
-				if pos := channelPositionsFromCount(chStr); pos != "" {
-					stream.JSON["ChannelPositions"] = pos
-				}
-			}
 			if bitDepth > 0 {
 				stream.JSON["BitDepth"] = strconv.Itoa(bitDepth)
+			}
+			if channels > 0 {
+				chStr := strconv.Itoa(channels)
+				stream.JSON["Channels"] = chStr
+				if dts.hd && dts.hasSpeakerMask {
+					if layout := dtsHDSpeakerActivityMaskChannelLayout(dts.hdSpeakerMask); layout != "" {
+						stream.JSON["ChannelLayout"] = layout
+					}
+					if positions := dtsHDSpeakerActivityMask(dts.hdSpeakerMask); positions != "" {
+						stream.JSON["ChannelPositions"] = positions
+					}
+				} else {
+					stream.JSON["ChannelLayout"] = channelLayout(uint64(channels))
+					if positions := channelPositionsFromCount(chStr); positions != "" {
+						stream.JSON["ChannelPositions"] = positions
+					}
+				}
 			}
 			if !dts.hd && dts.bitRateBps > 0 && !hasContainerBitrate {
 				stream.JSON["BitRate"] = strconv.FormatInt(dts.bitRateBps, 10)
@@ -1364,14 +1388,14 @@ func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAud
 			}
 			stream.JSON["Format_Settings_Endianness"] = "Big"
 			stream.JSON["Format_Settings_Mode"] = "16"
-			if dts.sampleRate > 0 {
+			if sampleRate > 0 {
 				if durStr := stream.JSON["Duration"]; durStr != "" {
 					if duration, err := strconv.ParseFloat(durStr, 64); err == nil && duration > 0 {
-						samplingCount := int64(math.Round(duration * float64(dts.sampleRate)))
+						samplingCount := int64(math.Round(duration * float64(sampleRate)))
 						stream.JSON["SamplingCount"] = strconv.FormatInt(samplingCount, 10)
 					}
 				} else if duration, ok := parseDurationSeconds(findField(stream.Fields, "Duration")); ok {
-					samplingCount := int64(math.Round(duration * float64(dts.sampleRate)))
+					samplingCount := int64(math.Round(duration * float64(sampleRate)))
 					stream.JSON["SamplingCount"] = strconv.FormatInt(samplingCount, 10)
 				}
 			}
@@ -1864,7 +1888,7 @@ func probeMatroskaAudio(probes map[uint64]*matroskaAudioProbe, track uint64, pay
 						info.hdBitDepth = bd
 					}
 				}
-				if ch, mask, bd, ok := parseDTSHDExSSMeta(payload); ok {
+				if ch, mask, bd, sr, ok := parseDTSHDExSSMeta(payload); ok {
 					info.hdChannels = ch
 					if mask != 0 {
 						info.hdSpeakerMask = mask
@@ -1872,6 +1896,9 @@ func probeMatroskaAudio(probes map[uint64]*matroskaAudioProbe, track uint64, pay
 					}
 					if bd > 0 && info.hdBitDepth == 0 {
 						info.hdBitDepth = bd
+					}
+					if sr > 0 {
+						info.hdSampleRate = sr
 					}
 				}
 			}
