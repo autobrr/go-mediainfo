@@ -1609,24 +1609,6 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64, durationPrec i
 		if videoInfo.codedHeight > 0 {
 			storedHeight = videoInfo.codedHeight
 		}
-		displayWidth := videoInfo.displayWidth
-		displayHeight := videoInfo.displayHeight
-		if displayWidth == 0 && sampledWidth > 0 {
-			crop := videoInfo.cropLeft + videoInfo.cropRight
-			if crop > 0 && crop < sampledWidth {
-				displayWidth = sampledWidth - crop
-			} else {
-				displayWidth = sampledWidth
-			}
-		}
-		if displayHeight == 0 && sampledHeight > 0 {
-			crop := videoInfo.cropTop + videoInfo.cropBottom
-			if crop > 0 && crop < sampledHeight {
-				displayHeight = sampledHeight - crop
-			} else {
-				displayHeight = sampledHeight
-			}
-		}
 		if storedWidth > 0 && sampledWidth > 0 && storedWidth != sampledWidth {
 			jsonExtras["Stored_Width"] = strconv.FormatUint(storedWidth, 10)
 		}
