@@ -180,6 +180,35 @@ func TestParseMatroskaTrackEntryNonHeaderCompression(t *testing.T) {
 	}
 }
 
+func TestParseMatroskaTrackEntryKeepsPixelDimensionsWithDisplaySize(t *testing.T) {
+	videoPayload := make([]byte, 0, 32)
+	videoPayload = append(videoPayload, buildMatroskaElement(mkvIDPixelWidth, encodeMatroskaUint(1920))...)
+	videoPayload = append(videoPayload, buildMatroskaElement(mkvIDPixelHeight, encodeMatroskaUint(1038))...)
+	videoPayload = append(videoPayload, buildMatroskaElement(mkvIDDisplayWidth, encodeMatroskaUint(320))...)
+	videoPayload = append(videoPayload, buildMatroskaElement(mkvIDDisplayHeight, encodeMatroskaUint(173))...)
+	video := buildMatroskaElement(mkvIDTrackVideo, videoPayload)
+	entry := append(
+		buildMatroskaElement(mkvIDTrackType, encodeMatroskaUint(1)),
+		buildMatroskaElement(mkvIDTrackNumber, encodeMatroskaUint(1))...,
+	)
+	entry = append(entry, buildMatroskaElement(mkvIDCodecID, []byte("V_MPEG4/ISO/AVC"))...)
+	entry = append(entry, video...)
+
+	stream, ok := parseMatroskaTrackEntry(entry, 0, 3)
+	if !ok {
+		t.Fatalf("expected parsed stream")
+	}
+	if got := findField(stream.Fields, "Width"); got != "1 920 pixels" {
+		t.Fatalf("Width=%q", got)
+	}
+	if got := findField(stream.Fields, "Height"); got != "1 038 pixels" {
+		t.Fatalf("Height=%q", got)
+	}
+	if got := findField(stream.Fields, "Display aspect ratio"); got != "1.85:1" {
+		t.Fatalf("Display aspect ratio=%q", got)
+	}
+}
+
 func TestParseMatroskaInfoDateUTC(t *testing.T) {
 	base := time.Date(2001, time.January, 1, 0, 0, 0, 0, time.UTC)
 	target := time.Date(2012, time.November, 28, 15, 41, 23, 0, time.UTC)

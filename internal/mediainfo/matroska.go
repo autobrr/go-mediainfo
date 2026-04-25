@@ -1389,8 +1389,16 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64, durationPrec i
 	}
 	if kind == StreamVideo {
 		bitRateNominal := spsInfo.HasBitRateCBR && spsInfo.BitRateCBR
-		storedWidth := videoInfo.pixelWidth
-		storedHeight := videoInfo.pixelHeight
+		sampledWidth := videoInfo.pixelWidth
+		sampledHeight := videoInfo.pixelHeight
+		if spsInfo.Width > 0 {
+			sampledWidth = spsInfo.Width
+		}
+		if spsInfo.Height > 0 {
+			sampledHeight = spsInfo.Height
+		}
+		storedWidth := sampledWidth
+		storedHeight := sampledHeight
 		if videoInfo.codedWidth > 0 {
 			storedWidth = videoInfo.codedWidth
 		}
@@ -1399,24 +1407,14 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64, durationPrec i
 		}
 		displayWidth := videoInfo.displayWidth
 		displayHeight := videoInfo.displayHeight
-		if videoInfo.displayUnit != 0 {
-			displayWidth = 0
-			displayHeight = 0
+		if sampledWidth > 0 {
+			fields = append(fields, Field{Name: "Width", Value: formatPixels(sampledWidth)})
 		}
-		outWidth := storedWidth
-		outHeight := storedHeight
-		if displayWidth > 0 && displayHeight > 0 {
-			outWidth = displayWidth
-			outHeight = displayHeight
+		if sampledHeight > 0 {
+			fields = append(fields, Field{Name: "Height", Value: formatPixels(sampledHeight)})
 		}
-		if outWidth > 0 {
-			fields = append(fields, Field{Name: "Width", Value: formatPixels(outWidth)})
-		}
-		if outHeight > 0 {
-			fields = append(fields, Field{Name: "Height", Value: formatPixels(outHeight)})
-		}
-		aspectW := storedWidth
-		aspectH := storedHeight
+		aspectW := sampledWidth
+		aspectH := sampledHeight
 		if displayWidth > 0 && displayHeight > 0 {
 			aspectW = displayWidth
 			aspectH = displayHeight
@@ -1595,8 +1593,16 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64, durationPrec i
 		}
 	}
 	if kind == StreamVideo {
-		storedWidth := videoInfo.pixelWidth
-		storedHeight := videoInfo.pixelHeight
+		sampledWidth := videoInfo.pixelWidth
+		sampledHeight := videoInfo.pixelHeight
+		if spsInfo.Width > 0 {
+			sampledWidth = spsInfo.Width
+		}
+		if spsInfo.Height > 0 {
+			sampledHeight = spsInfo.Height
+		}
+		storedWidth := sampledWidth
+		storedHeight := sampledHeight
 		if videoInfo.codedWidth > 0 {
 			storedWidth = videoInfo.codedWidth
 		}
@@ -1605,31 +1611,31 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64, durationPrec i
 		}
 		displayWidth := videoInfo.displayWidth
 		displayHeight := videoInfo.displayHeight
-		if displayWidth == 0 && storedWidth > 0 {
+		if displayWidth == 0 && sampledWidth > 0 {
 			crop := videoInfo.cropLeft + videoInfo.cropRight
-			if crop > 0 && crop < storedWidth {
-				displayWidth = storedWidth - crop
+			if crop > 0 && crop < sampledWidth {
+				displayWidth = sampledWidth - crop
 			} else {
-				displayWidth = storedWidth
+				displayWidth = sampledWidth
 			}
 		}
-		if displayHeight == 0 && storedHeight > 0 {
+		if displayHeight == 0 && sampledHeight > 0 {
 			crop := videoInfo.cropTop + videoInfo.cropBottom
-			if crop > 0 && crop < storedHeight {
-				displayHeight = storedHeight - crop
+			if crop > 0 && crop < sampledHeight {
+				displayHeight = sampledHeight - crop
 			} else {
-				displayHeight = storedHeight
+				displayHeight = sampledHeight
 			}
 		}
-		if storedWidth > 0 && displayWidth > 0 && storedWidth != displayWidth {
+		if storedWidth > 0 && sampledWidth > 0 && storedWidth != sampledWidth {
 			jsonExtras["Stored_Width"] = strconv.FormatUint(storedWidth, 10)
 		}
-		if storedHeight == displayHeight && displayHeight > 0 && codecID == "V_MPEG4/ISO/AVC" {
-			if displayHeight%16 != 0 {
-				storedHeight = ((displayHeight + 15) / 16) * 16
+		if storedHeight == sampledHeight && sampledHeight > 0 && codecID == "V_MPEG4/ISO/AVC" {
+			if sampledHeight%16 != 0 {
+				storedHeight = ((sampledHeight + 15) / 16) * 16
 			}
 		}
-		if storedHeight > 0 && displayHeight > 0 && storedHeight != displayHeight {
+		if storedHeight > 0 && sampledHeight > 0 && storedHeight != sampledHeight {
 			jsonExtras["Stored_Height"] = strconv.FormatUint(storedHeight, 10)
 		}
 		if spsInfo.HasFixedFrameRate && !spsInfo.FixedFrameRate {

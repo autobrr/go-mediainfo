@@ -82,7 +82,10 @@ func TestGoldenOutputs(t *testing.T) {
 }
 
 func normalizeText(s string) string {
-	return strings.ReplaceAll(s, "\r\n", "\n")
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	s = strings.ReplaceAll(s, `samples\\`, "samples/")
+	s = strings.ReplaceAll(s, `samples\`, "samples/")
+	return s
 }
 
 var (
