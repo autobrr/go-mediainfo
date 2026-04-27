@@ -6,10 +6,33 @@ cask "mediainfo" do
     Use `go-mediainfo` to run this cask's binary.
   EOS
 
+  version "0.3.1"
+
+  on_macos do
+    on_intel do
+      sha256 "e794f871c8cd499cc695eac8b5a1363b4f6fe31aff39421cf316bc246495270a"
+      url "https://github.com/autobrr/go-mediainfo/releases/download/v#{version}/mediainfo_#{version}_darwin_amd64.tar.gz"
+    end
+    on_arm do
+      sha256 "385d26e9b68eb525bb3320b1770975bf24edd7f02adf163745369dc849102d2f"
+      url "https://github.com/autobrr/go-mediainfo/releases/download/v#{version}/mediainfo_#{version}_darwin_arm64.tar.gz"
+    end
+  end
+
+  on_linux do
+    on_intel do
+      sha256 "d06c49868d1387f27b81515b846377687d2963a933c2f177944cc0df0c490b8f"
+      url "https://github.com/autobrr/go-mediainfo/releases/download/v#{version}/mediainfo_#{version}_linux_amd64.tar.gz"
+    end
+    on_arm do
+      sha256 "61848ccc618440d076c1c874f7e7115038ca35198adda385d0dd14112b96a60e"
+      url "https://github.com/autobrr/go-mediainfo/releases/download/v#{version}/mediainfo_#{version}_linux_arm64.tar.gz"
+    end
+  end
+
   name "mediainfo"
   desc "Go rewrite of MediaInfo CLI."
   homepage "https://github.com/autobrr/go-mediainfo"
-  version "0.3.0"
 
   livecheck do
     skip "Auto-generated on release."
@@ -17,27 +40,6 @@ cask "mediainfo" do
 
   binary "mediainfo"
 
-  on_macos do
-    on_intel do
-      url "https://github.com/autobrr/go-mediainfo/releases/download/v#{version}/mediainfo_#{version}_darwin_amd64.tar.gz"
-      sha256 "d8aa1d31ed467b849829ca8867971c16c21181ad3c69766d18a49cda07e80cd7"
-    end
-    on_arm do
-      url "https://github.com/autobrr/go-mediainfo/releases/download/v#{version}/mediainfo_#{version}_darwin_arm64.tar.gz"
-      sha256 "a4672c8cc3b86c1290f220a589282f9597b43db177566959c907652008ca57c7"
-    end
-  end
-
-  on_linux do
-    on_intel do
-      url "https://github.com/autobrr/go-mediainfo/releases/download/v#{version}/mediainfo_#{version}_linux_amd64.tar.gz"
-      sha256 "28b8f0743f59c757c87339f8fadcd6110560a84bd692d7f485f4dc7b289ca5b4"
-    end
-    on_arm do
-      url "https://github.com/autobrr/go-mediainfo/releases/download/v#{version}/mediainfo_#{version}_linux_arm64.tar.gz"
-      sha256 "adac19ebce7fb4818508ee227580c98083bbc6aef233b21ab931092962658579"
-    end
-  end
-
   # No zap stanza required
+
 end
