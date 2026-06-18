@@ -224,9 +224,10 @@ func parseHEVCSPS(nal []byte) h264SPSInfo {
 	matrix := ""
 	hasColorDescription := false
 	frameRate := float64(0)
+	chromaSampleLoc := -1
 
 	if br.readBitsValue(1) == 1 { // vui_parameters_present_flag
-		colorRange, hasColorRange, colorPrimaries, transfer, matrix, hasColorDescription, frameRate, _ = parseHEVCVUI(br)
+		colorRange, hasColorRange, colorPrimaries, transfer, matrix, hasColorDescription, frameRate, _, chromaSampleLoc = parseHEVCVUI(br)
 	}
 
 	// Conformance window cropping.
@@ -269,6 +270,8 @@ func parseHEVCSPS(nal []byte) h264SPSInfo {
 		TransferCharacteristics: transfer,
 		MatrixCoefficients:      matrix,
 		HasColorDescription:     hasColorDescription,
+		HasChromaLoc:            chromaSampleLoc >= 0,
+		ChromaSampleLoc:         chromaSampleLoc,
 		ProfileID:               profileIDC,
 		LevelID:                 levelIDC,
 		HEVCTier:                tierName,
@@ -460,7 +463,7 @@ func skipHEVCShortTermRefPicSet(br *bitReader, idx int, sets []hevcShortTermRPS)
 	return numNeg + numPos, true
 }
 
-func parseHEVCVUI(br *bitReader) (string, bool, string, string, string, bool, float64, bool) {
+func parseHEVCVUI(br *bitReader) (string, bool, string, string, string, bool, float64, bool, int) {
 	colorRange := ""
 	hasColorRange := false
 	colorPrimaries := ""
@@ -469,6 +472,7 @@ func parseHEVCVUI(br *bitReader) (string, bool, string, string, string, bool, fl
 	hasColorDescription := false
 	frameRate := float64(0)
 	hasTiming := false
+	chromaSampleLoc := -1
 
 	if br.readBitsValue(1) == 1 { // aspect_ratio_info_present_flag
 		aspectRatioIDC := br.readBitsValue(8)
@@ -500,8 +504,10 @@ func parseHEVCVUI(br *bitReader) (string, bool, string, string, string, bool, fl
 		}
 	}
 	if br.readBitsValue(1) == 1 { // chroma_loc_info_present_flag
-		_, _ = br.readUEWithOk()
-		_, _ = br.readUEWithOk()
+		if loc, ok := br.readUEWithOk(); ok { // chroma_sample_loc_type_top_field
+			chromaSampleLoc = int(loc)
+		}
+		_, _ = br.readUEWithOk() // chroma_sample_loc_type_bottom_field
 	}
 	// neutral_chroma_indication_flag, field_seq_flag, frame_field_info_present_flag
 	_ = br.readBitsValue(1)
@@ -527,7 +533,7 @@ func parseHEVCVUI(br *bitReader) (string, bool, string, string, string, bool, fl
 		if br.readBitsValue(1) == 1 { // hrd_parameters_present_flag
 			// Skip hrd_parameters() - not needed for Matroska parity work right now.
 			// If present, abort VUI parsing to avoid desync.
-			return colorRange, hasColorRange, colorPrimaries, transfer, matrix, hasColorDescription, frameRate, hasTiming
+			return colorRange, hasColorRange, colorPrimaries, transfer, matrix, hasColorDescription, frameRate, hasTiming, chromaSampleLoc
 		}
 	}
 	if br.readBitsValue(1) == 1 { // bitstream_restriction_flag
@@ -542,5 +548,5 @@ func parseHEVCVUI(br *bitReader) (string, bool, string, string, string, bool, fl
 		_, _ = br.readUEWithOk()
 	}
 
-	return colorRange, hasColorRange, colorPrimaries, transfer, matrix, hasColorDescription, frameRate, hasTiming
+	return colorRange, hasColorRange, colorPrimaries, transfer, matrix, hasColorDescription, frameRate, hasTiming, chromaSampleLoc
 }

@@ -35,6 +35,11 @@ func parseHEVCConfig(payload []byte) (string, []Field, hevcConfigInfo, h264SPSIn
 		nalLengthSize: int(lengthSizeMinusOne) + 1,
 	}
 
+	spsInfo := h264SPSInfo{}
+	if sps := findHEVCSPSInConfig(payload); len(sps) > 0 {
+		spsInfo = parseHEVCSPS(sps)
+	}
+
 	fields := []Field{}
 	if info.profileName != "" {
 		profile := info.profileName
@@ -43,24 +48,22 @@ func parseHEVCConfig(payload []byte) (string, []Field, hevcConfigInfo, h264SPSIn
 		}
 		fields = append(fields, Field{Name: "Format profile", Value: profile})
 	}
-	if tierName == "High" {
+	// MediaInfo always reports the HEVC tier (Main or High).
+	if tierName != "" {
 		fields = append(fields, Field{Name: "Format tier", Value: tierName})
 	}
 	if info.chromaFormat != "" {
 		fields = append(fields, Field{Name: "Chroma subsampling", Value: info.chromaFormat})
-		if chromaFormatIDC == 1 {
-			// Match official MediaInfo JSON output for HEVC 4:2:0.
-			fields = append(fields, Field{Name: "Chroma subsampling position", Value: "Type 2"})
+		// MediaInfo emits ChromaSubsampling_Position only when the SPS VUI signals
+		// chroma_loc_info; the value mirrors chroma_sample_loc_type_top_field.
+		if spsInfo.HasChromaLoc {
+			fields = append(fields, Field{Name: "Chroma subsampling position", Value: fmt.Sprintf("Type %d", spsInfo.ChromaSampleLoc)})
 		}
 	}
 	if info.bitDepth > 0 {
 		fields = append(fields, Field{Name: "Bit depth", Value: formatBitDepth(info.bitDepth)})
 	}
 
-	spsInfo := h264SPSInfo{}
-	if sps := findHEVCSPSInConfig(payload); len(sps) > 0 {
-		spsInfo = parseHEVCSPS(sps)
-	}
 	return info.profileName, fields, info, spsInfo
 }
 

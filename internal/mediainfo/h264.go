@@ -27,6 +27,10 @@ type h264SPSInfo struct {
 	HasColorDescription     bool
 	ProfileID               byte
 	LevelID                 byte
+	// HEVC-only: chroma_sample_loc_type_top_field from the SPS VUI, present only when
+	// chroma_loc_info_present_flag is set. MediaInfo reports it as "Type <ChromaSampleLoc>".
+	HasChromaLoc    bool
+	ChromaSampleLoc int
 	// HEVC-only: tier name ("Main" or "High") when available.
 	HEVCTier          string
 	Width             uint64
