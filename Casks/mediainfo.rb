@@ -6,26 +6,26 @@ cask "mediainfo" do
     Use `go-mediainfo` to run this cask's binary.
   EOS
 
-  version "0.3.1"
+  version "0.4.0"
 
   on_macos do
     on_intel do
-      sha256 "e794f871c8cd499cc695eac8b5a1363b4f6fe31aff39421cf316bc246495270a"
+      sha256 "294c7e137470e5d2a83251178c0546063f30e243493273c8cccfc82a4dca19a7"
       url "https://github.com/autobrr/go-mediainfo/releases/download/v#{version}/mediainfo_#{version}_darwin_amd64.tar.gz"
     end
     on_arm do
-      sha256 "385d26e9b68eb525bb3320b1770975bf24edd7f02adf163745369dc849102d2f"
+      sha256 "1e00e91b28333b8231f2150986e68b18005afc50f03ce34e84cae0db3fe26270"
       url "https://github.com/autobrr/go-mediainfo/releases/download/v#{version}/mediainfo_#{version}_darwin_arm64.tar.gz"
     end
   end
 
   on_linux do
     on_intel do
-      sha256 "d06c49868d1387f27b81515b846377687d2963a933c2f177944cc0df0c490b8f"
+      sha256 "59a6101f78a83d0a18d33c931dc38000f961dfd6b9f5610ae9cf29bb0813ed16"
       url "https://github.com/autobrr/go-mediainfo/releases/download/v#{version}/mediainfo_#{version}_linux_amd64.tar.gz"
     end
     on_arm do
-      sha256 "61848ccc618440d076c1c874f7e7115038ca35198adda385d0dd14112b96a60e"
+      sha256 "6bbadfd8a9f836269b73ef2e757041dcf6810d8920b6563dbca5415e5ff8480c"
       url "https://github.com/autobrr/go-mediainfo/releases/download/v#{version}/mediainfo_#{version}_linux_arm64.tar.gz"
     end
   end
