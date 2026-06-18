@@ -1716,6 +1716,20 @@ func applyMatroskaVideoProbes(info *MatroskaInfo, probes map[uint64]*matroskaVid
 				stream.Fields = appendFieldUnique(stream.Fields, Field{Name: "Encoding settings", Value: probe.encoding})
 			}
 		}
+		if probe.codec == "HEVC" && probe.hdrInfo.x265Library != "" {
+			// Prefer the bitstream-derived x265 library over generic container muxer
+			// strings (Lavc/ffmpeg/libx265), matching MediaInfo which fills the video
+			// Encoded_Library from the HEVC SEI rather than the Matroska ENCODER tag.
+			existing := findField(stream.Fields, "Writing library")
+			lower := strings.ToLower(existing)
+			isGeneric := existing == "" || strings.HasPrefix(existing, "Lavc") || strings.Contains(lower, "ffmpeg") || strings.Contains(lower, "libx265") || strings.Contains(lower, "libx264")
+			if isGeneric {
+				stream.Fields = setFieldValue(stream.Fields, "Writing library", probe.hdrInfo.x265Library)
+			}
+			if probe.hdrInfo.x265Settings != "" && findField(stream.Fields, "Encoding settings") == "" {
+				stream.Fields = appendFieldUnique(stream.Fields, Field{Name: "Encoding settings", Value: probe.hdrInfo.x265Settings})
+			}
+		}
 		if stream.JSON == nil {
 			stream.JSON = map[string]string{}
 		}

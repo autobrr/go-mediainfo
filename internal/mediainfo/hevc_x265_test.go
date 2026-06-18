@@ -1,0 +1,124 @@
+package mediainfo
+
+import "testing"
+
+const x265RealInfo = "x265 (build 216) - 4.2+1-e444744:[Mac OS X][clang 21.0.0][64 bit] 8bit+10bit+12bit - H.265/HEVC codec - Copyright 2013-2018 (c) Multicoreware, Inc - http://x265.org - options: cpuid=98 frame-threads=3 wpp bitdepth=8 fps=24/1 input-res=320x240 deblock=0:0 scenecut-aware-qp=0conformance-window-offsets"
+
+const x265WantLibrary = "x265 4.2+1-e444744:[Mac OS X][clang 21.0.0][64 bit] 8bit+10bit+12bit"
+const x265WantSettings = "cpuid=98 / frame-threads=3 / wpp / input-res=320x240 / deblock=0:0 / scenecut-aware-qp=0conformance-window-offsets"
+
+func TestParseX265InfoString(t *testing.T) {
+	var info hevcHDRInfo
+	parseX265InfoString([]byte(x265RealInfo), &info)
+
+	if !info.x265Seen {
+		t.Fatalf("x265Seen = false, want true")
+	}
+	if info.x265Library != x265WantLibrary {
+		t.Fatalf("x265Library:\n got %q\nwant %q", info.x265Library, x265WantLibrary)
+	}
+	// bitdepth=, fps=, and digit-leading tokens are dropped; the x265 no-space bug
+	// token survives intact.
+	if info.x265Settings != x265WantSettings {
+		t.Fatalf("x265Settings:\n got %q\nwant %q", info.x265Settings, x265WantSettings)
+	}
+}
+
+func TestParseX265InfoStringTrailingNUL(t *testing.T) {
+	// A single trailing NUL is tolerated (matches MediaInfo Peek_String behaviour).
+	var info hevcHDRInfo
+	parseX265InfoString(append([]byte(x265RealInfo), 0x00), &info)
+	if !info.x265Seen || info.x265Library != x265WantLibrary {
+		t.Fatalf("trailing NUL not tolerated: seen=%v lib=%q", info.x265Seen, info.x265Library)
+	}
+
+	// An embedded NUL that is not the final byte means the payload is not text.
+	var info2 hevcHDRInfo
+	parseX265InfoString([]byte("x265 - 9.9\x00 - options: wpp x"), &info2)
+	if info2.x265Seen {
+		t.Fatalf("embedded NUL payload should be ignored")
+	}
+}
+
+func TestParseHEVCUserDataUnregistered(t *testing.T) {
+	uuid := []byte{0x2C, 0xA2, 0xDE, 0x09, 0xB5, 0x17, 0x47, 0xDB, 0xBB, 0x55, 0xA4, 0xFE, 0x7F, 0xC2, 0xFC, 0x4E}
+	payload := append(append([]byte{}, uuid...), []byte(x265RealInfo)...)
+
+	var info hevcHDRInfo
+	parseHEVCUserDataUnregistered(payload, &info)
+	if info.x265Library != x265WantLibrary {
+		t.Fatalf("x265Library = %q, want %q", info.x265Library, x265WantLibrary)
+	}
+
+	// A different (non-x265) UUID must be ignored even if the body looks like text.
+	wrongUUID := append([]byte{0x42, 0x7F, 0xCC, 0x9B, 0xB8, 0x92, 0x48, 0x21}, uuid[8:]...)
+	payload2 := append(append([]byte{}, wrongUUID...), []byte(x265RealInfo)...)
+	var info2 hevcHDRInfo
+	parseHEVCUserDataUnregistered(payload2, &info2)
+	if info2.x265Seen {
+		t.Fatalf("non-x265 UUID should be ignored")
+	}
+}
+
+func TestParseHEVCConfigSEI(t *testing.T) {
+	// Some muxers place the x265 user-data SEI in the hvcC NAL arrays. Build a minimal
+	// HEVCDecoderConfigurationRecord with one PREFIX_SEI (nal_unit_type 39) array.
+	uuid := []byte{0x2C, 0xA2, 0xDE, 0x09, 0xB5, 0x17, 0x47, 0xDB, 0xBB, 0x55, 0xA4, 0xFE, 0x7F, 0xC2, 0xFC, 0x4E}
+	text := "x265 (build 1) - 9.9 - H.265/HEVC codec - c - u - options: wpp 320 bitdepth=8 fps=2 me=0"
+	body := append(append([]byte{}, uuid...), []byte(text)...)
+	if len(body) > 254 {
+		t.Fatalf("test SEI payload too large for single-byte size: %d", len(body))
+	}
+	nal := append([]byte{0x4E, 0x01, 0x05, byte(len(body))}, body...) // PREFIX_SEI, payloadType 5
+
+	cfg := make([]byte, 23)
+	cfg[22] = 1             // numOfArrays
+	cfg = append(cfg, 0x27) // array_completeness/type: NAL_unit_type 39
+	cfg = append(cfg, 0x00, 0x01)
+	cfg = append(cfg, byte(len(nal)>>8), byte(len(nal)))
+	cfg = append(cfg, nal...)
+
+	var info hevcHDRInfo
+	parseHEVCConfigSEI(cfg, &info)
+	if !info.x265Seen {
+		t.Fatalf("x265 SEI not extracted from hvcC arrays")
+	}
+	if info.x265Library != "x265 9.9" {
+		t.Fatalf("x265Library = %q, want %q", info.x265Library, "x265 9.9")
+	}
+	if info.x265Settings != "wpp / me=0" {
+		t.Fatalf("x265Settings = %q, want %q", info.x265Settings, "wpp / me=0")
+	}
+}
+
+func TestSplitEncodedLibraryX265(t *testing.T) {
+	name, version := splitEncodedLibrary("x265 - 4.2+1-e444744:[Mac OS X] 8bit")
+	if name != "x265" || version != "4.2+1-e444744:[Mac OS X] 8bit" {
+		t.Fatalf("splitEncodedLibrary x265 = (%q,%q)", name, version)
+	}
+	// Bare name with no version yields an empty version (MediaInfo leaves it unset).
+	if n, v := splitEncodedLibrary("x265"); n != "x265" || v != "" {
+		t.Fatalf("splitEncodedLibrary bare = (%q,%q), want (x265, \"\")", n, v)
+	}
+}
+
+func TestMapStreamFieldsToJSONX265EncodedLibrary(t *testing.T) {
+	fields := []Field{
+		{Name: "Writing library", Value: x265WantLibrary},
+		{Name: "Encoding settings", Value: x265WantSettings},
+	}
+	got := mapStreamFieldsToJSON(StreamVideo, fields)
+
+	if v := jsonFieldValue(got, "Encoded_Library"); v != "x265 - 4.2+1-e444744:[Mac OS X][clang 21.0.0][64 bit] 8bit+10bit+12bit" {
+		t.Fatalf("Encoded_Library = %q", v)
+	}
+	if v := jsonFieldValue(got, "Encoded_Library_Name"); v != "x265" {
+		t.Fatalf("Encoded_Library_Name = %q", v)
+	}
+	if v := jsonFieldValue(got, "Encoded_Library_Version"); v != "4.2+1-e444744:[Mac OS X][clang 21.0.0][64 bit] 8bit+10bit+12bit" {
+		t.Fatalf("Encoded_Library_Version = %q", v)
+	}
+	if v := jsonFieldValue(got, "Encoded_Library_Settings"); v != x265WantSettings {
+		t.Fatalf("Encoded_Library_Settings = %q", v)
+	}
+}

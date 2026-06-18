@@ -15,10 +15,23 @@ type hevcHDRInfo struct {
 	hdr10Plus             bool
 	hdr10PlusVersion      int
 	hdr10PlusToneMapping  bool
+	// x265 writes its writing library + encoding settings into an SEI
+	// user_data_unregistered message (payloadType 5); captured here.
+	x265Library  string // "x265 <version>" (space form, mirrors findX264Info output)
+	x265Settings string // encoding options joined with " / "
+	x265Seen     bool
 }
 
 func (info *hevcHDRInfo) complete() bool {
 	return info.hasMastering && info.maxCLL > 0 && info.maxFALL > 0 && info.hdr10Plus
+}
+
+// scanDone reports whether nothing more can be gathered from the bitstream: both the
+// HDR metadata and the x265 encoder SEI have been collected. Used to stop the SEI/NAL
+// walk early. It intentionally requires x265Seen so an HDR-complete stream is still
+// scanned for the x265 user-data SEI (the two often share the first prefix-SEI NAL).
+func (info *hevcHDRInfo) scanDone() bool {
+	return info.complete() && info.x265Seen
 }
 
 func parseHEVCSampleHDR(sample []byte, nalLengthSize int, info *hevcHDRInfo) {
@@ -43,7 +56,7 @@ func parseHEVCNALUnitsLengthPrefixed(sample []byte, nalLengthSize int, info *hev
 			break
 		}
 		parseHEVCNAL(sample[offset:offset+nalSize], info)
-		if info.complete() {
+		if info.scanDone() {
 			return
 		}
 		offset += nalSize
@@ -62,7 +75,7 @@ func parseHEVCNALUnitsAnnexB(sample []byte, info *hevcHDRInfo) {
 		if len(nal) > 0 {
 			parseHEVCNAL(nal, info)
 		}
-		if info.complete() || next < 0 {
+		if info.scanDone() || next < 0 {
 			return
 		}
 		start = next
@@ -141,6 +154,8 @@ func parseHEVCSEI(rbsp []byte, info *hevcHDRInfo) {
 		payload := rbsp[i : i+payloadSize]
 		i += payloadSize
 		switch payloadType {
+		case 5:
+			parseHEVCUserDataUnregistered(payload, info)
 		case 137:
 			parseMasteringDisplayColourVolume(payload, info)
 		case 144:
@@ -148,7 +163,7 @@ func parseHEVCSEI(rbsp []byte, info *hevcHDRInfo) {
 		case 4:
 			parseHEVCUserDataRegistered(payload, info)
 		}
-		if info.complete() {
+		if info.scanDone() {
 			return
 		}
 	}

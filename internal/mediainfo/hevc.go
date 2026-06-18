@@ -1,6 +1,9 @@
 package mediainfo
 
-import "fmt"
+import (
+	"encoding/binary"
+	"fmt"
+)
 
 type hevcConfigInfo struct {
 	profileName   string
@@ -59,6 +62,43 @@ func parseHEVCConfig(payload []byte) (string, []Field, hevcConfigInfo, h264SPSIn
 		spsInfo = parseHEVCSPS(sps)
 	}
 	return info.profileName, fields, info, spsInfo
+}
+
+// parseHEVCConfigSEI walks the NAL arrays of an HEVC DecoderConfigurationRecord
+// (hvcC) and feeds any prefix/suffix SEI NAL units to the SEI parser. Some muxers
+// (e.g. ffmpeg with global headers) place the x265 encoder user_data_unregistered
+// SEI in the configuration record rather than in frame data, so the cluster/bitstream
+// scan never sees it.
+func parseHEVCConfigSEI(payload []byte, info *hevcHDRInfo) {
+	if info == nil || len(payload) < 23 {
+		return
+	}
+	numArrays := int(payload[22])
+	offset := 23
+	for a := 0; a < numArrays; a++ {
+		if offset+3 > len(payload) {
+			return
+		}
+		nalUnitType := payload[offset] & 0x3F
+		offset++
+		numNalus := int(binary.BigEndian.Uint16(payload[offset : offset+2]))
+		offset += 2
+		for n := 0; n < numNalus; n++ {
+			if offset+2 > len(payload) {
+				return
+			}
+			nalLen := int(binary.BigEndian.Uint16(payload[offset : offset+2]))
+			offset += 2
+			if nalLen <= 0 || offset+nalLen > len(payload) {
+				return
+			}
+			nal := payload[offset : offset+nalLen]
+			offset += nalLen
+			if nalUnitType == 39 || nalUnitType == 40 {
+				parseHEVCNAL(nal, info)
+			}
+		}
+	}
 }
 
 func hevcProfileName(idc byte) string {

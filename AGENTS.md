@@ -346,6 +346,8 @@ Owner: soup
 - Self-update: cobra `update` command (release builds only), uses go-selfupdate
 - UX: docs/help print lowercase flags; parser accepts options case-insensitively
 - Repo samples: generated fixtures (ffmpeg testsrc2+sine); see `samples/README.md` and `samples/generate.sh`
+- HEVC x265: parse SEI user_data_unregistered (payloadType 5, UUID hi `0x2CA2DE09B51747DB`) for `Encoded_Library`/`_Name`/`_Version`/`_Settings`; mirrors MediaInfoLib `File_Hevc::sei_message_user_data_unregistered_x265` (split on " - "; version truncated at " 8bpp"; options drop `options:`/digit-leading/`fps=`/`bitdepth=` tokens; no derived BitRate_Nominal unlike x264). Wired for Matroska (incl. hvcC CodecPrivate SEI via `parseHEVCConfigSEI`, takes precedence over generic `Lavc`/muxer ENCODER tag) + MPEG-TS (Annex B). Verified 1:1 vs reference on 8/10-bit mkv + ts; x264 mkv/mp4 unchanged.
+- HEVC-in-MP4 gap (TODO): `mp4_codec.go` parses no `hvc1`/`hev1` bitstream at all (only `avcC`), so MP4 HEVC is missing `Encoded_Library*` plus SPS-derived `Format_Profile`/`BitDepth`/`ChromaSubsampling`/`Format_Tier`/`colour_range`/`ScanType`; needs an hvcC parse path parallel to AVC. Raw `.hevc` elementary streams have no format-dispatch case either.
 
 ## Notes
 - Update this file as we learn more about CLI behavior, formats, and edge cases.

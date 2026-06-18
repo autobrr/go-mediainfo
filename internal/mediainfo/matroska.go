@@ -374,6 +374,14 @@ func ParseMatroskaWithOptions(r io.ReaderAt, size int64, opts AnalyzeOptions) (M
 							nalLengthSize: stream.nalLengthSize,
 							headerStrip:   stream.mkvHeaderStripBytes,
 						}
+						if stream.mkvHEVCX265Library != "" {
+							// x265 SEI was carried in CodecPrivate (hvcC); seed it so the
+							// cluster-scan transfer emits it with the same precedence as a
+							// bitstream-derived library.
+							probe.hdrInfo.x265Library = stream.mkvHEVCX265Library
+							probe.hdrInfo.x265Settings = stream.mkvHEVCX265Settings
+							probe.hdrInfo.x265Seen = true
+						}
 						if opts.ParseSpeed < 1 {
 							probe.targetPackets = matroskaHEVCQuickProbePackets
 						}
@@ -1130,6 +1138,8 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64, durationPrec i
 	var flagDefault *bool
 	var flagForced *bool
 	var nalLengthSize int
+	var x265Library string
+	var x265Settings string
 	var hdrFormat string
 	var dvCfg dolbyVisionConfig
 	var hasDV bool
@@ -1314,6 +1324,12 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64, durationPrec i
 		_, hevcFields, hevcInfo, hevcSPS := parseHEVCConfig(codecPrivate)
 		fields = append(fields, hevcFields...)
 		nalLengthSize = hevcInfo.nalLengthSize
+		var cfgSEI hevcHDRInfo
+		parseHEVCConfigSEI(codecPrivate, &cfgSEI)
+		if cfgSEI.x265Library != "" {
+			x265Library = cfgSEI.x265Library
+			x265Settings = cfgSEI.x265Settings
+		}
 		if hevcSPS.Width > 0 || hevcSPS.CodedWidth > 0 || hevcSPS.ColorPrimaries != "" {
 			spsInfo = hevcSPS
 		}
@@ -1709,6 +1725,8 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64, durationPrec i
 		mkvHeaderStripBytes: headerStrip,
 		mkvDolbyVision:      dvCfg,
 		mkvHasDolbyVision:   hasDV,
+		mkvHEVCX265Library:  x265Library,
+		mkvHEVCX265Settings: x265Settings,
 	}, true
 }
 
