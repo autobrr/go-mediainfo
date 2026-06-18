@@ -14,15 +14,19 @@ func buildHEVCFieldsFromSPS(sps h264SPSInfo) []Field {
 			fields = append(fields, Field{Name: "Format profile", Value: profile})
 		}
 	}
-	if sps.HEVCTier == "High" {
+	// MediaInfo always reports the HEVC tier (Main or High), matching parseHEVCConfig.
+	if sps.HEVCTier != "" {
 		fields = append(fields, Field{Name: "Format tier", Value: sps.HEVCTier})
 	}
 
 	if sps.ChromaFormat != "" {
 		fields = append(fields, Field{Name: "Color space", Value: "YUV"})
 		fields = append(fields, Field{Name: "Chroma subsampling", Value: sps.ChromaFormat})
-		if sps.ChromaFormat == "4:2:0" {
-			fields = append(fields, Field{Name: "Chroma subsampling position", Value: "Type 2"})
+		// ChromaSubsampling_Position is emitted only when the SPS VUI signals
+		// chroma_loc_info; the value mirrors chroma_sample_loc_type_top_field
+		// (mirrors parseHEVCConfig, not a hardcoded "Type 2").
+		if sps.HasChromaLoc {
+			fields = append(fields, Field{Name: "Chroma subsampling position", Value: fmt.Sprintf("Type %d", sps.ChromaSampleLoc)})
 		}
 	}
 	if sps.BitDepth > 0 {
