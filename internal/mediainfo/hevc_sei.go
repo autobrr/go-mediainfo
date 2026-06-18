@@ -26,11 +26,15 @@ func (info *hevcHDRInfo) complete() bool {
 	return info.hasMastering && info.maxCLL > 0 && info.maxFALL > 0 && info.hdr10Plus
 }
 
-// scanDone reports whether nothing more can be gathered from the bitstream: both the
-// HDR metadata and the x265 encoder SEI have been collected. Used to stop the SEI/NAL
-// walk early. It intentionally requires x265Seen so an HDR-complete stream is still
-// scanned for the x265 user-data SEI (the two often share the first prefix-SEI NAL).
+// scanDone reports whether required HEVC metadata has been collected. The x265
+// SEI is optional and is bounded by the Matroska video probe packet cap.
 func (info *hevcHDRInfo) scanDone() bool {
+	return info.complete()
+}
+
+// sampleScanDone reports whether parsing the current HEVC sample can stop early:
+// all required HDR metadata and the optional x265 encoder SEI were both found.
+func (info *hevcHDRInfo) sampleScanDone() bool {
 	return info.complete() && info.x265Seen
 }
 
@@ -56,7 +60,7 @@ func parseHEVCNALUnitsLengthPrefixed(sample []byte, nalLengthSize int, info *hev
 			break
 		}
 		parseHEVCNAL(sample[offset:offset+nalSize], info)
-		if info.scanDone() {
+		if info.sampleScanDone() {
 			return
 		}
 		offset += nalSize
@@ -75,7 +79,7 @@ func parseHEVCNALUnitsAnnexB(sample []byte, info *hevcHDRInfo) {
 		if len(nal) > 0 {
 			parseHEVCNAL(nal, info)
 		}
-		if info.scanDone() || next < 0 {
+		if info.sampleScanDone() || next < 0 {
 			return
 		}
 		start = next
@@ -163,7 +167,7 @@ func parseHEVCSEI(rbsp []byte, info *hevcHDRInfo) {
 		case 4:
 			parseHEVCUserDataRegistered(payload, info)
 		}
-		if info.scanDone() {
+		if info.sampleScanDone() {
 			return
 		}
 	}

@@ -382,9 +382,7 @@ func ParseMatroskaWithOptions(r io.ReaderAt, size int64, opts AnalyzeOptions) (M
 							probe.hdrInfo.x265Settings = stream.mkvHEVCX265Settings
 							probe.hdrInfo.x265Seen = true
 						}
-						if opts.ParseSpeed < 1 {
-							probe.targetPackets = matroskaHEVCQuickProbePackets
-						}
+						probe.targetPackets = matroskaHEVCQuickProbePackets
 						videoProbes[id] = probe
 					}
 				case StreamGeneral, StreamText, StreamImage, StreamMenu:

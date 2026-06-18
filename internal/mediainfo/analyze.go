@@ -588,6 +588,9 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 				if enc == "" {
 					continue
 				}
+				if !matroskaVideoHasX264Settings(streams[i]) {
+					continue
+				}
 
 				x264Bitrate, x264HasBitrate := findX264Bitrate(enc)
 				if x264HasBitrate && x264Bitrate > 0 {
@@ -1768,6 +1771,66 @@ func parseFPS(value string) (float64, bool) {
 		}
 	}
 	return parsed, true
+}
+
+// matroskaVideoHasX264Settings reports whether Matroska encoder metadata is
+// strong enough to apply x264-only bitrate and VBV rules. A positive x264 or
+// libx264 library wins, an explicit x265/libx265 library rejects the settings,
+// and settings-only streams are accepted only when they contain x264-specific
+// option keys.
+func matroskaVideoHasX264Settings(stream Stream) bool {
+	writingLib := strings.TrimSpace(findField(stream.Fields, "Writing library"))
+	if matroskaWritingLibraryIsX264(writingLib) {
+		return true
+	}
+	if matroskaWritingLibraryIsX265(writingLib) {
+		return false
+	}
+	return matroskaEncodingSettingsLookX264(findField(stream.Fields, "Encoding settings"))
+}
+
+func matroskaWritingLibraryIsX264(value string) bool {
+	lower := strings.ToLower(strings.TrimSpace(value))
+	return hasCodecLibraryToken(lower, "x264") || hasCodecLibraryToken(lower, "libx264")
+}
+
+func matroskaWritingLibraryIsX265(value string) bool {
+	lower := strings.ToLower(strings.TrimSpace(value))
+	return hasCodecLibraryToken(lower, "x265") || hasCodecLibraryToken(lower, "libx265")
+}
+
+// hasCodecLibraryToken matches an encoder token at the start of a library
+// string without accepting adjacent names such as "x264foo".
+func hasCodecLibraryToken(value, token string) bool {
+	if !strings.HasPrefix(value, token) {
+		return false
+	}
+	if len(value) == len(token) {
+		return true
+	}
+	return !isASCIILetterDigit(value[len(token)])
+}
+
+func isASCIILetterDigit(ch byte) bool {
+	return (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9')
+}
+
+// matroskaEncodingSettingsLookX264 recognizes option keys emitted by x264 that
+// are not enough to identify x265 settings on their own.
+func matroskaEncodingSettingsLookX264(value string) bool {
+	lower := strings.ToLower(value)
+	keys := [...]string{
+		"cabac=", "ref=", "deblock=", "analyse=", "subme=", "psy_rd=",
+		"mixed_ref=", "me_range=", "chroma_me=", "8x8dct=", "cqm=",
+		"deadzone=", "fast_pskip=", "b_pyramid=", "b_adapt=", "weightb=",
+		"mbtree=", "keyint_min=", "scenecut=", "intra_refresh=",
+	}
+	for _, key := range keys {
+		if strings.Contains(lower, key) {
+			return true
+		}
+	}
+	return false
 }
 
 type x264InfoOptions struct {
