@@ -253,6 +253,10 @@ func parseVisualSampleEntry(entry []byte, sampleType string) sampleEntryResult {
 			}
 		}
 		fields = appendFieldUnique(fields, Field{Name: "Color space", Value: "YUV"})
+	} else if sampleType == "hvc1" || sampleType == "hev1" {
+		var hevcFields []Field
+		hevcFields, spsInfo = parseMP4HEVCSampleEntry(entry, uint64(width), uint64(height), jsonExtras)
+		fields = append(fields, hevcFields...)
 	}
 	// When AVC bitstream says "not fixed" but container timing is CFR, official MediaInfo keeps CFR
 	// and reports the bitstream hint as FrameRate_Mode_Original=VFR.
@@ -283,6 +287,71 @@ func parseVisualSampleEntry(entry []byte, sampleType string) sampleEntryResult {
 		jsonExtras = nil
 	}
 	return sampleEntryResult{Fields: fields, Width: uint64(width), Height: uint64(height), JSON: jsonExtras}
+}
+
+// parseMP4HEVCSampleEntry parses the hvcC configuration box of an HEVC (hvc1/hev1)
+// MP4 visual sample entry. It returns the stream fields (Format profile / tier,
+// chroma subsampling, bit depth, codec configuration box, scan type, colour space,
+// and the x265 writing library / encoding settings when present) plus the parsed SPS
+// info. Colour metadata is written into jsonExtras with a "Stream" source: unlike the
+// AVC path (which merges a container colr atom and reports "Container / Stream"), HEVC
+// MP4 streams here carry colour info only in the bitstream SPS VUI.
+func parseMP4HEVCSampleEntry(entry []byte, width, height uint64, jsonExtras map[string]string) ([]Field, h264SPSInfo) {
+	payload, ok := findMP4ChildBox(entry, mp4VisualSampleEntryHeaderSize, "hvcC")
+	if !ok {
+		payload, ok = findMP4BoxByName(entry, "hvcC")
+	}
+	if !ok {
+		return nil, h264SPSInfo{}
+	}
+	_, hevcFields, _, spsInfo := parseHEVCConfig(payload)
+	fields := append([]Field{}, hevcFields...)
+	fields = append(fields, Field{Name: "Codec configuration box", Value: "hvcC"})
+	// HEVC does not use field/interlaced coding in practice; MediaInfo reports Progressive.
+	fields = append(fields, Field{Name: "Scan type", Value: "Progressive"})
+	fields = append(fields, Field{Name: "Color space", Value: "YUV"})
+
+	// Stored (coded, pre-conformance-crop) dimensions are reported when they differ from
+	// the displayed size, e.g. 1080-line HEVC is coded as 1088 luma samples.
+	if spsInfo.CodedWidth > 0 && width > 0 && spsInfo.CodedWidth != width {
+		jsonExtras["Stored_Width"] = strconv.FormatUint(spsInfo.CodedWidth, 10)
+	}
+	if spsInfo.CodedHeight > 0 && height > 0 && spsInfo.CodedHeight != height {
+		jsonExtras["Stored_Height"] = strconv.FormatUint(spsInfo.CodedHeight, 10)
+	}
+
+	if spsInfo.HasColorRange && spsInfo.ColorRange != "" {
+		jsonExtras["colour_range"] = spsInfo.ColorRange
+		jsonExtras["colour_range_Source"] = "Stream"
+	}
+	if spsInfo.HasColorDescription {
+		jsonExtras["colour_description_present"] = "Yes"
+		jsonExtras["colour_description_present_Source"] = "Stream"
+		if spsInfo.ColorPrimaries != "" {
+			jsonExtras["colour_primaries"] = spsInfo.ColorPrimaries
+			jsonExtras["colour_primaries_Source"] = "Stream"
+		}
+		if spsInfo.TransferCharacteristics != "" {
+			jsonExtras["transfer_characteristics"] = spsInfo.TransferCharacteristics
+			jsonExtras["transfer_characteristics_Source"] = "Stream"
+		}
+		if spsInfo.MatrixCoefficients != "" {
+			jsonExtras["matrix_coefficients"] = spsInfo.MatrixCoefficients
+			jsonExtras["matrix_coefficients_Source"] = "Stream"
+		}
+	}
+
+	// x265 (and similar encoders with global headers) place the writing-library +
+	// encoding-settings SEI in the hvcC NAL arrays rather than in frame data.
+	var sei hevcHDRInfo
+	parseHEVCConfigSEI(payload, &sei)
+	if sei.x265Library != "" {
+		fields = append(fields, Field{Name: "Writing library", Value: sei.x265Library})
+		if sei.x265Settings != "" {
+			fields = append(fields, Field{Name: "Encoding settings", Value: sei.x265Settings})
+		}
+	}
+	return fields, spsInfo
 }
 
 func parseAudioSampleEntry(entry []byte, sampleType string) sampleEntryResult {
