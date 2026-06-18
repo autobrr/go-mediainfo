@@ -182,7 +182,10 @@ func parseHEVCSPS(nal []byte) h264SPSInfo {
 	}
 
 	numShortTermRPS, ok := br.readUEWithOk()
-	if !ok || numShortTermRPS < 0 {
+	// num_short_term_ref_pic_sets is capped at 64 by the HEVC spec; reject larger
+	// (or negative) values from malformed/crafted streams before allocating, to
+	// avoid an unbounded make() panic/OOM on attacker-controlled input.
+	if !ok || numShortTermRPS < 0 || numShortTermRPS > 64 {
 		return h264SPSInfo{}
 	}
 	rps := make([]hevcShortTermRPS, numShortTermRPS)
