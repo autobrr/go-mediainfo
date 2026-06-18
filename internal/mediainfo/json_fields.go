@@ -279,6 +279,9 @@ func mapStreamFieldsToJSON(kind StreamKind, fields []Field) []jsonKV {
 			if strings.HasPrefix(encoded, "x264 ") && !strings.HasPrefix(encoded, "x264 - ") {
 				encoded = "x264 - " + strings.TrimPrefix(encoded, "x264 ")
 			}
+			if strings.HasPrefix(encoded, "x265 ") && !strings.HasPrefix(encoded, "x265 - ") {
+				encoded = "x265 - " + strings.TrimPrefix(encoded, "x265 ")
+			}
 			out = append(out, jsonKV{Key: "Encoded_Library", Val: encoded})
 			if name, version := splitEncodedLibrary(encoded); name != "" {
 				out = append(out, jsonKV{Key: "Encoded_Library_Name", Val: name})
@@ -591,6 +594,15 @@ func splitEncodedLibrary(value string) (string, string) {
 		trimmed := strings.TrimPrefix(value, "x264 - ")
 		trimmed = strings.TrimPrefix(trimmed, "x264 ")
 		return "x264", strings.TrimSpace(trimmed)
+	}
+	if strings.HasPrefix(value, "x265") {
+		if rest, ok := strings.CutPrefix(value, "x265 - "); ok {
+			return "x265", strings.TrimSpace(rest)
+		}
+		if rest, ok := strings.CutPrefix(value, "x265 "); ok {
+			return "x265", strings.TrimSpace(rest)
+		}
+		return "x265", ""
 	}
 	return "", ""
 }

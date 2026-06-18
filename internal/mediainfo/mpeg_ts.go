@@ -2333,8 +2333,12 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 			}
 			if st.encoding != "" {
 				fields = append(fields, Field{Name: "Encoding settings", Value: st.encoding})
-				if bitrate, ok := findX264Bitrate(st.encoding); ok {
-					fields = append(fields, Field{Name: "Nominal bit rate", Value: formatBitrate(bitrate)})
+				// x264 reports a "bitrate=" option that MediaInfo turns into a Nominal
+				// bit rate; x265 has no equivalent (its settings carry no such field).
+				if st.format != "HEVC" {
+					if bitrate, ok := findX264Bitrate(st.encoding); ok {
+						fields = append(fields, Field{Name: "Nominal bit rate", Value: formatBitrate(bitrate)})
+					}
 				}
 			}
 		}
@@ -2968,6 +2972,12 @@ func processPES(entry *tsStream) {
 			entry.hevcHDR.hdr10Plus = true
 			entry.hevcHDR.hdr10PlusVersion = hdr.hdr10PlusVersion
 			entry.hevcHDR.hdr10PlusToneMapping = hdr.hdr10PlusToneMapping
+		}
+		if entry.writingLibrary == "" && hdr.x265Library != "" {
+			entry.writingLibrary = hdr.x265Library
+		}
+		if entry.encoding == "" && hdr.x265Settings != "" {
+			entry.encoding = hdr.x265Settings
 		}
 
 		if ok {

@@ -800,6 +800,10 @@ func readMatroskaBlockHeader(er *ebmlReader, size int64, audioProbes map[uint64]
 	return trackVal, timecode, dataSize, frameCount, nil
 }
 
+// videoProbeNeedsSample reports whether another Matroska video block can still
+// contribute bitstream-derived metadata. HEVC keeps looking for optional x265
+// SEI after required HDR metadata is complete, but only until the packet cap is
+// exhausted.
 func videoProbeNeedsSample(probe *matroskaVideoProbe) bool {
 	if probe == nil {
 		return false
@@ -809,7 +813,7 @@ func videoProbeNeedsSample(probe *matroskaVideoProbe) bool {
 	}
 	switch probe.codec {
 	case "HEVC":
-		return !probe.hdrInfo.complete()
+		return !probe.hdrInfo.scanDone() || !probe.hdrInfo.x265Seen
 	case "AVC":
 		return probe.writingLib == "" || probe.encoding == ""
 	default:
@@ -1714,6 +1718,15 @@ func applyMatroskaVideoProbes(info *MatroskaInfo, probes map[uint64]*matroskaVid
 			}
 			if probe.encoding != "" && findField(stream.Fields, "Encoding settings") == "" {
 				stream.Fields = appendFieldUnique(stream.Fields, Field{Name: "Encoding settings", Value: probe.encoding})
+			}
+		}
+		if probe.codec == "HEVC" && probe.hdrInfo.x265Library != "" {
+			// x265 SEI is stream-derived encoder metadata and is more specific than
+			// Matroska tag or muxer strings for HEVC video encoder fields, so it
+			// replaces both library and settings when present.
+			stream.Fields = setFieldValue(stream.Fields, "Writing library", probe.hdrInfo.x265Library)
+			if probe.hdrInfo.x265Settings != "" {
+				stream.Fields = setFieldValue(stream.Fields, "Encoding settings", probe.hdrInfo.x265Settings)
 			}
 		}
 		if stream.JSON == nil {

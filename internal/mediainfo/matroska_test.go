@@ -362,8 +362,125 @@ func TestVideoProbeNeedsSample(t *testing.T) {
 		maxFALL:      400,
 		hdr10Plus:    true,
 	}
+	if !videoProbeNeedsSample(probe) {
+		t.Fatalf("expected HDR-complete HEVC probe without x265 SEI to keep sampling")
+	}
+	probe.hdrInfo.x265Seen = true
 	if videoProbeNeedsSample(probe) {
-		t.Fatalf("expected complete probe to stop sampling")
+		t.Fatalf("expected HDR-complete HEVC probe with x265 SEI to stop sampling")
+	}
+}
+
+func TestProbeMatroskaVideo_HEVCContinuesAfterHDRForX265SEI(t *testing.T) {
+	probe := &matroskaVideoProbe{
+		codec:         "HEVC",
+		nalLengthSize: 4,
+		hdrInfo: hevcHDRInfo{
+			hasMastering: true,
+			maxCLL:       1000,
+			maxFALL:      400,
+			hdr10Plus:    true,
+		},
+	}
+	probes := map[uint64]*matroskaVideoProbe{1: probe}
+
+	probeMatroskaVideo(probes, 1, buildHEVCX265LengthPrefixedSample(t))
+
+	if !probe.hdrInfo.x265Seen {
+		t.Fatalf("expected later x265 SEI to be parsed after HDR completion")
+	}
+	if probe.hdrInfo.x265Library != "x265 9.9" {
+		t.Fatalf("x265Library = %q, want %q", probe.hdrInfo.x265Library, "x265 9.9")
+	}
+	if probe.hdrInfo.x265Settings != "wpp / me=0" {
+		t.Fatalf("x265Settings = %q, want %q", probe.hdrInfo.x265Settings, "wpp / me=0")
+	}
+}
+
+func TestScanMatroskaClusters_HEVCReadsLateX265AfterHDRComplete(t *testing.T) {
+	cluster := mkvClusterWithSimpleBlock(mkvBlockNoLace(buildHEVCX265LengthPrefixedSample(t)))
+	probe := &matroskaVideoProbe{
+		codec:         "HEVC",
+		nalLengthSize: 4,
+		targetPackets: matroskaHEVCQuickProbePackets,
+		hdrInfo: hevcHDRInfo{
+			hasMastering: true,
+			maxCLL:       1000,
+			maxFALL:      400,
+			hdr10Plus:    true,
+		},
+	}
+
+	scanMatroskaClusters(bytes.NewReader(cluster), 0, int64(len(cluster)), 1000000, nil, map[uint64]*matroskaVideoProbe{1: probe}, false, false, 0.5, 1, nil)
+
+	if !probe.hdrInfo.x265Seen {
+		t.Fatalf("expected scanner to read later x265 SEI after HDR completion")
+	}
+	if probe.packetCount != 1 {
+		t.Fatalf("packetCount = %d, want 1", probe.packetCount)
+	}
+	if probe.hdrInfo.x265Library != "x265 9.9" {
+		t.Fatalf("x265Library = %q, want x265 9.9", probe.hdrInfo.x265Library)
+	}
+}
+
+func TestScanMatroskaClusters_HEVCStopsAtPacketCapWithoutX265(t *testing.T) {
+	cluster := mkvClusterWithSimpleBlocks(
+		mkvBlockNoLace(buildHEVCNonX265LengthPrefixedSample()),
+		mkvBlockNoLace(buildHEVCNonX265LengthPrefixedSample()),
+	)
+	probe := &matroskaVideoProbe{
+		codec:         "HEVC",
+		nalLengthSize: 4,
+		targetPackets: 1,
+		hdrInfo: hevcHDRInfo{
+			hasMastering: true,
+			maxCLL:       1000,
+			maxFALL:      400,
+			hdr10Plus:    true,
+		},
+	}
+	videoProbes := map[uint64]*matroskaVideoProbe{1: probe}
+
+	scanMatroskaClusters(bytes.NewReader(cluster), 0, int64(len(cluster)), 1000000, nil, videoProbes, false, false, 1, 1, nil)
+
+	if !probe.exhausted {
+		t.Fatalf("expected HEVC probe to exhaust at packet cap")
+	}
+	if probe.packetCount != 1 {
+		t.Fatalf("packetCount = %d, want 1", probe.packetCount)
+	}
+	if !matroskaProbesComplete(nil, videoProbes) {
+		t.Fatalf("expected exhausted non-x265 HEVC probe to be complete")
+	}
+}
+
+func TestApplyMatroskaVideoProbes_X265SEIOverridesContainerEncoder(t *testing.T) {
+	info := MatroskaInfo{Tracks: []Stream{{
+		Kind: StreamVideo,
+		Fields: []Field{
+			{Name: "ID", Value: "1"},
+			{Name: "Writing library", Value: "HandBrake 1.7.0"},
+			{Name: "Encoding settings", Value: "container settings"},
+		},
+	}}}
+	probes := map[uint64]*matroskaVideoProbe{1: {
+		codec: "HEVC",
+		hdrInfo: hevcHDRInfo{
+			x265Library:  "x265 9.9",
+			x265Settings: "wpp / me=0",
+			x265Seen:     true,
+		},
+	}}
+
+	applyMatroskaVideoProbes(&info, probes)
+
+	stream := info.Tracks[0]
+	if got := findField(stream.Fields, "Writing library"); got != "x265 9.9" {
+		t.Fatalf("Writing library = %q, want x265 9.9", got)
+	}
+	if got := findField(stream.Fields, "Encoding settings"); got != "wpp / me=0" {
+		t.Fatalf("Encoding settings = %q, want wpp / me=0", got)
 	}
 }
 
@@ -389,6 +506,32 @@ func TestMatroskaProbesCompleteRequiresParsedAudio(t *testing.T) {
 	if !matroskaProbesComplete(audio, nil) {
 		t.Fatalf("expected non-collecting E-AC-3 probe to be complete")
 	}
+}
+
+func buildHEVCX265LengthPrefixedSample(t *testing.T) []byte {
+	t.Helper()
+
+	uuid := []byte{0x2C, 0xA2, 0xDE, 0x09, 0xB5, 0x17, 0x47, 0xDB, 0xBB, 0x55, 0xA4, 0xFE, 0x7F, 0xC2, 0xFC, 0x4E}
+	text := "x265 (build 1) - 9.9 - H.265/HEVC codec - c - u - options: wpp 320 bitdepth=8 fps=2 me=0"
+	body := append(append([]byte{}, uuid...), []byte(text)...)
+	if len(body) > 254 {
+		t.Fatalf("test SEI payload too large for single-byte size: %d", len(body))
+	}
+	nal := append([]byte{0x4E, 0x01, 0x05, byte(len(body))}, body...)
+	return append([]byte{0x00, 0x00, 0x00, byte(len(nal))}, nal...)
+}
+
+func buildHEVCNonX265LengthPrefixedSample() []byte {
+	nal := []byte{0x40, 0x01, 0x0C, 0x01}
+	return append([]byte{0x00, 0x00, 0x00, byte(len(nal))}, nal...)
+}
+
+func mkvClusterWithSimpleBlocks(blocks ...[]byte) []byte {
+	payload := buildMatroskaElement(mkvIDTimecode, []byte{0x00})
+	for _, block := range blocks {
+		payload = append(payload, buildMatroskaElement(mkvIDSimpleBlock, block)...)
+	}
+	return buildMatroskaElement(mkvIDCluster, payload)
 }
 
 func buildMatroskaSample() []byte {

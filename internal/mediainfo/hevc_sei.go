@@ -15,10 +15,27 @@ type hevcHDRInfo struct {
 	hdr10Plus             bool
 	hdr10PlusVersion      int
 	hdr10PlusToneMapping  bool
+	// x265 writes its writing library + encoding settings into an SEI
+	// user_data_unregistered message (payloadType 5); captured here.
+	x265Library  string // "x265 <version>" (space form, mirrors findX264Info output)
+	x265Settings string // encoding options joined with " / "
+	x265Seen     bool
 }
 
 func (info *hevcHDRInfo) complete() bool {
 	return info.hasMastering && info.maxCLL > 0 && info.maxFALL > 0 && info.hdr10Plus
+}
+
+// scanDone reports whether required HEVC metadata has been collected. The x265
+// SEI is optional and is bounded by the Matroska video probe packet cap.
+func (info *hevcHDRInfo) scanDone() bool {
+	return info.complete()
+}
+
+// sampleScanDone reports whether parsing the current HEVC sample can stop early:
+// all required HDR metadata and the optional x265 encoder SEI were both found.
+func (info *hevcHDRInfo) sampleScanDone() bool {
+	return info.complete() && info.x265Seen
 }
 
 func parseHEVCSampleHDR(sample []byte, nalLengthSize int, info *hevcHDRInfo) {
@@ -43,7 +60,7 @@ func parseHEVCNALUnitsLengthPrefixed(sample []byte, nalLengthSize int, info *hev
 			break
 		}
 		parseHEVCNAL(sample[offset:offset+nalSize], info)
-		if info.complete() {
+		if info.sampleScanDone() {
 			return
 		}
 		offset += nalSize
@@ -62,7 +79,7 @@ func parseHEVCNALUnitsAnnexB(sample []byte, info *hevcHDRInfo) {
 		if len(nal) > 0 {
 			parseHEVCNAL(nal, info)
 		}
-		if info.complete() || next < 0 {
+		if info.sampleScanDone() || next < 0 {
 			return
 		}
 		start = next
@@ -141,6 +158,8 @@ func parseHEVCSEI(rbsp []byte, info *hevcHDRInfo) {
 		payload := rbsp[i : i+payloadSize]
 		i += payloadSize
 		switch payloadType {
+		case 5:
+			parseHEVCUserDataUnregistered(payload, info)
 		case 137:
 			parseMasteringDisplayColourVolume(payload, info)
 		case 144:
@@ -148,7 +167,7 @@ func parseHEVCSEI(rbsp []byte, info *hevcHDRInfo) {
 		case 4:
 			parseHEVCUserDataRegistered(payload, info)
 		}
-		if info.complete() {
+		if info.sampleScanDone() {
 			return
 		}
 	}
