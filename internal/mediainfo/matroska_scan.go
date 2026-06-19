@@ -1486,9 +1486,9 @@ func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAud
 				stream.JSON["SamplingCount"] = strconv.FormatInt(samplingCount, 10)
 			}
 		}
-		if probe.format == "E-AC-3" {
-			stream.JSON["Format_Settings_Endianness"] = "Big"
-		}
+		// Official MediaInfo reports AC-3 and E-AC-3 bitstreams as big-endian, not
+		// just E-AC-3 (the DTS branch above already sets this unconditionally).
+		stream.JSON["Format_Settings_Endianness"] = "Big"
 		if code := ac3ServiceKindCode(ac3.bsmod); code != "" {
 			stream.JSON["ServiceKind"] = code
 		}
