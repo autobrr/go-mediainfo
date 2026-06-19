@@ -1273,14 +1273,13 @@ func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAud
 					stream.JSON = map[string]string{}
 				}
 				if dts.hdXLL {
-					// DTS-HD Master Audio (XLL): lossless.
-					stream.Fields = setFieldValue(stream.Fields, "Format", "DTS XLL")
+					// DTS-HD Master Audio (XLL): lossless. Official keeps Format="DTS"
+					// and carries the extension in Format_AdditionalFeatures only.
 					stream.Fields = insertFieldAfter(stream.Fields, Field{Name: "Commercial name", Value: "DTS-HD Master Audio"}, "Format/Info")
 					stream.JSON["Format_AdditionalFeatures"] = "XLL"
 					stream.JSON["Format_Commercial_IfAny"] = "DTS-HD Master Audio"
 				} else if dts.hdXBR {
-					// DTS-HD High Resolution Audio (XBR): lossy VBR.
-					stream.Fields = setFieldValue(stream.Fields, "Format", "DTS XBR")
+					// DTS-HD High Resolution Audio (XBR): lossy VBR. Format stays "DTS".
 					stream.Fields = insertFieldAfter(stream.Fields, Field{Name: "Commercial name", Value: "DTS-HD High Resolution Audio"}, "Format/Info")
 					stream.JSON["Format_AdditionalFeatures"] = "XBR"
 					stream.JSON["Format_Commercial_IfAny"] = "DTS-HD High Resolution Audio"

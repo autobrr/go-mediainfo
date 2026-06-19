@@ -53,3 +53,28 @@ func TestBuildJSONComputedFields_MatroskaFrameRateNumDen(t *testing.T) {
 		}
 	})
 }
+
+// Official MediaInfo keeps Audio.Format="DTS" for DTS-HD and carries the
+// extension in Format_AdditionalFeatures; go was folding it into Format
+// ("DTS XLL"). Parity audit (2026-06-19). (ES/XCh detection is a separate fix.)
+func TestApplyMatroskaAudioProbes_DTSHDFormatNotMangled(t *testing.T) {
+	info := &MatroskaInfo{Tracks: []Stream{{Kind: StreamAudio, Fields: []Field{
+		{Name: "ID", Value: "1"},
+		{Name: "Format", Value: "DTS"},
+		{Name: "Format/Info", Value: "Digital Theater Systems"},
+	}}}}
+	probes := map[uint64]*matroskaAudioProbe{
+		1: {format: "DTS", ok: true, dts: dtsInfo{hd: true, hdXLL: true}},
+	}
+	applyMatroskaAudioProbes(info, probes)
+	got := info.Tracks[0]
+	if f := findField(got.Fields, "Format"); f != "DTS" {
+		t.Fatalf("Format = %q, want \"DTS\" (extension must not be folded into Format)", f)
+	}
+	if got.JSON["Format_AdditionalFeatures"] != "XLL" {
+		t.Fatalf("Format_AdditionalFeatures = %q, want \"XLL\"", got.JSON["Format_AdditionalFeatures"])
+	}
+	if got.JSON["Format_Commercial_IfAny"] != "DTS-HD Master Audio" {
+		t.Fatalf("Format_Commercial_IfAny = %q, want \"DTS-HD Master Audio\"", got.JSON["Format_Commercial_IfAny"])
+	}
+}
