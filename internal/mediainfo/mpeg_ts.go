@@ -33,6 +33,8 @@ type tsStream struct {
 	ac3Tail             []ac3Info
 	ac3TailPos          int
 	ac3TailFull         bool
+	eac3Extension       bool
+	eac3ExtensionKbps   int64
 	width               uint64
 	height              uint64
 	storedHeight        uint64
@@ -1525,6 +1527,8 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 		format := st.format
 		if isTrueHD {
 			format = "MLP FBA"
+		} else if st.kind == StreamAudio && st.format == "E-AC-3" && ac3HasJOCInfo(st.ac3Info) {
+			format = "E-AC-3 JOC"
 		} else if st.kind == StreamAudio && st.audioProfile != "" {
 			format = "AAC " + st.audioProfile
 		}
@@ -1590,6 +1594,15 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 				fields = append(fields, Field{Name: "Muxing mode", Value: "ADTS"})
 			} else if info := mapMatroskaFormatInfo(st.format); info != "" {
 				fields = append(fields, Field{Name: "Format/Info", Value: info})
+			}
+			if st.format == "E-AC-3" && ac3HasJOCInfo(st.ac3Info) {
+				fields = setFieldValue(fields, "Format/Info", "Enhanced AC-3 with Joint Object Coding")
+				fields = append(fields, Field{Name: "Commercial name", Value: "Dolby Digital Plus with Dolby Atmos"})
+				if isBDAV {
+					fields = append(fields, Field{Name: "Format profile", Value: "Blu-ray Disc"})
+					fields = append(fields, Field{Name: "Muxing mode", Value: "Stream extension"})
+				}
+				jsonExtras["Format_AdditionalFeatures"] = "JOC"
 			}
 			if st.streamType != 0 {
 				codecID := formatTSCodecID(st.streamType)
@@ -2071,6 +2084,9 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 				if !isTrueHD && st.format == "AC-3" && st.audioChannels == 6 {
 					layout = "L R C LFE Ls Rs"
 				}
+				if st.format == "E-AC-3" && st.ac3Info.layout != "" {
+					layout = st.ac3Info.layout
+				}
 				if isBDAV && st.format == "DTS" && channels == 6 {
 					layout = "C L R Ls Rs LFE"
 				}
@@ -2091,6 +2107,10 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 				if isTrueHD {
 					jsonExtras["ChannelLayout"] = "L R C LFE Ls Rs Lb Rb"
 					jsonExtras["ChannelPositions"] = "Front: L C R, Side: L R, Back: L R, LFE"
+				} else if st.format == "E-AC-3" {
+					if layout != "" {
+						jsonExtras["ChannelLayout"] = layout
+					}
 				} else if isBDAV && st.format == "DTS" {
 					if layout != "" {
 						jsonExtras["ChannelLayout"] = layout
@@ -2128,6 +2148,18 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 					delay := float64(int64(st.pts.min)-int64(videoPTS.min)) * 1000 / 90000.0
 					fields = append(fields, Field{Name: "Delay relative to video", Value: fmt.Sprintf("%d ms", int64(math.Round(delay)))})
 				}
+				if duration > 0 && st.audioBitRateKbps > 0 && size > 0 {
+					bps := int64(st.audioBitRateKbps) * 1000
+					durationMs := int64(math.Round(duration * 1000))
+					if durationMs > 0 {
+						streamSize := int64(math.Round(float64(bps) * float64(durationMs) / 8000.0))
+						if streamSize > 0 {
+							if value := formatStreamSize(streamSize, size); value != "" {
+								fields = append(fields, Field{Name: "Stream size", Value: value})
+							}
+						}
+					}
+				}
 			}
 
 			if st.hasAC3 {
@@ -2141,7 +2173,13 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 				} else if st.format == "AC-3" {
 					jsonExtras["Format_Commercial_IfAny"] = "Dolby Digital"
 				} else if st.format == "E-AC-3" {
-					jsonExtras["Format_Commercial_IfAny"] = "Dolby Digital Plus"
+					if ac3HasJOCInfo(st.ac3Info) {
+						jsonExtras["Format_Commercial_IfAny"] = "Dolby Digital Plus with Dolby Atmos"
+						jsonExtras["Format_Profile"] = "Blu-ray Disc"
+						jsonExtras["MuxingMode"] = "Stream extension"
+					} else {
+						jsonExtras["Format_Commercial_IfAny"] = "Dolby Digital Plus"
+					}
 				}
 				if st.ac3Info.spf > 0 {
 					jsonExtras["SamplesPerFrame"] = strconv.Itoa(st.ac3Info.spf)
@@ -2162,6 +2200,45 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 				if st.ac3Info.serviceKind != "" {
 					fields = append(fields, Field{Name: "Service kind", Value: st.ac3Info.serviceKind})
 				}
+				if st.format == "E-AC-3" && ac3HasJOCInfo(st.ac3Info) {
+					if complexity, ok := ac3JOCComplexity(st.ac3Info); ok {
+						fields = append(fields, Field{Name: "Complexity index", Value: strconv.Itoa(complexity)})
+					}
+					if st.ac3Info.hasJOCDyn {
+						fields = append(fields, Field{Name: "Number of dynamic objects", Value: strconv.Itoa(st.ac3Info.jocDynObjects)})
+					}
+					if st.ac3Info.hasJOCBed {
+						fields = append(fields, Field{Name: "Bed channel count", Value: formatChannels(st.ac3Info.jocBedCount)})
+						fields = append(fields, Field{Name: "Bed channel configuration", Value: st.ac3Info.jocBedLayout})
+					}
+				}
+				if st.ac3Info.hasDialnorm {
+					fields = append(fields, Field{Name: "Dialog Normalization", Value: strconv.Itoa(st.ac3Info.dialnorm) + " dB"})
+				}
+				if st.ac3Info.hasCompr {
+					fields = append(fields, Field{Name: "compr", Value: fmt.Sprintf("%.2f dB", st.ac3Info.comprDB)})
+				}
+				if st.ac3Info.hasCmixlev {
+					fields = append(fields, Field{Name: "cmixlev", Value: fmt.Sprintf("%.1f dB", st.ac3Info.cmixlevDB)})
+				}
+				if st.ac3Info.hasSurmixlev {
+					fields = append(fields, Field{Name: "surmixlev", Value: fmt.Sprintf("%.0f dB", st.ac3Info.surmixlevDB)})
+				}
+				if st.ac3Info.hasDmixmod {
+					fields = append(fields, Field{Name: "dmixmod", Value: st.ac3Info.dmixmod})
+				}
+				if st.ac3Info.hasLtrtcmixlev {
+					fields = append(fields, Field{Name: "ltrtcmixlev", Value: fmt.Sprintf("%.1f dB", st.ac3Info.ltrtcmixlevDB)})
+				}
+				if st.ac3Info.hasLtrtsurmixlev {
+					fields = append(fields, Field{Name: "ltrtsurmixlev", Value: fmt.Sprintf("%.1f dB", st.ac3Info.ltrtsurmixlevDB)})
+				}
+				if st.ac3Info.hasLorocmixlev {
+					fields = append(fields, Field{Name: "lorocmixlev", Value: fmt.Sprintf("%.1f dB", st.ac3Info.lorocmixlevDB)})
+				}
+				if st.ac3Info.hasLorosurmixlev {
+					fields = append(fields, Field{Name: "lorosurmixlev", Value: fmt.Sprintf("%.1f dB", st.ac3Info.lorosurmixlevDB)})
+				}
 				if !partialScan && !isBDAV && hasMPEGVideo && st.audioFrames > 0 && st.hasAC3 && jsonExtras["FrameCount"] == "" {
 					jsonExtras["FrameCount"] = strconv.FormatUint(st.audioFrames, 10)
 				}
@@ -2181,6 +2258,27 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 				if st.ac3Info.hasCompr {
 					extraFields = append(extraFields, jsonKV{Key: "compr", Val: fmt.Sprintf("%.2f", st.ac3Info.comprDB)})
 				}
+				if st.ac3Info.hasCmixlev {
+					extraFields = append(extraFields, jsonKV{Key: "cmixlev", Val: fmt.Sprintf("%.1f", st.ac3Info.cmixlevDB)})
+				}
+				if st.ac3Info.hasSurmixlev {
+					extraFields = append(extraFields, jsonKV{Key: "surmixlev", Val: fmt.Sprintf("%.0f", st.ac3Info.surmixlevDB)})
+				}
+				if st.ac3Info.hasDmixmod {
+					extraFields = append(extraFields, jsonKV{Key: "dmixmod", Val: st.ac3Info.dmixmod})
+				}
+				if st.ac3Info.hasLtrtcmixlev {
+					extraFields = append(extraFields, jsonKV{Key: "ltrtcmixlev", Val: fmt.Sprintf("%.1f", st.ac3Info.ltrtcmixlevDB)})
+				}
+				if st.ac3Info.hasLtrtsurmixlev {
+					extraFields = append(extraFields, jsonKV{Key: "ltrtsurmixlev", Val: fmt.Sprintf("%.1f", st.ac3Info.ltrtsurmixlevDB)})
+				}
+				if st.ac3Info.hasLorocmixlev {
+					extraFields = append(extraFields, jsonKV{Key: "lorocmixlev", Val: fmt.Sprintf("%.1f", st.ac3Info.lorocmixlevDB)})
+				}
+				if st.ac3Info.hasLorosurmixlev {
+					extraFields = append(extraFields, jsonKV{Key: "lorosurmixlev", Val: fmt.Sprintf("%.1f", st.ac3Info.lorosurmixlevDB)})
+				}
 				// MediaInfoLib does not expose dynrng for AC-3 stereo (acmod==2) in TS captures at the
 				// default ParseSpeed, but it does for BDAV/M2TS.
 				if st.ac3Info.hasDynrng && (isBDAV || st.ac3Info.acmod != 2) {
@@ -2198,13 +2296,18 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 				if avg, minVal, maxVal, ok := st.ac3Stats.dialnormStats(); ok {
 					extraFields = append(extraFields, jsonKV{Key: "dialnorm_Average", Val: strconv.Itoa(avg)})
 					extraFields = append(extraFields, jsonKV{Key: "dialnorm_Minimum", Val: strconv.Itoa(minVal)})
-					_ = maxVal
+					fields = append(fields, Field{Name: "dialnorm_Average", Value: strconv.Itoa(avg) + " dB"})
+					fields = append(fields, Field{Name: "dialnorm_Minimum", Value: strconv.Itoa(minVal) + " dB"})
+					fields = append(fields, Field{Name: "dialnorm_Maximum", Value: strconv.Itoa(maxVal) + " dB"})
 				}
 				if avg, minVal, maxVal, count, ok := st.ac3Stats.comprStats(); ok {
 					extraFields = append(extraFields, jsonKV{Key: "compr_Average", Val: fmt.Sprintf("%.2f", avg)})
 					extraFields = append(extraFields, jsonKV{Key: "compr_Minimum", Val: fmt.Sprintf("%.2f", minVal)})
 					extraFields = append(extraFields, jsonKV{Key: "compr_Maximum", Val: fmt.Sprintf("%.2f", maxVal)})
 					extraFields = append(extraFields, jsonKV{Key: "compr_Count", Val: strconv.Itoa(count)})
+					fields = append(fields, Field{Name: "compr_Average", Value: fmt.Sprintf("%.2f dB", avg)})
+					fields = append(fields, Field{Name: "compr_Minimum", Value: fmt.Sprintf("%.2f dB", minVal)})
+					fields = append(fields, Field{Name: "compr_Maximum", Value: fmt.Sprintf("%.2f dB", maxVal)})
 				}
 				// MediaInfo uses dynrnge existence (any frame) to decide whether to expose dynrng_* stats.
 				// TS captures: stereo (acmod==2) is suppressed at default ParseSpeed.
@@ -2215,6 +2318,21 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 						extraFields = append(extraFields, jsonKV{Key: "dynrng_Minimum", Val: fmt.Sprintf("%.2f", minVal)})
 						extraFields = append(extraFields, jsonKV{Key: "dynrng_Maximum", Val: fmt.Sprintf("%.2f", maxVal)})
 						extraFields = append(extraFields, jsonKV{Key: "dynrng_Count", Val: strconv.Itoa(count)})
+						fields = append(fields, Field{Name: "dynrng_Average", Value: fmt.Sprintf("%.2f dB", avg)})
+						fields = append(fields, Field{Name: "dynrng_Minimum", Value: fmt.Sprintf("%.2f dB", minVal)})
+						fields = append(fields, Field{Name: "dynrng_Maximum", Value: fmt.Sprintf("%.2f dB", maxVal)})
+					}
+				}
+				if st.format == "E-AC-3" && ac3HasJOCInfo(st.ac3Info) {
+					if complexity, ok := ac3JOCComplexity(st.ac3Info); ok {
+						extraFields = append(extraFields, jsonKV{Key: "ComplexityIndex", Val: strconv.Itoa(complexity)})
+					}
+					if st.ac3Info.hasJOCDyn {
+						extraFields = append(extraFields, jsonKV{Key: "NumberOfDynamicObjects", Val: strconv.Itoa(st.ac3Info.jocDynObjects)})
+					}
+					if st.ac3Info.hasJOCBed {
+						extraFields = append(extraFields, jsonKV{Key: "BedChannelCount", Val: strconv.FormatUint(st.ac3Info.jocBedCount, 10)})
+						extraFields = append(extraFields, jsonKV{Key: "BedChannelConfiguration", Val: st.ac3Info.jocBedLayout})
 					}
 				}
 				if len(extraFields) > 0 {
@@ -3406,6 +3524,16 @@ func consumeAC3(entry *tsStream, payload []byte, collectStats bool, statsHead bo
 		}
 		info, frameSize, ok := parseAC3Frame(entry.audioBuffer[i:])
 		if !ok || frameSize <= 0 {
+			if extInfo, extFrameSize, extOK := parseEAC3FrameWithOptions(entry.audioBuffer[i:], true); extOK && extFrameSize > 0 {
+				if i+extFrameSize > len(entry.audioBuffer) {
+					break
+				}
+				if ac3CRCValid(entry.audioBuffer[i:i+extFrameSize], extInfo.bsid) {
+					applyEAC3Extension(entry, extInfo)
+					i += extFrameSize
+					continue
+				}
+			}
 			i++
 			continue
 		}
@@ -3474,6 +3602,37 @@ func consumeAC3(entry *tsStream, payload []byte, collectStats bool, statsHead bo
 	}
 	if i > 0 {
 		entry.audioBuffer = append(entry.audioBuffer[:0], entry.audioBuffer[i:]...)
+	}
+}
+
+// applyEAC3Extension upgrades a BDAV AC-3 core stream when a dependent E-AC-3
+// extension frame is found on the same PID.
+func applyEAC3Extension(entry *tsStream, info ac3Info) {
+	entry.eac3Extension = true
+	if entry.eac3ExtensionKbps == 0 && info.bitRateKbps > 0 {
+		entry.eac3ExtensionKbps = info.bitRateKbps
+	}
+	entry.format = "E-AC-3"
+	entry.streamType = 0x84
+	entry.audioBitRateMode = "Constant"
+	entry.hasAC3 = true
+	entry.ac3Info.mergeFrameBase(info)
+	if entry.audioRate == 0 && info.sampleRate > 0 {
+		entry.audioRate = info.sampleRate
+	}
+	if entry.audioSpf == 0 && info.spf > 0 {
+		entry.audioSpf = info.spf
+	}
+	if entry.audioBitRateKbps > 0 && entry.eac3ExtensionKbps > 0 {
+		entry.audioBitRateKbps = entry.ac3Info.bitRateKbps + entry.eac3ExtensionKbps
+	}
+	if info.hasEAC3ChannelMap && entry.ac3Info.layout != "" {
+		channels, layout := mergeAudioChannelLayouts(entry.ac3Info.layout, info.eac3ChannelMapLayout)
+		if channels > 0 && layout != "" {
+			entry.ac3Info.channels = channels
+			entry.ac3Info.layout = layout
+			entry.audioChannels = channels
+		}
 	}
 }
 
