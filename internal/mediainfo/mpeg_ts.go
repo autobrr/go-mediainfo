@@ -207,6 +207,21 @@ func normalizeBDAVDTSDuration(duration, videoDuration float64, isBDAV bool, form
 	return duration
 }
 
+// setEAC3CommercialJSON writes E-AC-3 commercial JSON labels.
+// JOC streams keep the Atmos label for all TS containers, but Blu-ray profile
+// and stream-extension muxing metadata are BDAV-only.
+func setEAC3CommercialJSON(jsonExtras map[string]string, info ac3Info, isBDAV bool) {
+	if ac3HasJOCInfo(info) {
+		jsonExtras["Format_Commercial_IfAny"] = "Dolby Digital Plus with Dolby Atmos"
+		if isBDAV {
+			jsonExtras["Format_Profile"] = "Blu-ray Disc"
+			jsonExtras["MuxingMode"] = "Stream extension"
+		}
+		return
+	}
+	jsonExtras["Format_Commercial_IfAny"] = "Dolby Digital Plus"
+}
+
 type mpeg2UserDataPacket struct {
 	temporalReference uint16
 	data              []byte
@@ -2189,13 +2204,7 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 				} else if st.format == "AC-3" {
 					jsonExtras["Format_Commercial_IfAny"] = "Dolby Digital"
 				} else if st.format == "E-AC-3" {
-					if ac3HasJOCInfo(st.ac3Info) {
-						jsonExtras["Format_Commercial_IfAny"] = "Dolby Digital Plus with Dolby Atmos"
-						jsonExtras["Format_Profile"] = "Blu-ray Disc"
-						jsonExtras["MuxingMode"] = "Stream extension"
-					} else {
-						jsonExtras["Format_Commercial_IfAny"] = "Dolby Digital Plus"
-					}
+					setEAC3CommercialJSON(jsonExtras, st.ac3Info, isBDAV)
 				}
 				if st.ac3Info.spf > 0 {
 					jsonExtras["SamplesPerFrame"] = strconv.Itoa(st.ac3Info.spf)
@@ -2418,7 +2427,7 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 			}
 			if !isBDAV && hasMPEGVideo && st.bytes > 0 && size > 0 {
 				if value := formatStreamSize(int64(st.bytes), size); value != "" {
-					fields = append(fields, Field{Name: "Stream size", Value: value})
+					fields = appendFieldUnique(fields, Field{Name: "Stream size", Value: value})
 				}
 			}
 		}
