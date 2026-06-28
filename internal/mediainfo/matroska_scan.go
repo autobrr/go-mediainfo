@@ -59,6 +59,8 @@ type dtsInfo struct {
 	hd              bool
 	hdXLL           bool // DTS-HD Master Audio (lossless)
 	hdXBR           bool // DTS-HD High Resolution Audio (lossy)
+	hdDTSX          bool // DTS:X object metadata is present on top of the DTS-HD bed.
+	hdIMAX          bool // IMAX Enhanced DTS:X extension metadata is present.
 	hdBitDepth      int
 	hdChannels      int
 	hdSpeakerMask   uint16
@@ -1328,10 +1330,23 @@ func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAud
 				}
 				if dts.hdXLL {
 					// DTS-HD Master Audio (XLL): lossless.
-					stream.Fields = setFieldValue(stream.Fields, "Format", "DTS XLL")
-					stream.Fields = insertFieldAfter(stream.Fields, Field{Name: "Commercial name", Value: "DTS-HD Master Audio"}, "Format/Info")
-					stream.JSON["Format_AdditionalFeatures"] = "XLL"
-					stream.JSON["Format_Commercial_IfAny"] = "DTS-HD Master Audio"
+					format := "DTS XLL"
+					commercial := "DTS-HD Master Audio"
+					features := "XLL"
+					if dts.hdIMAX {
+						format = "DTS XLL X IMAX"
+						commercial = "DTS-HD MA + IMAX Enhanced"
+						features = "XLL X IMAX"
+					} else if dts.hdDTSX {
+						format = "DTS XLL X"
+						commercial = "DTS-HD MA + DTS:X"
+						features = "XLL X"
+					}
+					stream.Fields = setFieldValue(stream.Fields, "Format", format)
+					stream.Fields = insertFieldAfter(stream.Fields, Field{Name: "Commercial name", Value: commercial}, "Format/Info")
+					stream.JSON["Format"] = "DTS"
+					stream.JSON["Format_AdditionalFeatures"] = features
+					stream.JSON["Format_Commercial_IfAny"] = commercial
 				} else if dts.hdXBR {
 					// DTS-HD High Resolution Audio (XBR): lossy VBR.
 					stream.Fields = setFieldValue(stream.Fields, "Format", "DTS XBR")
@@ -1356,6 +1371,9 @@ func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAud
 				stream.Fields = setFieldValue(stream.Fields, "Channel(s)", formatChannels(uint64(channels)))
 				if dts.hd && dts.hasSpeakerMask {
 					layout := dtsHDSpeakerActivityMaskChannelLayout(dts.hdSpeakerMask)
+					if dts.hdDTSX && layout != "" {
+						layout = dtsXChannelLayout(layout)
+					}
 					if layout != "" {
 						stream.Fields = setFieldValue(stream.Fields, "Channel layout", layout)
 					}
@@ -1386,7 +1404,7 @@ func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAud
 			if dts.hd {
 				// DTS-HD: variable bitrate, clear core bitrate.
 				stream.Fields = setFieldValue(stream.Fields, "Bit rate mode", "Variable")
-				if hasContainerBitrate {
+				if hasContainerBitrate && !dts.hdDTSX {
 					// Remove core bitrate — DTS-HD is VBR and the core rate does not apply.
 					stream.Fields = removeField(stream.Fields, "Bit rate")
 				}
@@ -1420,9 +1438,15 @@ func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAud
 				stream.JSON["Channels"] = chStr
 				if dts.hd && dts.hasSpeakerMask {
 					if layout := dtsHDSpeakerActivityMaskChannelLayout(dts.hdSpeakerMask); layout != "" {
+						if dts.hdDTSX {
+							layout = dtsXChannelLayout(layout)
+						}
 						stream.JSON["ChannelLayout"] = layout
 					}
 					if positions := dtsHDSpeakerActivityMask(dts.hdSpeakerMask); positions != "" {
+						if dts.hdDTSX {
+							positions += ", Objects"
+						}
 						stream.JSON["ChannelPositions"] = positions
 					}
 				} else {
@@ -1436,7 +1460,7 @@ func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAud
 				stream.JSON["BitRate"] = strconv.FormatInt(dts.bitRateBps, 10)
 				stream.JSON["BitRate_Mode"] = "CBR"
 			}
-			if dts.hd {
+			if dts.hd && !dts.hdDTSX {
 				// Remove container-level BitRate from JSON for DTS-HD.
 				delete(stream.JSON, "BitRate")
 			}
@@ -1681,6 +1705,27 @@ func deriveCBRAudioStreamSizes(info *MatroskaInfo, fileSize int64) {
 		}
 		stream.JSON["StreamSize"] = strconv.FormatInt(bytes, 10)
 	}
+}
+
+// dtsXChannelLayout returns MediaInfo's DTS:X layout text for a DTS-HD bed.
+//
+// DTS:X object metadata is not a fixed set of height channels. MediaInfo keeps
+// the channel bed from the DTS-HD speaker mask, normalizes rear-surround labels
+// to back labels for these samples, and appends "Objects".
+func dtsXChannelLayout(layout string) string {
+	if layout == "" {
+		return layout
+	}
+	parts := strings.Fields(layout)
+	for i, part := range parts {
+		switch part {
+		case "Lsr":
+			parts[i] = "Lb"
+		case "Rsr":
+			parts[i] = "Rb"
+		}
+	}
+	return strings.Join(append(parts, "Objects"), " ")
 }
 
 func applyMatroskaTrackDelays(info *MatroskaInfo, stats map[uint64]*matroskaTrackStats) {
@@ -1958,6 +2003,11 @@ func probeMatroskaAudio(probes map[uint64]*matroskaAudioProbe, track uint64, pay
 				// Distinguish XLL (Master Audio, lossless) from XBR (High Resolution, lossy).
 				info.hdXLL = hasDTSHDXLLSync(payload)
 				info.hdXBR = hasDTSHDXBRSync(payload)
+				info.hdDTSX = hasDTSHDXSync(payload)
+				info.hdIMAX = hasDTSHDIMAXSync(payload)
+				if info.hdIMAX {
+					info.hdDTSX = true
+				}
 				if info.hdXLL {
 					if bd, ok := parseDTSHDXLLBitDepth(payload); ok && bd > 0 {
 						info.hdBitDepth = bd

@@ -87,3 +87,137 @@ func TestConsumeDTSCoreAndHDExtension(t *testing.T) {
 		t.Fatalf("expected DTS-HD mode switch, got mode=%q bitrate=%d", entry.audioBitRateMode, entry.audioBitRateKbps)
 	}
 }
+
+func TestDTSHDImmersiveMarkers(t *testing.T) {
+	payload := []byte{
+		0x00, 0x64, 0x58, 0x20, 0x25,
+		0x00, 0x41, 0xA2, 0x95, 0x47,
+		0x00, 0x02, 0x00, 0x08, 0x50,
+		0x00, 0xF1, 0x40, 0x00, 0xD7,
+	}
+	if !hasDTSHDExtension(payload) {
+		t.Fatal("expected ExSS sync")
+	}
+	if !hasDTSHDXLLSync(payload) {
+		t.Fatal("expected XLL sync")
+	}
+	if !hasDTSHDXSync(payload) {
+		t.Fatal("expected DTS:X sync")
+	}
+	if !hasDTSHDIMAXSync(payload) {
+		t.Fatal("expected IMAX sync")
+	}
+}
+
+func TestApplyMatroskaAudioProbes_DTSHDXLLIMAX(t *testing.T) {
+	info := &MatroskaInfo{Tracks: []Stream{{
+		Kind: StreamAudio,
+		Fields: []Field{
+			{Name: "ID", Value: "2"},
+			{Name: "Format", Value: "DTS"},
+			{Name: "Format/Info", Value: "Digital Theater Systems"},
+			{Name: "Bit rate", Value: "6 242 kb/s"},
+			{Name: "Channel(s)", Value: "8 channels"},
+			{Name: "Default", Value: "Yes"},
+		},
+		JSON: map[string]string{"BitRate": "6242280"},
+	}}}
+	probes := map[uint64]*matroskaAudioProbe{
+		2: {
+			format: "DTS",
+			dts: dtsInfo{
+				sampleRate:      48000,
+				samplesPerFrame: 512,
+				channels:        8,
+				hd:              true,
+				hdXLL:           true,
+				hdDTSX:          true,
+				hdIMAX:          true,
+				hdBitDepth:      24,
+				hdChannels:      8,
+				hdSpeakerMask:   0x084B,
+				hasSpeakerMask:  true,
+			},
+			ok: true,
+		},
+	}
+
+	applyMatroskaAudioProbes(info, probes)
+	stream := info.Tracks[0]
+	if got := findField(stream.Fields, "Format"); got != "DTS XLL X IMAX" {
+		t.Fatalf("Format=%q want DTS XLL X IMAX", got)
+	}
+	if got := findField(stream.Fields, "Commercial name"); got != "DTS-HD MA + IMAX Enhanced" {
+		t.Fatalf("Commercial name=%q", got)
+	}
+	if got := findField(stream.Fields, "Bit rate"); got != "6 242 kb/s" {
+		t.Fatalf("Bit rate=%q", got)
+	}
+	if got := findField(stream.Fields, "Channel layout"); got != "C L R LFE Lb Rb Lss Rss Objects" {
+		t.Fatalf("Channel layout=%q", got)
+	}
+	if got := stream.JSON["Format"]; got != "DTS" {
+		t.Fatalf("JSON Format=%q", got)
+	}
+	if got := stream.JSON["Format_AdditionalFeatures"]; got != "XLL X IMAX" {
+		t.Fatalf("Format_AdditionalFeatures=%q", got)
+	}
+	if got := stream.JSON["Format_Commercial_IfAny"]; got != "DTS-HD MA + IMAX Enhanced" {
+		t.Fatalf("Format_Commercial_IfAny=%q", got)
+	}
+	if got := stream.JSON["BitRate"]; got != "6242280" {
+		t.Fatalf("JSON BitRate=%q", got)
+	}
+	if got := stream.JSON["ChannelLayout"]; got != "C L R LFE Lb Rb Lss Rss Objects" {
+		t.Fatalf("JSON ChannelLayout=%q", got)
+	}
+	if got := stream.JSON["ChannelPositions"]; got != "Front: L C R, Side: L R, Back: L R, LFE, Objects" {
+		t.Fatalf("JSON ChannelPositions=%q", got)
+	}
+}
+
+func TestApplyMatroskaAudioProbes_DTSHDXLLPlainKeepsExistingBehavior(t *testing.T) {
+	info := &MatroskaInfo{Tracks: []Stream{{
+		Kind: StreamAudio,
+		Fields: []Field{
+			{Name: "ID", Value: "2"},
+			{Name: "Format", Value: "DTS"},
+			{Name: "Format/Info", Value: "Digital Theater Systems"},
+			{Name: "Bit rate", Value: "3 000 kb/s"},
+			{Name: "Channel(s)", Value: "6 channels"},
+		},
+		JSON: map[string]string{"BitRate": "3000000"},
+	}}}
+	probes := map[uint64]*matroskaAudioProbe{
+		2: {
+			format: "DTS",
+			dts: dtsInfo{
+				sampleRate:      48000,
+				samplesPerFrame: 512,
+				channels:        6,
+				hd:              true,
+				hdXLL:           true,
+				hdBitDepth:      24,
+			},
+			ok: true,
+		},
+	}
+
+	applyMatroskaAudioProbes(info, probes)
+	stream := info.Tracks[0]
+	if got := findField(stream.Fields, "Format"); got != "DTS XLL" {
+		t.Fatalf("Format=%q want DTS XLL", got)
+	}
+	if got := findField(stream.Fields, "Commercial name"); got != "DTS-HD Master Audio" {
+		t.Fatalf("Commercial name=%q", got)
+	}
+	if got := findField(stream.Fields, "Bit rate"); got != "" {
+		t.Fatalf("Bit rate should be removed for plain DTS-HD, got %q", got)
+	}
+	if got := stream.JSON["Format_AdditionalFeatures"]; got != "XLL" {
+		t.Fatalf("Format_AdditionalFeatures=%q", got)
+	}
+	if got := stream.JSON["BitRate"]; got != "" {
+		t.Fatalf("JSON BitRate should be removed for plain DTS-HD, got %q", got)
+	}
+}

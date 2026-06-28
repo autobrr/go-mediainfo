@@ -4020,6 +4020,30 @@ func hasDTSHDXBRSync(payload []byte) bool {
 	return false
 }
 
+// hasDTSHDXSync checks for the DTS:X object metadata marker used by FFmpeg's
+// DCA parser to classify DTS-HD streams with immersive extensions.
+func hasDTSHDXSync(payload []byte) bool {
+	for i := 0; i+4 <= len(payload); i++ {
+		if payload[i] == 0x02 && payload[i+1] == 0x00 && payload[i+2] == 0x08 && payload[i+3] == 0x50 {
+			return true
+		}
+	}
+	return false
+}
+
+// hasDTSHDIMAXSync checks for the IMAX Enhanced marker found in DTS:X IMAX
+// extensions. A positive match describes the extension profile, not another
+// discrete speaker channel layout.
+func hasDTSHDIMAXSync(payload []byte) bool {
+	for i := 0; i+4 <= len(payload); i++ {
+		value := uint32(payload[i])<<24 | uint32(payload[i+1])<<16 | uint32(payload[i+2])<<8 | uint32(payload[i+3])
+		if value&0xFFFFFFF0 == 0xF14000D0 {
+			return true
+		}
+	}
+	return false
+}
+
 var dtsCRCCCITTTable = func() [256]uint16 {
 	// MediaInfoLib uses a CCITT CRC with init=0xFFFF and a table precomputed with polynomial 0x1021,
 	// with entries byte-swapped.
