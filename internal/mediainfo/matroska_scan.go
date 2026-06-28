@@ -1284,6 +1284,9 @@ func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAud
 				stream.JSON["Format"] = "MLP FBA"
 				stream.JSON["Format_Commercial_IfAny"] = "Dolby TrueHD with Dolby Atmos"
 				stream.JSON["Format_AdditionalFeatures"] = atmos.additionalFeatures
+				stream.Fields = setFieldValue(stream.Fields, "Channel layout", "L R C LFE Ls Rs Lb Rb")
+				stream.JSON["ChannelLayout"] = "L R C LFE Ls Rs Lb Rb"
+				stream.JSON["ChannelPositions"] = "Front: L C R, Side: L R, Back: L R, LFE"
 				if stream.JSONRaw == nil {
 					stream.JSONRaw = map[string]string{}
 				}
@@ -1303,8 +1306,8 @@ func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAud
 				frameRate := float64(thd.sampleRate) / float64(thd.samplesPerFrame)
 				stream.Fields = setFieldValue(stream.Fields, "Frame rate", formatAudioFrameRate(frameRate, thd.samplesPerFrame))
 				stream.JSON["FrameRate"] = fmt.Sprintf("%.3f", frameRate)
-				stream.JSON["FrameRate_Num"] = strconv.Itoa(int(math.Round(frameRate)))
-				stream.JSON["FrameRate_Den"] = "1"
+				stream.JSON["FrameRate_Num"] = strconv.Itoa(thd.sampleRate)
+				stream.JSON["FrameRate_Den"] = strconv.Itoa(thd.samplesPerFrame)
 				stream.JSON["SamplesPerFrame"] = strconv.Itoa(thd.samplesPerFrame)
 				if durStr := stream.JSON["Duration"]; durStr != "" {
 					if duration, err := strconv.ParseFloat(durStr, 64); err == nil && duration > 0 {
@@ -1315,9 +1318,6 @@ func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAud
 					}
 				}
 			}
-			stream.Fields = setFieldValue(stream.Fields, "Channel layout", "L R C LFE Ls Rs Lb Rb")
-			stream.JSON["ChannelLayout"] = "L R C LFE Ls Rs Lb Rb"
-			stream.JSON["ChannelPositions"] = "Front: L C R, Side: L R, Back: L R, LFE"
 			stream.Fields = insertFieldBefore(stream.Fields, Field{Name: "Compression mode", Value: "Lossless"}, "Stream size")
 			stream.JSON["Compression_Mode"] = "Lossless"
 			continue

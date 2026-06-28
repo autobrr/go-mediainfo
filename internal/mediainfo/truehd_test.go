@@ -105,3 +105,58 @@ func TestApplyMatroskaAudioProbes_TrueHDAtmosKeepsSevenOneLayout(t *testing.T) {
 		t.Fatalf("extra=%s", got)
 	}
 }
+
+func TestApplyMatroskaAudioProbes_TrueHDNonAtmosKeepsMatroskaLayout(t *testing.T) {
+	info := &MatroskaInfo{Tracks: []Stream{{
+		Kind: StreamAudio,
+		Fields: []Field{
+			{Name: "ID", Value: "2"},
+			{Name: "Format", Value: "TrueHD"},
+			{Name: "Channel layout", Value: "L R C LFE Ls Rs"},
+			{Name: "Stream size", Value: "1.00 GiB"},
+		},
+		JSON: map[string]string{
+			"ChannelLayout":    "L R C LFE Ls Rs",
+			"ChannelPositions": "Front: L C R, Side: L R, LFE",
+			"Duration":         "10.000000000",
+		},
+	}}}
+	probes := map[uint64]*matroskaAudioProbe{
+		2: {
+			format: "TrueHD",
+			truehd: trueHDInfo{
+				sampleRate:      44100,
+				samplesPerFrame: 40,
+				maxBitRate:      8199000,
+			},
+			ok: true,
+		},
+	}
+
+	applyMatroskaAudioProbes(info, probes)
+	stream := info.Tracks[0]
+	if got := findField(stream.Fields, "Channel layout"); got != "L R C LFE Ls Rs" {
+		t.Fatalf("Channel layout=%q want Matroska layout", got)
+	}
+	if got := stream.JSON["ChannelLayout"]; got != "L R C LFE Ls Rs" {
+		t.Fatalf("JSON ChannelLayout=%q want Matroska layout", got)
+	}
+	if got := stream.JSON["ChannelPositions"]; got != "Front: L C R, Side: L R, LFE" {
+		t.Fatalf("JSON ChannelPositions=%q want Matroska positions", got)
+	}
+	if got := findField(stream.Fields, "Maximum bit rate"); got != "8 199 kb/s" {
+		t.Fatalf("Maximum bit rate=%q want 8 199 kb/s", got)
+	}
+	if got := findField(stream.Fields, "Frame rate"); got != "1102.500 FPS (40 SPF)" {
+		t.Fatalf("Frame rate=%q want 1102.500 FPS (40 SPF)", got)
+	}
+	if got := stream.JSON["FrameRate"]; got != "1102.500" {
+		t.Fatalf("FrameRate=%q want 1102.500", got)
+	}
+	if got := stream.JSON["FrameRate_Num"]; got != "44100" {
+		t.Fatalf("FrameRate_Num=%q want 44100", got)
+	}
+	if got := stream.JSON["FrameRate_Den"]; got != "40" {
+		t.Fatalf("FrameRate_Den=%q want 40", got)
+	}
+}
