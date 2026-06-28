@@ -178,6 +178,34 @@ func ParseMatroskaWithOptions(r io.ReaderAt, size int64, opts AnalyzeOptions) (M
 	}
 	if info.SegmentOffset > 0 && info.SegmentSize > 0 && info.TimecodeScale > 0 {
 		if size > scanSize {
+			if len(info.Tracks) == 0 {
+				tracksOffset := int64(0)
+				if seekPos, ok := findMatroskaSeekPosition(buf, int(info.SegmentOffset), mkvIDTracks); ok {
+					tracksOffset = info.SegmentOffset + int64(seekPos)
+				}
+				if tracksOffset > 0 && tracksOffset < size {
+					tracksSize := min(size-tracksOffset, int64(8<<20))
+					if tracksSize > 0 {
+						tracksBuf := make([]byte, tracksSize)
+						if _, err := r.ReadAt(tracksBuf, tracksOffset); err == nil || err == io.EOF {
+							id, idLen, ok := readVintID(tracksBuf, 0)
+							if ok && id == mkvIDTracks {
+								tSize, sizeLen, ok := readVintSize(tracksBuf, idLen)
+								if ok && tSize != unknownVintSize {
+									dataStart := idLen + sizeLen
+									dataEnd := dataStart + int(tSize)
+									if dataEnd <= len(tracksBuf) {
+										if tracks, ok := parseMatroskaTracks(tracksBuf[dataStart:dataEnd], info.Container.DurationSeconds, info.durationPrec); ok {
+											info.Tracks = append(info.Tracks, tracks...)
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+
 			// If Attachments were truncated by the initial scan buffer, resolve them via SeekHead and
 			// parse lazily (seek-skipping file payloads).
 			attachmentsOffset := int64(0)
