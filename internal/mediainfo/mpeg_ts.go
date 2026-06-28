@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -149,6 +150,8 @@ func (s *tsStream) hasValidCEA608() bool {
 	return false
 }
 
+// normalizeTSStreamOrder drops duplicate or stale PIDs from a discovered TS order.
+// For BDAV, it also applies MediaInfo's presentation order: stream kind first, then PID.
 func normalizeTSStreamOrder(order []uint16, streams map[uint16]*tsStream, isBDAV bool) []uint16 {
 	seen := make(map[uint16]struct{}, len(order))
 	normalized := make([]uint16, 0, len(order))
@@ -162,8 +165,21 @@ func normalizeTSStreamOrder(order []uint16, streams map[uint16]*tsStream, isBDAV
 		seen[pid] = struct{}{}
 		normalized = append(normalized, pid)
 	}
-	// For BDAV, StreamOrder matches PMT entry order on real discs; preserve insertion order
-	// (we append streams in PMT order when available).
+	if isBDAV {
+		sort.SliceStable(normalized, func(i, j int) bool {
+			left := streams[normalized[i]]
+			right := streams[normalized[j]]
+			if left == nil || right == nil {
+				return normalized[i] < normalized[j]
+			}
+			li := streamKindOrder[left.kind]
+			ri := streamKindOrder[right.kind]
+			if li == ri {
+				return normalized[i] < normalized[j]
+			}
+			return li < ri
+		})
+	}
 	return normalized
 }
 
