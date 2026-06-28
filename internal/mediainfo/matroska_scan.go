@@ -1272,23 +1272,23 @@ func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAud
 			if stream.JSON == nil {
 				stream.JSON = map[string]string{}
 			}
-			if thd.atmos {
+			if atmos, ok := trueHDAtmosPresentationInfo(thd); ok {
 				stream.Fields = setFieldValue(stream.Fields, "Format", "MLP FBA 16-ch")
 				stream.Fields = setFieldValue(stream.Fields, "Format/Info", "Meridian Lossless Packing FBA with 16-channel presentation")
 				stream.Fields = insertFieldAfter(stream.Fields, Field{Name: "Commercial name", Value: "Dolby TrueHD with Dolby Atmos"}, "Format/Info")
-				stream.Fields = insertFieldBefore(stream.Fields, Field{Name: "Number of dynamic objects", Value: "11"}, "Default")
-				stream.Fields = insertFieldBefore(stream.Fields, Field{Name: "Bed channel count", Value: "1 channel"}, "Default")
-				stream.Fields = insertFieldBefore(stream.Fields, Field{Name: "Bed channel configuration", Value: "LFE"}, "Default")
+				stream.Fields = insertFieldBefore(stream.Fields, Field{Name: "Number of dynamic objects", Value: strconv.Itoa(atmos.dynamicObjects)}, "Default")
+				stream.Fields = insertFieldBefore(stream.Fields, Field{Name: "Bed channel count", Value: formatChannels(atmos.bedChannelCount)}, "Default")
+				stream.Fields = insertFieldBefore(stream.Fields, Field{Name: "Bed channel configuration", Value: atmos.bedChannelConfig}, "Default")
 				stream.JSON["Format"] = "MLP FBA"
 				stream.JSON["Format_Commercial_IfAny"] = "Dolby TrueHD with Dolby Atmos"
-				stream.JSON["Format_AdditionalFeatures"] = "16-ch"
+				stream.JSON["Format_AdditionalFeatures"] = atmos.additionalFeatures
 				if stream.JSONRaw == nil {
 					stream.JSONRaw = map[string]string{}
 				}
 				stream.JSONRaw["extra"] = renderJSONObject([]jsonKV{
-					{Key: "NumberOfDynamicObjects", Val: "11"},
-					{Key: "BedChannelCount", Val: "1"},
-					{Key: "BedChannelConfiguration", Val: "LFE"},
+					{Key: "NumberOfDynamicObjects", Val: strconv.Itoa(atmos.dynamicObjects)},
+					{Key: "BedChannelCount", Val: strconv.FormatUint(atmos.bedChannelCount, 10)},
+					{Key: "BedChannelConfiguration", Val: atmos.bedChannelConfigShort},
 				}, false)
 			}
 			if thd.maxBitRate > 0 {

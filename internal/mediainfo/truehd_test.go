@@ -27,6 +27,19 @@ func TestParseTrueHDFrameAtmosMajorSync(t *testing.T) {
 	if info.maxBitRate != 8199000 {
 		t.Fatalf("maxBitRate=%d want 8199000", info.maxBitRate)
 	}
+	atmos, ok := trueHDAtmosPresentationInfo(info)
+	if !ok {
+		t.Fatal("expected Atmos presentation details")
+	}
+	if atmos.additionalFeatures != "16-ch" {
+		t.Fatalf("additionalFeatures=%q want 16-ch", atmos.additionalFeatures)
+	}
+	if atmos.dynamicObjects != 11 {
+		t.Fatalf("dynamicObjects=%d want 11", atmos.dynamicObjects)
+	}
+	if atmos.bedChannelCount != 1 || atmos.bedChannelConfig != "LFE" {
+		t.Fatalf("bed=%d/%q want 1/LFE", atmos.bedChannelCount, atmos.bedChannelConfig)
+	}
 }
 
 func TestParseTrueHDFrameWithoutAtmosFlag(t *testing.T) {
@@ -43,5 +56,52 @@ func TestParseTrueHDFrameWithoutAtmosFlag(t *testing.T) {
 	}
 	if info.atmos {
 		t.Fatal("did not expect Atmos when substream_info high bit is clear")
+	}
+	if _, ok := trueHDAtmosPresentationInfo(info); ok {
+		t.Fatal("did not expect Atmos presentation details")
+	}
+}
+
+func TestApplyMatroskaAudioProbes_TrueHDAtmosKeepsSevenOneLayout(t *testing.T) {
+	info := &MatroskaInfo{Tracks: []Stream{{
+		Kind: StreamAudio,
+		Fields: []Field{
+			{Name: "ID", Value: "2"},
+			{Name: "Format", Value: "TrueHD"},
+			{Name: "Format/Info", Value: "Dolby TrueHD"},
+			{Name: "Channel(s)", Value: "8 channels"},
+			{Name: "Default", Value: "Yes"},
+		},
+		JSON: map[string]string{"Channels": "8"},
+	}}}
+	probes := map[uint64]*matroskaAudioProbe{
+		2: {
+			format: "TrueHD",
+			truehd: trueHDInfo{
+				atmos:           true,
+				sampleRate:      48000,
+				samplesPerFrame: 40,
+				maxBitRate:      8199000,
+			},
+			ok: true,
+		},
+	}
+
+	applyMatroskaAudioProbes(info, probes)
+	stream := info.Tracks[0]
+	if got := findField(stream.Fields, "Format"); got != "MLP FBA 16-ch" {
+		t.Fatalf("Format=%q want MLP FBA 16-ch", got)
+	}
+	if got := findField(stream.Fields, "Channel layout"); got != "L R C LFE Ls Rs Lb Rb" {
+		t.Fatalf("Channel layout=%q want standard 7.1", got)
+	}
+	if got := stream.JSON["ChannelLayout"]; got != "L R C LFE Ls Rs Lb Rb" {
+		t.Fatalf("JSON ChannelLayout=%q want standard 7.1", got)
+	}
+	if got := stream.JSON["Format_AdditionalFeatures"]; got != "16-ch" {
+		t.Fatalf("Format_AdditionalFeatures=%q want 16-ch", got)
+	}
+	if got := stream.JSONRaw["extra"]; got != `{"NumberOfDynamicObjects":"11","BedChannelCount":"1","BedChannelConfiguration":"LFE"}` {
+		t.Fatalf("extra=%s", got)
 	}
 }

@@ -14,6 +14,32 @@ type trueHDInfo struct {
 	maxBitRate      int64
 }
 
+type trueHDAtmosPresentation struct {
+	additionalFeatures    string
+	dynamicObjects        int
+	bedChannelCount       uint64
+	bedChannelConfig      string
+	bedChannelConfigShort string
+}
+
+// trueHDAtmosPresentationInfo returns the MediaInfo-style summary for the
+// Dolby TrueHD Atmos home-theater spatial-coding presentation. These values do
+// not describe physical height speaker channels; the base stream still exposes
+// a backward-compatible 7.1 channel render, while Atmos-capable decoders recover
+// spatially coded objects plus the LFE bed.
+func trueHDAtmosPresentationInfo(info trueHDInfo) (trueHDAtmosPresentation, bool) {
+	if !info.atmos {
+		return trueHDAtmosPresentation{}, false
+	}
+	return trueHDAtmosPresentation{
+		additionalFeatures:    "16-ch",
+		dynamicObjects:        11,
+		bedChannelCount:       1,
+		bedChannelConfig:      "LFE",
+		bedChannelConfigShort: "LFE",
+	}, true
+}
+
 // parseTrueHDFrame reads a TrueHD major-sync header from a frame payload.
 // Payloads may include a leading access-unit prefix before the sync word.
 func parseTrueHDFrame(payload []byte) (trueHDInfo, bool) {
