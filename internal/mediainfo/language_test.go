@@ -16,15 +16,19 @@ func TestFormatLanguageHindi(t *testing.T) {
 
 func TestFormatLanguageCommonISO639Codes(t *testing.T) {
 	tests := map[string]string{
-		"jpn":     "Japanese",
-		"kor":     "Korean",
-		"nld":     "Dutch",
-		"iw":      "Hebrew",
-		"uk":      "Ukrainian",
-		"vi":      "Vietnamese",
-		"pt-BR":   "Portuguese (BR)",
-		"zh-Hant": "Chinese (Hant)",
-		"en-US":   "English (US)",
+		"jpn":        "Japanese",
+		"kor":        "Korean",
+		"nld":        "Dutch",
+		"iw":         "Hebrew",
+		"uk":         "Ukrainian",
+		"vi":         "Vietnamese",
+		"fil":        "Filipino",
+		"fil-PH":     "Filipino (PH)",
+		"zxx":        "Silent",
+		"pt-BR":      "Portuguese (BR)",
+		"zh-Hant":    "Chinese (Hant)",
+		"zh-Hant-TW": "Chinese (Hant-TW)",
+		"en-US":      "English (US)",
 	}
 	for code, want := range tests {
 		if got := formatLanguage(code); got != want {

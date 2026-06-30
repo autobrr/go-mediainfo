@@ -402,6 +402,14 @@ var languageMap3To2 = map[string]string{
 	"zul": "zu",
 }
 
+var languageNames3 = map[string]string{
+	"fil": "Filipino",
+	"mis": "Uncoded languages",
+	"mul": "Multiple languages",
+	"tlh": "Klingon",
+	"zxx": "Silent",
+}
+
 func normalizeLanguageCode(code string) string {
 	code = strings.TrimSpace(code)
 	if code == "" {
@@ -447,7 +455,7 @@ func formatLanguage(code string) string {
 		return ""
 	}
 	parts := strings.Split(normalized, "-")
-	name := languageNames[parts[0]]
+	name := languageName(parts[0])
 	if name == "" {
 		return code
 	}
@@ -455,6 +463,13 @@ func formatLanguage(code string) string {
 		return fmt.Sprintf("%s (%s)", name, strings.Join(parts[1:], "-"))
 	}
 	return name
+}
+
+func languageName(code string) string {
+	if name := languageNames[code]; name != "" {
+		return name
+	}
+	return languageNames3[code]
 }
 
 func isAlpha(s string) bool {
