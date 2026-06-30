@@ -13,3 +13,22 @@ func TestFormatLanguageHindi(t *testing.T) {
 		t.Fatalf("formatLanguage(\"hi\") = %q, want Hindi", got)
 	}
 }
+
+func TestFormatLanguageCommonISO639Codes(t *testing.T) {
+	tests := map[string]string{
+		"jpn":     "Japanese",
+		"kor":     "Korean",
+		"nld":     "Dutch",
+		"iw":      "Hebrew",
+		"uk":      "Ukrainian",
+		"vi":      "Vietnamese",
+		"pt-BR":   "Portuguese (BR)",
+		"zh-Hant": "Chinese (Hant)",
+		"en-US":   "English (US)",
+	}
+	for code, want := range tests {
+		if got := formatLanguage(code); got != want {
+			t.Fatalf("formatLanguage(%q) = %q, want %q", code, got, want)
+		}
+	}
+}
