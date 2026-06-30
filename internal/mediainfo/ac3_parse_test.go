@@ -150,6 +150,44 @@ func TestParseEAC3FrameWithOptions_BoundsJOCScanToFrame(t *testing.T) {
 	}
 }
 
+func TestParseEAC3DependentFrame_ChannelMap(t *testing.T) {
+	const frameSize = 20
+	buf := make([]byte, frameSize)
+	bw := ac3BitWriter{buf: buf}
+
+	bw.writeBits(0x0B77, 16)          // syncword
+	bw.writeBits(1, 2)                // dependent stream
+	bw.writeBits(0, 3)                // substreamid
+	bw.writeBits((frameSize/2)-1, 11) // frmsiz
+	bw.writeBits(0, 2)                // fscod: 48 kHz
+	bw.writeBits(3, 2)                // numblkscod: 6 blocks / 1536 samples
+	bw.writeBits(5, 3)                // acmod
+	bw.writeBits(0, 1)                // lfeon
+	bw.writeBits(16, 5)               // bsid
+	bw.writeBits(25, 5)               // dialnorm
+	bw.writeBits(1, 1)                // compre
+	bw.writeBits(0xFF, 8)             // compr
+	bw.writeBits(1, 1)                // chanmape
+	bw.writeBits(0xA010, 16)          // L/R + top-front pair extension map
+
+	info, gotSize, ok := parseEAC3FrameWithOptions(buf, false)
+	if !ok {
+		t.Fatal("parseEAC3FrameWithOptions returned ok=false")
+	}
+	if gotSize != frameSize {
+		t.Fatalf("frameSize mismatch: got=%d want=%d", gotSize, frameSize)
+	}
+	if !info.hasEAC3ChannelMap {
+		t.Fatal("expected dependent channel map")
+	}
+	if info.eac3ChannelMapLayout != "L R Tfl Tfr" || info.eac3ChannelMapChannel != 4 {
+		t.Fatalf("channel map layout/count mismatch: got=%q/%d", info.eac3ChannelMapLayout, info.eac3ChannelMapChannel)
+	}
+	if channels, layout := mergeAudioChannelLayouts("L R C LFE Ls Rs", info.eac3ChannelMapLayout); channels != 8 || layout != "L R C LFE Ls Rs Tfl Tfr" {
+		t.Fatalf("merged layout mismatch: got=%q/%d", layout, channels)
+	}
+}
+
 func buildEMDFJOCPayload() []byte {
 	body := make([]byte, 6)
 	bw := ac3BitWriter{buf: body}

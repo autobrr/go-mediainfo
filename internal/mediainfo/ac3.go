@@ -56,25 +56,41 @@ type ac3Info struct {
 	dynrngeSeen   bool // "ever seen" (MediaInfo dynrnge_Exists)
 
 	// MediaInfo-style stats histograms. Nil until first merge.
-	comprs        []uint32
-	dynrngs       []uint32
-	cmixlevDB     float64
-	hasCmixlev    bool
-	surmixlevDB   float64
-	hasSurmixlev  bool
-	mixlevel      int
-	hasMixlevel   bool
-	roomtyp       string
-	hasRoomtyp    bool
-	hasJOC        bool
-	hasJOCComplex bool
-	jocComplexity int
-	jocObjects    int
-	hasJOCDyn     bool
-	jocDynObjects int
-	hasJOCBed     bool
-	jocBedCount   uint64
-	jocBedLayout  string
+	comprs           []uint32
+	dynrngs          []uint32
+	cmixlevDB        float64
+	hasCmixlev       bool
+	surmixlevDB      float64
+	hasSurmixlev     bool
+	mixlevel         int
+	hasMixlevel      bool
+	roomtyp          string
+	hasRoomtyp       bool
+	dmixmod          string
+	hasDmixmod       bool
+	ltrtcmixlevDB    float64
+	hasLtrtcmixlev   bool
+	ltrtsurmixlevDB  float64
+	hasLtrtsurmixlev bool
+	lorocmixlevDB    float64
+	hasLorocmixlev   bool
+	lorosurmixlevDB  float64
+	hasLorosurmixlev bool
+	hasJOC           bool
+	hasJOCComplex    bool
+	jocComplexity    int
+	jocObjects       int
+	hasJOCDyn        bool
+	jocDynObjects    int
+	hasJOCBed        bool
+	jocBedCount      uint64
+	jocBedLayout     string
+
+	eac3FrameType         int
+	eac3ChannelMap        uint16
+	hasEAC3ChannelMap     bool
+	eac3ChannelMapLayout  string
+	eac3ChannelMapChannel uint64
 }
 
 type ac3BitReader struct {
@@ -361,9 +377,45 @@ func parseAC3Frame(payload []byte) (ac3Info, int, bool) {
 			return info, 0, false
 		}
 		if xbsi1e == 1 {
-			// dmixmod (2) + ltrtcmixlev (3) + ltrtsurmixlev (3) + lorocmixlev (3) + lorosurmixlev (3)
-			if _, ok := br.readBits(14); !ok {
+			dmixmod, ok := br.readBits(2)
+			if !ok {
 				return info, 0, false
+			}
+			if value := ac3PreferredDownmix(dmixmod); value != "" {
+				info.dmixmod = value
+				info.hasDmixmod = true
+			}
+			ltrtcmixlev, ok := br.readBits(3)
+			if !ok {
+				return info, 0, false
+			}
+			if value, ok := ac3ExtendedMixLevelDB(ltrtcmixlev); ok {
+				info.ltrtcmixlevDB = value
+				info.hasLtrtcmixlev = true
+			}
+			ltrtsurmixlev, ok := br.readBits(3)
+			if !ok {
+				return info, 0, false
+			}
+			if value, ok := ac3ExtendedMixLevelDB(ltrtsurmixlev); ok {
+				info.ltrtsurmixlevDB = value
+				info.hasLtrtsurmixlev = true
+			}
+			lorocmixlev, ok := br.readBits(3)
+			if !ok {
+				return info, 0, false
+			}
+			if value, ok := ac3ExtendedMixLevelDB(lorocmixlev); ok {
+				info.lorocmixlevDB = value
+				info.hasLorocmixlev = true
+			}
+			lorosurmixlev, ok := br.readBits(3)
+			if !ok {
+				return info, 0, false
+			}
+			if value, ok := ac3ExtendedMixLevelDB(lorosurmixlev); ok {
+				info.lorosurmixlevDB = value
+				info.hasLorosurmixlev = true
 			}
 		}
 		xbsi2e, ok := br.readBits(1)
@@ -433,56 +485,66 @@ func parseAC3Frame(payload []byte) (ac3Info, int, bool) {
 	}
 
 	info = ac3Info{
-		bitRateKbps:   bitRate,
-		sampleRate:    sampleRate,
-		channels:      channels,
-		layout:        layout,
-		bsid:          int(bsid),
-		bsmod:         int(bsmod),
-		acmod:         int(acmod),
-		lfeon:         int(lfeonVal),
-		dsurmod:       info.dsurmod,
-		hasDsurmod:    info.hasDsurmod,
-		serviceKind:   ac3ServiceKind(int(bsmod)),
-		frameRate:     frameRate,
-		spf:           spf,
-		dialnorm:      info.dialnorm,
-		dialnormCode:  info.dialnormCode,
-		dialnormSum:   info.dialnormSum,
-		dialnormCount: info.dialnormCount,
-		dialnormMin:   info.dialnormMin,
-		dialnormMax:   info.dialnormMax,
-		hasDialnorm:   info.hasDialnorm,
-		comprDB:       info.comprDB,
-		compre:        info.compre,
-		comprCode:     info.comprCode,
-		comprCount:    info.comprCount,
-		comprSum:      info.comprSum,
-		comprSumDB:    info.comprSumDB,
-		comprMin:      info.comprMin,
-		comprMax:      info.comprMax,
-		comprIsDB:     info.comprIsDB,
-		comprFieldDB:  info.comprFieldDB,
-		hasCompr:      info.hasCompr,
-		hasComprField: info.hasComprField,
-		dynrngDB:      info.dynrngDB,
-		hasDynrng:     info.hasDynrng,
-		dynrnge:       info.dynrnge,
-		dynrngCode:    info.dynrngCode,
-		dynrngParsed:  info.dynrngParsed,
-		dynrngSum:     info.dynrngSum,
-		dynrngCount:   info.dynrngCount,
-		dynrngMin:     info.dynrngMin,
-		dynrngMax:     info.dynrngMax,
-		dynrngeSeen:   info.dynrngeSeen,
-		cmixlevDB:     info.cmixlevDB,
-		hasCmixlev:    info.hasCmixlev,
-		surmixlevDB:   info.surmixlevDB,
-		hasSurmixlev:  info.hasSurmixlev,
-		mixlevel:      info.mixlevel,
-		hasMixlevel:   info.hasMixlevel,
-		roomtyp:       info.roomtyp,
-		hasRoomtyp:    info.hasRoomtyp,
+		bitRateKbps:      bitRate,
+		sampleRate:       sampleRate,
+		channels:         channels,
+		layout:           layout,
+		bsid:             int(bsid),
+		bsmod:            int(bsmod),
+		acmod:            int(acmod),
+		lfeon:            int(lfeonVal),
+		dsurmod:          info.dsurmod,
+		hasDsurmod:       info.hasDsurmod,
+		serviceKind:      ac3ServiceKind(int(bsmod)),
+		frameRate:        frameRate,
+		spf:              spf,
+		dialnorm:         info.dialnorm,
+		dialnormCode:     info.dialnormCode,
+		dialnormSum:      info.dialnormSum,
+		dialnormCount:    info.dialnormCount,
+		dialnormMin:      info.dialnormMin,
+		dialnormMax:      info.dialnormMax,
+		hasDialnorm:      info.hasDialnorm,
+		comprDB:          info.comprDB,
+		compre:           info.compre,
+		comprCode:        info.comprCode,
+		comprCount:       info.comprCount,
+		comprSum:         info.comprSum,
+		comprSumDB:       info.comprSumDB,
+		comprMin:         info.comprMin,
+		comprMax:         info.comprMax,
+		comprIsDB:        info.comprIsDB,
+		comprFieldDB:     info.comprFieldDB,
+		hasCompr:         info.hasCompr,
+		hasComprField:    info.hasComprField,
+		dynrngDB:         info.dynrngDB,
+		hasDynrng:        info.hasDynrng,
+		dynrnge:          info.dynrnge,
+		dynrngCode:       info.dynrngCode,
+		dynrngParsed:     info.dynrngParsed,
+		dynrngSum:        info.dynrngSum,
+		dynrngCount:      info.dynrngCount,
+		dynrngMin:        info.dynrngMin,
+		dynrngMax:        info.dynrngMax,
+		dynrngeSeen:      info.dynrngeSeen,
+		cmixlevDB:        info.cmixlevDB,
+		hasCmixlev:       info.hasCmixlev,
+		surmixlevDB:      info.surmixlevDB,
+		hasSurmixlev:     info.hasSurmixlev,
+		mixlevel:         info.mixlevel,
+		hasMixlevel:      info.hasMixlevel,
+		roomtyp:          info.roomtyp,
+		hasRoomtyp:       info.hasRoomtyp,
+		dmixmod:          info.dmixmod,
+		hasDmixmod:       info.hasDmixmod,
+		ltrtcmixlevDB:    info.ltrtcmixlevDB,
+		hasLtrtcmixlev:   info.hasLtrtcmixlev,
+		ltrtsurmixlevDB:  info.ltrtsurmixlevDB,
+		hasLtrtsurmixlev: info.hasLtrtsurmixlev,
+		lorocmixlevDB:    info.lorocmixlevDB,
+		hasLorocmixlev:   info.hasLorocmixlev,
+		lorosurmixlevDB:  info.lorosurmixlevDB,
+		hasLorosurmixlev: info.hasLorosurmixlev,
 	}
 	return info, frameSize, true
 }
@@ -553,9 +615,6 @@ func parseEAC3FrameWithOptions(payload []byte, parseJOC bool) (ac3Info, int, boo
 	if bsid < 10 {
 		return info, 0, false
 	}
-	// For dependent substreams, the BSI fields we care about for JSON stats may not be present
-	// (or may be at a different position). Only accumulate dialnorm/compr stats from independent
-	// substreams to match official mediainfo behavior on common E-AC-3 layouts.
 	if strmtyp == 0 {
 		dialnorm, ok := br.readBits(5)
 		if !ok {
@@ -582,6 +641,37 @@ func parseEAC3FrameWithOptions(payload []byte, parseJOC bool) (ac3Info, int, boo
 			info.comprCode = uint8(compr)
 			info.comprDB = ac3ComprDB(uint8(compr))
 			info.hasCompr = true
+		}
+	} else if strmtyp == 1 {
+		for i := 0; i < eac3DialnormFieldCount(int(acmod)); i++ {
+			if _, ok := br.readBits(5); !ok { // dialnorm
+				return info, 0, false
+			}
+			compre, ok := br.readBits(1)
+			if !ok {
+				return info, 0, false
+			}
+			if compre == 1 {
+				if _, ok := br.readBits(8); !ok { // compr
+					return info, 0, false
+				}
+			}
+		}
+		chanmape, ok := br.readBits(1)
+		if !ok {
+			return info, 0, false
+		}
+		if chanmape == 1 {
+			chanmap, ok := br.readBits(16)
+			if !ok {
+				return info, 0, false
+			}
+			if layout, count := eac3ChannelMapLayout(uint16(chanmap)); layout != "" {
+				info.hasEAC3ChannelMap = true
+				info.eac3ChannelMap = uint16(chanmap)
+				info.eac3ChannelMapLayout = layout
+				info.eac3ChannelMapChannel = count
+			}
 		}
 	}
 
@@ -644,8 +734,96 @@ func parseEAC3FrameWithOptions(payload []byte, parseJOC bool) (ac3Info, int, boo
 		hasJOCBed:     jocMeta.hasJOCBed,
 		jocBedCount:   jocMeta.jocBedCount,
 		jocBedLayout:  jocMeta.jocBedLayout,
+
+		eac3FrameType:         int(strmtyp),
+		eac3ChannelMap:        info.eac3ChannelMap,
+		hasEAC3ChannelMap:     info.hasEAC3ChannelMap,
+		eac3ChannelMapLayout:  info.eac3ChannelMapLayout,
+		eac3ChannelMapChannel: info.eac3ChannelMapChannel,
 	}
 	return info, frameSize, true
+}
+
+// eac3DialnormFieldCount returns how many dialog-normalization/compression field groups
+// are present before dependent-stream channel mapping for the given E-AC-3 coding mode.
+func eac3DialnormFieldCount(acmod int) int {
+	if acmod == 0 {
+		return 2
+	}
+	return 1
+}
+
+// eac3CustomChannelMapLayouts maps the 16 dependent E-AC-3 custom channel-map bits
+// to MediaInfo channel labels in bitstream order.
+var eac3CustomChannelMapLayouts = [][]string{
+	{"L"},
+	{"C"},
+	{"R"},
+	{"Ls"},
+	{"Rs"},
+	{"Lc", "Rc"},
+	{"Lb", "Rb"},
+	{"Cb"},
+	{"Tc"},
+	{"Lsd", "Rsd"},
+	{"Lw", "Rw"},
+	{"Tfl", "Tfr"},
+	{"Tfc"},
+	{"Tbl", "Tbr"},
+	{"LFE2"},
+	{"LFE"},
+}
+
+// eac3ChannelMapLayout converts a dependent E-AC-3 custom channel map to a stable
+// MediaInfo-style channel layout and channel count.
+func eac3ChannelMapLayout(mask uint16) (string, uint64) {
+	seen := map[string]bool{}
+	for i, layout := range eac3CustomChannelMapLayouts {
+		if mask&(1<<uint(15-i)) == 0 {
+			continue
+		}
+		for _, ch := range layout {
+			seen[ch] = true
+		}
+	}
+	return orderedChannelLayout(seen)
+}
+
+// channelLayoutOrder is the preferred output order for merged codec-derived channel labels.
+var channelLayoutOrder = []string{
+	"L", "R", "C", "LFE", "Ls", "Rs", "Lb", "Rb", "Lc", "Rc", "Lw", "Rw",
+	"Cb", "Tc", "Lsd", "Rsd", "Tfl", "Tfr", "Tfc", "Tbl", "Tbr", "LFE2",
+}
+
+// orderedChannelLayout renders a set of channel labels and consumes known labels from seen.
+func orderedChannelLayout(seen map[string]bool) (string, uint64) {
+	if len(seen) == 0 {
+		return "", 0
+	}
+	parts := make([]string, 0, len(seen))
+	for _, ch := range channelLayoutOrder {
+		if seen[ch] {
+			parts = append(parts, ch)
+			delete(seen, ch)
+		}
+	}
+	for ch := range seen {
+		parts = append(parts, ch)
+	}
+	return strings.Join(parts, " "), uint64(len(parts))
+}
+
+// mergeAudioChannelLayouts combines core and extension channel layouts without duplicating
+// channels already present in the core stream.
+func mergeAudioChannelLayouts(layouts ...string) (uint64, string) {
+	seen := map[string]bool{}
+	for _, layout := range layouts {
+		for _, ch := range strings.Fields(layout) {
+			seen[ch] = true
+		}
+	}
+	layout, count := orderedChannelLayout(seen)
+	return count, layout
 }
 
 func eac3SampleRate(fscod int, fscod2 int) float64 {
@@ -814,6 +992,32 @@ func (info *ac3Info) mergeFrame(frame ac3Info) {
 		info.jocBedCount = frame.jocBedCount
 		info.jocBedLayout = frame.jocBedLayout
 	}
+	if frame.hasDmixmod && !info.hasDmixmod {
+		info.dmixmod = frame.dmixmod
+		info.hasDmixmod = true
+	}
+	if frame.hasLtrtcmixlev && !info.hasLtrtcmixlev {
+		info.ltrtcmixlevDB = frame.ltrtcmixlevDB
+		info.hasLtrtcmixlev = true
+	}
+	if frame.hasLtrtsurmixlev && !info.hasLtrtsurmixlev {
+		info.ltrtsurmixlevDB = frame.ltrtsurmixlevDB
+		info.hasLtrtsurmixlev = true
+	}
+	if frame.hasLorocmixlev && !info.hasLorocmixlev {
+		info.lorocmixlevDB = frame.lorocmixlevDB
+		info.hasLorocmixlev = true
+	}
+	if frame.hasLorosurmixlev && !info.hasLorosurmixlev {
+		info.lorosurmixlevDB = frame.lorosurmixlevDB
+		info.hasLorosurmixlev = true
+	}
+	if frame.hasEAC3ChannelMap && !info.hasEAC3ChannelMap {
+		info.hasEAC3ChannelMap = true
+		info.eac3ChannelMap = frame.eac3ChannelMap
+		info.eac3ChannelMapLayout = frame.eac3ChannelMapLayout
+		info.eac3ChannelMapChannel = frame.eac3ChannelMapChannel
+	}
 
 	info.framesMerged++
 }
@@ -911,6 +1115,32 @@ func (info *ac3Info) mergeFrameBase(frame ac3Info) {
 		info.hasJOCBed = true
 		info.jocBedCount = frame.jocBedCount
 		info.jocBedLayout = frame.jocBedLayout
+	}
+	if frame.hasDmixmod && !info.hasDmixmod {
+		info.dmixmod = frame.dmixmod
+		info.hasDmixmod = true
+	}
+	if frame.hasLtrtcmixlev && !info.hasLtrtcmixlev {
+		info.ltrtcmixlevDB = frame.ltrtcmixlevDB
+		info.hasLtrtcmixlev = true
+	}
+	if frame.hasLtrtsurmixlev && !info.hasLtrtsurmixlev {
+		info.ltrtsurmixlevDB = frame.ltrtsurmixlevDB
+		info.hasLtrtsurmixlev = true
+	}
+	if frame.hasLorocmixlev && !info.hasLorocmixlev {
+		info.lorocmixlevDB = frame.lorocmixlevDB
+		info.hasLorocmixlev = true
+	}
+	if frame.hasLorosurmixlev && !info.hasLorosurmixlev {
+		info.lorosurmixlevDB = frame.lorosurmixlevDB
+		info.hasLorosurmixlev = true
+	}
+	if frame.hasEAC3ChannelMap && !info.hasEAC3ChannelMap {
+		info.hasEAC3ChannelMap = true
+		info.eac3ChannelMap = frame.eac3ChannelMap
+		info.eac3ChannelMapLayout = frame.eac3ChannelMapLayout
+		info.eac3ChannelMapChannel = frame.eac3ChannelMapChannel
 	}
 
 	info.framesMerged++
@@ -1133,6 +1363,40 @@ func ac3SurroundMixLevelDB(code uint32) (float64, bool) {
 		return 0, true
 	default:
 		return 0, false
+	}
+}
+
+// ac3ExtendedMixLevelDB maps AC-3 xbsi extended mix-level codes to dB values.
+func ac3ExtendedMixLevelDB(code uint32) (float64, bool) {
+	switch code {
+	case 0:
+		return 3.0, true
+	case 1:
+		return 1.5, true
+	case 2:
+		return 0.0, true
+	case 3:
+		return -1.5, true
+	case 4:
+		return -3.0, true
+	case 5:
+		return -4.5, true
+	case 6:
+		return -6.0, true
+	default:
+		return 0, false
+	}
+}
+
+// ac3PreferredDownmix maps AC-3 xbsi preferred stereo downmix codes to MediaInfo labels.
+func ac3PreferredDownmix(code uint32) string {
+	switch code {
+	case 1:
+		return "Lt/Rt"
+	case 2:
+		return "Lo/Ro"
+	default:
+		return ""
 	}
 }
 

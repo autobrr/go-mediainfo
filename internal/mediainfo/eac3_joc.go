@@ -145,6 +145,22 @@ func ac3HasJOCInfo(info ac3Info) bool {
 	return info.hasJOC || info.hasJOCComplex || info.jocObjects > 0 || info.hasJOCDyn || info.hasJOCBed
 }
 
+// ac3JOCComplexity returns the explicit JOC complexity index when present, or the
+// MediaInfo-compatible object-count fallback used for text/JSON output.
+func ac3JOCComplexity(info ac3Info) (int, bool) {
+	if info.hasJOCComplex {
+		return info.jocComplexity, true
+	}
+	fallback := info.jocObjects
+	if info.hasJOCDyn && info.jocDynObjects > fallback {
+		fallback = info.jocDynObjects
+	}
+	if fallback > 0 {
+		return fallback + 1, true
+	}
+	return 0, false
+}
+
 func parseEAC3EMDFAt(payload []byte, bitPos int, meta *eac3JOCMeta) bool {
 	br := ac3BitReader{data: payload, bitPos: bitPos}
 	if _, ok := br.readBits(16); !ok { // syncword

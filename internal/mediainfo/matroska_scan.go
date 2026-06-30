@@ -39,6 +39,7 @@ type matroskaAudioProbe struct {
 	format         string
 	info           ac3Info
 	dts            dtsInfo
+	truehd         trueHDInfo
 	ok             bool
 	collect        bool
 	targetFrames   int
@@ -58,6 +59,8 @@ type dtsInfo struct {
 	hd              bool
 	hdXLL           bool // DTS-HD Master Audio (lossless)
 	hdXBR           bool // DTS-HD High Resolution Audio (lossy)
+	hdDTSX          bool // DTS:X object metadata is present on top of the DTS-HD bed.
+	hdIMAX          bool // IMAX Enhanced DTS:X extension metadata is present.
 	hdBitDepth      int
 	hdChannels      int
 	hdSpeakerMask   uint16
@@ -1266,6 +1269,59 @@ func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAud
 		if probe == nil || !probe.ok {
 			continue
 		}
+		if probe.format == "TrueHD" {
+			thd := probe.truehd
+			if stream.JSON == nil {
+				stream.JSON = map[string]string{}
+			}
+			if atmos, ok := trueHDAtmosPresentationInfo(thd); ok {
+				stream.Fields = setFieldValue(stream.Fields, "Format", "MLP FBA 16-ch")
+				stream.Fields = setFieldValue(stream.Fields, "Format/Info", "Meridian Lossless Packing FBA with 16-channel presentation")
+				stream.Fields = insertFieldAfter(stream.Fields, Field{Name: "Commercial name", Value: "Dolby TrueHD with Dolby Atmos"}, "Format/Info")
+				stream.Fields = insertFieldBefore(stream.Fields, Field{Name: "Number of dynamic objects", Value: strconv.Itoa(atmos.dynamicObjects)}, "Default")
+				stream.Fields = insertFieldBefore(stream.Fields, Field{Name: "Bed channel count", Value: formatChannels(atmos.bedChannelCount)}, "Default")
+				stream.Fields = insertFieldBefore(stream.Fields, Field{Name: "Bed channel configuration", Value: atmos.bedChannelConfig}, "Default")
+				stream.JSON["Format"] = "MLP FBA"
+				stream.JSON["Format_Commercial_IfAny"] = "Dolby TrueHD with Dolby Atmos"
+				stream.JSON["Format_AdditionalFeatures"] = atmos.additionalFeatures
+				stream.Fields = setFieldValue(stream.Fields, "Channel layout", "L R C LFE Ls Rs Lb Rb")
+				stream.JSON["ChannelLayout"] = "L R C LFE Ls Rs Lb Rb"
+				stream.JSON["ChannelPositions"] = "Front: L C R, Side: L R, Back: L R, LFE"
+				if stream.JSONRaw == nil {
+					stream.JSONRaw = map[string]string{}
+				}
+				stream.JSONRaw["extra"] = renderJSONObject([]jsonKV{
+					{Key: "NumberOfDynamicObjects", Val: strconv.Itoa(atmos.dynamicObjects)},
+					{Key: "BedChannelCount", Val: strconv.FormatUint(atmos.bedChannelCount, 10)},
+					{Key: "BedChannelConfiguration", Val: atmos.bedChannelConfigShort},
+				}, false)
+			}
+			if thd.maxBitRate > 0 {
+				stream.Fields = setFieldValue(stream.Fields, "Maximum bit rate", formatBitrate(float64(thd.maxBitRate)))
+				stream.JSON["BitRate_Maximum"] = strconv.FormatInt(thd.maxBitRate, 10)
+			}
+			stream.Fields = setFieldValue(stream.Fields, "Bit rate mode", "Variable")
+			stream.JSON["BitRate_Mode"] = "VBR"
+			if thd.sampleRate > 0 && thd.samplesPerFrame > 0 {
+				frameRate := float64(thd.sampleRate) / float64(thd.samplesPerFrame)
+				stream.Fields = setFieldValue(stream.Fields, "Frame rate", formatAudioFrameRate(frameRate, thd.samplesPerFrame))
+				stream.JSON["FrameRate"] = fmt.Sprintf("%.3f", frameRate)
+				stream.JSON["FrameRate_Num"] = strconv.Itoa(thd.sampleRate)
+				stream.JSON["FrameRate_Den"] = strconv.Itoa(thd.samplesPerFrame)
+				stream.JSON["SamplesPerFrame"] = strconv.Itoa(thd.samplesPerFrame)
+				if durStr := stream.JSON["Duration"]; durStr != "" {
+					if duration, err := strconv.ParseFloat(durStr, 64); err == nil && duration > 0 {
+						samplingCount := int64(math.Round(duration * float64(thd.sampleRate)))
+						frameCount := int64(math.Round(duration * frameRate))
+						stream.JSON["SamplingCount"] = strconv.FormatInt(samplingCount, 10)
+						stream.JSON["FrameCount"] = strconv.FormatInt(frameCount, 10)
+					}
+				}
+			}
+			stream.Fields = insertFieldBefore(stream.Fields, Field{Name: "Compression mode", Value: "Lossless"}, "Stream size")
+			stream.JSON["Compression_Mode"] = "Lossless"
+			continue
+		}
 		if probe.format == "DTS" {
 			dts := probe.dts
 			if dts.hd {
@@ -1274,10 +1330,23 @@ func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAud
 				}
 				if dts.hdXLL {
 					// DTS-HD Master Audio (XLL): lossless.
-					stream.Fields = setFieldValue(stream.Fields, "Format", "DTS XLL")
-					stream.Fields = insertFieldAfter(stream.Fields, Field{Name: "Commercial name", Value: "DTS-HD Master Audio"}, "Format/Info")
-					stream.JSON["Format_AdditionalFeatures"] = "XLL"
-					stream.JSON["Format_Commercial_IfAny"] = "DTS-HD Master Audio"
+					format := "DTS XLL"
+					commercial := "DTS-HD Master Audio"
+					features := "XLL"
+					if dts.hdIMAX {
+						format = "DTS XLL X IMAX"
+						commercial = "DTS-HD MA + IMAX Enhanced"
+						features = "XLL X IMAX"
+					} else if dts.hdDTSX {
+						format = "DTS XLL X"
+						commercial = "DTS-HD MA + DTS:X"
+						features = "XLL X"
+					}
+					stream.Fields = setFieldValue(stream.Fields, "Format", format)
+					stream.Fields = insertFieldAfter(stream.Fields, Field{Name: "Commercial name", Value: commercial}, "Format/Info")
+					stream.JSON["Format"] = "DTS"
+					stream.JSON["Format_AdditionalFeatures"] = features
+					stream.JSON["Format_Commercial_IfAny"] = commercial
 				} else if dts.hdXBR {
 					// DTS-HD High Resolution Audio (XBR): lossy VBR.
 					stream.Fields = setFieldValue(stream.Fields, "Format", "DTS XBR")
@@ -1302,6 +1371,9 @@ func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAud
 				stream.Fields = setFieldValue(stream.Fields, "Channel(s)", formatChannels(uint64(channels)))
 				if dts.hd && dts.hasSpeakerMask {
 					layout := dtsHDSpeakerActivityMaskChannelLayout(dts.hdSpeakerMask)
+					if dts.hdDTSX && layout != "" {
+						layout = dtsXChannelLayout(layout)
+					}
 					if layout != "" {
 						stream.Fields = setFieldValue(stream.Fields, "Channel layout", layout)
 					}
@@ -1332,7 +1404,7 @@ func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAud
 			if dts.hd {
 				// DTS-HD: variable bitrate, clear core bitrate.
 				stream.Fields = setFieldValue(stream.Fields, "Bit rate mode", "Variable")
-				if hasContainerBitrate {
+				if hasContainerBitrate && !dts.hdDTSX {
 					// Remove core bitrate — DTS-HD is VBR and the core rate does not apply.
 					stream.Fields = removeField(stream.Fields, "Bit rate")
 				}
@@ -1366,9 +1438,15 @@ func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAud
 				stream.JSON["Channels"] = chStr
 				if dts.hd && dts.hasSpeakerMask {
 					if layout := dtsHDSpeakerActivityMaskChannelLayout(dts.hdSpeakerMask); layout != "" {
+						if dts.hdDTSX {
+							layout = dtsXChannelLayout(layout)
+						}
 						stream.JSON["ChannelLayout"] = layout
 					}
 					if positions := dtsHDSpeakerActivityMask(dts.hdSpeakerMask); positions != "" {
+						if dts.hdDTSX {
+							positions += ", Objects"
+						}
 						stream.JSON["ChannelPositions"] = positions
 					}
 				} else {
@@ -1382,7 +1460,7 @@ func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAud
 				stream.JSON["BitRate"] = strconv.FormatInt(dts.bitRateBps, 10)
 				stream.JSON["BitRate_Mode"] = "CBR"
 			}
-			if dts.hd {
+			if dts.hd && !dts.hdDTSX {
 				// Remove container-level BitRate from JSON for DTS-HD.
 				delete(stream.JSON, "BitRate")
 			}
@@ -1627,6 +1705,27 @@ func deriveCBRAudioStreamSizes(info *MatroskaInfo, fileSize int64) {
 		}
 		stream.JSON["StreamSize"] = strconv.FormatInt(bytes, 10)
 	}
+}
+
+// dtsXChannelLayout returns MediaInfo's DTS:X layout text for a DTS-HD bed.
+//
+// DTS:X object metadata is not a fixed set of height channels. MediaInfo keeps
+// the channel bed from the DTS-HD speaker mask, normalizes rear-surround labels
+// to back labels for these samples, and appends "Objects".
+func dtsXChannelLayout(layout string) string {
+	if layout == "" {
+		return layout
+	}
+	parts := strings.Fields(layout)
+	for i, part := range parts {
+		switch part {
+		case "Lsr":
+			parts[i] = "Lb"
+		case "Rsr":
+			parts[i] = "Rb"
+		}
+	}
+	return strings.Join(append(parts, "Objects"), " ")
 }
 
 func applyMatroskaTrackDelays(info *MatroskaInfo, stats map[uint64]*matroskaTrackStats) {
@@ -1888,6 +1987,14 @@ func probeMatroskaAudio(probes map[uint64]*matroskaAudioProbe, track uint64, pay
 	if frames < 1 {
 		frames = 1
 	}
+	if probe.format == "TrueHD" {
+		if info, ok := parseTrueHDFrame(payload); ok {
+			probe.truehd = info
+			probe.ok = true
+			probe.collect = false
+		}
+		return
+	}
 	if probe.format == "DTS" {
 		if info, ok := parseDTSCoreFrame(payload); ok {
 			// Check for DTS-HD extension (ExSS sync 0x64582025) after core frame.
@@ -1896,6 +2003,11 @@ func probeMatroskaAudio(probes map[uint64]*matroskaAudioProbe, track uint64, pay
 				// Distinguish XLL (Master Audio, lossless) from XBR (High Resolution, lossy).
 				info.hdXLL = hasDTSHDXLLSync(payload)
 				info.hdXBR = hasDTSHDXBRSync(payload)
+				info.hdDTSX = hasDTSHDXSync(payload)
+				info.hdIMAX = hasDTSHDIMAXSync(payload)
+				if info.hdIMAX {
+					info.hdDTSX = true
+				}
 				if info.hdXLL {
 					if bd, ok := parseDTSHDXLLBitDepth(payload); ok && bd > 0 {
 						info.hdBitDepth = bd

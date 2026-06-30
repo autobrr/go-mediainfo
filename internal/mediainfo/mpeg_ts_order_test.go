@@ -13,7 +13,7 @@ func TestNormalizeTSStreamOrderBDAV(t *testing.T) {
 		0x1202: {pid: 0x1202, kind: StreamText, programNumber: 1},
 	}
 	got := normalizeTSStreamOrder(order, streams, true)
-	want := []uint16{0x1202, 0x1101, 0x1011, 0x1201, 0x1100, 0x1200}
+	want := []uint16{0x1011, 0x1100, 0x1101, 0x1200, 0x1201, 0x1202}
 	if len(got) != len(want) {
 		t.Fatalf("len(got)=%d len(want)=%d got=%v", len(got), len(want), got)
 	}

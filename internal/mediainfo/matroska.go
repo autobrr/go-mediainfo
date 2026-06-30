@@ -319,7 +319,7 @@ func ParseMatroskaWithOptions(r io.ReaderAt, size int64, opts AnalyzeOptions) (M
 				switch stream.Kind {
 				case StreamAudio:
 					format := findField(stream.Fields, "Format")
-					if format != "AC-3" && format != "E-AC-3" && format != "DTS" {
+					if format != "AC-3" && format != "E-AC-3" && format != "DTS" && format != "TrueHD" {
 						continue
 					}
 					probe := &matroskaAudioProbe{
@@ -353,6 +353,10 @@ func ParseMatroskaWithOptions(r io.ReaderAt, size int64, opts AnalyzeOptions) (M
 						if opts.ParseSpeed < 1 {
 							probe.targetPackets = 1
 						}
+					}
+					if format == "TrueHD" && opts.ParseSpeed < 1 {
+						// Atmos metadata lives in the major-sync header; one packet is enough for bounded scans.
+						probe.targetPackets = 1
 					}
 					audioProbes[id] = probe
 				case StreamVideo:
