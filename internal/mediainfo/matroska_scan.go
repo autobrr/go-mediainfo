@@ -1484,6 +1484,13 @@ func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAud
 			continue
 		}
 		ac3 := probe.info
+		if probe.format == "E-AC-3" && ac3.hasEAC3ChannelMap && ac3.layout != "" {
+			channels, layout := mergeAudioChannelLayouts(ac3.layout, ac3.eac3ChannelMapLayout)
+			if channels > 0 && layout != "" {
+				ac3.channels = channels
+				ac3.layout = layout
+			}
+		}
 		if ac3.channels > 0 {
 			stream.Fields = setFieldValue(stream.Fields, "Channel(s)", formatChannels(ac3.channels))
 		}
@@ -1496,19 +1503,28 @@ func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAud
 		if ac3.frameRate > 0 && ac3.spf > 0 {
 			stream.Fields = setFieldValue(stream.Fields, "Frame rate", formatAudioFrameRate(ac3.frameRate, ac3.spf))
 		}
-		if ac3.bitRateKbps > 0 {
+		hasContainerBitrate := findField(stream.Fields, "Bit rate") != "" || (stream.JSON != nil && stream.JSON["BitRate"] != "")
+		if ac3.bitRateKbps > 0 && !hasContainerBitrate {
 			stream.Fields = setFieldValue(stream.Fields, "Bit rate mode", "Constant")
 			stream.Fields = setFieldValue(stream.Fields, "Bit rate", formatBitrateKbps(ac3.bitRateKbps))
+		} else if ac3.bitRateKbps > 0 && findField(stream.Fields, "Bit rate mode") == "" {
+			stream.Fields = insertFieldBefore(stream.Fields, Field{Name: "Bit rate mode", Value: "Constant"}, "Bit rate")
 		}
 		stream.Fields = insertFieldBefore(stream.Fields, Field{Name: "Compression mode", Value: "Lossy"}, "Stream size")
 		if probe.format == "E-AC-3" {
-			hasJOC := ac3.hasJOC || ac3.hasJOCComplex || ac3.jocObjects > 0 || ac3.hasJOCDyn || ac3.hasJOCBed
+			hasJOC := ac3HasJOCInfo(ac3)
 			if hasJOC {
+				stream.Fields = setFieldValue(stream.Fields, "Format", "E-AC-3 JOC")
+				stream.Fields = setFieldValue(stream.Fields, "Format/Info", "Enhanced AC-3 with Joint Object Coding")
 				stream.Fields = setFieldValue(stream.Fields, "Commercial name", "Dolby Digital Plus with Dolby Atmos")
+				if bitrate, ok := parseInt(stream.JSON["BitRate"]); ok && bitrate >= 1536000 {
+					stream.Fields = insertFieldBefore(stream.Fields, Field{Name: "Format profile", Value: "Blu-ray Disc"}, "Codec ID")
+				}
 				if stream.JSON == nil {
 					stream.JSON = map[string]string{}
 				}
 				// Official mediainfo keeps Format=E-AC-3 and uses Format_AdditionalFeatures=JOC.
+				stream.JSON["Format"] = "E-AC-3"
 				stream.JSON["Format_AdditionalFeatures"] = "JOC"
 			} else {
 				stream.Fields = setFieldValue(stream.Fields, "Commercial name", "Dolby Digital Plus")
@@ -1540,6 +1556,40 @@ func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAud
 			if ac3.hasJOCBed {
 				stream.Fields = insertFieldBefore(stream.Fields, Field{Name: "Bed channel count", Value: formatChannels(ac3.jocBedCount)}, before)
 				stream.Fields = insertFieldBefore(stream.Fields, Field{Name: "Bed channel configuration", Value: ac3.jocBedLayout}, before)
+			}
+		}
+		if probe.format == "E-AC-3" {
+			if ac3.hasDialnorm {
+				stream.Fields = append(stream.Fields, Field{Name: "Dialog Normalization", Value: formatDialnorm(ac3.dialnorm)})
+			}
+			if ac3.hasCompr {
+				stream.Fields = append(stream.Fields, Field{Name: "compr", Value: formatCompr(ac3.comprDB)})
+			}
+			if ac3.hasCmixlev {
+				stream.Fields = append(stream.Fields, Field{Name: "cmixlev", Value: fmt.Sprintf("%.1f dB", ac3.cmixlevDB)})
+			}
+			if ac3.hasSurmixlev {
+				stream.Fields = append(stream.Fields, Field{Name: "surmixlev", Value: fmt.Sprintf("%.0f dB", ac3.surmixlevDB)})
+			}
+			if ac3.hasDmixmod {
+				stream.Fields = append(stream.Fields, Field{Name: "dmixmod", Value: ac3.dmixmod})
+			}
+			if ac3.hasLtrtcmixlev {
+				stream.Fields = append(stream.Fields, Field{Name: "ltrtcmixlev", Value: fmt.Sprintf("%.1f dB", ac3.ltrtcmixlevDB)})
+			}
+			if ac3.hasLtrtsurmixlev {
+				stream.Fields = append(stream.Fields, Field{Name: "ltrtsurmixlev", Value: fmt.Sprintf("%.1f dB", ac3.ltrtsurmixlevDB)})
+			}
+			if ac3.hasLorocmixlev {
+				stream.Fields = append(stream.Fields, Field{Name: "lorocmixlev", Value: fmt.Sprintf("%.1f dB", ac3.lorocmixlevDB)})
+			}
+			if ac3.hasLorosurmixlev {
+				stream.Fields = append(stream.Fields, Field{Name: "lorosurmixlev", Value: fmt.Sprintf("%.1f dB", ac3.lorosurmixlevDB)})
+			}
+			if avg, minVal, maxVal, ok := ac3.dialnormStats(); ok {
+				stream.Fields = append(stream.Fields, Field{Name: "dialnorm_Average", Value: formatDialnorm(avg)})
+				stream.Fields = append(stream.Fields, Field{Name: "dialnorm_Minimum", Value: formatDialnorm(minVal)})
+				stream.Fields = append(stream.Fields, Field{Name: "dialnorm_Maximum", Value: formatDialnorm(maxVal)})
 			}
 		}
 		if stream.JSON == nil {
@@ -1580,6 +1630,27 @@ func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAud
 		}
 		if ac3.hasCompr {
 			extraFields = append(extraFields, jsonKV{Key: "compr", Val: fmt.Sprintf("%.2f", ac3.comprDB)})
+		}
+		if ac3.hasCmixlev {
+			extraFields = append(extraFields, jsonKV{Key: "cmixlev", Val: fmt.Sprintf("%.1f", ac3.cmixlevDB)})
+		}
+		if ac3.hasSurmixlev {
+			extraFields = append(extraFields, jsonKV{Key: "surmixlev", Val: fmt.Sprintf("%.0f", ac3.surmixlevDB)})
+		}
+		if ac3.hasDmixmod {
+			extraFields = append(extraFields, jsonKV{Key: "dmixmod", Val: ac3.dmixmod})
+		}
+		if ac3.hasLtrtcmixlev {
+			extraFields = append(extraFields, jsonKV{Key: "ltrtcmixlev", Val: fmt.Sprintf("%.1f", ac3.ltrtcmixlevDB)})
+		}
+		if ac3.hasLtrtsurmixlev {
+			extraFields = append(extraFields, jsonKV{Key: "ltrtsurmixlev", Val: fmt.Sprintf("%.1f", ac3.ltrtsurmixlevDB)})
+		}
+		if ac3.hasLorocmixlev {
+			extraFields = append(extraFields, jsonKV{Key: "lorocmixlev", Val: fmt.Sprintf("%.1f", ac3.lorocmixlevDB)})
+		}
+		if ac3.hasLorosurmixlev {
+			extraFields = append(extraFields, jsonKV{Key: "lorosurmixlev", Val: fmt.Sprintf("%.1f", ac3.lorosurmixlevDB)})
 		}
 		if ac3.acmod > 0 {
 			extraFields = append(extraFields, jsonKV{Key: "acmod", Val: strconv.Itoa(ac3.acmod)})
@@ -2062,19 +2133,32 @@ func probeMatroskaAudio(probes map[uint64]*matroskaAudioProbe, track uint64, pay
 		// For non-laced packets, try to parse multiple frames within the packet. This matches
 		// MediaInfoLib behavior when a Block contains more than one E-AC-3 syncframe.
 		parseOne := func(buf []byte) (ac3Info, int, bool) {
-			return parseEAC3FrameWithOptions(buf, probe.parseJOC)
+			if info, frameSize, ok := parseEAC3FrameWithOptions(buf, probe.parseJOC); ok {
+				return info, frameSize, true
+			}
+			return parseAC3Frame(buf)
 		}
 		if !packetAligned {
 			offset := 0
 			for framesParsed := 0; framesParsed < 8 && offset+7 <= len(payload); framesParsed++ {
 				// Parse consecutive syncframes only at the expected boundaries. Avoid resync-scanning
-				// inside payload bytes, which can over-count on random 0x0B77 occurrences.
+				// inside payload bytes for normal stats, which can over-count on random 0x0B77
+				// occurrences. While JOC probing is active, allow a bounded resync within the same
+				// Matroska packet: some E-AC-3 Atmos muxes carry padded substreams before the
+				// dependent/JOC syncframes.
 				sub := payload[offset:]
 				if len(sub) < 2 || sub[0] != 0x0B || sub[1] != 0x77 {
 					break
 				}
 				info, frameSize, ok := parseOne(sub)
 				if !ok {
+					if probe.parseJOC {
+						if sync := bytes.Index(payload[offset+2:], []byte{0x0B, 0x77}); sync >= 0 {
+							offset += 2 + sync
+							framesParsed--
+							continue
+						}
+					}
 					break
 				}
 				// If we didn't read enough bytes for the full frame (common with peek-limited reads),
@@ -2083,13 +2167,7 @@ func probeMatroskaAudio(probes map[uint64]*matroskaAudioProbe, track uint64, pay
 					break
 				}
 				frameEnd := offset + frameSize
-				// Validate that the next syncframe begins exactly at the computed boundary. This
-				// reduces false positives from random 0x0B77 occurrences.
-				if frameEnd+1 < len(payload) {
-					if payload[frameEnd] != 0x0B || payload[frameEnd+1] != 0x77 {
-						break
-					}
-				} else if packetBytes > 0 && int64(len(payload)) < packetBytes {
+				if frameEnd+1 >= len(payload) && packetBytes > 0 && int64(len(payload)) < packetBytes {
 					// We only peeked part of the packet: don't assume end-of-packet implies validity.
 					break
 				}
@@ -2109,6 +2187,22 @@ func probeMatroskaAudio(probes map[uint64]*matroskaAudioProbe, track uint64, pay
 				if probe.targetFrames > 0 && probe.info.framesMerged >= probe.targetFrames {
 					break
 				}
+				// Validate that the next syncframe begins exactly at the computed boundary for
+				// stats collection. JOC scans may resync over padding to find dependent/Atmos
+				// metadata in the same Matroska packet.
+				if frameEnd+1 < len(payload) {
+					if payload[frameEnd] == 0x0B && payload[frameEnd+1] == 0x77 {
+						offset = frameEnd
+						continue
+					}
+					if probe.parseJOC {
+						if sync := bytes.Index(payload[frameEnd:], []byte{0x0B, 0x77}); sync >= 0 {
+							offset = frameEnd + sync
+							continue
+						}
+					}
+				}
+				break
 			}
 			if probe.targetFrames > 0 && probe.info.framesMerged >= probe.targetFrames {
 				probe.collect = false

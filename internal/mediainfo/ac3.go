@@ -674,6 +674,11 @@ func parseEAC3FrameWithOptions(payload []byte, parseJOC bool) (ac3Info, int, boo
 			}
 		}
 	}
+	if parseEAC3MetadataExtension(&br, &info, int(strmtyp), int(numblkscod), int(acmod), lfeonVal == 1, int(fscod)) {
+		// Extension type A is Dolby's JOC/Atmos signal in E-AC-3 additional bitstream info.
+		info.hasJOC = true
+		info.hasJOCComplex = true
+	}
 
 	sampleRate := eac3SampleRate(int(fscod), int(fscod2))
 	spf := eac3SamplesPerFrame(int(numblkscod))
@@ -725,9 +730,9 @@ func parseEAC3FrameWithOptions(payload []byte, parseJOC bool) (ac3Info, int, boo
 		dynrngDB:      info.dynrngDB,
 		hasDynrng:     info.hasDynrng,
 		hasCompr:      info.hasCompr,
-		hasJOC:        jocMeta.hasJOC,
-		hasJOCComplex: jocMeta.hasJOCComplex,
-		jocComplexity: jocMeta.jocComplexity,
+		hasJOC:        info.hasJOC || jocMeta.hasJOC,
+		hasJOCComplex: info.hasJOCComplex || jocMeta.hasJOCComplex,
+		jocComplexity: firstNonZero(info.jocComplexity, jocMeta.jocComplexity),
 		jocObjects:    jocMeta.jocObjects,
 		hasJOCDyn:     jocMeta.hasJOCDyn,
 		jocDynObjects: jocMeta.jocDynObjects,
@@ -742,6 +747,219 @@ func parseEAC3FrameWithOptions(payload []byte, parseJOC bool) (ac3Info, int, boo
 		eac3ChannelMapChannel: info.eac3ChannelMapChannel,
 	}
 	return info, frameSize, true
+}
+
+// parseEAC3MetadataExtension advances over E-AC-3 metadata fields through addbsi
+// and records Dolby extension type A, which signals JOC/Atmos plus its complexity
+// index. It returns false when the extension is absent or the bounded frame data
+// ends before the field can be read.
+func parseEAC3MetadataExtension(br *ac3BitReader, info *ac3Info, strmtyp int, numblkscod int, acmod int, lfeon bool, fscod int) bool {
+	if br == nil || info == nil {
+		return false
+	}
+	if mixmdate, ok := br.readBits(1); !ok {
+		return false
+	} else if mixmdate == 1 {
+		if acmod > 2 {
+			if !br.skipBits(2) {
+				return false
+			}
+			if acmod&1 != 0 {
+				if !br.skipBits(6) {
+					return false
+				}
+			}
+			if acmod&4 != 0 {
+				if !br.skipBits(6) {
+					return false
+				}
+			}
+		}
+		if lfeon {
+			lfeMixLevelExists, ok := br.readBits(1)
+			if !ok {
+				return false
+			}
+			if lfeMixLevelExists == 1 && !br.skipBits(5) {
+				return false
+			}
+		}
+		if strmtyp == 0 {
+			for i := 0; i < eac3DialnormFieldCount(acmod); i++ {
+				programScaleExists, ok := br.readBits(1)
+				if !ok {
+					return false
+				}
+				if programScaleExists == 1 && !br.skipBits(6) {
+					return false
+				}
+			}
+			externalScaleExists, ok := br.readBits(1)
+			if !ok {
+				return false
+			}
+			if externalScaleExists == 1 && !br.skipBits(6) {
+				return false
+			}
+			mixData, ok := br.readBits(2)
+			if !ok {
+				return false
+			}
+			switch mixData {
+			case 1:
+				if !br.skipBits(5) {
+					return false
+				}
+			case 2:
+				if !br.skipBits(12) {
+					return false
+				}
+			case 3:
+				size, ok := br.readBits(5)
+				if !ok || !br.skipBits((int(size)+2)*8) {
+					return false
+				}
+			}
+			if acmod < 2 {
+				for i := 0; i < eac3DialnormFieldCount(acmod); i++ {
+					panInfoExists, ok := br.readBits(1)
+					if !ok {
+						return false
+					}
+					if panInfoExists == 1 && !br.skipBits(14) {
+						return false
+					}
+				}
+			}
+			mixConfigExists, ok := br.readBits(1)
+			if !ok {
+				return false
+			}
+			if mixConfigExists == 1 {
+				blocks := eac3BlockCount(numblkscod)
+				for i := 0; i < blocks; i++ {
+					if blocks == 1 {
+						if !br.skipBits(5) {
+							return false
+						}
+						continue
+					}
+					blockMixExists, ok := br.readBits(1)
+					if !ok {
+						return false
+					}
+					if blockMixExists == 1 && !br.skipBits(5) {
+						return false
+					}
+				}
+			}
+		}
+	}
+	if infomdate, ok := br.readBits(1); !ok {
+		return false
+	} else if infomdate == 1 {
+		bsmod, ok := br.readBits(3)
+		if !ok || !br.skipBits(2) {
+			return false
+		}
+		info.bsmod = int(bsmod)
+		info.serviceKind = ac3ServiceKind(int(bsmod))
+		if acmod == 2 && !br.skipBits(4) {
+			return false
+		}
+		if acmod >= 6 && !br.skipBits(2) {
+			return false
+		}
+		for i := 0; i < eac3DialnormFieldCount(acmod); i++ {
+			audioProdInfoExists, ok := br.readBits(1)
+			if !ok {
+				return false
+			}
+			if audioProdInfoExists == 1 && !br.skipBits(8) {
+				return false
+			}
+		}
+		if fscod != 3 && !br.skipBits(1) {
+			return false
+		}
+	}
+	if strmtyp == 0 && numblkscod != 3 {
+		if !br.skipBits(1) {
+			return false
+		}
+	}
+	if strmtyp == 2 && numblkscod == 3 {
+		if !br.skipBits(6) {
+			return false
+		}
+	} else if strmtyp == 2 {
+		convertExists, ok := br.readBits(1)
+		if !ok {
+			return false
+		}
+		if convertExists == 1 && !br.skipBits(6) {
+			return false
+		}
+	}
+	addbsie, ok := br.readBits(1)
+	if !ok || addbsie == 0 {
+		return false
+	}
+	addbsil, ok := br.readBits(6)
+	if !ok {
+		return false
+	}
+	additionalBytes := int(addbsil) + 1
+	for i := 0; i < additionalBytes; i++ {
+		if i == 0 {
+			if !br.skipBits(7) {
+				return false
+			}
+			flag, ok := br.readBits(1)
+			if !ok {
+				return false
+			}
+			if flag == 1 {
+				complexity, ok := br.readBits(8)
+				if !ok {
+					return false
+				}
+				info.jocComplexity = int(complexity)
+				return true
+			}
+			continue
+		}
+		if !br.skipBits(8) {
+			return false
+		}
+	}
+	return false
+}
+
+// eac3BlockCount maps the E-AC-3 numblkscod field to audio blocks per frame.
+func eac3BlockCount(numblkscod int) int {
+	switch numblkscod {
+	case 0:
+		return 1
+	case 1:
+		return 2
+	case 2:
+		return 3
+	case 3:
+		return 6
+	default:
+		return 0
+	}
+}
+
+// firstNonZero returns the first non-zero value in priority order.
+func firstNonZero(values ...int) int {
+	for _, v := range values {
+		if v != 0 {
+			return v
+		}
+	}
+	return 0
 }
 
 // eac3DialnormFieldCount returns how many dialog-normalization/compression field groups

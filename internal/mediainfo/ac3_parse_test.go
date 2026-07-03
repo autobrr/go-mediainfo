@@ -188,6 +188,42 @@ func TestParseEAC3DependentFrame_ChannelMap(t *testing.T) {
 	}
 }
 
+func TestParseEAC3FrameWithOptions_AddBSITypeAAtmos(t *testing.T) {
+	const frameSize = 32
+	buf := make([]byte, frameSize)
+	bw := ac3BitWriter{buf: buf}
+
+	bw.writeBits(0x0B77, 16)          // syncword
+	bw.writeBits(0, 2)                // independent stream
+	bw.writeBits(0, 3)                // substreamid
+	bw.writeBits((frameSize/2)-1, 11) // frmsiz
+	bw.writeBits(0, 2)                // fscod: 48 kHz
+	bw.writeBits(3, 2)                // numblkscod: 6 blocks / 1536 samples
+	bw.writeBits(2, 3)                // acmod
+	bw.writeBits(0, 1)                // lfeon
+	bw.writeBits(16, 5)               // bsid
+	bw.writeBits(25, 5)               // dialnorm
+	bw.writeBits(0, 1)                // compre
+	bw.writeBits(0, 1)                // mixmdate
+	bw.writeBits(0, 1)                // infomdate
+	bw.writeBits(1, 1)                // addbsie
+	bw.writeBits(1, 6)                // addbsil: two bytes follow
+	bw.writeBits(0, 7)                // reserved/type-A prefix
+	bw.writeBits(1, 1)                // flag_ec3_extension_type_a
+	bw.writeBits(16, 8)               // complexity_index_type_a
+
+	info, gotSize, ok := parseEAC3FrameWithOptions(buf, false)
+	if !ok {
+		t.Fatal("parseEAC3FrameWithOptions returned ok=false")
+	}
+	if gotSize != frameSize {
+		t.Fatalf("frameSize mismatch: got=%d want=%d", gotSize, frameSize)
+	}
+	if !info.hasJOC || !info.hasJOCComplex || info.jocComplexity != 16 {
+		t.Fatalf("JOC metadata mismatch: hasJOC=%v hasComplex=%v complexity=%d", info.hasJOC, info.hasJOCComplex, info.jocComplexity)
+	}
+}
+
 func buildEMDFJOCPayload() []byte {
 	body := make([]byte, 6)
 	bw := ac3BitWriter{buf: body}

@@ -327,7 +327,9 @@ func ParseMatroskaWithOptions(r io.ReaderAt, size int64, opts AnalyzeOptions) (M
 						headerStrip: stream.mkvHeaderStripBytes,
 					}
 					if format == "E-AC-3" {
-						probe.parseJOC = !stream.eac3Dec3.parsed || stream.eac3Dec3.hasJOC || stream.eac3Dec3.hasJOCComplex
+						// dec3 can omit JOC signaling on Atmos Matroska tracks; keep a bounded
+						// bitstream probe so dependent EMDF/JOC metadata still wins.
+						probe.parseJOC = true
 						if stream.eac3Dec3.hasJOCComplex {
 							probe.info.hasJOCComplex = true
 							probe.info.jocComplexity = stream.eac3Dec3.jocComplexity
@@ -342,9 +344,6 @@ func ParseMatroskaWithOptions(r io.ReaderAt, size int64, opts AnalyzeOptions) (M
 							probe.targetPackets = matroskaEAC3QuickProbePackets
 							if probe.parseJOC {
 								probe.jocStopPackets = matroskaEAC3QuickProbePacketsJOC
-							}
-							if stream.eac3Dec3.parsed && !stream.eac3Dec3.hasJOC && !stream.eac3Dec3.hasJOCComplex {
-								probe.parseJOC = false
 							}
 						}
 					}
