@@ -3,6 +3,7 @@ package mediainfo
 import (
 	"bytes"
 	"math"
+	"strings"
 	"testing"
 )
 
@@ -197,7 +198,7 @@ func TestApplyMatroskaAudioProbes_EAC3JOCTextMetadata(t *testing.T) {
 	if got := stream.JSON["Format_AdditionalFeatures"]; got != "JOC" {
 		t.Fatalf("JSON Format_AdditionalFeatures=%q, want JOC", got)
 	}
-	if got := stream.JSONRaw["extra"]; !bytes.Contains([]byte(got), []byte(`"dmixmod":"Lo/Ro"`)) {
+	if got := stream.JSONRaw["extra"]; !strings.Contains(got, `"dmixmod":"Lo/Ro"`) {
 		t.Fatalf("extra missing dmixmod: %s", got)
 	}
 }

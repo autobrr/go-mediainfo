@@ -205,7 +205,12 @@ func TestParseEAC3FrameWithOptions_AddBSITypeAAtmos(t *testing.T) {
 	bw.writeBits(25, 5)               // dialnorm
 	bw.writeBits(0, 1)                // compre
 	bw.writeBits(0, 1)                // mixmdate
-	bw.writeBits(0, 1)                // infomdate
+	bw.writeBits(1, 1)                // infomdate
+	bw.writeBits(5, 3)                // bsmod: Commentary
+	bw.writeBits(0, 2)                // copyright/original bits
+	bw.writeBits(0, 4)                // acmod=2 info metadata
+	bw.writeBits(0, 1)                // no audio production info
+	bw.writeBits(0, 1)                // source sample rate code
 	bw.writeBits(1, 1)                // addbsie
 	bw.writeBits(1, 6)                // addbsil: two bytes follow
 	bw.writeBits(0, 7)                // reserved/type-A prefix
@@ -221,6 +226,19 @@ func TestParseEAC3FrameWithOptions_AddBSITypeAAtmos(t *testing.T) {
 	}
 	if !info.hasJOC || !info.hasJOCComplex || info.jocComplexity != 16 {
 		t.Fatalf("JOC metadata mismatch: hasJOC=%v hasComplex=%v complexity=%d", info.hasJOC, info.hasJOCComplex, info.jocComplexity)
+	}
+	if info.bsmod != 5 || info.serviceKind != "Commentary" {
+		t.Fatalf("service kind mismatch: bsmod=%d serviceKind=%q", info.bsmod, info.serviceKind)
+	}
+	var merged ac3Info
+	merged.mergeFrame(info)
+	if merged.bsmod != 5 || merged.serviceKind != "Commentary" {
+		t.Fatalf("merged service kind mismatch: bsmod=%d serviceKind=%q", merged.bsmod, merged.serviceKind)
+	}
+	var base ac3Info
+	base.mergeFrameBase(info)
+	if base.bsmod != 5 || base.serviceKind != "Commentary" {
+		t.Fatalf("base service kind mismatch: bsmod=%d serviceKind=%q", base.bsmod, base.serviceKind)
 	}
 }
 
