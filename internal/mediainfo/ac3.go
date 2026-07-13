@@ -16,6 +16,7 @@ type ac3Info struct {
 	bsmod        int
 	acmod        int
 	lfeon        int
+	hasLFE       bool
 	dsurmod      int
 	hasDsurmod   bool
 	dsurexmod    int
@@ -99,6 +100,7 @@ type ac3Info struct {
 	hasEAC3Dependent      bool
 	dependentACMod        int
 	dependentLFE          int
+	hasDependentACMod     bool
 	eac3ChannelMap        uint16
 	hasEAC3ChannelMap     bool
 	eac3ChannelMapLayout  string
@@ -520,6 +522,7 @@ func parseAC3Frame(payload []byte) (ac3Info, int, bool) {
 		bsmod:            int(bsmod),
 		acmod:            int(acmod),
 		lfeon:            int(lfeonVal),
+		hasLFE:           true,
 		dsurmod:          info.dsurmod,
 		hasDsurmod:       info.hasDsurmod,
 		dsurexmod:        info.dsurexmod,
@@ -732,6 +735,7 @@ func parseEAC3FrameWithOptions(payload []byte, parseJOC bool) (ac3Info, int, boo
 		dsurmod:       info.dsurmod,
 		hasDsurmod:    info.hasDsurmod,
 		lfeon:         int(lfeonVal),
+		hasLFE:        true,
 		serviceKind:   ac3ServiceKind(info.bsmod),
 		frameRate:     frameRate,
 		spf:           spf,
@@ -781,6 +785,7 @@ func parseEAC3FrameWithOptions(payload []byte, parseJOC bool) (ac3Info, int, boo
 		hasMixlevel:           info.hasMixlevel,
 		roomtyp:               info.roomtyp,
 		hasRoomtyp:            info.hasRoomtyp,
+		hasAdconvtyp:          info.hasAdconvtyp,
 	}
 	return info, frameSize, true
 }
@@ -1233,6 +1238,7 @@ func (info *ac3Info) mergeFrame(frame ac3Info) {
 		info.layout = frame.layout
 		info.acmod = frame.acmod
 		info.lfeon = frame.lfeon
+		info.hasLFE = true
 		info.bsmod = frame.bsmod
 		info.serviceKind = frame.serviceKind
 	}
@@ -1240,9 +1246,10 @@ func (info *ac3Info) mergeFrame(frame ac3Info) {
 		info.hasEAC3Dependent = true
 		frame.dynrngParsed = true
 		frame.dynrngCode = 0
-		if info.dependentACMod == 0 {
+		if !info.hasDependentACMod {
 			info.dependentACMod = frame.acmod
 			info.dependentLFE = frame.lfeon
+			info.hasDependentACMod = true
 		}
 	}
 	if info.framesMerged == 0 {
@@ -1296,8 +1303,9 @@ func (info *ac3Info) mergeFrame(frame ac3Info) {
 	if frame.hasAdconvtyp {
 		info.hasAdconvtyp = true
 	}
-	if frame.lfeon > 0 && info.lfeon == 0 {
+	if frame.hasLFE && !info.hasLFE {
 		info.lfeon = frame.lfeon
+		info.hasLFE = true
 	}
 	if frame.serviceKind != "" && info.serviceKind == "" {
 		info.serviceKind = frame.serviceKind
@@ -1477,8 +1485,9 @@ func (info *ac3Info) mergeFrameBase(frame ac3Info) {
 	if frame.hasAdconvtyp {
 		info.hasAdconvtyp = true
 	}
-	if frame.lfeon > 0 && info.lfeon == 0 {
+	if frame.hasLFE && !info.hasLFE {
 		info.lfeon = frame.lfeon
+		info.hasLFE = true
 	}
 	if frame.serviceKind != "" && info.serviceKind == "" {
 		info.serviceKind = frame.serviceKind

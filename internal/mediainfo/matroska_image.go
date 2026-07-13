@@ -142,12 +142,13 @@ func parsePNGAttachment(data []byte) (width, height, depth int, gamma string, ok
 		return 0, 0, 0, "", false
 	}
 	for pos := 8; pos+12 <= len(data); {
-		length := int(binary.BigEndian.Uint32(data[pos : pos+4]))
-		if length < 0 || pos+12+length > len(data) {
+		length := uint64(binary.BigEndian.Uint32(data[pos : pos+4]))
+		if length > uint64(len(data)-pos-12) {
 			break
 		}
+		chunkLen := int(length)
 		kind := string(data[pos+4 : pos+8])
-		payload := data[pos+8 : pos+8+length]
+		payload := data[pos+8 : pos+8+chunkLen]
 		switch kind {
 		case "IHDR":
 			if len(payload) >= 13 {
@@ -162,7 +163,7 @@ func parsePNGAttachment(data []byte) (width, height, depth int, gamma string, ok
 				gamma = strings.TrimRight(strings.TrimRight(fmt.Sprintf("%.3f", value), "0"), ".")
 			}
 		}
-		pos += 12 + length
+		pos += 12 + chunkLen
 	}
 	return width, height, depth, gamma, ok
 }

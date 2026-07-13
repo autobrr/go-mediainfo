@@ -42,6 +42,47 @@ func TestNormalizeMatroskaDisplayAspectRatioUsesPixelAspectRatio(t *testing.T) {
 	}
 }
 
+func TestNormalizeMatroskaDisplayAspectRatioBranchMatrix(t *testing.T) {
+	tests := []struct {
+		name   string
+		fields []jsonKV
+		want   string
+	}{
+		{
+			name: "active format preserves declared ratio",
+			fields: []jsonKV{{Key: "Format", Val: "AVC"}, {Key: "Width", Val: "1920"}, {Key: "Height", Val: "1080"},
+				{Key: "PixelAspectRatio", Val: "0.999"}, {Key: "DisplayAspectRatio", Val: "2.350"}, {Key: "ActiveFormatDescription", Val: "8"}},
+			want: "2.350",
+		},
+		{
+			name: "HEVC container ratio preserved",
+			fields: []jsonKV{{Key: "Format", Val: "HEVC"}, {Key: "Width", Val: "1920"}, {Key: "Height", Val: "1080"},
+				{Key: "PixelAspectRatio", Val: "1.000"}, {Key: "DisplayAspectRatio", Val: "2.000"}},
+			want: "2.000",
+		},
+		{
+			name: "PAL MPEG video special case",
+			fields: []jsonKV{{Key: "Format", Val: "MPEG Video"}, {Key: "Width", Val: "720"}, {Key: "Height", Val: "576"},
+				{Key: "PixelAspectRatio", Val: "1.067"}},
+			want: "1.333",
+		},
+		{
+			name: "near square AVC snaps to square",
+			fields: []jsonKV{{Key: "Format", Val: "AVC"}, {Key: "Width", Val: "1920"}, {Key: "Height", Val: "1080"},
+				{Key: "PixelAspectRatio", Val: "0.999"}},
+			want: "1.778",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := normalizeContainerComputedJSON(StreamVideo, append([]jsonKV(nil), tt.fields...), "Matroska")
+			if value := jsonFieldValue(got, "DisplayAspectRatio"); value != tt.want {
+				t.Fatalf("DisplayAspectRatio=%q want %q", value, tt.want)
+			}
+		})
+	}
+}
+
 func TestSortJSONAudioFieldsPlacesTitleBeforeLanguageAndExtra(t *testing.T) {
 	fields := sortJSONFields(StreamAudio, []jsonKV{
 		{Key: "extra", Val: `{}`},

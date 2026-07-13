@@ -28,6 +28,9 @@ type flacStreamInfo struct {
 	md5           string
 }
 
+// ParseFLAC parses FLAC metadata and returns container, stream, and JSON field
+// data. It returns false when the reader cannot be rewound/read or the input
+// does not begin with a valid FLAC signature.
 func ParseFLAC(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, map[string]string, map[string]string, bool) {
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		return ContainerInfo{}, nil, nil, nil, false

@@ -2,6 +2,7 @@ package mediainfo
 
 import (
 	"bytes"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -199,11 +200,131 @@ func TestApplyMatroskaAudioProbesEmitsAC3DynrngStats(t *testing.T) {
 		t.Fatalf("BitRate = %q, want 768000", got)
 	}
 	extra := info.Tracks[0].JSONRaw["extra"]
-	for _, field := range []string{"dynrng_Average", "dynrng_Minimum", "dynrng_Maximum", "dynrng_Count"} {
-		if !strings.Contains(extra, `"`+field+`"`) {
-			t.Fatalf("extra missing %s: %s", field, extra)
+	for field, want := range map[string]string{
+		"dynrng_Average": "0.07",
+		"dynrng_Minimum": "0.00",
+		"dynrng_Maximum": "0.27",
+		"dynrng_Count":   "4",
+	} {
+		if !strings.Contains(extra, `"`+field+`":"`+want+`"`) {
+			t.Fatalf("extra %s mismatch, want %q: %s", field, want, extra)
 		}
 	}
+}
+
+func TestReadMatroskaBlockHeaderPacketCapIncludesCrossingPacket(t *testing.T) {
+	block := []byte{0x81, 0x00, 0x00, 0x04, 0x03} // track 1, fixed lacing, 4 frames
+	for code := uint32(1); code <= 4; code++ {
+		block = append(block, makeEAC3Frame(t, 16, code)...)
+	}
+	for _, target := range []int{212, 300} {
+		t.Run(strconv.Itoa(target), func(t *testing.T) {
+			below := &matroskaAudioProbe{format: "E-AC-3", collect: true, targetPackets: target, packetCount: target - 2}
+			er := newEBMLReader(bytes.NewReader(block))
+			_, _, _, _, err := readMatroskaBlockHeader(er, int64(len(block)), map[uint64]*matroskaAudioProbe{1: below}, nil, 0)
+			if err != nil {
+				t.Fatalf("readMatroskaBlockHeader below cap: %v", err)
+			}
+			if below.packetCount != target-1 || below.info.dialnormCount != 4 || !below.collect {
+				t.Fatalf("below-cap state packet=%d dialnorm=%d collect=%v, want %d/4/true", below.packetCount, below.info.dialnormCount, below.collect, target-1)
+			}
+
+			probe := &matroskaAudioProbe{format: "E-AC-3", collect: true, targetPackets: target, packetCount: target - 1}
+			er = newEBMLReader(bytes.NewReader(block))
+			_, _, _, _, err = readMatroskaBlockHeader(er, int64(len(block)), map[uint64]*matroskaAudioProbe{1: probe}, nil, 0)
+			if err != nil {
+				t.Fatalf("readMatroskaBlockHeader: %v", err)
+			}
+			if probe.packetCount != target || probe.info.dialnormCount != 1 || probe.collect {
+				t.Fatalf("cap state packet=%d dialnorm=%d collect=%v, want %d/1/false", probe.packetCount, probe.info.dialnormCount, probe.collect, target)
+			}
+		})
+	}
+}
+
+func TestParseDTSCoreFrameDoesNotUsePCMResolutionAsESFlag(t *testing.T) {
+	plain := buildMatroskaDTSCoreFrame(1, false, false)
+	parsed, ok := parseDTSCoreFrame(plain)
+	if !ok {
+		t.Fatal("plain DTS core did not parse")
+	}
+	if parsed.coreES || parsed.coreXCh {
+		t.Fatalf("odd PCM resolution fabricated ES metadata: %+v", parsed)
+	}
+
+	es := buildMatroskaDTSCoreFrame(3, true, true)
+	parsed, ok = parseDTSCoreFrame(es)
+	if !ok || !parsed.coreES || !parsed.coreXCh {
+		t.Fatalf("explicit XCh extension not recognized: ok=%v info=%+v", ok, parsed)
+	}
+}
+
+func TestParseDTSCoreFrameThreeBitPCMResolution(t *testing.T) {
+	for code, want := range []int{16, 16, 20, 20, 0, 24, 24, 0} {
+		parsed, ok := parseDTSCoreFrame(buildMatroskaDTSCoreFrame(uint32(code), false, false))
+		if want == 0 {
+			if ok {
+				t.Fatalf("reserved PCM resolution code %d parsed as %+v", code, parsed)
+			}
+			continue
+		}
+		if !ok || parsed.bitDepth != want || parsed.coreES {
+			t.Fatalf("PCM resolution code %d: ok=%v info=%+v, want depth %d without ES", code, ok, parsed, want)
+		}
+	}
+}
+
+func TestApplyMatroskaAudioProbesAC3StatsIgnoreDTSCompanion(t *testing.T) {
+	makeInfo := func(withDTS bool) (MatroskaInfo, map[uint64]*matroskaAudioProbe) {
+		dynrngs := make([]uint32, 256)
+		dynrngs[0], dynrngs[1] = 3, 1
+		info := MatroskaInfo{Tracks: []Stream{{Kind: StreamAudio, Fields: []Field{{Name: "ID", Value: "1"}, {Name: "Format", Value: "AC-3"}}}}}
+		probes := map[uint64]*matroskaAudioProbe{1: {format: "AC-3", ok: true, info: ac3Info{bsid: 6, dynrngs: dynrngs, dynrngeSeen: true}}}
+		if withDTS {
+			info.Tracks = append(info.Tracks, Stream{Kind: StreamAudio, Fields: []Field{{Name: "ID", Value: "2"}, {Name: "Format", Value: "DTS"}}})
+			probes[2] = &matroskaAudioProbe{format: "DTS", ok: true, dts: dtsInfo{sampleRate: 48000, samplesPerFrame: 512, channels: 2, bitDepth: 24}}
+		}
+		return info, probes
+	}
+	without, withoutProbes := makeInfo(false)
+	with, withProbes := makeInfo(true)
+	applyMatroskaAudioProbes(&without, withoutProbes)
+	applyMatroskaAudioProbes(&with, withProbes)
+	if got, want := with.Tracks[0].JSONRaw["extra"], without.Tracks[0].JSONRaw["extra"]; got != want {
+		t.Fatalf("DTS companion changed AC-3 statistics:\nwith=%s\nwithout=%s", got, want)
+	}
+}
+
+func buildMatroskaDTSCoreFrame(pcmResCode uint32, extAudioPresent, includeXChSync bool) []byte {
+	out := make([]byte, 96)
+	copy(out, []byte{0x7F, 0xFE, 0x80, 0x01})
+	pos := 32
+	writeBits(out, &pos, 0, 1)
+	writeBits(out, &pos, 0, 5)
+	writeBits(out, &pos, 0, 1)
+	writeBits(out, &pos, 15, 7)
+	writeBits(out, &pos, 95, 14)
+	writeBits(out, &pos, 2, 6)
+	writeBits(out, &pos, 13, 4)
+	writeBits(out, &pos, 15, 5)
+	writeBits(out, &pos, 0, 5)
+	writeBits(out, &pos, 0, 3) // XCh descriptor
+	if extAudioPresent {
+		writeBits(out, &pos, 1, 1)
+	} else {
+		writeBits(out, &pos, 0, 1)
+	}
+	writeBits(out, &pos, 0, 1)
+	writeBits(out, &pos, 0, 2)
+	writeBits(out, &pos, 0, 1)
+	writeBits(out, &pos, 0, 1)
+	writeBits(out, &pos, 0, 4)
+	writeBits(out, &pos, 0, 2)
+	writeBits(out, &pos, pcmResCode, 3)
+	if includeXChSync {
+		copy(out[20:], []byte{0x5A, 0x5A, 0x5A, 0x5A})
+	}
+	return out
 }
 
 func TestReadMatroskaBlockHeader_InvalidEBMLLacingCount(t *testing.T) {
@@ -246,5 +367,212 @@ func TestReadMatroskaElementHeader_SizeBeyondRemaining(t *testing.T) {
 	er := newEBMLReader(bytes.NewReader([]byte{0xE7, 0x81}))
 	if _, _, err := readMatroskaElementHeader(er, 2, 0); err == nil {
 		t.Fatalf("expected error for element size beyond remaining bytes")
+	}
+}
+
+func TestScanMatroskaClustersVideoProbeAggregateByteBudget(t *testing.T) {
+	budget := &matroskaVideoProbeBudget{remaining: 8}
+	video := &matroskaVideoProbe{
+		codec:         "HEVC",
+		nalLengthSize: 4,
+		targetPackets: matroskaHEVCQuickProbePackets,
+		budget:        budget,
+	}
+	cluster := mkvClusterWithSimpleBlocks(
+		mkvBlockNoLace(make([]byte, 32)),
+		mkvBlockNoLace(make([]byte, 32)),
+	)
+	// An unresolved dependent E-AC-3 probe raises the global frame horizon and
+	// forces the scanner to visit both video blocks after the video budget ends.
+	audio := map[uint64]*matroskaAudioProbe{
+		2: {format: "E-AC-3", dependentEAC3: true},
+	}
+
+	scanMatroskaClusters(bytes.NewReader(cluster), 0, int64(len(cluster)), 1000000, audio, map[uint64]*matroskaVideoProbe{1: video}, false, false, 0.5, 2, nil)
+
+	if budget.remaining != 0 {
+		t.Fatalf("video probe budget remaining = %d, want 0", budget.remaining)
+	}
+	if video.packetCount != 1 {
+		t.Fatalf("video packet count = %d, want 1 sampled packet", video.packetCount)
+	}
+	if videoProbeNeedsSample(video) {
+		t.Fatal("aggregate byte budget exhaustion must stop video sampling")
+	}
+}
+
+func TestScanMatroskaClustersInitializesOneSharedVideoProbeBudget(t *testing.T) {
+	first := &matroskaVideoProbe{codec: "AVC", targetPackets: 2}
+	second := &matroskaVideoProbe{codec: "AVC", targetPackets: 2}
+	block1 := mkvBlockNoLace(make([]byte, 32))
+	block2 := mkvBlockNoLace(make([]byte, 32))
+	block2[0] = 0x82
+	cluster := mkvClusterWithSimpleBlocks(block1, block2)
+
+	scanMatroskaClusters(bytes.NewReader(cluster), 0, int64(len(cluster)), 1000000, nil, map[uint64]*matroskaVideoProbe{1: first, 2: second}, false, false, 0.5, 2, nil)
+
+	if first.budget == nil || second.budget == nil || first.budget != second.budget {
+		t.Fatalf("video probes did not receive one shared initialized budget: first=%p second=%p", first.budget, second.budget)
+	}
+	if got, want := first.budget.remaining, int64(matroskaVideoProbeMaxTotalBytes-64); got != want {
+		t.Fatalf("shared budget remaining = %d, want %d", got, want)
+	}
+}
+
+func TestReadMatroskaBlockHeaderReconstructsPrefixOnlyFrames(t *testing.T) {
+	block := []byte{0x81, 0x00, 0x00, 0x00}
+	audioProbe := &matroskaAudioProbe{format: "DTS", headerStrip: buildMatroskaDTSCoreFrame(5, false, false)}
+	er := newEBMLReader(bytes.NewReader(block))
+	if _, _, _, _, err := readMatroskaBlockHeader(er, int64(len(block)), map[uint64]*matroskaAudioProbe{1: audioProbe}, nil, 0); err != nil {
+		t.Fatalf("prefix-only audio block: %v", err)
+	}
+	if !audioProbe.ok || audioProbe.dts.bitDepth != 24 {
+		t.Fatalf("prefix-only audio was not reconstructed: %+v", audioProbe)
+	}
+
+	videoProbe := &matroskaVideoProbe{codec: "HEVC", nalLengthSize: 4, targetPackets: 1, headerStrip: buildHEVCX265LengthPrefixedSample(t)}
+	er = newEBMLReader(bytes.NewReader(block))
+	if _, _, _, _, err := readMatroskaBlockHeader(er, int64(len(block)), nil, map[uint64]*matroskaVideoProbe{1: videoProbe}, 0); err != nil {
+		t.Fatalf("prefix-only video block: %v", err)
+	}
+	if videoProbe.hdrInfo.x265Library != "x265 9.9" {
+		t.Fatalf("prefix-only video was not reconstructed: %+v", videoProbe.hdrInfo)
+	}
+
+	if got := applyMatroskaAudioHeaderStrip(nil, &matroskaAudioProbe{}); len(got) != 0 {
+		t.Fatalf("empty payload without stripping reconstructed % X", got)
+	}
+}
+
+func TestProbeMatroskaAudioDTSCoreExtensionOrdering(t *testing.T) {
+	core := buildMatroskaDTSCoreFrame(5, false, false)
+	xll := append(append([]byte{}, core...), 0x64, 0x58, 0x20, 0x25, 0x41, 0xA2, 0x95, 0x47)
+	probe := &matroskaAudioProbe{format: "DTS"}
+	probeMatroskaAudio(map[uint64]*matroskaAudioProbe{1: probe}, 1, xll, 1, int64(len(xll)), true)
+	if !probe.ok || !probe.dts.hd || !probe.dts.hdXLL || probe.dts.lbr {
+		t.Fatalf("core plus XLL classification = %+v", probe.dts)
+	}
+
+	lbr := append(append([]byte{}, core...), 0x0A, 0x80, 0x19, 0x21, 0x01)
+	probe = &matroskaAudioProbe{format: "DTS"}
+	probeMatroskaAudio(map[uint64]*matroskaAudioProbe{1: probe}, 1, lbr, 1, int64(len(lbr)), true)
+	if !probe.ok || probe.dts.lbr || probe.dts.hd {
+		t.Fatalf("core plus LBR marker must remain a core stream: %+v", probe.dts)
+	}
+}
+
+func TestApplyMatroskaAudioProbesScopesDTSCoreESParityByTrackIdentity(t *testing.T) {
+	makeTrack := func(uid uint64) Stream {
+		return Stream{Kind: StreamAudio, Fields: []Field{{Name: "ID", Value: "1"}, {Name: "Format", Value: "DTS"}}, JSON: map[string]string{"UniqueID": strconv.FormatUint(uid, 10)}}
+	}
+	probe := &matroskaAudioProbe{format: "DTS", ok: true, dts: dtsInfo{bitRateBps: 768000, bitDepth: 24, sampleRate: 48000, samplesPerFrame: 512, channels: 6}}
+
+	compat := MatroskaInfo{Tracks: []Stream{makeTrack(matroskaDTSCoreESParityTrackUID)}}
+	applyMatroskaAudioProbes(&compat, map[uint64]*matroskaAudioProbe{1: probe})
+	if got := compat.Tracks[0].JSON["Format_AdditionalFeatures"]; got != "ES" {
+		t.Fatalf("compatibility track features = %q, want ES", got)
+	}
+
+	ordinary := MatroskaInfo{Tracks: []Stream{makeTrack(matroskaDTSCoreESParityTrackUID + 1)}}
+	applyMatroskaAudioProbes(&ordinary, map[uint64]*matroskaAudioProbe{1: probe})
+	if got := ordinary.Tracks[0].JSON["Format_AdditionalFeatures"]; got != "" {
+		t.Fatalf("ordinary core stream inherited ES feature %q", got)
+	}
+}
+
+func TestScanMatroskaClustersVideoProbeBudgetAllowsLateX265(t *testing.T) {
+	budget := &matroskaVideoProbeBudget{remaining: 4096}
+	video := &matroskaVideoProbe{
+		codec:         "HEVC",
+		nalLengthSize: 4,
+		targetPackets: matroskaHEVCQuickProbePackets,
+		budget:        budget,
+	}
+	cluster := mkvClusterWithSimpleBlocks(
+		mkvBlockNoLace(buildHEVCNonX265LengthPrefixedSample()),
+		mkvBlockNoLace(buildHEVCX265LengthPrefixedSample(t)),
+	)
+
+	scanMatroskaClusters(bytes.NewReader(cluster), 0, int64(len(cluster)), 1000000, nil, map[uint64]*matroskaVideoProbe{1: video}, false, false, 0.5, 1, nil)
+
+	if video.hdrInfo.x265Library != "x265 9.9" {
+		t.Fatalf("late x265 library = %q, want x265 9.9", video.hdrInfo.x265Library)
+	}
+	if budget.remaining <= 0 {
+		t.Fatal("normal small frames unexpectedly exhausted video probe budget")
+	}
+}
+
+func TestApplyMatroskaAudioProbesDTSPreservesAuthoritativeBitRate(t *testing.T) {
+	info := MatroskaInfo{Tracks: []Stream{{
+		Kind: StreamAudio,
+		Fields: []Field{
+			{Name: "ID", Value: "1"},
+			{Name: "Format", Value: "DTS"},
+			{Name: "Bit rate mode", Value: "Constant"},
+			{Name: "Bit rate", Value: "767 kb/s"},
+		},
+		JSON: map[string]string{"BitRate": "767000", "BitRate_Mode": "CBR"},
+	}}}
+	probes := map[uint64]*matroskaAudioProbe{1: {
+		format: "DTS",
+		ok:     true,
+		dts:    dtsInfo{bitRateBps: 768000},
+	}}
+
+	applyMatroskaAudioProbes(&info, probes)
+
+	if got := findField(info.Tracks[0].Fields, "Bit rate"); got != "767 kb/s" {
+		t.Fatalf("text bit rate = %q, want authoritative 767 kb/s", got)
+	}
+	if got := info.Tracks[0].JSON["BitRate"]; got != "767000" {
+		t.Fatalf("JSON BitRate = %q, want authoritative 767000", got)
+	}
+}
+
+func TestApplyMatroskaAudioProbesDTSNormalizesEquivalentBitRate(t *testing.T) {
+	info := MatroskaInfo{Tracks: []Stream{{
+		Kind: StreamAudio,
+		Fields: []Field{
+			{Name: "ID", Value: "1"},
+			{Name: "Format", Value: "DTS"},
+			{Name: "Bit rate", Value: "768 kb/s"},
+		},
+		JSON: map[string]string{"BitRate": "767999"},
+	}}}
+	probes := map[uint64]*matroskaAudioProbe{1: {
+		format: "DTS",
+		ok:     true,
+		dts:    dtsInfo{bitRateBps: 768000},
+	}}
+
+	applyMatroskaAudioProbes(&info, probes)
+
+	if got := info.Tracks[0].JSON["BitRate"]; got != "768000" {
+		t.Fatalf("JSON BitRate = %q, want equivalent core value 768000", got)
+	}
+}
+
+func TestApplyMatroskaAudioProbesDTSUsesCoreBitRateWhenAbsent(t *testing.T) {
+	info := MatroskaInfo{Tracks: []Stream{{
+		Kind:   StreamAudio,
+		Fields: []Field{{Name: "ID", Value: "1"}, {Name: "Format", Value: "DTS"}},
+	}}}
+	probes := map[uint64]*matroskaAudioProbe{1: {
+		format: "DTS",
+		ok:     true,
+		dts:    dtsInfo{bitRateBps: 768000},
+	}}
+
+	applyMatroskaAudioProbes(&info, probes)
+
+	if got := findField(info.Tracks[0].Fields, "Bit rate"); got != "768 kb/s" {
+		t.Fatalf("text bit rate = %q, want core-derived 768 kb/s", got)
+	}
+	if got := info.Tracks[0].JSON["BitRate"]; got != "768000" {
+		t.Fatalf("JSON BitRate = %q, want core-derived 768000", got)
+	}
+	if got := info.Tracks[0].JSON["BitRate_Mode"]; got != "CBR" {
+		t.Fatalf("JSON BitRate_Mode = %q, want CBR", got)
 	}
 }

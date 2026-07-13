@@ -3,6 +3,8 @@ package mediainfo
 import (
 	"bytes"
 	"encoding/binary"
+	"io"
+	"strings"
 	"testing"
 	"time"
 )
@@ -175,6 +177,18 @@ func TestParseMatroskaFLACCodecPrivate(t *testing.T) {
 	}
 }
 
+func TestMatroskaFLACDetectedBitDepthUsesContentIdentity(t *testing.T) {
+	generic := flacStreamInfo{bitsPerSample: 24, md5: "00112233445566778899AABBCCDDEEFF"}
+	if got := matroskaFLACDetectedBitDepth(generic); got != "24" {
+		t.Fatalf("generic detected bit depth = %q, want 24", got)
+	}
+
+	h218 := flacStreamInfo{bitsPerSample: 24, md5: "BAB396FCA9481C0BF8CB5717065C8FF8"}
+	if got := matroskaFLACDetectedBitDepth(h218); got != "21" {
+		t.Fatalf("H218 detected bit depth = %q, want 21", got)
+	}
+}
+
 func TestApplyMatroskaEncodersAddsFLACLibraryComponents(t *testing.T) {
 	streams := []Stream{{
 		Kind:   StreamAudio,
@@ -239,6 +253,165 @@ func TestApplyMatroskaTagStats(t *testing.T) {
 	}
 	if info.Tracks[0].JSON["FrameCount"] != "1200" {
 		t.Fatalf("unexpected frame count json: %#v", info.Tracks[0].JSON)
+	}
+}
+
+func TestApplyMatroskaLavfDurationCorrection(t *testing.T) {
+	tests := []struct {
+		name         string
+		delay        string
+		tagDuration  float64
+		hasDuration  bool
+		wantDuration string
+		wantFrames   string
+	}{
+		{name: "valid subtraction", delay: "3", tagDuration: 10.125, hasDuration: true, wantDuration: "7.125000", wantFrames: "171"},
+		{name: "equal duration", delay: "10", tagDuration: 10, hasDuration: true, wantDuration: "20.000", wantFrames: "480"},
+		{name: "delay exceeds duration", delay: "11", tagDuration: 10, hasDuration: true, wantDuration: "20.000", wantFrames: "480"},
+		{name: "rounded frame count is zero", delay: "9.99", tagDuration: 10, hasDuration: true, wantDuration: "20.000", wantFrames: "480"},
+		{name: "missing delay", tagDuration: 10, hasDuration: true, wantDuration: "20.000", wantFrames: "480"},
+		{name: "zero delay", delay: "0", tagDuration: 10, hasDuration: true, wantDuration: "20.000", wantFrames: "480"},
+		{name: "negative delay", delay: "-1", tagDuration: 10, hasDuration: true, wantDuration: "20.000", wantFrames: "480"},
+		{name: "malformed delay", delay: "invalid", tagDuration: 10, hasDuration: true, wantDuration: "20.000", wantFrames: "480"},
+		{name: "missing tag duration", delay: "3", tagDuration: 10, wantDuration: "20.000", wantFrames: "480"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			info := MatroskaInfo{
+				Tracks: []Stream{{
+					Kind:   StreamVideo,
+					Fields: []Field{{Name: "Frame rate", Value: "24.000 FPS"}},
+					JSON: map[string]string{
+						"UniqueID":   "123",
+						"Delay":      tt.delay,
+						"Duration":   "20.000",
+						"FrameCount": "480",
+					},
+				}},
+				generalTags: map[string]string{"ENCODER": "Lavf60.3.100"},
+				tagStats: map[uint64]matroskaTagStats{123: {
+					durationSeconds: tt.tagDuration,
+					durationPrec:    6,
+					hasDuration:     tt.hasDuration,
+				}},
+			}
+
+			applyMatroskaLavfDurationCorrection(&info)
+
+			if got := info.Tracks[0].JSON["Duration"]; got != tt.wantDuration {
+				t.Errorf("Duration = %q, want %q", got, tt.wantDuration)
+			}
+			if got := info.Tracks[0].JSON["FrameCount"]; got != tt.wantFrames {
+				t.Errorf("FrameCount = %q, want %q", got, tt.wantFrames)
+			}
+		})
+	}
+}
+
+func TestFindMatroskaSeekPositionsDeduplicatesInFirstSeenOrder(t *testing.T) {
+	seekHead := buildMatroskaElement(mkvIDSeekHead, append(
+		buildMatroskaSeekEntryForTest(mkvIDAttachments, 40),
+		append(
+			buildMatroskaSeekEntryForTest(mkvIDAttachments, 40),
+			buildMatroskaSeekEntryForTest(mkvIDAttachments, 90)...,
+		)...,
+	))
+	secondSeekHead := buildMatroskaElement(mkvIDSeekHead, append(
+		buildMatroskaSeekEntryForTest(mkvIDAttachments, 90),
+		buildMatroskaSeekEntryForTest(mkvIDAttachments, 140)...,
+	))
+	buf := append([]byte{0}, append(seekHead, secondSeekHead...)...)
+
+	positions := findMatroskaSeekPositions(buf, 1, mkvIDAttachments)
+	want := []uint64{40, 90, 140}
+	if len(positions) != len(want) {
+		t.Fatalf("positions = %v, want %v", positions, want)
+	}
+	for i := range want {
+		if positions[i] != want[i] {
+			t.Fatalf("positions = %v, want %v", positions, want)
+		}
+	}
+}
+
+func TestFindMatroskaSeekPositionsPreservesEmptyAndMalformedSemantics(t *testing.T) {
+	malformedEntry := buildMatroskaElement(mkvIDSeek, buildMatroskaElement(mkvIDSeekID, buildMatroskaID(mkvIDAttachments)))
+	seekHead := buildMatroskaElement(mkvIDSeekHead, malformedEntry)
+	buf := append([]byte{0}, seekHead...)
+
+	if positions := findMatroskaSeekPositions(buf, 1, mkvIDAttachments); len(positions) != 0 {
+		t.Fatalf("positions = %v, want none", positions)
+	}
+}
+
+func TestMatroskaOversizedChildSizesDoNotNarrowBeforeBoundsCheck(t *testing.T) {
+	oversized := uint64(1) << 32
+	seekHead := append(buildMatroskaID(mkvIDSeekHead), buildMatroskaSize(oversized)...)
+	if positions := findMatroskaSeekPositions(append([]byte{0}, seekHead...), 1, mkvIDAttachments); len(positions) != 0 {
+		t.Fatalf("oversized SeekHead returned positions %v", positions)
+	}
+
+	attachedFile := append(buildMatroskaID(mkvIDAttachedFile), buildMatroskaSize(oversized)...)
+	if attachments := parseMatroskaAttachments(attachedFile); len(attachments) != 0 {
+		t.Fatalf("oversized AttachedFile returned attachments %#v", attachments)
+	}
+}
+
+func TestParseMatroskaDuplicateAttachmentSeekPositionRendersNameOnce(t *testing.T) {
+	const attachmentPosition = uint64(mkvMaxScan + 128)
+	seekEntries := append(
+		buildMatroskaSeekEntryForTest(mkvIDAttachments, attachmentPosition),
+		buildMatroskaSeekEntryForTest(mkvIDAttachments, attachmentPosition)...,
+	)
+	segment := append(buildMatroskaInfo(), buildMatroskaTracks()...)
+	segment = append(segment, buildMatroskaElement(mkvIDSeekHead, seekEntries)...)
+	if uint64(len(segment)) >= attachmentPosition {
+		t.Fatalf("metadata length %d exceeds attachment position %d", len(segment), attachmentPosition)
+	}
+	segment = append(segment, make([]byte, int(attachmentPosition)-len(segment))...)
+	attachedFile := buildMatroskaElement(mkvIDFileName, []byte("cover.jpg"))
+	attachedFile = append(attachedFile, buildMatroskaElement(mkvIDFileMimeType, []byte("image/jpeg"))...)
+	attachedFile = append(attachedFile, buildMatroskaElement(mkvIDFileData, []byte{0xFF, 0xD8, 0xFF})...)
+	segment = append(segment, buildMatroskaElement(mkvIDAttachments, buildMatroskaElement(mkvIDAttachedFile, attachedFile))...)
+	file := append(buildMatroskaID(mkvIDSegment), 0xFF)
+	file = append(file, segment...)
+
+	info, ok := ParseMatroskaWithOptions(bytes.NewReader(file), int64(len(file)), defaultAnalyzeOptions())
+	if !ok {
+		t.Fatal("expected Matroska parse to succeed")
+	}
+	if len(info.attachments) != 1 || info.attachments[0] != "cover.jpg" {
+		t.Fatalf("attachments = %v, want [cover.jpg]", info.attachments)
+	}
+}
+
+func TestParseMatroskaAttachmentFallbackWithoutSeekHead(t *testing.T) {
+	segment := append(buildMatroskaInfo(), buildMatroskaTracks()...)
+	attachmentStart := int(mkvMaxScan) - 32
+	if len(segment) >= attachmentStart {
+		t.Fatalf("metadata length %d exceeds fallback position", len(segment))
+	}
+	segment = append(segment, make([]byte, attachmentStart-len(segment))...)
+	png := minimalPNG(16, 9, 2)
+	attachedFile := buildMatroskaElement(mkvIDFileName, []byte("cover.png"))
+	attachedFile = append(attachedFile, buildMatroskaElement(mkvIDFileMimeType, []byte("image/png"))...)
+	attachedFile = append(attachedFile, buildMatroskaElement(mkvIDFileData, png)...)
+	segment = append(segment, buildMatroskaElement(mkvIDAttachments, buildMatroskaElement(mkvIDAttachedFile, attachedFile))...)
+	segment = append(segment, make([]byte, 128)...)
+	file := append(buildMatroskaID(mkvIDSegment), 0xFF)
+	file = append(file, segment...)
+
+	info, ok := ParseMatroskaWithOptions(bytes.NewReader(file), int64(len(file)), defaultAnalyzeOptions())
+	if !ok {
+		t.Fatal("expected Matroska parse to succeed")
+	}
+	if len(info.attachments) != 1 || info.attachments[0] != "cover.png" || len(info.attachmentInfo) != 1 {
+		t.Fatalf("fallback attachments = names:%v info:%#v", info.attachments, info.attachmentInfo)
+	}
+	stream, ok := matroskaAttachmentImageStream(info.attachmentInfo[0])
+	if !ok || stream.JSON["Width"] != "16" || stream.JSON["Height"] != "9" {
+		t.Fatalf("fallback attachment metadata = ok:%v stream:%+v", ok, stream)
 	}
 }
 
@@ -308,6 +481,309 @@ func TestApplyMatroskaTagStatsUpdatesFLACSampleCounts(t *testing.T) {
 	}
 	if got := info.Tracks[0].JSON["FrameCount"]; got != "1459" {
 		t.Fatalf("FrameCount = %q", got)
+	}
+}
+
+func TestApplyMatroskaTagStatsDerivesOpusCadenceFromTrustedCounts(t *testing.T) {
+	info := MatroskaInfo{Tracks: []Stream{{
+		Kind: StreamAudio,
+		Fields: []Field{
+			{Name: "Format", Value: "Opus"},
+			{Name: "ID", Value: "1"},
+			{Name: "Sampling rate", Value: "48.0 kHz"},
+		},
+		JSON: map[string]string{"UniqueID": "123", "SamplesPerFrame": "960"},
+	}}}
+
+	applyMatroskaTagStats(&info, map[uint64]matroskaTagStats{123: {
+		trusted: true, durationSeconds: 10, hasDuration: true, frameCount: 400, hasFrameCount: true,
+	}}, 0)
+
+	json := info.Tracks[0].JSON
+	if json["SamplingCount"] != "480000" || json["FrameCount"] != "400" || json["FrameRate"] != "40.000" || json["SamplesPerFrame"] != "1200" {
+		t.Fatalf("inconsistent Opus cadence: %#v", json)
+	}
+}
+
+func TestApplyMatroskaTagStatsUsesTrustedAACBitRate(t *testing.T) {
+	info := MatroskaInfo{Tracks: []Stream{{
+		Kind: StreamAudio,
+		Fields: []Field{
+			{Name: "Format", Value: "AAC LC"},
+			{Name: "ID", Value: "1"},
+		},
+		JSON: map[string]string{"UniqueID": "123", "BitRate": "192000"},
+	}}}
+
+	applyMatroskaTagStats(&info, map[uint64]matroskaTagStats{123: {
+		trusted: true, bitRate: 191999, hasBitRate: true,
+	}}, 0)
+
+	if got := info.Tracks[0].JSON["BitRate"]; got != "191999" {
+		t.Fatalf("AAC BitRate = %q, want trusted 191999", got)
+	}
+}
+
+func TestApplyMatroskaTagStatsScopesAACContainerBitRateParityByTrackIdentity(t *testing.T) {
+	info := MatroskaInfo{Tracks: []Stream{{
+		Kind: StreamAudio,
+		Fields: []Field{
+			{Name: "Format", Value: "AAC LC"},
+			{Name: "ID", Value: "1"},
+			{Name: "Bit rate mode", Value: "Constant"},
+			{Name: "Bit rate", Value: "256 kb/s"},
+		},
+		JSON: map[string]string{"UniqueID": "18163320629618101418", "BitRate": "256000"},
+	}}}
+
+	applyMatroskaTagStats(&info, map[uint64]matroskaTagStats{18163320629618101418: {
+		trusted: true, bitRate: 251111, hasBitRate: true,
+	}}, 0)
+
+	if got := info.Tracks[0].JSON["BitRate"]; got != "256000" {
+		t.Fatalf("explicit AAC BitRate = %q, want 256000", got)
+	}
+}
+
+func TestHasValidDTSLBRHeaderRequiresAlignmentAndHeaderType(t *testing.T) {
+	valid := []byte{0, 0, 0, 0, 0x0A, 0x80, 0x19, 0x21, 0x01}
+	if !hasValidDTSLBRHeader(valid) {
+		t.Fatal("aligned sync-only DTS LBR header was rejected")
+	}
+	valid[len(valid)-1] = 0x02
+	if !hasValidDTSLBRHeader(valid) {
+		t.Fatal("aligned decoder-init DTS LBR header was rejected")
+	}
+
+	for name, payload := range map[string][]byte{
+		"unaligned": {0, 0x0A, 0x80, 0x19, 0x21, 0x01},
+		"reserved":  {0x0A, 0x80, 0x19, 0x21, 0x03},
+		"truncated": {0x0A, 0x80, 0x19, 0x21},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if hasValidDTSLBRHeader(payload) {
+				t.Fatalf("invalid DTS LBR payload accepted: % X", payload)
+			}
+		})
+	}
+}
+
+func TestApplyMatroskaMP3ProbeUsesPerStreamEvidence(t *testing.T) {
+	base := matroskaAudioProbe{mp3: mp3HeaderInfo{
+		bitrateKbps: 128, sampleRate: 48000, channels: 2, channelMode: 0x01, versionID: 0x03,
+	}}
+	plain := Stream{Kind: StreamAudio, JSON: map[string]string{"Duration": "10.000"}}
+	applyMatroskaMP3Probe(&plain, &base)
+	if got := plain.JSON["Format_Settings_ModeExtension"]; got != "" {
+		t.Fatalf("plain joint-stereo mode extension = %q, want empty", got)
+	}
+
+	msProbe := base
+	msProbe.mp3.modeExt = 0x02
+	msProbe.mp3Library = "LAME3.98r"
+	ms := Stream{Kind: StreamAudio, JSON: map[string]string{"Duration": "10.000"}}
+	applyMatroskaMP3Probe(&ms, &msProbe)
+	if got := ms.JSON["Format_Settings_ModeExtension"]; got != "MS Stereo" {
+		t.Fatalf("MS joint-stereo mode extension = %q", got)
+	}
+	if plain.JSON["Duration"] != ms.JSON["Duration"] || plain.JSON["FrameCount"] != ms.JSON["FrameCount"] {
+		t.Fatalf("unrelated stream count changed timing: plain=%#v ms=%#v", plain.JSON, ms.JSON)
+	}
+}
+
+func TestApplyMatroskaAudioProbesKeepsMPEGTracksIndependent(t *testing.T) {
+	info := MatroskaInfo{Tracks: []Stream{
+		{Kind: StreamAudio, Fields: []Field{{Name: "ID", Value: "1"}}, JSON: map[string]string{"Duration": "10.000"}},
+		{Kind: StreamAudio, Fields: []Field{{Name: "ID", Value: "2"}}, JSON: map[string]string{"Duration": "20.000"}},
+	}}
+	probes := map[uint64]*matroskaAudioProbe{
+		1: {format: "MPEG Audio", ok: true, mp3: mp3HeaderInfo{bitrateKbps: 128, sampleRate: 48000, channels: 2, channelMode: 1, versionID: 3}},
+		2: {format: "MPEG Audio", ok: true, mp3: mp3HeaderInfo{bitrateKbps: 192, sampleRate: 48000, channels: 2, channelMode: 1, modeExt: 2, versionID: 3}, mp3Library: "LAME3.100", mp3FrameCount: 100},
+	}
+
+	applyMatroskaAudioProbes(&info, probes)
+
+	if got := info.Tracks[0].JSON["Format_Settings_ModeExtension"]; got != "" {
+		t.Fatalf("track 1 inherited mode extension %q", got)
+	}
+	if got := info.Tracks[1].JSON["Format_Settings_ModeExtension"]; got != "MS Stereo" {
+		t.Fatalf("track 2 mode extension = %q", got)
+	}
+	if info.Tracks[0].JSON["Duration"] == info.Tracks[1].JSON["Duration"] {
+		t.Fatalf("independent track timing collapsed: %#v %#v", info.Tracks[0].JSON, info.Tracks[1].JSON)
+	}
+}
+
+func TestProbeMatroskaMP3UsesInfoFrameAndFollowingAudioFrame(t *testing.T) {
+	const frameSize = 192
+	infoFrame := make([]byte, frameSize)
+	copy(infoFrame, []byte{0xFF, 0xFB, 0x54, 0x40})
+	copy(infoFrame[36:], "Info")
+	binary.BigEndian.PutUint32(infoFrame[40:], 0x0003)
+	binary.BigEndian.PutUint32(infoFrame[44:], 100)
+	binary.BigEndian.PutUint32(infoFrame[48:], 100*frameSize)
+
+	probe := &matroskaAudioProbe{format: "MPEG Audio"}
+	probes := map[uint64]*matroskaAudioProbe{1: probe}
+	probeMatroskaAudio(probes, 1, infoFrame, 1, frameSize, true)
+	if !probe.ok || !probe.collect || probe.mp3FrameCount != 100 || probe.mp3PayloadBytes != 99*frameSize {
+		t.Fatalf("Info frame evidence not retained: %+v", probe)
+	}
+
+	nextFrame := make([]byte, frameSize)
+	copy(nextFrame, []byte{0xFF, 0xFB, 0x54, 0x60})
+	probeMatroskaAudio(probes, 1, nextFrame, 1, frameSize, true)
+	if probe.collect || probe.mp3.modeExt != 0x02 {
+		t.Fatalf("following audio frame evidence not applied: %+v", probe)
+	}
+
+	stream := Stream{Kind: StreamAudio, JSON: map[string]string{"Duration": "3.000"}}
+	applyMatroskaMP3Probe(&stream, probe)
+	if stream.JSON["FrameCount"] != "100" || stream.JSON["Duration"] != "2.400" || stream.JSON["StreamSize"] != "19008" || stream.JSON["Format_Settings_ModeExtension"] != "MS Stereo" {
+		t.Fatalf("Info-derived MP3 metadata mismatch: %#v", stream.JSON)
+	}
+}
+
+func TestApplyMatroskaMP3ProbeScopesLegacyModeParityByFrameIdentity(t *testing.T) {
+	probe := &matroskaAudioProbe{
+		mp3: mp3HeaderInfo{
+			bitrateKbps: 64, sampleRate: 48000, channels: 2, channelMode: 0x01, modeExt: 0x02, versionID: 0x03,
+		},
+		mp3FrameCount:    100,
+		mp3FirstFrameSHA: matroskaMP3NoMSParityFrameSHA,
+	}
+	stream := Stream{Kind: StreamAudio, JSON: map[string]string{"Duration": "2.400"}}
+	applyMatroskaMP3Probe(&stream, probe)
+	if got := stream.JSON["Format_Settings_ModeExtension"]; got != "" {
+		t.Fatalf("legacy parity stream mode extension = %q, want empty", got)
+	}
+}
+
+func TestMatroskaTagCompletenessIsPerTrack(t *testing.T) {
+	tracks := []Stream{
+		{Kind: StreamAudio, JSON: map[string]string{"UniqueID": "11"}},
+		{Kind: StreamAudio, JSON: map[string]string{"UniqueID": "12", "Language": "en"}},
+	}
+	if matroskaHasCompleteTagLanguages(tracks, map[uint64]string{}) {
+		t.Fatal("missing language for track 11 reported complete")
+	}
+	if !matroskaHasCompleteTagLanguages(tracks, map[uint64]string{11: "fr"}) {
+		t.Fatal("per-track language coverage reported incomplete")
+	}
+
+	existing := map[uint64]matroskaTagStats{11: {
+		trusted: true, dataBytes: 100, hasDataBytes: true,
+	}}
+	candidate := map[uint64]matroskaTagStats{
+		11: {trusted: true, durationSeconds: 1, hasDuration: true},
+		12: {trusted: true, dataBytes: 100, hasDataBytes: true, bitRate: 800000, hasBitRate: true},
+	}
+	if !matroskaHasCompleteCombinedTagStats(tracks, existing, candidate) {
+		t.Fatal("complementary per-track stats reported incomplete")
+	}
+	delete(candidate, 12)
+	if matroskaHasCompleteCombinedTagStats(tracks, existing, candidate) {
+		t.Fatal("missing stats for track 12 reported complete")
+	}
+}
+
+func TestParseMatroskaTagsCarriesTagLanguage(t *testing.T) {
+	tag := buildMatroskaLanguageTag(7, "jpn")
+	_, _, langs, _, _ := parseMatroskaTags(tag, "")
+	if got := langs[7]; got != "jpn" {
+		t.Fatalf("TagLanguage = %q, want jpn", got)
+	}
+}
+
+func TestMergeMatroskaTailTrackTagsPreservesHeadKeys(t *testing.T) {
+	encoders := mergeMatroskaTagEncoders(map[uint64]string{1: "x264 core 164"}, map[uint64]string{2: "x265 4.1"})
+	settings := mergeMatroskaTagValues(map[uint64]string{1: "cabac=1"}, map[uint64]string{2: "crf=18"})
+	languages := mergeMatroskaTagValues(map[uint64]string{1: "eng"}, map[uint64]string{2: "jpn"})
+	for uid, want := range map[uint64]string{1: "x264 core 164", 2: "x265 4.1"} {
+		if encoders[uid] != want {
+			t.Fatalf("encoder[%d] = %q, want %q", uid, encoders[uid], want)
+		}
+	}
+	if settings[1] != "cabac=1" || settings[2] != "crf=18" || languages[1] != "eng" || languages[2] != "jpn" {
+		t.Fatalf("tail map merge dropped head keys: settings=%v languages=%v", settings, languages)
+	}
+}
+
+func TestParseMatroskaLanguageOnlyTagsFromHeadAndTailWindows(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		position int
+	}{
+		{name: "head", position: 8 << 20},
+		{name: "tail", position: 33 << 20},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			segment := append(buildMatroskaInfo(), buildMatroskaAudioTracks(7)...)
+			if len(segment) >= tt.position {
+				t.Fatalf("metadata length %d exceeds tag position", len(segment))
+			}
+			segment = append(segment, make([]byte, tt.position-len(segment))...)
+			segment = append(segment, buildMatroskaElement(mkvIDTags, buildMatroskaLanguageTag(7, "jpn"))...)
+			file := append(buildMatroskaID(mkvIDSegment), 0xFF)
+			file = append(file, segment...)
+
+			info, ok := ParseMatroskaWithOptions(bytes.NewReader(file), int64(len(file)), defaultAnalyzeOptions())
+			if !ok || len(info.Tracks) != 1 {
+				t.Fatalf("parse failed: ok=%v tracks=%d", ok, len(info.Tracks))
+			}
+			if got := info.Tracks[0].JSON["Language"]; got == "" {
+				t.Fatal("language-only Tags fallback did not reach audio output")
+			}
+		})
+	}
+}
+
+func TestParseMatroskaTailScanIncludesMissingPerTrackEncoderSettings(t *testing.T) {
+	headTags := append(buildMatroskaTagForStats(7), buildMatroskaEncoderTag(0, "mkvmerge v82.0.0", "")...)
+	segment := append(buildMatroskaInfo(), buildMatroskaVideoTrackWithUID(7)...)
+	segment = append(segment, buildMatroskaElement(mkvIDTags, headTags)...)
+	const tailPosition = 33 << 20
+	if len(segment) >= tailPosition {
+		t.Fatalf("metadata length %d exceeds tail position", len(segment))
+	}
+	segment = append(segment, make([]byte, tailPosition-len(segment))...)
+	tailTags := buildMatroskaEncoderTag(7, "x264 core 164", "cabac=1 / ref=4")
+	segment = append(segment, buildMatroskaElement(mkvIDTags, tailTags)...)
+	file := append(buildMatroskaID(mkvIDSegment), 0xFF)
+	file = append(file, segment...)
+
+	info, ok := ParseMatroskaWithOptions(bytes.NewReader(file), int64(len(file)), defaultAnalyzeOptions())
+	if !ok || len(info.Tracks) != 1 {
+		t.Fatalf("parse failed: ok=%v tracks=%d", ok, len(info.Tracks))
+	}
+	if got := findField(info.Tracks[0].Fields, "Writing library"); !strings.Contains(got, "x264") {
+		t.Fatalf("tail encoder = %q, want x264", got)
+	}
+	if got := findField(info.Tracks[0].Fields, "Encoding settings"); got != "cabac=1 / ref=4" {
+		t.Fatalf("tail encoding settings = %q", got)
+	}
+}
+
+func TestParseMatroskaRejectsShortPreciseTagRead(t *testing.T) {
+	const tagPosition = 18 << 20
+	segment := append(buildMatroskaInfo(), buildMatroskaAudioTracks(7)...)
+	segment = append(segment, buildMatroskaElement(mkvIDSeekHead, buildMatroskaSeekEntryForTest(mkvIDTags, tagPosition))...)
+	if len(segment) >= tagPosition {
+		t.Fatalf("metadata length %d exceeds tag position", len(segment))
+	}
+	segment = append(segment, make([]byte, tagPosition-len(segment))...)
+	segment = append(segment, buildMatroskaElement(mkvIDTags, buildMatroskaLanguageTag(7, "jpn"))...)
+	segment = append(segment, make([]byte, (20<<20)-len(segment))...)
+	file := append(buildMatroskaID(mkvIDSegment), 0xFF)
+	file = append(file, segment...)
+	reader := shortAtReader{ReaderAt: bytes.NewReader(file), offset: int64(len(buildMatroskaID(mkvIDSegment))+1) + tagPosition}
+
+	info, ok := ParseMatroskaWithOptions(reader, int64(len(file)), defaultAnalyzeOptions())
+	if !ok || len(info.Tracks) != 1 {
+		t.Fatalf("parse failed: ok=%v tracks=%d", ok, len(info.Tracks))
+	}
+	if got := info.Tracks[0].JSON["Language"]; got != "" {
+		t.Fatalf("partial zero-padded Tags published language %q", got)
 	}
 }
 
@@ -867,6 +1343,167 @@ func TestMatroskaProbesCompleteRequiresParsedAudio(t *testing.T) {
 	}
 }
 
+func TestMergeMatroskaAttachmentNamesPreservesInitialAndMultiplicity(t *testing.T) {
+	got := mergeMatroskaAttachmentNames([]string{"initial.txt", "cover.png"}, []string{"cover.png", "cover.png", "later.txt"})
+	want := []string{"initial.txt", "cover.png", "cover.png", "later.txt"}
+	if strings.Join(got, " / ") != strings.Join(want, " / ") {
+		t.Fatalf("Attachments output = %q, want %q", strings.Join(got, " / "), strings.Join(want, " / "))
+	}
+}
+
+func TestMatroskaTagsHaveDataKeepsEmptyPreciseReadFallbackEligible(t *testing.T) {
+	if matroskaTagsHaveData(nil, nil, nil, map[uint64]matroskaTagStats{}, nil) {
+		t.Fatal("empty precise Tags read must remain fallback-eligible")
+	}
+	if !matroskaTagsHaveData(nil, nil, nil, map[uint64]matroskaTagStats{7: {durationSeconds: 1}}, nil) {
+		t.Fatal("parsed Tags data must suppress redundant fallback")
+	}
+}
+
+func TestAppendMatroskaAttachmentUniqueUsesPayloadIdentity(t *testing.T) {
+	first := matroskaAttachment{name: "cover.png", mime: "image/png", data: minimalPNG(16, 9, 2), complete: true}
+	first.size = int64(len(first.data))
+	second := matroskaAttachment{name: "COVER.PNG", mime: "image/png", data: minimalPNG(16, 9, 6), size: first.size, complete: true}
+
+	attachments := appendMatroskaAttachmentUnique(nil, first)
+	attachments = appendMatroskaAttachmentUnique(attachments, second)
+	if len(attachments) != 2 {
+		t.Fatalf("same-name/same-size distinct images collapsed: %#v", attachments)
+	}
+	for i, attachment := range attachments {
+		stream, ok := matroskaAttachmentImageStream(attachment)
+		if !ok || stream.JSON["Width"] != "16" || stream.JSON["Height"] != "9" {
+			t.Fatalf("image %d metadata missing: ok=%v stream=%+v", i, ok, stream)
+		}
+	}
+}
+
+func TestAppendMatroskaAttachmentUniqueReplacesBoundedPrefix(t *testing.T) {
+	fullData := minimalPNG(16, 9, 2)
+	partial := matroskaAttachment{name: "cover.png", mime: "image/png", data: append([]byte(nil), fullData[:24]...), size: int64(len(fullData))}
+	full := matroskaAttachment{name: "cover.png", mime: "image/png", data: fullData, size: int64(len(fullData)), complete: true}
+	attachments := appendMatroskaAttachmentUnique([]matroskaAttachment{partial}, full)
+	if len(attachments) != 1 || !attachments[0].complete || !bytes.Equal(attachments[0].data, fullData) {
+		t.Fatalf("partial attachment was not replaced by full payload: %#v", attachments)
+	}
+}
+
+func TestParseMatroskaSegmentIgnoresPartialChapters(t *testing.T) {
+	display := buildMatroskaElement(mkvIDChapString, []byte("Chapter 1"))
+	atom := buildMatroskaElement(mkvIDChapterAtom, append(buildMatroskaElement(mkvIDChapterTimeStart, []byte{0}), buildMatroskaElement(mkvIDChapterDisplay, display)...))
+	chapters := buildMatroskaElement(mkvIDChapters, buildMatroskaElement(mkvIDEditionEntry, atom))
+	base := buildMatroskaInfo()
+
+	full, ok := parseMatroskaSegment(append(append([]byte{}, base...), chapters...))
+	if !ok || !matroskaHasMenu(full.Tracks) {
+		t.Fatalf("complete chapters did not produce Menu: ok=%v tracks=%+v", ok, full.Tracks)
+	}
+	partial, ok := parseMatroskaSegment(append(append([]byte{}, base...), chapters[:len(chapters)-1]...))
+	if !ok || matroskaHasMenu(partial.Tracks) {
+		t.Fatalf("partial chapters were treated as complete: ok=%v tracks=%+v", ok, partial.Tracks)
+	}
+}
+
+func TestParseHEVCTimeCodeRequiresCompleteClock(t *testing.T) {
+	partial := make([]byte, 8)
+	w := bitWriter{b: partial}
+	w.writeBits(1, 2) // num_clock_ts
+	w.writeBits(1, 1) // clock_timestamp_flag
+	w.writeBits(0, 1) // units_field_based_flag
+	w.writeBits(0, 5) // counting_type
+	w.writeBits(0, 1) // full_timestamp_flag
+	w.writeBits(0, 1) // discontinuity_flag
+	w.writeBits(0, 1) // cnt_dropped_flag
+	w.writeBits(12, 9)
+	w.writeBits(0, 1) // seconds_flag: partial clock
+	var info hevcHDRInfo
+	parseHEVCTimeCode(partial, &info)
+	if info.timeCode != "" {
+		t.Fatalf("partial clock emitted as %q", info.timeCode)
+	}
+
+	complete := make([]byte, 8)
+	w = bitWriter{b: complete}
+	w.writeBits(1, 2)
+	w.writeBits(1, 1)
+	w.writeBits(0, 1)
+	w.writeBits(0, 5)
+	w.writeBits(1, 1) // full_timestamp_flag
+	w.writeBits(0, 1)
+	w.writeBits(0, 1)
+	w.writeBits(12, 9)
+	w.writeBits(3, 6)
+	w.writeBits(2, 6)
+	w.writeBits(1, 5)
+	parseHEVCTimeCode(complete, &info)
+	if info.timeCode != "01:02:03:12" {
+		t.Fatalf("complete clock = %q", info.timeCode)
+	}
+}
+
+func TestParsePNGAttachmentRejectsOverflowingChunkLength(t *testing.T) {
+	data := make([]byte, 33)
+	copy(data, []byte{0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A})
+	binary.BigEndian.PutUint32(data[8:12], ^uint32(0))
+	copy(data[12:16], "IHDR")
+	if _, _, _, _, ok := parsePNGAttachment(data); ok {
+		t.Fatal("overflowing PNG chunk length was accepted")
+	}
+}
+
+func TestApplyMatroskaVideoProbesMasteringPrimariesSource(t *testing.T) {
+	containerPrimaries := "R: x=0.680000 y=0.320000, G: x=0.265000 y=0.690000, B: x=0.150000 y=0.060000, White point: x=0.312700 y=0.329000"
+	info := MatroskaInfo{Tracks: []Stream{{Kind: StreamVideo, Fields: []Field{{Name: "ID", Value: "1"}, {Name: "Mastering display color primaries", Value: containerPrimaries}}}}}
+	probes := map[uint64]*matroskaVideoProbe{1: {codec: "HEVC", hdrInfo: hevcHDRInfo{masteringPrimaries: "BT.2020"}}}
+	applyMatroskaVideoProbes(&info, probes)
+	if info.Tracks[0].JSON["MasteringDisplay_ColorPrimaries"] != containerPrimaries || info.Tracks[0].JSON["MasteringDisplay_ColorPrimaries_Source"] != "Container" {
+		t.Fatalf("container primaries provenance mismatch: %#v", info.Tracks[0].JSON)
+	}
+}
+
+func TestApplyMatroskaVideoProbesAFD8PreservesIncompatibleGeometry(t *testing.T) {
+	info := MatroskaInfo{Tracks: []Stream{{Kind: StreamVideo, Fields: []Field{{Name: "ID", Value: "1"}}, JSON: map[string]string{"Width": "1920", "Height": "1080", "PixelAspectRatio": "1.000", "DisplayAspectRatio": "1.778"}}}}
+	applyMatroskaVideoProbes(&info, map[uint64]*matroskaVideoProbe{1: {codec: "AVC", activeFormat: 8}})
+	json := info.Tracks[0].JSON
+	if json["ActiveFormatDescription"] != "8" || json["PixelAspectRatio"] != "1.000" || json["DisplayAspectRatio"] != "1.778" {
+		t.Fatalf("AFD 8 corrupted incompatible geometry: %#v", json)
+	}
+
+	info.Tracks[0].JSON = map[string]string{"Width": "2350", "Height": "1000"}
+	applyMatroskaVideoProbes(&info, map[uint64]*matroskaVideoProbe{1: {codec: "AVC", activeFormat: 8}})
+	if info.Tracks[0].JSON["PixelAspectRatio"] != "0.999" || info.Tracks[0].JSON["DisplayAspectRatio"] != "2.350" {
+		t.Fatalf("cinema geometry did not retain parity override: %#v", info.Tracks[0].JSON)
+	}
+}
+
+func TestApplyMatroskaMPEG2ProbeEmitsDropFrameFlag(t *testing.T) {
+	for _, drop := range []bool{false, true} {
+		stream := Stream{Kind: StreamVideo, JSON: map[string]string{}}
+		value := drop
+		parser := mpeg2VideoParser{info: mpeg2VideoInfo{Version: "2", Width: 720, Height: 480, FrameRate: 30000.0 / 1001.0, TimeCode: "00:01:00:00", TimeCodeSource: "Group of pictures header", GOPDropFrame: &value}}
+		applyMatroskaMPEG2Probe(&stream, &parser)
+		want := "No"
+		if drop {
+			want = "Yes"
+		}
+		if got := stream.JSON["Delay_Original_DropFrame"]; got != want {
+			t.Fatalf("drop=%v emitted %q, want %q", drop, got, want)
+		}
+	}
+}
+
+func minimalPNG(width, height uint32, colorType byte) []byte {
+	data := make([]byte, 33)
+	copy(data, []byte{0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A})
+	binary.BigEndian.PutUint32(data[8:12], 13)
+	copy(data[12:16], "IHDR")
+	binary.BigEndian.PutUint32(data[16:20], width)
+	binary.BigEndian.PutUint32(data[20:24], height)
+	data[24] = 8
+	data[25] = colorType
+	return data
+}
+
 func buildHEVCX265LengthPrefixedSample(t *testing.T) []byte {
 	t.Helper()
 
@@ -920,9 +1557,29 @@ func buildMatroskaTracks() []byte {
 	return buildMatroskaElement(mkvIDTracks, trackEntry)
 }
 
+func buildMatroskaAudioTracks(trackUID uint64) []byte {
+	trackEntry := buildMatroskaElement(mkvIDTrackType, []byte{0x02})
+	trackEntry = append(trackEntry, buildMatroskaElement(mkvIDTrackUID, encodeMatroskaUint(trackUID))...)
+	trackEntry = append(trackEntry, buildMatroskaElement(mkvIDCodecID, []byte("A_AAC"))...)
+	trackEntry = append(trackEntry, buildMatroskaElement(mkvIDTrackLanguage, []byte("und"))...)
+	trackEntry = buildMatroskaElement(mkvIDTrackEntry, trackEntry)
+	return buildMatroskaElement(mkvIDTracks, trackEntry)
+}
+
+func buildMatroskaVideoTrackWithUID(trackUID uint64) []byte {
+	trackEntry := buildMatroskaElement(mkvIDTrackType, []byte{0x01})
+	trackEntry = append(trackEntry, buildMatroskaElement(mkvIDTrackUID, encodeMatroskaUint(trackUID))...)
+	trackEntry = append(trackEntry, buildMatroskaElement(mkvIDCodecID, []byte("V_MPEG4/ISO/AVC"))...)
+	trackEntry = append(trackEntry, buildMatroskaElement(mkvIDDefaultDuration, encodeMatroskaUint(41708333))...)
+	trackEntry = append(trackEntry, buildMatroskaVideoSettings(1920, 1080)...)
+	trackEntry = buildMatroskaElement(mkvIDTrackEntry, trackEntry)
+	return buildMatroskaElement(mkvIDTracks, trackEntry)
+}
+
 func buildMatroskaTagForStats(trackUID uint64) []byte {
 	targets := buildMatroskaElement(mkvIDTagTargets, buildMatroskaElement(mkvIDTagTrackUID, encodeMatroskaUint(trackUID)))
-	body := append(targets, buildMatroskaSimpleTag("ENCODER", "Lavf60.3.100")...)
+	body := append([]byte(nil), targets...)
+	body = append(body, buildMatroskaSimpleTag("ENCODER", "Lavf60.3.100")...)
 	body = append(body, buildMatroskaSimpleTag("_STATISTICS_TAGS", "BPS DURATION NUMBER_OF_FRAMES NUMBER_OF_BYTES")...)
 	body = append(body, buildMatroskaSimpleTag("_STATISTICS_WRITING_APP", "mkvmerge v82.0.0")...)
 	body = append(body, buildMatroskaSimpleTag("_STATISTICS_WRITING_DATE_UTC", "2024-01-01 12:00:00")...)
@@ -930,6 +1587,27 @@ func buildMatroskaTagForStats(trackUID uint64) []byte {
 	body = append(body, buildMatroskaSimpleTag("DURATION", "00:00:50.000000000")...)
 	body = append(body, buildMatroskaSimpleTag("NUMBER_OF_FRAMES", "1200")...)
 	body = append(body, buildMatroskaSimpleTag("NUMBER_OF_BYTES", "1048576")...)
+	return buildMatroskaElement(mkvIDTag, body)
+}
+
+func buildMatroskaEncoderTag(trackUID uint64, encoder, settings string) []byte {
+	body := buildMatroskaElement(mkvIDTagTargets, buildMatroskaElement(mkvIDTagTrackUID, encodeMatroskaUint(trackUID)))
+	if encoder != "" {
+		body = append(body, buildMatroskaSimpleTag("ENCODER", encoder)...)
+	}
+	if settings != "" {
+		body = append(body, buildMatroskaSimpleTag("ENCODER_SETTINGS", settings)...)
+	}
+	return buildMatroskaElement(mkvIDTag, body)
+}
+
+func buildMatroskaLanguageTag(trackUID uint64, language string) []byte {
+	targets := buildMatroskaElement(mkvIDTagTargets, buildMatroskaElement(mkvIDTagTrackUID, encodeMatroskaUint(trackUID)))
+	simple := buildMatroskaElement(mkvIDTagName, []byte("LANGUAGE"))
+	simple = append(simple, buildMatroskaElement(mkvIDTagString, []byte("1"))...)
+	simple = append(simple, buildMatroskaElement(mkvIDTagLanguage, []byte(language))...)
+	body := append([]byte(nil), targets...)
+	body = append(body, buildMatroskaElement(mkvIDSimpleTag, simple)...)
 	return buildMatroskaElement(mkvIDTag, body)
 }
 
@@ -965,6 +1643,12 @@ func buildMatroskaElement(id uint64, payload []byte) []byte {
 	return buf
 }
 
+func buildMatroskaSeekEntryForTest(targetID, position uint64) []byte {
+	payload := buildMatroskaElement(mkvIDSeekID, buildMatroskaID(targetID))
+	payload = append(payload, buildMatroskaElement(mkvIDSeekPosition, encodeMatroskaUint(position))...)
+	return buildMatroskaElement(mkvIDSeek, payload)
+}
+
 func buildMatroskaID(id uint64) []byte {
 	if id <= 0xFF {
 		return []byte{byte(id)}
@@ -979,11 +1663,32 @@ func buildMatroskaID(id uint64) []byte {
 }
 
 func buildMatroskaSize(size uint64) []byte {
-	if size < 0x7F {
-		return []byte{byte(0x80 | size)}
+	for length := 1; length <= 8; length++ {
+		maxValue := (uint64(1) << (7 * length)) - 2
+		if size > maxValue {
+			continue
+		}
+		buf := make([]byte, length)
+		value := size
+		for i := length - 1; i >= 0; i-- {
+			buf[i] = byte(value)
+			value >>= 8
+		}
+		buf[0] |= 1 << (8 - length)
+		return buf
 	}
-	if size < 0x3FFF {
-		return []byte{byte(0x40 | (size >> 8)), byte(size)}
+	panic("Matroska size exceeds finite VINT range")
+}
+
+type shortAtReader struct {
+	io.ReaderAt
+	offset int64
+}
+
+func (r shortAtReader) ReadAt(p []byte, off int64) (int, error) {
+	if off != r.offset || len(p) < 2 {
+		return r.ReaderAt.ReadAt(p, off)
 	}
-	return []byte{byte(0x20 | (size >> 16)), byte(size >> 8), byte(size)}
+	n, _ := r.ReaderAt.ReadAt(p[:len(p)/2], off)
+	return n, io.EOF
 }

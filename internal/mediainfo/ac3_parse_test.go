@@ -1,6 +1,9 @@
 package mediainfo
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 type ac3BitWriter struct {
 	buf    []byte
@@ -31,6 +34,74 @@ func TestParseEAC3AudioProductionInfo(t *testing.T) {
 	}
 	if !info.hasRoomtyp || info.roomtyp != "Small" {
 		t.Fatalf("roomtyp=%q (present=%v), want Small", info.roomtyp, info.hasRoomtyp)
+	}
+}
+
+func TestParseEAC3FrameWithOptionsPreservesHDCDConversionMetadata(t *testing.T) {
+	const frameSize = 32
+	buf := make([]byte, frameSize)
+	bw := ac3BitWriter{buf: buf}
+
+	bw.writeBits(0x0B77, 16)
+	bw.writeBits(0, 2)                // independent stream
+	bw.writeBits(0, 3)                // substreamid
+	bw.writeBits((frameSize/2)-1, 11) // frmsiz
+	bw.writeBits(0, 2)                // fscod
+	bw.writeBits(3, 2)                // numblkscod
+	bw.writeBits(2, 3)                // acmod: stereo
+	bw.writeBits(0, 1)                // lfeon
+	bw.writeBits(16, 5)               // bsid
+	bw.writeBits(25, 5)               // dialnorm
+	bw.writeBits(0, 1)                // compre
+	bw.writeBits(0, 1)                // mixmdate
+	bw.writeBits(1, 1)                // infomdate
+	bw.writeBits(0, 3)                // bsmod
+	bw.writeBits(0, 2)                // copyright/original
+	bw.writeBits(0, 2)                // dsurmod
+	bw.writeBits(0, 2)                // dheadphonmod
+	bw.writeBits(1, 1)                // audprodie
+	bw.writeBits(25, 5)               // mixlevel
+	bw.writeBits(2, 2)                // roomtyp: Small
+	bw.writeBits(1, 1)                // adconvtyp: HDCD
+	bw.writeBits(0, 1)                // source sample rate
+	bw.writeBits(0, 1)                // addbsie
+
+	frame, gotSize, ok := parseEAC3FrameWithOptions(buf, false)
+	if !ok || gotSize != frameSize {
+		t.Fatalf("parse result: ok=%v frameSize=%d want=%d", ok, gotSize, frameSize)
+	}
+	if !frame.hasAdconvtyp {
+		t.Fatal("parsed adconvtyp was discarded during result construction")
+	}
+
+	info := MatroskaInfo{Tracks: []Stream{{
+		Kind:   StreamAudio,
+		Fields: []Field{{Name: "ID", Value: "1"}, {Name: "Format", Value: "E-AC-3"}},
+	}}}
+	applyMatroskaAudioProbes(&info, map[uint64]*matroskaAudioProbe{1: {format: "E-AC-3", ok: true, info: frame}})
+	if extra := info.Tracks[0].JSONRaw["extra"]; !strings.Contains(extra, `"adconvtyp":"HDCD"`) {
+		t.Fatalf("rendered extra missing HDCD adconvtyp: %s", extra)
+	}
+}
+
+func TestMergeEAC3DependentDualMonoPreservesZeroACModAndLFE(t *testing.T) {
+	var info ac3Info
+	info.mergeFrame(ac3Info{eac3FrameType: 0, acmod: 2, lfeon: 0, hasLFE: true})
+	info.mergeFrame(ac3Info{eac3FrameType: 1, acmod: 0, lfeon: 1, hasLFE: true})
+	info.mergeFrame(ac3Info{eac3FrameType: 1, acmod: 2, lfeon: 0, hasLFE: true})
+	if !info.hasDependentACMod || info.dependentACMod != 0 || info.dependentLFE != 1 {
+		t.Fatalf("dependent metadata = present:%v acmod:%d lfe:%d, want true/0/1", info.hasDependentACMod, info.dependentACMod, info.dependentLFE)
+	}
+
+	container := MatroskaInfo{Tracks: []Stream{{
+		Kind:   StreamAudio,
+		Fields: []Field{{Name: "ID", Value: "1"}, {Name: "Format", Value: "E-AC-3"}},
+		JSON:   map[string]string{},
+	}}}
+	applyMatroskaAudioProbes(&container, map[uint64]*matroskaAudioProbe{1: {format: "E-AC-3", ok: true, info: info}})
+	extra := container.Tracks[0].JSONRaw["extra"]
+	if !strings.Contains(extra, `"acmod":"2 / 0"`) || !strings.Contains(extra, `"lfeon":"0 / 1"`) {
+		t.Fatalf("dependent metadata not rendered: %s", extra)
 	}
 }
 
