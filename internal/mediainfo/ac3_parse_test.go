@@ -300,6 +300,234 @@ func TestParseEAC3FrameWithOptions_MixingMetadata(t *testing.T) {
 	}
 }
 
+func TestParseEAC3FrameWithOptions_DefaultServiceKindWithoutInfoMetadata(t *testing.T) {
+	info, _, ok := parseEAC3FrameWithOptions(buildEAC3Frame(20, 25, 0), false)
+	if !ok {
+		t.Fatal("parseEAC3FrameWithOptions returned ok=false")
+	}
+	if info.bsmod != 0 || info.serviceKind != "Complete Main" {
+		t.Fatalf("default service kind mismatch: bsmod=%d serviceKind=%q", info.bsmod, info.serviceKind)
+	}
+}
+
+func TestParseEAC3FrameWithOptions_ConvertedStreamMetadataAlignment(t *testing.T) {
+	const frameSize = 32
+	buf := make([]byte, frameSize)
+	bw := ac3BitWriter{buf: buf}
+
+	bw.writeBits(0x0B77, 16)
+	bw.writeBits(2, 2)                // strmtyp: AC-3 converted
+	bw.writeBits(0, 3)                // substreamid
+	bw.writeBits((frameSize/2)-1, 11) // frmsiz
+	bw.writeBits(0, 2)                // fscod
+	bw.writeBits(3, 2)                // numblkscod
+	bw.writeBits(2, 3)                // acmod
+	bw.writeBits(0, 1)                // lfeon
+	bw.writeBits(16, 5)               // bsid
+	bw.writeBits(0, 5)                // dialnorm
+	bw.writeBits(0, 1)                // compre
+	bw.writeBits(0, 1)                // mixmdate
+	bw.writeBits(1, 1)                // infomdate
+	bw.writeBits(5, 3)                // bsmod: Commentary
+	bw.writeBits(0, 2)                // copyright/original
+	bw.writeBits(0, 4)                // acmod=2 metadata
+	bw.writeBits(0, 1)                // audprodie
+	bw.writeBits(0, 1)                // source sample rate
+	bw.writeBits(0, 6)                // convsync
+	bw.writeBits(0, 1)                // addbsie
+
+	info, gotSize, ok := parseEAC3FrameWithOptions(buf, false)
+	if !ok || gotSize != frameSize {
+		t.Fatalf("parse result: ok=%v frameSize=%d want=%d", ok, gotSize, frameSize)
+	}
+	if info.hasDmixmod {
+		t.Fatalf("unexpected downmix metadata: %q", info.dmixmod)
+	}
+	if info.bsmod != 5 || info.serviceKind != "Commentary" {
+		t.Fatalf("service kind mismatch: bsmod=%d serviceKind=%q", info.bsmod, info.serviceKind)
+	}
+}
+
+func TestParseEAC3FrameWithOptions_DualMonoMetadataAlignment(t *testing.T) {
+	const frameSize = 32
+	buf := make([]byte, frameSize)
+	bw := ac3BitWriter{buf: buf}
+
+	bw.writeBits(0x0B77, 16)
+	bw.writeBits(0, 2)                // independent stream
+	bw.writeBits(0, 3)                // substreamid
+	bw.writeBits((frameSize/2)-1, 11) // frmsiz
+	bw.writeBits(0, 2)                // fscod
+	bw.writeBits(3, 2)                // numblkscod
+	bw.writeBits(0, 3)                // acmod: dual mono
+	bw.writeBits(0, 1)                // lfeon
+	bw.writeBits(16, 5)               // bsid
+	bw.writeBits(25, 5)               // dialnorm program 1
+	bw.writeBits(0, 1)                // compre program 1
+	bw.writeBits(0, 5)                // dialnorm program 2
+	bw.writeBits(0, 1)                // compre program 2
+	bw.writeBits(0, 1)                // mixmdate
+	bw.writeBits(1, 1)                // infomdate
+	bw.writeBits(5, 3)                // bsmod: Commentary
+	bw.writeBits(0, 2)                // copyright/original
+	bw.writeBits(0, 1)                // audprodie program 1
+	bw.writeBits(0, 1)                // audprodie program 2
+	bw.writeBits(0, 1)                // source sample rate
+	bw.writeBits(0, 1)                // addbsie
+
+	info, gotSize, ok := parseEAC3FrameWithOptions(buf, false)
+	if !ok || gotSize != frameSize {
+		t.Fatalf("parse result: ok=%v frameSize=%d want=%d", ok, gotSize, frameSize)
+	}
+	if info.dialnorm != -25 || info.dialnormCount != 1 {
+		t.Fatalf("first-program dialnorm mismatch: value=%d count=%d", info.dialnorm, info.dialnormCount)
+	}
+	if info.bsmod != 5 || info.serviceKind != "Commentary" {
+		t.Fatalf("service kind mismatch: bsmod=%d serviceKind=%q", info.bsmod, info.serviceKind)
+	}
+}
+
+func TestParseEAC3FrameWithOptions_MixDef3MetadataAlignment(t *testing.T) {
+	const frameSize = 64
+	buf := make([]byte, frameSize)
+	bw := ac3BitWriter{buf: buf}
+
+	bw.writeBits(0x0B77, 16)
+	bw.writeBits(0, 2)                // independent stream
+	bw.writeBits(0, 3)                // substreamid
+	bw.writeBits((frameSize/2)-1, 11) // frmsiz
+	bw.writeBits(0, 2)                // fscod
+	bw.writeBits(3, 2)                // numblkscod
+	bw.writeBits(7, 3)                // acmod: 3/2
+	bw.writeBits(0, 1)                // lfeon
+	bw.writeBits(16, 5)               // bsid
+	bw.writeBits(31, 5)               // dialnorm
+	bw.writeBits(0, 1)                // compre
+	bw.writeBits(1, 1)                // mixmdate
+	bw.writeBits(2, 2)                // dmixmod: Lo/Ro
+	bw.writeBits(4, 3)                // ltrtcmixlev
+	bw.writeBits(4, 3)                // lorocmixlev
+	bw.writeBits(4, 3)                // ltrtsurmixlev
+	bw.writeBits(4, 3)                // lorosurmixlev
+	bw.writeBits(0, 1)                // pgmscle
+	bw.writeBits(0, 1)                // extpgmscle
+	bw.writeBits(3, 2)                // mixdef
+	bw.writeBits(0, 5)                // mixdeflen: two-byte payload
+	bw.writeBits(1, 1)                // mixdata2e
+	bw.writeBits(0, 6)                // premixcmpsel
+	bw.writeBits(0, 1)                // drcsrc
+	bw.writeBits(0, 3)                // premixcmpscl
+	for range 7 {
+		bw.writeBits(0, 1) // extpgm*scle/dmixscle
+	}
+	bw.writeBits(1, 1) // addche
+	bw.writeBits(0, 1) // extpgmaux1scle
+	bw.writeBits(0, 1) // extpgmaux2scle
+	bw.writeBits(1, 1) // mixdata3e
+	bw.writeBits(0, 5) // spchdat
+	bw.writeBits(1, 1) // addspchdate
+	bw.writeBits(0, 7) // spchdat1 + spchan1att
+	bw.writeBits(1, 1) // addspdat1e
+	bw.writeBits(0, 7) // spchdat2 + spchan2att
+	bw.writeBits(0, 16)
+	bw.writeBits(0, 1) // frmmixcfginfoe
+	bw.writeBits(1, 1) // infomdate
+	bw.writeBits(5, 3) // bsmod: Commentary
+	bw.writeBits(0, 2) // copyright/original
+	bw.writeBits(0, 2) // acmod>=6 metadata
+	bw.writeBits(0, 1) // audprodie
+	bw.writeBits(0, 1) // source sample rate
+	bw.writeBits(0, 1) // addbsie
+
+	info, gotSize, ok := parseEAC3FrameWithOptions(buf, false)
+	if !ok || gotSize != frameSize {
+		t.Fatalf("parse result: ok=%v frameSize=%d want=%d", ok, gotSize, frameSize)
+	}
+	if !info.hasDmixmod || info.dmixmod != "Lo/Ro" {
+		t.Fatalf("dmixmod mismatch: present=%v value=%q", info.hasDmixmod, info.dmixmod)
+	}
+	if info.bsmod != 5 || info.serviceKind != "Commentary" {
+		t.Fatalf("service kind mismatch: bsmod=%d serviceKind=%q", info.bsmod, info.serviceKind)
+	}
+}
+
+func TestParseEAC3FrameWithOptions_Acmod4DoesNotReadSurroundMixLevels(t *testing.T) {
+	const frameSize = 32
+	buf := make([]byte, frameSize)
+	bw := ac3BitWriter{buf: buf}
+
+	bw.writeBits(0x0B77, 16)
+	bw.writeBits(0, 2)                // independent stream
+	bw.writeBits(0, 3)                // substreamid
+	bw.writeBits((frameSize/2)-1, 11) // frmsiz
+	bw.writeBits(0, 2)                // fscod
+	bw.writeBits(3, 2)                // numblkscod
+	bw.writeBits(4, 3)                // acmod: 2/1
+	bw.writeBits(0, 1)                // lfeon
+	bw.writeBits(16, 5)               // bsid
+	bw.writeBits(31, 5)               // dialnorm
+	bw.writeBits(0, 1)                // compre
+	bw.writeBits(1, 1)                // mixmdate
+	bw.writeBits(3, 2)                // dmixmod: reserved literal
+	bw.writeBits(0, 1)                // pgmscle
+	bw.writeBits(0, 1)                // extpgmscle
+	bw.writeBits(0, 2)                // mixdef
+	bw.writeBits(0, 1)                // frmmixcfginfoe
+	bw.writeBits(1, 1)                // infomdate
+	bw.writeBits(5, 3)                // bsmod: Commentary
+	bw.writeBits(0, 2)                // copyright/original
+	bw.writeBits(0, 1)                // audprodie
+	bw.writeBits(0, 1)                // source sample rate
+	bw.writeBits(0, 1)                // addbsie
+
+	info, gotSize, ok := parseEAC3FrameWithOptions(buf, false)
+	if !ok || gotSize != frameSize {
+		t.Fatalf("parse result: ok=%v frameSize=%d want=%d", ok, gotSize, frameSize)
+	}
+	if !info.hasDmixmod || info.dmixmod != "3" {
+		t.Fatalf("dmixmod mismatch: present=%v value=%q", info.hasDmixmod, info.dmixmod)
+	}
+	if info.hasLtrtsurmixlev || info.hasLorosurmixlev {
+		t.Fatal("acmod=4 must not read surround mix-level fields")
+	}
+	if info.bsmod != 5 || info.serviceKind != "Commentary" {
+		t.Fatalf("service kind mismatch: bsmod=%d serviceKind=%q", info.bsmod, info.serviceKind)
+	}
+}
+
+func TestParseEAC3FrameWithOptions_AddBSITypeARequiresTwoBytes(t *testing.T) {
+	const frameSize = 32
+	buf := make([]byte, frameSize)
+	bw := ac3BitWriter{buf: buf}
+
+	bw.writeBits(0x0B77, 16)
+	bw.writeBits(0, 2)                // independent stream
+	bw.writeBits(0, 3)                // substreamid
+	bw.writeBits((frameSize/2)-1, 11) // frmsiz
+	bw.writeBits(0, 2)                // fscod
+	bw.writeBits(3, 2)                // numblkscod
+	bw.writeBits(2, 3)                // acmod
+	bw.writeBits(0, 1)                // lfeon
+	bw.writeBits(16, 5)               // bsid
+	bw.writeBits(25, 5)               // dialnorm
+	bw.writeBits(0, 1)                // compre
+	bw.writeBits(0, 1)                // mixmdate
+	bw.writeBits(0, 1)                // infomdate
+	bw.writeBits(1, 1)                // addbsie
+	bw.writeBits(0, 6)                // addbsil: one byte follows
+	bw.writeBits(0, 7)                // reserved/type-A prefix
+	bw.writeBits(1, 1)                // flag_ec3_extension_type_a
+	bw.writeBits(127, 8)              // first byte past addbsi; not complexity
+
+	info, gotSize, ok := parseEAC3FrameWithOptions(buf, false)
+	if !ok || gotSize != frameSize {
+		t.Fatalf("parse result: ok=%v frameSize=%d want=%d", ok, gotSize, frameSize)
+	}
+	if info.hasJOCComplex || info.jocComplexity != 0 {
+		t.Fatalf("single-byte addbsi fabricated complexity: present=%v value=%d", info.hasJOCComplex, info.jocComplexity)
+	}
+}
+
 func buildEMDFJOCPayload() []byte {
 	body := make([]byte, 6)
 	bw := ac3BitWriter{buf: body}

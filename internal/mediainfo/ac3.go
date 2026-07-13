@@ -549,10 +549,14 @@ func parseAC3Frame(payload []byte) (ac3Info, int, bool) {
 	return info, frameSize, true
 }
 
+// parseEAC3Frame parses one E-AC-3 syncframe and scans that frame for JOC metadata.
 func parseEAC3Frame(payload []byte) (ac3Info, int, bool) {
 	return parseEAC3FrameWithOptions(payload, true)
 }
 
+// parseEAC3FrameWithOptions parses one E-AC-3 syncframe from payload. It returns
+// the declared frame size even when payload contains following syncframes, and
+// limits optional JOC discovery to the declared frame when parseJOC is true.
 func parseEAC3FrameWithOptions(payload []byte, parseJOC bool) (ac3Info, int, bool) {
 	var info ac3Info
 	if len(payload) < 7 {
@@ -615,18 +619,20 @@ func parseEAC3FrameWithOptions(payload []byte, parseJOC bool) (ac3Info, int, boo
 	if bsid < 10 {
 		return info, 0, false
 	}
-	if strmtyp == 0 {
+	for i := 0; i < eac3DialnormFieldCount(int(acmod)); i++ {
 		dialnorm, ok := br.readBits(5)
 		if !ok {
 			return info, 0, false
 		}
-		info.hasDialnorm = true
-		info.dialnorm = ac3DialnormDB(dialnorm)
-		info.dialnormCode = uint8(dialnorm)
-		info.dialnormCount = 1
-		info.dialnormSum = math.Pow(10.0, float64(info.dialnorm)/10.0)
-		info.dialnormMin = info.dialnorm
-		info.dialnormMax = info.dialnorm
+		if i == 0 && strmtyp == 0 {
+			info.hasDialnorm = true
+			info.dialnorm = ac3DialnormDB(dialnorm)
+			info.dialnormCode = uint8(dialnorm)
+			info.dialnormCount = 1
+			info.dialnormSum = math.Pow(10.0, float64(info.dialnorm)/10.0)
+			info.dialnormMin = info.dialnorm
+			info.dialnormMax = info.dialnorm
+		}
 
 		compre, ok := br.readBits(1)
 		if !ok {
@@ -637,26 +643,15 @@ func parseEAC3FrameWithOptions(payload []byte, parseJOC bool) (ac3Info, int, boo
 			if !ok {
 				return info, 0, false
 			}
-			info.compre = true
-			info.comprCode = uint8(compr)
-			info.comprDB = ac3ComprDB(uint8(compr))
-			info.hasCompr = true
-		}
-	} else if strmtyp == 1 {
-		for i := 0; i < eac3DialnormFieldCount(int(acmod)); i++ {
-			if _, ok := br.readBits(5); !ok { // dialnorm
-				return info, 0, false
-			}
-			compre, ok := br.readBits(1)
-			if !ok {
-				return info, 0, false
-			}
-			if compre == 1 {
-				if _, ok := br.readBits(8); !ok { // compr
-					return info, 0, false
-				}
+			if i == 0 && strmtyp == 0 {
+				info.compre = true
+				info.comprCode = uint8(compr)
+				info.comprDB = ac3ComprDB(uint8(compr))
+				info.hasCompr = true
 			}
 		}
+	}
+	if strmtyp == 1 {
 		chanmape, ok := br.readBits(1)
 		if !ok {
 			return info, 0, false
@@ -710,7 +705,7 @@ func parseEAC3FrameWithOptions(payload []byte, parseJOC bool) (ac3Info, int, boo
 		bsmod:         info.bsmod,
 		acmod:         int(acmod),
 		lfeon:         int(lfeonVal),
-		serviceKind:   info.serviceKind,
+		serviceKind:   ac3ServiceKind(info.bsmod),
 		frameRate:     frameRate,
 		spf:           spf,
 		dialnorm:      info.dialnorm,
@@ -759,11 +754,11 @@ func parseEAC3FrameWithOptions(payload []byte, parseJOC bool) (ac3Info, int, boo
 	return info, frameSize, true
 }
 
-// parseEAC3MetadataExtension advances over E-AC-3 metadata fields through addbsi
-// and records Dolby extension type A's JOC complexity index. The flag alone is
-// not sufficient to identify Atmos; object-audio metadata must also be present.
-// It returns false when the extension is absent or the bounded frame data ends
-// before the field can be read.
+// parseEAC3MetadataExtension advances over the E-AC-3 mixing and informational
+// metadata through addbsi, recording fields that MediaInfo exposes. It reports
+// a Dolby extension type A complexity index only when addbsi contains both
+// required bytes. It returns true only when that index is read; the type A flag
+// alone does not identify Atmos without object metadata.
 func parseEAC3MetadataExtension(br *ac3BitReader, info *ac3Info, strmtyp int, numblkscod int, acmod int, lfeon bool, fscod int) bool {
 	if br == nil || info == nil {
 		return false
@@ -798,7 +793,7 @@ func parseEAC3MetadataExtension(br *ac3BitReader, info *ac3Info, strmtyp int, nu
 					info.hasLorocmixlev = true
 				}
 			}
-			if acmod&4 != 0 {
+			if acmod > 4 {
 				ltrtsurmixlev, ok := br.readBits(3)
 				if !ok {
 					return false
@@ -858,7 +853,52 @@ func parseEAC3MetadataExtension(br *ac3BitReader, info *ac3Info, strmtyp int, nu
 				}
 			case 3:
 				size, ok := br.readBits(5)
-				if !ok || !br.skipBits((int(size)+2)*8) {
+				if !ok {
+					return false
+				}
+				mixData2Exists, ok := br.readBits(1)
+				if !ok {
+					return false
+				}
+				if mixData2Exists == 1 {
+					if !br.skipBits(10) { // premixcmpsel, drcsrc, premixcmpscl
+						return false
+					}
+					for range 7 {
+						scaleExists, ok := br.readBits(1)
+						if !ok || (scaleExists == 1 && !br.skipBits(4)) {
+							return false
+						}
+					}
+					additionalChannelsExist, ok := br.readBits(1)
+					if !ok {
+						return false
+					}
+					if additionalChannelsExist == 1 {
+						for range 2 {
+							scaleExists, ok := br.readBits(1)
+							if !ok || (scaleExists == 1 && !br.skipBits(4)) {
+								return false
+							}
+						}
+					}
+				}
+				mixData3Exists, ok := br.readBits(1)
+				if !ok {
+					return false
+				}
+				if mixData3Exists == 1 {
+					if !br.skipBits(5) { // spchdat
+						return false
+					}
+					for range 2 {
+						speechDataExists, ok := br.readBits(1)
+						if !ok || (speechDataExists == 1 && !br.skipBits(7)) {
+							return false
+						}
+					}
+				}
+				if !br.skipBits((int(size) + 2) * 8) {
 					return false
 				}
 			}
@@ -961,7 +1001,7 @@ func parseEAC3MetadataExtension(br *ac3BitReader, info *ac3Info, strmtyp int, nu
 			if !ok {
 				return false
 			}
-			if flag == 1 {
+			if flag == 1 && additionalBytes >= 2 {
 				complexity, ok := br.readBits(8)
 				if !ok {
 					return false
@@ -1648,13 +1688,16 @@ func ac3ExtendedMixLevelDB(code uint32) (float64, bool) {
 	}
 }
 
-// ac3PreferredDownmix maps AC-3 xbsi preferred stereo downmix codes to MediaInfo labels.
+// ac3PreferredDownmix maps AC-3 xbsi preferred stereo downmix codes to MediaInfo labels,
+// including MediaInfo's literal rendering of reserved code 3.
 func ac3PreferredDownmix(code uint32) string {
 	switch code {
 	case 1:
 		return "Lt/Rt"
 	case 2:
 		return "Lo/Ro"
+	case 3:
+		return "3"
 	default:
 		return ""
 	}

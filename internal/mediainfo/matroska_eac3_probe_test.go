@@ -41,6 +41,34 @@ func buildEAC3Frame(frameSize int, dialnorm uint64, comprByte uint64) []byte {
 	return out
 }
 
+func buildAC3FrameForMatroskaProbe() []byte {
+	const (
+		fscod      = 0
+		frmsizecod = 0
+	)
+	frameSize := ac3FrameSizeBytes(fscod, frmsizecod)
+	out := make([]byte, frameSize)
+	bw := ac3BitWriter{buf: out}
+	bw.writeBits(0x0B77, 16)
+	bw.writeBits(0, 16) // crc1
+	bw.writeBits(fscod, 2)
+	bw.writeBits(frmsizecod, 6)
+	bw.writeBits(6, 5)  // bsid
+	bw.writeBits(0, 3)  // bsmod
+	bw.writeBits(1, 3)  // acmod: mono
+	bw.writeBits(0, 1)  // lfeon
+	bw.writeBits(24, 5) // dialnorm
+	bw.writeBits(0, 1)  // compre
+	bw.writeBits(0, 1)  // langcode
+	bw.writeBits(0, 1)  // audprodie
+	bw.writeBits(0, 1)  // copyrightb
+	bw.writeBits(0, 1)  // origbs
+	bw.writeBits(0, 1)  // xbsi1e
+	bw.writeBits(0, 1)  // xbsi2e
+	bw.writeBits(0, 1)  // addbsie
+	return out
+}
+
 func TestProbeMatroskaAudio_EAC3MultiFramePacket(t *testing.T) {
 	const track = 1
 	frame := buildEAC3Frame(20, 1, 0x00)
@@ -102,6 +130,31 @@ func TestProbeMatroskaAudio_EAC3JOCResyncsAcrossPacketPadding(t *testing.T) {
 	}
 }
 
+func TestProbeMatroskaAudio_EAC3JOCResyncIgnoresAC3Core(t *testing.T) {
+	const track = 1
+	frame := buildEAC3Frame(20, 1, 0x00)
+	core := buildAC3FrameForMatroskaProbe()
+	if _, _, ok := parseAC3Frame(core); !ok {
+		t.Fatal("test setup produced invalid AC-3 core frame")
+	}
+	jocFrame := buildEAC3Frame(64, 2, 0x00)
+	copy(jocFrame[20:], buildEMDFJOCPayload())
+	payload := append(append(append([]byte{}, frame...), core...), jocFrame...)
+
+	probes := map[uint64]*matroskaAudioProbe{
+		track: {format: "E-AC-3", collect: true, parseJOC: true},
+	}
+	probeMatroskaAudio(probes, track, payload, 1, int64(len(payload)), false)
+
+	p := probes[track]
+	if p == nil || !p.ok || !p.info.hasJOC {
+		t.Fatalf("probe result: present=%v ok=%v hasJOC=%v", p != nil, p != nil && p.ok, p != nil && p.info.hasJOC)
+	}
+	if p.info.framesMerged != 2 {
+		t.Fatalf("framesMerged=%d, want 2 E-AC-3 frames", p.info.framesMerged)
+	}
+}
+
 func TestApplyMatroskaAudioProbes_EAC3JOCTextMetadata(t *testing.T) {
 	info := &MatroskaInfo{
 		Tracks: []Stream{
@@ -151,10 +204,6 @@ func TestApplyMatroskaAudioProbes_EAC3JOCTextMetadata(t *testing.T) {
 				dialnormMax:   -31,
 				hasCompr:      true,
 				comprDB:       -0.28,
-				hasCmixlev:    true,
-				cmixlevDB:     -3,
-				hasSurmixlev:  true,
-				surmixlevDB:   -3,
 				hasDmixmod:    true,
 				dmixmod:       "Lo/Ro",
 			},
@@ -168,7 +217,6 @@ func TestApplyMatroskaAudioProbes_EAC3JOCTextMetadata(t *testing.T) {
 		"Format":                    "E-AC-3 JOC",
 		"Format/Info":               "Enhanced AC-3 with Joint Object Coding",
 		"Commercial name":           "Dolby Digital Plus with Dolby Atmos",
-		"Format profile":            "Blu-ray Disc",
 		"Bit rate mode":             "Constant",
 		"Bit rate":                  "1 536 kb/s",
 		"Complexity index":          "16",
@@ -177,8 +225,6 @@ func TestApplyMatroskaAudioProbes_EAC3JOCTextMetadata(t *testing.T) {
 		"Bed channel configuration": "LFE",
 		"Dialog Normalization":      "-31 dB",
 		"compr":                     "-0.28 dB",
-		"cmixlev":                   "-3.0 dB",
-		"surmixlev":                 "-3 dB",
 		"dmixmod":                   "Lo/Ro",
 		"dialnorm_Average":          "-31 dB",
 		"dialnorm_Minimum":          "-31 dB",
@@ -188,6 +234,9 @@ func TestApplyMatroskaAudioProbes_EAC3JOCTextMetadata(t *testing.T) {
 		if got := findField(stream.Fields, name); got != want {
 			t.Fatalf("%s=%q, want %q", name, got, want)
 		}
+	}
+	if got := findField(stream.Fields, "Format profile"); got != "" {
+		t.Fatalf("Format profile=%q, want omitted", got)
 	}
 	if got := stream.JSON["BitRate"]; got != "1536000" {
 		t.Fatalf("JSON BitRate=%q, want 1536000", got)
@@ -200,5 +249,42 @@ func TestApplyMatroskaAudioProbes_EAC3JOCTextMetadata(t *testing.T) {
 	}
 	if got := stream.JSONRaw["extra"]; !strings.Contains(got, `"acmod":"7","lfeon":"1","dmixmod":"Lo/Ro"`) {
 		t.Fatalf("extra missing or misordering E-AC-3 mixing metadata: %s", got)
+	}
+	if got := stream.JSONRaw["extra"]; !strings.Contains(got, `"ComplexityIndex":"16"`) {
+		t.Fatalf("extra missing JOC ComplexityIndex: %s", got)
+	}
+}
+
+func TestApplyMatroskaAudioProbes_EAC3TypeAOnlyOmitsAtmosFields(t *testing.T) {
+	info := &MatroskaInfo{Tracks: []Stream{{
+		Kind: StreamAudio,
+		Fields: []Field{
+			{Name: "ID", Value: "2"},
+			{Name: "Format", Value: "E-AC-3"},
+			{Name: "Codec ID", Value: "A_EAC3"},
+		},
+		JSON: map[string]string{},
+	}}}
+	probes := map[uint64]*matroskaAudioProbe{2: {
+		format: "E-AC-3",
+		ok:     true,
+		info: ac3Info{
+			hasJOCComplex: true,
+			jocComplexity: 16,
+			lfeon:         -1,
+		},
+	}}
+
+	applyMatroskaAudioProbes(info, probes)
+
+	stream := info.Tracks[0]
+	if got := findField(stream.Fields, "Commercial name"); got != "Dolby Digital Plus" {
+		t.Fatalf("Commercial name=%q, want Dolby Digital Plus", got)
+	}
+	if got := findField(stream.Fields, "Complexity index"); got != "" {
+		t.Fatalf("Complexity index=%q, want omitted", got)
+	}
+	if got := stream.JSONRaw["extra"]; strings.Contains(got, "ComplexityIndex") {
+		t.Fatalf("JSON extra unexpectedly contains ComplexityIndex: %s", got)
 	}
 }

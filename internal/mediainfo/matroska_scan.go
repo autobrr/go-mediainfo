@@ -484,6 +484,10 @@ func scanMatroskaBlock(er *ebmlReader, size int64, clusterTimecode int64, timeco
 	return frames, nil
 }
 
+// readMatroskaBlockHeader consumes a Block or SimpleBlock, returns its track,
+// relative timecode, payload size, and lace count, and feeds bounded payload
+// samples to active audio and video probes. Malformed or truncated lacing
+// returns an error.
 func readMatroskaBlockHeader(er *ebmlReader, size int64, audioProbes map[uint64]*matroskaAudioProbe, videoProbes map[uint64]*matroskaVideoProbe) (uint64, int16, int64, int64, error) {
 	if size < 4 {
 		if err := er.skip(size); err != nil {
@@ -738,7 +742,7 @@ func readMatroskaBlockHeader(er *ebmlReader, size int64, audioProbes map[uint64]
 					if stopAfterThisPacket && maxLacesToProbe > 0 && i >= maxLacesToProbe {
 						peek = 0
 					} else if audioProbe.parseJOC {
-						peek = size
+						peek = min(size, 32768)
 					} else if frameCount == 1 {
 						// Non-laced packets may contain multiple E-AC-3 frames; read a bit more so we
 						// can stay in sync and match official compr stats.
@@ -1255,6 +1259,9 @@ func matroskaHasCompleteTagStats(streams []Stream, tagStats map[uint64]matroskaT
 	return hasMediaTrack
 }
 
+// applyMatroskaAudioProbes merges bitstream-derived audio metadata into parsed
+// Matroska tracks. Atmos-only fields are emitted only when E-AC-3 object metadata
+// confirms JOC, while ordinary E-AC-3 mixing and service metadata remains available.
 func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAudioProbe) {
 	if len(probes) == 0 {
 		return
@@ -1517,9 +1524,6 @@ func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAud
 				stream.Fields = setFieldValue(stream.Fields, "Format", "E-AC-3 JOC")
 				stream.Fields = setFieldValue(stream.Fields, "Format/Info", "Enhanced AC-3 with Joint Object Coding")
 				stream.Fields = setFieldValue(stream.Fields, "Commercial name", "Dolby Digital Plus with Dolby Atmos")
-				if bitrate, ok := parseInt(stream.JSON["BitRate"]); ok && bitrate >= 1536000 {
-					stream.Fields = insertFieldBefore(stream.Fields, Field{Name: "Format profile", Value: "Blu-ray Disc"}, "Codec ID")
-				}
 				if stream.JSON == nil {
 					stream.JSON = map[string]string{}
 				}
@@ -1533,7 +1537,7 @@ func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAud
 		if ac3.serviceKind != "" {
 			stream.Fields = insertFieldBefore(stream.Fields, Field{Name: "Service kind", Value: ac3.serviceKind}, "Default")
 		}
-		if probe.format == "E-AC-3" {
+		if probe.format == "E-AC-3" && ac3HasJOCInfo(ac3) {
 			before := "Dialog Normalization"
 			complexity := -1
 			if ac3.hasJOCComplex {
@@ -1675,7 +1679,7 @@ func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAud
 			extraFields = append(extraFields, jsonKV{Key: "compr_Maximum", Val: fmt.Sprintf("%.2f", maxVal)})
 			extraFields = append(extraFields, jsonKV{Key: "compr_Count", Val: strconv.Itoa(count)})
 		}
-		if probe.format == "E-AC-3" {
+		if probe.format == "E-AC-3" && ac3HasJOCInfo(ac3) {
 			complexity := -1
 			if ac3.hasJOCComplex {
 				complexity = ac3.jocComplexity
@@ -2047,6 +2051,9 @@ func mergeEAC3JOC(dst *ac3Info, src ac3Info) {
 	}
 }
 
+// probeMatroskaAudio parses the bounded payload sample for the requested track
+// and merges valid codec frames into its probe state. E-AC-3 collection may
+// resynchronize across packet padding but does not treat AC-3 core frames as E-AC-3.
 func probeMatroskaAudio(probes map[uint64]*matroskaAudioProbe, track uint64, payload []byte, frames int64, packetBytes int64, packetAligned bool) {
 	if len(payload) == 0 || probes == nil {
 		return
@@ -2133,10 +2140,7 @@ func probeMatroskaAudio(probes map[uint64]*matroskaAudioProbe, track uint64, pay
 		// For non-laced packets, try to parse multiple frames within the packet. This matches
 		// MediaInfoLib behavior when a Block contains more than one E-AC-3 syncframe.
 		parseOne := func(buf []byte) (ac3Info, int, bool) {
-			if info, frameSize, ok := parseEAC3FrameWithOptions(buf, probe.parseJOC); ok {
-				return info, frameSize, true
-			}
-			return parseAC3Frame(buf)
+			return parseEAC3FrameWithOptions(buf, probe.parseJOC)
 		}
 		if !packetAligned {
 			offset := 0
