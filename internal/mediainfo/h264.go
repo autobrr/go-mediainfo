@@ -4,6 +4,8 @@ import (
 	"fmt"
 )
 
+// h264SPSInfo contains H.264 SPS/VUI properties used to render AVC metadata and
+// interpret timing SEI messages.
 type h264SPSInfo struct {
 	ChromaFormat            string
 	BitDepth                int
@@ -32,24 +34,40 @@ type h264SPSInfo struct {
 	HasChromaLoc    bool
 	ChromaSampleLoc int
 	// HEVC-only: tier name ("Main" or "High") when available.
-	HEVCTier          string
-	Width             uint64
-	Height            uint64
-	CodedWidth        uint64
-	CodedHeight       uint64
-	FrameRate         float64
-	FixedFrameRate    bool
-	HasFixedFrameRate bool
-	BitRate           int64
-	HasBitRate        bool
-	BitRateCBR        bool
-	HasBitRateCBR     bool
-	BufferSize        int64
-	HasBufferSize     bool
-	BufferSizeNAL     int64
-	HasBufferSizeNAL  bool
-	BufferSizeVCL     int64
-	HasBufferSizeVCL  bool
+	HEVCTier              string
+	Width                 uint64
+	Height                uint64
+	CodedWidth            uint64
+	CodedHeight           uint64
+	FrameRate             float64
+	FixedFrameRate        bool
+	HasFixedFrameRate     bool
+	BitRate               int64
+	HasBitRate            bool
+	BitRateCBR            bool
+	HasBitRateCBR         bool
+	BufferSize            int64
+	HasBufferSize         bool
+	BufferSizeNAL         int64
+	HasBufferSizeNAL      bool
+	BufferSizeVCL         int64
+	HasBufferSizeVCL      bool
+	CpbDpbDelaysPresent   bool
+	CpbRemovalDelayLength int
+	DpbOutputDelayLength  int
+	PicStructPresent      bool
+	TimeOffsetLength      int
+}
+
+// h264HRDInfo contains the first CPB entry and delay widths from an SPS HRD
+// parameters structure.
+type h264HRDInfo struct {
+	bitRate               int64
+	bufferSize            int64
+	cbr                   bool
+	cpbRemovalDelayLength int
+	dpbOutputDelayLength  int
+	timeOffsetLength      int
 }
 
 func parseAVCConfig(payload []byte) (string, []Field, h264SPSInfo) {
@@ -183,6 +201,8 @@ func appendH264ScanType(fields []Field, spsInfo h264SPSInfo) []Field {
 	return append(fields, Field{Name: "Scan type", Value: "Interlaced"})
 }
 
+// parseH264SPS extracts supported sequence and VUI properties from an SPS NAL.
+// Unavailable or malformed properties remain at their zero values.
 func parseH264SPS(nal []byte) h264SPSInfo {
 	rbsp := nalToRBSP(nal)
 	br := newBitReader(rbsp)
@@ -216,6 +236,11 @@ func parseH264SPS(nal []byte) h264SPSInfo {
 	hasBufferSizeNAL := false
 	bufferSizeVCL := int64(0)
 	hasBufferSizeVCL := false
+	cpbDpbDelaysPresent := false
+	cpbRemovalDelayLength := 0
+	dpbOutputDelayLength := 0
+	picStructPresent := false
+	timeOffsetLength := 0
 
 	if isHighProfile(profileID) {
 		chromaFormat = br.readUE()
@@ -380,45 +405,55 @@ func parseH264SPS(nal []byte) h264SPSInfo {
 			}
 		}
 		nalHRDPresent := br.readBitsValue(1) == 1
+		var timingHRD h264HRDInfo
 		if nalHRDPresent {
-			if hrdBitRate, hrdBuffer, hrdCBR, ok := parseH264HRD(br); ok {
-				if hrdBitRate > 0 {
-					bitRate = hrdBitRate
+			if hrd, ok := parseH264HRD(br); ok {
+				timingHRD = hrd
+				if hrd.bitRate > 0 {
+					bitRate = hrd.bitRate
 					hasBitRate = true
-					bitRateCBR = hrdCBR
+					bitRateCBR = hrd.cbr
 					hasBitRateCBR = true
 				}
-				if hrdBuffer > 0 {
-					bufferSizeNAL = hrdBuffer
+				if hrd.bufferSize > 0 {
+					bufferSizeNAL = hrd.bufferSize
 					hasBufferSizeNAL = true
-					bufferSize = hrdBuffer
+					bufferSize = hrd.bufferSize
 					hasBufferSize = true
 				}
 			}
 		}
 		vclHRDPresent := br.readBitsValue(1) == 1
 		if vclHRDPresent {
-			if hrdBitRate, hrdBuffer, hrdCBR, ok := parseH264HRD(br); ok {
-				if hrdBitRate > 0 && !hasBitRate {
-					bitRate = hrdBitRate
+			if hrd, ok := parseH264HRD(br); ok {
+				if !nalHRDPresent {
+					timingHRD = hrd
+				}
+				if hrd.bitRate > 0 && !hasBitRate {
+					bitRate = hrd.bitRate
 					hasBitRate = true
-					bitRateCBR = hrdCBR
+					bitRateCBR = hrd.cbr
 					hasBitRateCBR = true
 				}
-				if hrdBuffer > 0 && !hasBufferSize {
-					bufferSizeVCL = hrdBuffer
+				if hrd.bufferSize > 0 && !hasBufferSize {
+					bufferSizeVCL = hrd.bufferSize
 					hasBufferSizeVCL = true
-					bufferSize = hrdBuffer
+					bufferSize = hrd.bufferSize
 					hasBufferSize = true
-				} else if hrdBuffer > 0 {
-					bufferSizeVCL = hrdBuffer
+				} else if hrd.bufferSize > 0 {
+					bufferSizeVCL = hrd.bufferSize
 					hasBufferSizeVCL = true
 				}
 			}
 		}
 		if nalHRDPresent || vclHRDPresent {
 			_ = br.readBitsValue(1)
+			cpbDpbDelaysPresent = true
+			cpbRemovalDelayLength = timingHRD.cpbRemovalDelayLength
+			dpbOutputDelayLength = timingHRD.dpbOutputDelayLength
+			timeOffsetLength = timingHRD.timeOffsetLength
 		}
+		picStructPresent = br.readBitsValue(1) == 1
 	}
 
 	info := h264SPSInfo{
@@ -460,6 +495,11 @@ func parseH264SPS(nal []byte) h264SPSInfo {
 		HasBufferSizeNAL:        hasBufferSizeNAL,
 		BufferSizeVCL:           bufferSizeVCL,
 		HasBufferSizeVCL:        hasBufferSizeVCL,
+		CpbDpbDelaysPresent:     cpbDpbDelaysPresent,
+		CpbRemovalDelayLength:   cpbRemovalDelayLength,
+		DpbOutputDelayLength:    dpbOutputDelayLength,
+		PicStructPresent:        picStructPresent,
+		TimeOffsetLength:        timeOffsetLength,
 	}
 	info.ChromaFormat = chromaFormatString(chromaFormat)
 	return info
@@ -504,15 +544,17 @@ func h264SARFromIDC(idc uint64) (uint32, uint32, bool) {
 	}
 }
 
-func parseH264HRD(br *bitReader) (int64, int64, bool, bool) {
+// parseH264HRD consumes one HRD parameters structure and returns its first CPB
+// entry plus the delay widths needed to decode pic_timing SEI messages.
+func parseH264HRD(br *bitReader) (h264HRDInfo, bool) {
 	cpbCntMinus1, ok := br.readUEWithOk()
 	if !ok {
-		return 0, 0, false, false
+		return h264HRDInfo{}, false
 	}
 	bitRateScale := br.readBitsValue(4)
 	cpbSizeScale := br.readBitsValue(4)
 	if bitRateScale == ^uint64(0) || cpbSizeScale == ^uint64(0) {
-		return 0, 0, false, false
+		return h264HRDInfo{}, false
 	}
 	var bitRateValue int
 	var cpbSizeValue int
@@ -520,11 +562,11 @@ func parseH264HRD(br *bitReader) (int64, int64, bool, bool) {
 	for i := 0; i <= cpbCntMinus1; i++ {
 		brValue, ok := br.readUEWithOk()
 		if !ok {
-			return 0, 0, false, false
+			return h264HRDInfo{}, false
 		}
 		value, ok := br.readUEWithOk()
 		if !ok {
-			return 0, 0, false, false
+			return h264HRDInfo{}, false
 		}
 		if i == 0 {
 			bitRateValue = brValue
@@ -532,23 +574,33 @@ func parseH264HRD(br *bitReader) (int64, int64, bool, bool) {
 		}
 		flag := br.readBitsValue(1)
 		if flag == ^uint64(0) {
-			return 0, 0, false, false
+			return h264HRDInfo{}, false
 		}
 		if i == 0 {
 			cbrFlag = flag == 1
 		}
 	}
-	for range 4 {
-		if br.readBitsValue(5) == ^uint64(0) {
-			return 0, 0, false, false
-		}
+	initialCPBRemovalDelayLengthValue := br.readBitsValue(5)
+	cpbRemovalDelayLengthValue := br.readBitsValue(5)
+	dpbOutputDelayLengthValue := br.readBitsValue(5)
+	if initialCPBRemovalDelayLengthValue == ^uint64(0) || cpbRemovalDelayLengthValue == ^uint64(0) || dpbOutputDelayLengthValue == ^uint64(0) {
+		return h264HRDInfo{}, false
+	}
+	timeOffsetLengthValue := br.readBitsValue(5)
+	if timeOffsetLengthValue == ^uint64(0) {
+		return h264HRDInfo{}, false
 	}
 	bitRate := int64(bitRateValue+1) << (6 + bitRateScale)
 	bufferSize := int64(cpbSizeValue+1) << (4 + cpbSizeScale)
 	if bitRate < 0 || bufferSize < 0 {
-		return 0, 0, false, false
+		return h264HRDInfo{}, false
 	}
-	return bitRate, bufferSize, cbrFlag, true
+	return h264HRDInfo{
+		bitRate: bitRate, bufferSize: bufferSize, cbr: cbrFlag,
+		cpbRemovalDelayLength: int(cpbRemovalDelayLengthValue) + 1,
+		dpbOutputDelayLength:  int(dpbOutputDelayLengthValue) + 1,
+		timeOffsetLength:      int(timeOffsetLengthValue),
+	}, true
 }
 
 func parseH264PPSCabac(nal []byte) (bool, bool) {
@@ -610,6 +662,8 @@ func parseH264AnnexB(payload []byte) ([]Field, h264SPSInfo, bool) {
 	return fields, spsInfo, true
 }
 
+// h264SliceCountAnnexB returns the dominant number of slices per picture in an
+// Annex B sample, using access-unit delimiters and first_mb_in_slice boundaries.
 func h264SliceCountAnnexB(payload []byte) int {
 	counts := map[int]int{}
 	current := 0
@@ -646,6 +700,176 @@ func h264SliceCountAnnexB(payload []byte) int {
 		}
 	}
 	return bestCount
+}
+
+// h264TimeCodeFromAnnexB returns the first complete clock timestamp found in a
+// pic_timing SEI message, or an empty string when none is usable.
+func h264TimeCodeFromAnnexB(payload []byte, sps h264SPSInfo) string {
+	var timeCode string
+	scanAnnexBNALs(payload, func(nal []byte) bool {
+		if len(nal) == 0 || nal[0]&0x1F != 6 {
+			return true
+		}
+		rbsp := nalToRBSP(nal)
+		for pos := 0; pos < len(rbsp); {
+			payloadType := 0
+			for pos < len(rbsp) && rbsp[pos] == 0xFF {
+				payloadType += 255
+				pos++
+			}
+			if pos >= len(rbsp) {
+				break
+			}
+			payloadType += int(rbsp[pos])
+			pos++
+			payloadSize := 0
+			for pos < len(rbsp) && rbsp[pos] == 0xFF {
+				payloadSize += 255
+				pos++
+			}
+			if pos >= len(rbsp) {
+				break
+			}
+			payloadSize += int(rbsp[pos])
+			pos++
+			if payloadSize < 0 || payloadSize > len(rbsp)-pos {
+				break
+			}
+			if payloadType == 1 {
+				if parsed, ok := parseH264PicTimingTimeCode(rbsp[pos:pos+payloadSize], sps); ok {
+					timeCode = parsed
+					return false
+				}
+			}
+			pos += payloadSize
+		}
+		return true
+	})
+	return timeCode
+}
+
+// parseH264PicTimingTimeCode decodes a pic_timing payload using SPS delay
+// widths. It accepts only continuous timestamps with an explicit hour value.
+func parseH264PicTimingTimeCode(payload []byte, sps h264SPSInfo) (string, bool) {
+	if !sps.PicStructPresent || len(payload) == 0 {
+		return "", false
+	}
+	br := newBitReader(payload)
+	read := func(bits int) (uint64, bool) {
+		value := br.readBitsValue(uint8(bits))
+		return value, value != ^uint64(0)
+	}
+	if sps.CpbDpbDelaysPresent {
+		if _, ok := read(sps.CpbRemovalDelayLength); !ok {
+			return "", false
+		}
+		if _, ok := read(sps.DpbOutputDelayLength); !ok {
+			return "", false
+		}
+	}
+	picStruct, ok := read(4)
+	if !ok || picStruct > 8 {
+		return "", false
+	}
+	numClockTS := [...]int{1, 1, 1, 2, 2, 3, 3, 2, 3}
+	for range numClockTS[picStruct] {
+		clockTimestampFlag, ok := read(1)
+		if !ok {
+			return "", false
+		}
+		if clockTimestampFlag == 0 {
+			continue
+		}
+		if _, ok := read(2); !ok { // ct_type
+			return "", false
+		}
+		if _, ok := read(1); !ok { // nuit_field_based_flag
+			return "", false
+		}
+		if _, ok := read(5); !ok { // counting_type
+			return "", false
+		}
+		fullTimestamp, ok := read(1)
+		if !ok {
+			return "", false
+		}
+		discontinuity, ok := read(1)
+		if !ok {
+			return "", false
+		}
+		cntDropped, ok := read(1)
+		if !ok {
+			return "", false
+		}
+		frames, ok := read(8)
+		if !ok {
+			return "", false
+		}
+		var seconds, minutes, hours uint64
+		hasHours := false
+		if fullTimestamp == 1 {
+			if seconds, ok = read(6); !ok {
+				return "", false
+			}
+			if minutes, ok = read(6); !ok {
+				return "", false
+			}
+			if hours, ok = read(5); !ok {
+				return "", false
+			}
+			hasHours = true
+		} else {
+			secondsFlag, valid := read(1)
+			if !valid {
+				return "", false
+			}
+			if secondsFlag == 1 {
+				if seconds, ok = read(6); !ok {
+					return "", false
+				}
+				minutesFlag, valid := read(1)
+				if !valid {
+					return "", false
+				}
+				if minutesFlag == 1 {
+					if minutes, ok = read(6); !ok {
+						return "", false
+					}
+					hoursFlag, valid := read(1)
+					if !valid {
+						return "", false
+					}
+					if hoursFlag == 1 {
+						if hours, ok = read(5); !ok {
+							return "", false
+						}
+						hasHours = true
+					}
+				}
+			}
+		}
+		if sps.TimeOffsetLength > 0 {
+			if _, ok := read(sps.TimeOffsetLength); !ok {
+				return "", false
+			}
+		}
+		if discontinuity == 1 {
+			return "", false
+		}
+		// MediaInfo only promotes pic_timing to a first-frame time code when the
+		// complete clock is present. Some Blu-ray streams carry minutes/seconds
+		// while omitting hours; treating the absent component as zero creates a
+		// timestamp that MediaInfo intentionally suppresses.
+		if !hasHours {
+			return "", false
+		}
+		separator := ":"
+		if cntDropped == 1 {
+			separator = ";"
+		}
+		return fmt.Sprintf("%02d:%02d:%02d%s%02d", hours, minutes, seconds, separator, frames), true
+	}
+	return "", false
 }
 
 func h264FirstMBInSlice(nal []byte) (int, bool) {

@@ -5,6 +5,8 @@ import (
 	"fmt"
 )
 
+// hevcHDRInfo accumulates HDR and encoder metadata discovered in HEVC SEI
+// messages during bounded sample scans.
 type hevcHDRInfo struct {
 	masteringPrimaries    string
 	masteringLuminanceMin float64
@@ -20,6 +22,11 @@ type hevcHDRInfo struct {
 	x265Library  string // "x265 <version>" (space form, mirrors findX264Info output)
 	x265Settings string // encoding options joined with " / "
 	x265Seen     bool
+	// Non-x265 encoder identity, such as ATEME Titan, carried by the same SEI
+	// message type.
+	encoderLibrary string
+	encoderName    string
+	encoderVersion string
 }
 
 func (info *hevcHDRInfo) complete() bool {

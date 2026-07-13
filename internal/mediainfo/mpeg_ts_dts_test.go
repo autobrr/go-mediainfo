@@ -43,7 +43,7 @@ func buildDTSCoreFrame(amode uint32, lfe uint32, brCode uint32) []byte {
 	writeBits(out, &pos, 0, 1)      // multirate interpolator
 	writeBits(out, &pos, 0, 4)      // encoder software rev
 	writeBits(out, &pos, 0, 2)      // copy history
-	writeBits(out, &pos, 2, 2)      // resolution code (24-bit)
+	writeBits(out, &pos, 6, 3)      // source PCM resolution code (24-bit)
 	return out
 }
 
@@ -74,7 +74,7 @@ func TestParseDTSCoreFrameUsesActualPaddedFrameRate(t *testing.T) {
 	writeBits(frame, &pos, 0, 1)    // multirate interpolator
 	writeBits(frame, &pos, 0, 4)    // encoder software revision
 	writeBits(frame, &pos, 0, 2)    // copy history
-	writeBits(frame, &pos, 2, 2)    // 24-bit resolution
+	writeBits(frame, &pos, 6, 3)    // source PCM resolution code (24-bit)
 
 	info, ok := parseDTSCoreFrame(frame)
 	if !ok {

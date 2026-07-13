@@ -53,8 +53,6 @@
 "Encoded_Library_Settings":"cabac=1 / ref=1 / deblock=1:0:0 / analyse=0x3:0x113 / me=hex / subme=2 / psy=1 / psy_rd=1.00:0.00 / mixed_ref=0 / me_range=16 / chroma_me=1 / trellis=0 / 8x8dct=1 / cqm=0 / deadzone=21,11 / fast_pskip=1 / chroma_qp_offset=0 / threads=11 / lookahead_threads=2 / sliced_threads=0 / nr=0 / decimate=1 / interlaced=0 / bluray_compat=0 / constrained_intra=0 / bframes=3 / b_pyramid=2 / b_adapt=1 / b_bias=0 / direct=1 / weightb=1 / open_gop=0 / weightp=1 / keyint=60 / keyint_min=31 / scenecut=0 / intra_refresh=0 / rc_lookahead=10 / rc=crf / mbtree=1 / crf=28.0 / qcomp=0.60 / qpmin=0 / qpmax=69 / qpstep=4 / ip_ratio=1.40 / aq=1:1.00",
 "Default":"No",
 "Forced":"No",
-"colour_description_present":"Yes",
-"colour_description_present_Source":"Container",
 "colour_range":"Limited",
 "colour_range_Source":"Container"},{"@type":"Audio","StreamOrder":"1",
 "ID":"2",

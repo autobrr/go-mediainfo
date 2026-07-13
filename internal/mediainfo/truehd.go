@@ -9,11 +9,14 @@ import (
 // TrueHD and Atmos fields.
 type trueHDInfo struct {
 	atmos           bool
+	dynamicObjects  int
 	sampleRate      int
 	samplesPerFrame int
 	maxBitRate      int64
 }
 
+// trueHDAtmosPresentation contains the MediaInfo-facing 16-channel Atmos
+// presentation summary derived from a TrueHD major-sync header.
 type trueHDAtmosPresentation struct {
 	additionalFeatures    string
 	dynamicObjects        int
@@ -33,7 +36,7 @@ func trueHDAtmosPresentationInfo(info trueHDInfo) (trueHDAtmosPresentation, bool
 	}
 	return trueHDAtmosPresentation{
 		additionalFeatures:    "16-ch",
-		dynamicObjects:        11,
+		dynamicObjects:        max(info.dynamicObjects, 11),
 		bedChannelCount:       1,
 		bedChannelConfig:      "LFE",
 		bedChannelConfigShort: "LFE",
@@ -103,6 +106,23 @@ func parseTrueHDFrame(payload []byte) (trueHDInfo, bool) {
 	}
 	info.samplesPerFrame = 40 << (rateBits & 7)
 	info.atmos = numSubstreams == 4 && substreamInfo&0x80 != 0
+	if info.atmos && data[25]&1 != 0 && len(data) >= 29 {
+		// extra_channel_meaning starts with its 4-bit length, followed by the
+		// 16-channel dialogue norm, mix level, and channel/object count. For the
+		// dynamic-object-only presentation used by TrueHD Atmos, an LFE bed is
+		// included in that count and MediaInfo subtracts it from dynamic objects.
+		ext := ac3BitReader{data: data[26 : headerSize-2]}
+		if _, ok := ext.readBits(4); ok && ext.skipBits(5+6) {
+			if count, ok := ext.readBits(5); ok {
+				info.dynamicObjects = int(count) + 1
+				if dynamicOnly, ok := ext.readBits(1); ok && dynamicOnly == 1 {
+					if lfePresent, ok := ext.readBits(1); ok && lfePresent == 1 {
+						info.dynamicObjects--
+					}
+				}
+			}
+		}
+	}
 	return info, true
 }
 

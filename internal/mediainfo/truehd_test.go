@@ -27,6 +27,9 @@ func TestParseTrueHDFrameAtmosMajorSync(t *testing.T) {
 	if info.maxBitRate != 8199000 {
 		t.Fatalf("maxBitRate=%d want 8199000", info.maxBitRate)
 	}
+	if info.dynamicObjects != 11 {
+		t.Fatalf("dynamicObjects=%d want 11", info.dynamicObjects)
+	}
 	atmos, ok := trueHDAtmosPresentationInfo(info)
 	if !ok {
 		t.Fatal("expected Atmos presentation details")

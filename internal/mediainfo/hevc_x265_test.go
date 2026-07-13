@@ -60,6 +60,15 @@ func TestParseHEVCUserDataUnregistered(t *testing.T) {
 	}
 }
 
+func TestParseHEVCUserDataUnregisteredATEME(t *testing.T) {
+	payload := append(make([]byte, 16), []byte("ATEME Titan KFE 3.7.3 (4.7.3.1001)\x00")...)
+	var info hevcHDRInfo
+	parseHEVCUserDataUnregistered(payload, &info)
+	if info.encoderLibrary != "ATEME Titan KFE 3.7.3 (4.7.3.1001)" || info.encoderName != "ATEME Titan KFE" || info.encoderVersion != "3.7.3 (4.7.3.1001)" {
+		t.Fatalf("unexpected ATEME metadata: %+v", info)
+	}
+}
+
 func TestParseHEVCConfigSEI(t *testing.T) {
 	// Some muxers place the x265 user-data SEI in the hvcC NAL arrays. Build a minimal
 	// HEVCDecoderConfigurationRecord with one PREFIX_SEI (nal_unit_type 39) array.

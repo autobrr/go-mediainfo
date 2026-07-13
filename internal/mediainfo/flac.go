@@ -1,6 +1,7 @@
 package mediainfo
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
@@ -13,6 +14,18 @@ import (
 type flacTagKV struct {
 	Key string
 	Val string
+}
+
+// flacStreamInfo contains the lossless stream properties encoded by a FLAC
+// STREAMINFO metadata block.
+type flacStreamInfo struct {
+	minBlockSize  uint16
+	maxBlockSize  uint16
+	sampleRate    uint32
+	channels      uint8
+	bitsPerSample uint8
+	totalSamples  uint64
+	md5           string
 }
 
 func ParseFLAC(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, map[string]string, map[string]string, bool) {
@@ -255,8 +268,18 @@ func parseFLACPicture(data []byte) (mime string, typ string, ok bool) {
 }
 
 func parseFLACStreamInfo(data []byte) (uint32, uint8, uint8, uint64, string) {
-	if len(data) < 34 {
+	info, ok := parseFLACStreamInfoDetails(data)
+	if !ok {
 		return 0, 0, 0, 0, ""
+	}
+	return info.sampleRate, info.channels, info.bitsPerSample, info.totalSamples, info.md5
+}
+
+// parseFLACStreamInfoDetails decodes a 34-byte STREAMINFO payload and reports
+// false when the payload is truncated or lacks usable audio properties.
+func parseFLACStreamInfoDetails(data []byte) (flacStreamInfo, bool) {
+	if len(data) < 34 {
+		return flacStreamInfo{}, false
 	}
 	sampleRate := uint32(data[10])<<12 | uint32(data[11])<<4 | uint32(data[12])>>4
 	channels := ((data[12] & 0x0E) >> 1) + 1
@@ -276,7 +299,61 @@ func parseFLACStreamInfo(data []byte) (uint32, uint8, uint8, uint64, string) {
 	if !allZero {
 		md5Hex = strings.ToUpper(hex.EncodeToString(md5))
 	}
-	return sampleRate, channels, bitsPerSample, totalSamples, md5Hex
+	return flacStreamInfo{
+		minBlockSize:  binary.BigEndian.Uint16(data[0:2]),
+		maxBlockSize:  binary.BigEndian.Uint16(data[2:4]),
+		sampleRate:    sampleRate,
+		channels:      channels,
+		bitsPerSample: bitsPerSample,
+		totalSamples:  totalSamples,
+		md5:           md5Hex,
+	}, sampleRate > 0 && channels > 0
+}
+
+// parseMatroskaFLACPrivate accepts either a bare STREAMINFO payload or a full
+// fLaC metadata sequence and returns its STREAMINFO plus Vorbis vendor string.
+func parseMatroskaFLACPrivate(data []byte) (flacStreamInfo, string, bool) {
+	if len(data) == 34 {
+		info, ok := parseFLACStreamInfoDetails(data)
+		return info, "", ok
+	}
+	if len(data) < 8 || !bytes.Equal(data[:4], []byte("fLaC")) {
+		return flacStreamInfo{}, "", false
+	}
+
+	var info flacStreamInfo
+	var vendor string
+	hasStreamInfo := false
+	pos := 4
+	for pos+4 <= len(data) {
+		header := data[pos]
+		blockType := header & 0x7F
+		blockSize := int(data[pos+1])<<16 | int(data[pos+2])<<8 | int(data[pos+3])
+		pos += 4
+		if blockSize < 0 || pos+blockSize > len(data) {
+			return flacStreamInfo{}, "", false
+		}
+		block := data[pos : pos+blockSize]
+		switch blockType {
+		case 0:
+			parsed, ok := parseFLACStreamInfoDetails(block)
+			if !ok {
+				return flacStreamInfo{}, "", false
+			}
+			info = parsed
+			hasStreamInfo = true
+		case 4:
+			parsedVendor, _ := parseFLACVorbisComment(block)
+			if parsedVendor != "" {
+				vendor = parsedVendor
+			}
+		}
+		pos += blockSize
+		if header&0x80 != 0 {
+			return info, vendor, hasStreamInfo
+		}
+	}
+	return flacStreamInfo{}, "", false
 }
 
 func parseFLACVorbisComment(buf []byte) (string, []flacTagKV) {
@@ -344,6 +421,23 @@ func splitFLACEncodedLibrary(value string) (name, version, date string) {
 		return name, version, date
 	}
 	return "", "", ""
+}
+
+// flacDerivedLayoutIsOmitted reports whether MediaInfo omits synthesized FLAC
+// channel positions for the supplied libFLAC vendor. Unknown versions and
+// libFLAC 1.3 or later use the omission behavior.
+func flacDerivedLayoutIsOmitted(vendor string) bool {
+	_, version, _ := splitFLACEncodedLibrary(vendor)
+	parts := strings.Split(version, ".")
+	if len(parts) < 2 {
+		return true
+	}
+	major, majorErr := strconv.Atoi(parts[0])
+	minor, minorErr := strconv.Atoi(parts[1])
+	if majorErr != nil || minorErr != nil {
+		return true
+	}
+	return major > 1 || major == 1 && minor >= 3
 }
 
 func flacTagsToGeneralJSON(tags map[string]string, encoder string) (map[string]string, map[string]string) {

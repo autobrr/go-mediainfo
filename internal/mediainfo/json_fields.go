@@ -341,6 +341,8 @@ func mapStreamFieldsToJSON(kind StreamKind, fields []Field) []jsonKV {
 	return out
 }
 
+// buildJSONComputedFields derives MediaInfo-compatible JSON values that are not
+// already present in the parsed field set.
 func buildJSONComputedFields(kind StreamKind, fields []jsonKV, containerFormat string) []jsonKV {
 	out := []jsonKV{}
 	format := jsonFieldValue(fields, "Format")
@@ -367,9 +369,12 @@ func buildJSONComputedFields(kind StreamKind, fields []jsonKV, containerFormat s
 	}
 
 	if kind == StreamAudio {
-		if channels != "" && jsonFieldValue(fields, "ChannelPositions") == "" {
+		if channels != "" && jsonFieldValue(fields, "ChannelPositions") == "" && jsonFieldValue(fields, "Channels_Original") == "" {
+			omitDerivedFLACPositions := containerFormat == "Matroska" && format == "FLAC" &&
+				jsonFieldValue(fields, "ChannelLayout") == "" &&
+				flacDerivedLayoutIsOmitted(jsonFieldValue(fields, "Encoded_Library"))
 			// Official mediainfo does not emit ChannelPositions for MPEG Audio in MPEG-PS (e.g. VOB).
-			if !(containerFormat == "MPEG-PS" && format == "MPEG Audio") {
+			if (containerFormat != "MPEG-PS" || format != "MPEG Audio") && !omitDerivedFLACPositions {
 				// For MPEG-TS/BDAV, MediaInfo often omits ChannelPositions when ChannelLayout isn't known
 				// (e.g. DTS-HD ExSS without a speaker mask). Avoid synthesizing positions in that case.
 				if (containerFormat == "MPEG-TS" || containerFormat == "BDAV") && jsonFieldValue(fields, "ChannelLayout") == "" {

@@ -37,6 +37,10 @@ func exposeWritingApplicationComponents(name string, version string) bool {
 	if err != nil || major <= 0 {
 		return false
 	}
+	// MediaInfo's splitter leaves mkvmerge v19 as a single application string.
+	if major == 19 {
+		return false
+	}
 	// MediaInfo's mkvmerge application splitter does not recognize codenames
 	// containing an apostrophe, such as v97's "You Don't Have A Clue".
 	return strings.Count(version, "'") <= 2

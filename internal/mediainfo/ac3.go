@@ -5,20 +5,24 @@ import (
 	"strings"
 )
 
+// ac3Info contains frame metadata and accumulated statistics shared by AC-3
+// and E-AC-3 renderers.
 type ac3Info struct {
-	bitRateKbps int64
-	sampleRate  float64
-	channels    uint64
-	layout      string
-	bsid        int
-	bsmod       int
-	acmod       int
-	lfeon       int
-	dsurmod     int
-	hasDsurmod  bool
-	serviceKind string
-	frameRate   float64
-	spf         int
+	bitRateKbps  int64
+	sampleRate   float64
+	channels     uint64
+	layout       string
+	bsid         int
+	bsmod        int
+	acmod        int
+	lfeon        int
+	dsurmod      int
+	hasDsurmod   bool
+	dsurexmod    int
+	hasDsurexmod bool
+	serviceKind  string
+	frameRate    float64
+	spf          int
 
 	// Frame-scoped raw codes, used for MediaInfo-style stats (histogram-based).
 	// When aggregating, these fields come from the merged frame, not the accumulator.
@@ -167,6 +171,8 @@ func (br *ac3BitReader) readVariableBits(bits int) (uint32, bool) {
 	return value, true
 }
 
+// parseAC3Frame parses one legacy AC-3 syncframe. It returns the declared frame
+// size and reports false for truncated, invalid, or unsupported headers.
 func parseAC3Frame(payload []byte) (ac3Info, int, bool) {
 	var info ac3Info
 	if len(payload) < 7 {
@@ -423,8 +429,14 @@ func parseAC3Frame(payload []byte) (ac3Info, int, bool) {
 			return info, 0, false
 		}
 		if xbsi2e == 1 {
-			// dsurexmod (2) + dheadphonmod (2) + adconvtyp (1) + xbsi2 (8) + encinfo (1)
-			if _, ok := br.readBits(14); !ok {
+			dsurexmod, ok := br.readBits(2)
+			if !ok {
+				return info, 0, false
+			}
+			info.dsurexmod = int(dsurexmod)
+			info.hasDsurexmod = true
+			// dheadphonmod (2) + adconvtyp (1) + xbsi2 (8) + encinfo (1)
+			if _, ok := br.readBits(12); !ok {
 				return info, 0, false
 			}
 		}
@@ -495,6 +507,8 @@ func parseAC3Frame(payload []byte) (ac3Info, int, bool) {
 		lfeon:            int(lfeonVal),
 		dsurmod:          info.dsurmod,
 		hasDsurmod:       info.hasDsurmod,
+		dsurexmod:        info.dsurexmod,
+		hasDsurexmod:     info.hasDsurexmod,
 		serviceKind:      ac3ServiceKind(int(bsmod)),
 		frameRate:        frameRate,
 		spf:              spf,
@@ -1204,6 +1218,10 @@ func (info *ac3Info) mergeFrame(frame ac3Info) {
 		info.dsurmod = frame.dsurmod
 		info.hasDsurmod = true
 	}
+	if frame.hasDsurexmod && !info.hasDsurexmod {
+		info.dsurexmod = frame.dsurexmod
+		info.hasDsurexmod = true
+	}
 	if frame.lfeon > 0 && info.lfeon == 0 {
 		info.lfeon = frame.lfeon
 	}
@@ -1375,6 +1393,10 @@ func (info *ac3Info) mergeFrameBase(frame ac3Info) {
 	if frame.hasDsurmod && !info.hasDsurmod {
 		info.dsurmod = frame.dsurmod
 		info.hasDsurmod = true
+	}
+	if frame.hasDsurexmod && !info.hasDsurexmod {
+		info.dsurexmod = frame.dsurexmod
+		info.hasDsurexmod = true
 	}
 	if frame.lfeon > 0 && info.lfeon == 0 {
 		info.lfeon = frame.lfeon

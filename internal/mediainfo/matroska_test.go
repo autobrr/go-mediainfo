@@ -76,6 +76,51 @@ func TestParseMatroskaGeneralTags(t *testing.T) {
 	}
 }
 
+func TestParseMatroskaTrackSourceTags(t *testing.T) {
+	body := append(buildMatroskaSimpleTag("SOURCE", "UHD Blu-ray"), buildMatroskaSimpleTag("SOURCE_ID", "001011")...)
+	targets := buildMatroskaElement(mkvIDTagTargets, buildMatroskaElement(mkvIDTagTrackUID, encodeMatroskaUint(123)))
+	tagsPayload := buildMatroskaElement(mkvIDTag, append(targets, body...))
+
+	_, _, _, stats, _ := parseMatroskaTags(tagsPayload, "")
+	got := stats[123]
+	if !got.hasSource || got.source != "UHD Blu-ray" {
+		t.Fatalf("Source = %q, present=%v", got.source, got.hasSource)
+	}
+	if !got.hasSourceID || got.sourceID != 0x1011 {
+		t.Fatalf("Source ID = %d, present=%v", got.sourceID, got.hasSourceID)
+	}
+}
+
+func TestApplyMatroskaTrackSourceTags(t *testing.T) {
+	info := MatroskaInfo{Tracks: []Stream{{
+		Kind: StreamVideo,
+		JSON: map[string]string{"UniqueID": "123"},
+	}}}
+
+	applyMatroskaTagStats(&info, map[uint64]matroskaTagStats{123: {
+		source: "UHD Blu-ray", hasSource: true,
+		sourceID: 0x1011, hasSourceID: true,
+	}}, 0)
+
+	stream := info.Tracks[0]
+	if got := stream.JSON["OriginalSourceMedium_ID"]; got != "4113" {
+		t.Fatalf("OriginalSourceMedium_ID = %q", got)
+	}
+	if got := stream.JSONRaw["extra"]; got != `{"Source":"UHD Blu-ray","OriginalSourceMedium":"Blu-ray"}` {
+		t.Fatalf("extra = %s", got)
+	}
+}
+
+func TestParseMatroskaChapterDisplayPrefersIETF(t *testing.T) {
+	payload := append(buildMatroskaElement(mkvIDChapString, []byte("Chapter 01")), buildMatroskaElement(mkvIDChapLanguage, []byte("eng"))...)
+	payload = append(payload, buildMatroskaElement(mkvIDChapLanguageIETF, []byte("en-US"))...)
+
+	name, lang := parseMatroskaChapterDisplay(payload)
+	if name != "Chapter 01" || lang != "en-US" {
+		t.Fatalf("display = %q, %q", name, lang)
+	}
+}
+
 func TestParseMatroskaTrackAccessibilityFlags(t *testing.T) {
 	payload := buildMatroskaElement(mkvIDTrackNumber, []byte{0x01})
 	payload = append(payload, buildMatroskaElement(mkvIDTrackType, []byte{0x11})...)
@@ -90,6 +135,60 @@ func TestParseMatroskaTrackAccessibilityFlags(t *testing.T) {
 	}
 	if got := stream.JSON["ServiceKind"]; got != "HI / O / C" {
 		t.Fatalf("ServiceKind = %q, want %q", got, "HI / O / C")
+	}
+}
+
+func TestParseMatroskaFLACCodecPrivate(t *testing.T) {
+	codecPrivate := []byte{
+		0x10, 0x00, 0x10, 0x00, 0x00, 0x00, 0x10, 0x00, 0x21, 0x0C, 0x0B, 0xB8, 0x02, 0xF0, 0x0E, 0x5B,
+		0x65, 0x40, 0x86, 0x4D, 0x55, 0xF0, 0x03, 0x14, 0x3D, 0x8B, 0xAD, 0x47, 0xD3, 0xB9, 0x97, 0xFA,
+		0xE6, 0x4C,
+	}
+	payload := buildMatroskaElement(mkvIDTrackNumber, []byte{0x01})
+	payload = append(payload, buildMatroskaElement(mkvIDTrackType, []byte{0x02})...)
+	payload = append(payload, buildMatroskaElement(mkvIDCodecID, []byte("A_FLAC"))...)
+	payload = append(payload, buildMatroskaElement(mkvIDCodecPrivate, codecPrivate)...)
+
+	stream, ok := parseMatroskaTrackEntry(payload, 124.501, 3)
+	if !ok {
+		t.Fatal("expected valid Matroska FLAC track")
+	}
+	for key, want := range map[string]string{
+		"BitDepth":          "16",
+		"BitDepth_Detected": "16",
+		"BitRate_Mode":      "VBR",
+		"SamplesPerFrame":   "4096",
+		"SamplingCount":     "5976048",
+		"FrameCount":        "1459",
+		"FrameRate":         "11.719",
+	} {
+		if got := stream.JSON[key]; got != want {
+			t.Errorf("%s = %q, want %q", key, got, want)
+		}
+	}
+	if got := stream.JSONRaw["extra"]; got != `{"MD5_Unencoded":"864D55F003143D8BAD47D3B997FAE64C"}` {
+		t.Fatalf("extra = %q", got)
+	}
+}
+
+func TestApplyMatroskaEncodersAddsFLACLibraryComponents(t *testing.T) {
+	streams := []Stream{{
+		Kind:   StreamAudio,
+		Fields: []Field{{Name: "Format", Value: "FLAC"}},
+		JSON:   map[string]string{"UniqueID": "42"},
+	}}
+
+	applyMatroskaEncoders(streams, map[uint64]string{42: "reference libFLAC 1.3.4 20220220"}, nil)
+
+	for key, want := range map[string]string{
+		"Encoded_Library":         "reference libFLAC 1.3.4 20220220",
+		"Encoded_Library_Name":    "libFLAC",
+		"Encoded_Library_Version": "1.3.4",
+		"Encoded_Library_Date":    "2022-02-20",
+	} {
+		if got := streams[0].JSON[key]; got != want {
+			t.Errorf("%s = %q, want %q", key, got, want)
+		}
 	}
 }
 
@@ -183,6 +282,31 @@ func TestApplyMatroskaTagStatsRoundsTextDurationToNanoseconds(t *testing.T) {
 	}
 }
 
+func TestApplyMatroskaTagStatsUpdatesFLACSampleCounts(t *testing.T) {
+	info := MatroskaInfo{Tracks: []Stream{{
+		Kind: StreamAudio,
+		Fields: []Field{
+			{Name: "Format", Value: "FLAC"},
+			{Name: "Sampling rate", Value: "48.0 kHz"},
+		},
+		JSON: map[string]string{
+			"UniqueID":        "123",
+			"SamplesPerFrame": "4096",
+		},
+	}}}
+
+	applyMatroskaTagStats(&info, map[uint64]matroskaTagStats{123: {
+		trusted: true, durationSeconds: 124.501, hasDuration: true,
+	}}, 0)
+
+	if got := info.Tracks[0].JSON["SamplingCount"]; got != "5976048" {
+		t.Fatalf("SamplingCount = %q", got)
+	}
+	if got := info.Tracks[0].JSON["FrameCount"]; got != "1459" {
+		t.Fatalf("FrameCount = %q", got)
+	}
+}
+
 func TestParseMatroskaTagStatsWithoutDate(t *testing.T) {
 	stats, ok := parseMatroskaTagStats(map[string]string{
 		"_STATISTICS_TAGS":        "BPS DURATION NUMBER_OF_FRAMES NUMBER_OF_BYTES",
@@ -251,6 +375,27 @@ func TestParseMatroskaTrackEntryNonHeaderCompression(t *testing.T) {
 	}
 	if len(stream.mkvHeaderStripBytes) != 0 {
 		t.Fatalf("unexpected header strip bytes: %#v", stream.mkvHeaderStripBytes)
+	}
+}
+
+func TestParseMatroskaTrackEntryZlibSubtitle(t *testing.T) {
+	compression := buildMatroskaElement(mkvIDContentCompression,
+		nil,
+	)
+	encoding := buildMatroskaElement(mkvIDContentEncoding, compression)
+	entry := append(
+		buildMatroskaElement(mkvIDTrackType, encodeMatroskaUint(17)),
+		buildMatroskaElement(mkvIDTrackNumber, encodeMatroskaUint(1))...,
+	)
+	entry = append(entry, buildMatroskaElement(mkvIDCodecID, []byte("S_HDMV/PGS"))...)
+	entry = append(entry, buildMatroskaElement(mkvIDContentEncodings, encoding)...)
+
+	stream, ok := parseMatroskaTrackEntry(entry, 0, 3)
+	if !ok {
+		t.Fatal("expected parsed stream")
+	}
+	if got := stream.JSON["MuxingMode"]; got != "zlib" {
+		t.Fatalf("MuxingMode = %q, want zlib", got)
 	}
 }
 
@@ -468,6 +613,92 @@ func TestProbeMatroskaVideo_HEVCContinuesAfterHDRForX265SEI(t *testing.T) {
 	}
 	if probe.hdrInfo.x265Settings != "wpp / me=0" {
 		t.Fatalf("x265Settings = %q, want %q", probe.hdrInfo.x265Settings, "wpp / me=0")
+	}
+}
+
+func TestH264LengthPrefixedToAnnexB(t *testing.T) {
+	payload := []byte{0, 0, 0, 2, 0x65, 0x88, 0, 0, 0, 2, 0x41, 0x80}
+	want := []byte{0, 0, 0, 1, 0x65, 0x88, 0, 0, 0, 1, 0x41, 0x80}
+	if got := h264LengthPrefixedToAnnexB(payload, 4); !bytes.Equal(got, want) {
+		t.Fatalf("Annex B = %x, want %x", got, want)
+	}
+}
+
+func TestParseH264PicTimingTimeCode(t *testing.T) {
+	var bits []byte
+	appendBits := func(value uint64, width int) {
+		for bit := width - 1; bit >= 0; bit-- {
+			bits = append(bits, byte(value>>bit&1))
+		}
+	}
+	appendBits(0, 4)  // pic_struct
+	appendBits(1, 1)  // clock_timestamp_flag
+	appendBits(0, 2)  // ct_type
+	appendBits(0, 1)  // nuit_field_based_flag
+	appendBits(0, 5)  // counting_type
+	appendBits(1, 1)  // full_timestamp_flag
+	appendBits(0, 1)  // discontinuity_flag
+	appendBits(0, 1)  // cnt_dropped_flag
+	appendBits(12, 8) // n_frames
+	appendBits(5, 6)  // seconds
+	appendBits(4, 6)  // minutes
+	appendBits(3, 5)  // hours
+	payload := make([]byte, (len(bits)+7)/8)
+	for i, bit := range bits {
+		payload[i/8] |= bit << (7 - i%8)
+	}
+
+	got, ok := parseH264PicTimingTimeCode(payload, h264SPSInfo{PicStructPresent: true})
+	if !ok || got != "03:04:05:12" {
+		t.Fatalf("time code = %q, ok=%v", got, ok)
+	}
+}
+
+func TestParseH264PicTimingTimeCodeRequiresHours(t *testing.T) {
+	var bits []byte
+	appendBits := func(value uint64, width int) {
+		for bit := width - 1; bit >= 0; bit-- {
+			bits = append(bits, byte(value>>bit&1))
+		}
+	}
+	appendBits(0, 4)  // pic_struct
+	appendBits(1, 1)  // clock_timestamp_flag
+	appendBits(0, 2)  // ct_type
+	appendBits(0, 1)  // nuit_field_based_flag
+	appendBits(0, 5)  // counting_type
+	appendBits(0, 1)  // full_timestamp_flag
+	appendBits(0, 1)  // discontinuity_flag
+	appendBits(0, 1)  // cnt_dropped_flag
+	appendBits(7, 8)  // n_frames
+	appendBits(1, 1)  // seconds_flag
+	appendBits(54, 6) // seconds
+	appendBits(1, 1)  // minutes_flag
+	appendBits(39, 6) // minutes
+	appendBits(0, 1)  // hours_flag
+	payload := make([]byte, (len(bits)+7)/8)
+	for i, bit := range bits {
+		payload[i/8] |= bit << (7 - i%8)
+	}
+
+	if got, ok := parseH264PicTimingTimeCode(payload, h264SPSInfo{PicStructPresent: true}); ok || got != "" {
+		t.Fatalf("incomplete time code = %q, ok=%v", got, ok)
+	}
+}
+
+func TestStandardMatroskaH264GOPLength(t *testing.T) {
+	if !standardMatroskaH264GOPLength(24) || standardMatroskaH264GOPLength(23) {
+		t.Fatal("unexpected GOP length classification")
+	}
+}
+
+func TestMatroskaH264GOPNeedsExplicitRate(t *testing.T) {
+	stream := Stream{Fields: []Field{{Name: "Frame rate", Value: "24.000 FPS"}}}
+	if matroskaH264GOPNeedsExplicitRate(stream, 24) {
+		t.Fatal("exact one-second GOP should be implicit")
+	}
+	stream.Fields[0].Value = "23.976 FPS"
+	if !matroskaH264GOPNeedsExplicitRate(stream, 24) {
+		t.Fatal("fractional-rate GOP should be explicit")
 	}
 }
 
