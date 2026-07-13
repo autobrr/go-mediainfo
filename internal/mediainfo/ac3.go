@@ -766,6 +766,10 @@ func parseEAC3FrameWithOptions(payload []byte, parseJOC bool) (ac3Info, int, boo
 		hasLorocmixlev:        info.hasLorocmixlev,
 		lorosurmixlevDB:       info.lorosurmixlevDB,
 		hasLorosurmixlev:      info.hasLorosurmixlev,
+		mixlevel:              info.mixlevel,
+		hasMixlevel:           info.hasMixlevel,
+		roomtyp:               info.roomtyp,
+		hasRoomtyp:            info.hasRoomtyp,
 	}
 	return info, frameSize, true
 }
@@ -978,8 +982,10 @@ func parseEAC3MetadataExtension(br *ac3BitReader, info *ac3Info, strmtyp int, nu
 			if !ok {
 				return false
 			}
-			if audioProdInfoExists == 1 && !br.skipBits(8) {
-				return false
+			if audioProdInfoExists == 1 {
+				if !parseEAC3AudioProductionInfo(br, info) {
+					return false
+				}
 			}
 		}
 		if fscod != 3 && !br.skipBits(1) {
@@ -1037,6 +1043,30 @@ func parseEAC3MetadataExtension(br *ac3BitReader, info *ac3Info, strmtyp int, nu
 		}
 	}
 	return false
+}
+
+// parseEAC3AudioProductionInfo reads mix level and room type from one E-AC-3
+// informational-metadata program, retaining the first reported values.
+func parseEAC3AudioProductionInfo(br *ac3BitReader, info *ac3Info) bool {
+	mixlevel, ok := br.readBits(5)
+	if !ok {
+		return false
+	}
+	roomtyp, ok := br.readBits(2)
+	if !ok || !br.skipBits(1) { // adconvtyp
+		return false
+	}
+	if info != nil {
+		if !info.hasMixlevel {
+			info.mixlevel = int(mixlevel) + 80
+			info.hasMixlevel = true
+		}
+		if value, ok := ac3RoomType(roomtyp); ok && !info.hasRoomtyp {
+			info.roomtyp = value
+			info.hasRoomtyp = true
+		}
+	}
+	return true
 }
 
 // eac3BlockCount maps the E-AC-3 numblkscod field to audio blocks per frame.

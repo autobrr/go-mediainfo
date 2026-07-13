@@ -63,6 +63,7 @@ func TestFLACDerivedLayoutIsOmitted(t *testing.T) {
 	}{
 		{"reference libFLAC 1.2.1 20070917", false},
 		{"reference libFLAC 1.3.4 20220220", true},
+		{"reference libFLAC 1.4.3 20230623", false},
 		{"reference libFLAC 1.5.0 20250211", true},
 		{"", true},
 	} {

@@ -19,6 +19,21 @@ func (w *ac3BitWriter) writeBits(v uint32, n int) {
 	}
 }
 
+func TestParseEAC3AudioProductionInfo(t *testing.T) {
+	reader := ac3BitReader{data: []byte{0xCC}} // mixlevel=25, roomtyp=2, adconvtyp=0
+	var info ac3Info
+
+	if !parseEAC3AudioProductionInfo(&reader, &info) {
+		t.Fatal("parseEAC3AudioProductionInfo returned false")
+	}
+	if !info.hasMixlevel || info.mixlevel != 105 {
+		t.Fatalf("mixlevel=%d (present=%v), want 105", info.mixlevel, info.hasMixlevel)
+	}
+	if !info.hasRoomtyp || info.roomtyp != "Small" {
+		t.Fatalf("roomtyp=%q (present=%v), want Small", info.roomtyp, info.hasRoomtyp)
+	}
+}
+
 func TestParseAC3Frame_Mono_NoCmixlev(t *testing.T) {
 	// Frame layout (subset) matching parseAC3Frame():
 	// syncword, crc1, fscod, frmsizecod, bsid, bsmod, acmod=1 (mono),

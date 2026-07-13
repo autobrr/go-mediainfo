@@ -84,7 +84,7 @@ func buildJSONStreamFields(stream Stream, order int, typeOrder int, containerFor
 	fields = applyJSONExtras(fields, stream.JSON, stream.JSONRaw)
 	fields = normalizeContainerComputedJSON(stream.Kind, fields, containerFormat)
 	if !stream.JSONSkipComputed {
-		fields = append(fields, buildJSONComputedFields(stream.Kind, fields, containerFormat)...)
+		fields = append(fields, buildJSONComputedFields(stream.Kind, fields, containerFormat, stream.JSONSkipFrameRateRatio)...)
 	}
 	return sortJSONFields(stream.Kind, fields)
 }
@@ -94,8 +94,12 @@ func normalizeContainerComputedJSON(kind StreamKind, fields []jsonKV, containerF
 		width, _ := strconv.ParseFloat(jsonFieldValue(fields, "Width"), 64)
 		height, _ := strconv.ParseFloat(jsonFieldValue(fields, "Height"), 64)
 		if width > 0 && height > 0 {
+			pixelAspect, _ := strconv.ParseFloat(jsonFieldValue(fields, "PixelAspectRatio"), 64)
+			if pixelAspect <= 0 {
+				pixelAspect = 1
+			}
 			// Official mediainfo JSON reports the numeric ratio even when the text field snaps to a common value.
-			fields = setJSONField(fields, "DisplayAspectRatio", formatJSONFloat(width/height))
+			fields = setJSONField(fields, "DisplayAspectRatio", formatJSONFloat((width/height)*pixelAspect))
 		}
 	}
 	if kind == StreamVideo && (strings.EqualFold(containerFormat, "MPEG-4") || strings.EqualFold(containerFormat, "QuickTime")) {
@@ -343,7 +347,7 @@ func mapStreamFieldsToJSON(kind StreamKind, fields []Field) []jsonKV {
 
 // buildJSONComputedFields derives MediaInfo-compatible JSON values that are not
 // already present in the parsed field set.
-func buildJSONComputedFields(kind StreamKind, fields []jsonKV, containerFormat string) []jsonKV {
+func buildJSONComputedFields(kind StreamKind, fields []jsonKV, containerFormat string, skipFrameRateRatio bool) []jsonKV {
 	out := []jsonKV{}
 	format := jsonFieldValue(fields, "Format")
 	duration, _ := strconv.ParseFloat(jsonFieldValue(fields, "Duration"), 64)
@@ -358,7 +362,7 @@ func buildJSONComputedFields(kind StreamKind, fields []jsonKV, containerFormat s
 		}
 		// MediaInfo emits FrameRate_Num/Den for some containers even when the displayed frame rate
 		// field lacks a "(num/den)" hint (e.g. BDAV and MPEG-TS).
-		if (containerFormat == "MPEG-4" || containerFormat == "MPEG-TS" || containerFormat == "BDAV" || containerFormat == "Matroska") &&
+		if !skipFrameRateRatio && (containerFormat == "MPEG-4" || containerFormat == "MPEG-TS" || containerFormat == "BDAV" || containerFormat == "Matroska") &&
 			jsonFieldValue(fields, "FrameRate_Num") == "" && jsonFieldValue(fields, "FrameRate_Den") == "" {
 			num, den := rationalizeFrameRate(frameRate)
 			if num > 0 && den > 0 {

@@ -29,6 +29,19 @@ func TestMapStreamFieldsToJSONDisplayAspectRatioDecimal(t *testing.T) {
 	}
 }
 
+func TestNormalizeMatroskaDisplayAspectRatioUsesPixelAspectRatio(t *testing.T) {
+	fields := []jsonKV{
+		{Key: "Width", Val: "720"},
+		{Key: "Height", Val: "480"},
+		{Key: "PixelAspectRatio", Val: "0.889"},
+	}
+
+	got := normalizeContainerComputedJSON(StreamVideo, fields, "Matroska")
+	if value := jsonFieldValue(got, "DisplayAspectRatio"); value != "1.333" {
+		t.Fatalf("DisplayAspectRatio=%q want %q", value, "1.333")
+	}
+}
+
 func TestSortJSONAudioFieldsPlacesTitleBeforeLanguageAndExtra(t *testing.T) {
 	fields := sortJSONFields(StreamAudio, []jsonKV{
 		{Key: "extra", Val: `{}`},

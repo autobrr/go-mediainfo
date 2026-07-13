@@ -248,3 +248,21 @@ func TestApplyMatroskaAudioProbes_DTSHDXLLPlainKeepsExistingBehavior(t *testing.
 		t.Fatalf("JSON BitRate should be removed for plain DTS-HD, got %q", got)
 	}
 }
+
+func TestNormalizeDTSHDChannelLayout(t *testing.T) {
+	tests := []struct {
+		name   string
+		layout string
+		want   string
+	}{
+		{name: "rear and side pairs", layout: "C L R LFE Lsr Rsr Lss Rss", want: "C L R LFE Lb Rb Lss Rss"},
+		{name: "rear pair only", layout: "C L R LFE Lsr Rsr", want: "C L R LFE Lsr Rsr"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := normalizeDTSHDChannelLayout(tt.layout); got != tt.want {
+				t.Fatalf("normalizeDTSHDChannelLayout(%q)=%q want %q", tt.layout, got, tt.want)
+			}
+		})
+	}
+}

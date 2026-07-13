@@ -17,14 +17,15 @@ type Field struct {
 }
 
 type Stream struct {
-	Kind                StreamKind
-	Fields              []Field
-	JSON                map[string]string
-	JSONRaw             map[string]string
-	JSONSkipStreamOrder bool
-	JSONSkipComputed    bool
-	eac3Dec3            eac3Dec3Info
-	nalLengthSize       int
+	Kind                   StreamKind
+	Fields                 []Field
+	JSON                   map[string]string
+	JSONRaw                map[string]string
+	JSONSkipStreamOrder    bool
+	JSONSkipComputed       bool
+	JSONSkipFrameRateRatio bool
+	eac3Dec3               eac3Dec3Info
+	nalLengthSize          int
 	// mkvH264SPS retains CodecPrivate timing metadata needed to decode frame SEI.
 	mkvH264SPS          h264SPSInfo
 	mkvHeaderStripBytes []byte

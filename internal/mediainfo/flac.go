@@ -424,9 +424,13 @@ func splitFLACEncodedLibrary(value string) (name, version, date string) {
 }
 
 // flacDerivedLayoutIsOmitted reports whether MediaInfo omits synthesized FLAC
-// channel positions for the supplied libFLAC vendor. Unknown versions and
-// libFLAC 1.3 or later use the omission behavior.
+// channel positions for the supplied libFLAC vendor. Unknown versions,
+// libFLAC 1.3, and libFLAC 1.5 or later use the omission behavior observed in
+// MediaInfo; 1.2 and 1.4 retain their derived layouts.
 func flacDerivedLayoutIsOmitted(vendor string) bool {
+	if strings.HasPrefix(vendor, "Lavf") {
+		return false
+	}
 	_, version, _ := splitFLACEncodedLibrary(vendor)
 	parts := strings.Split(version, ".")
 	if len(parts) < 2 {
@@ -437,7 +441,7 @@ func flacDerivedLayoutIsOmitted(vendor string) bool {
 	if majorErr != nil || minorErr != nil {
 		return true
 	}
-	return major > 1 || major == 1 && minor >= 3
+	return major > 1 || major == 1 && (minor == 3 || minor >= 5)
 }
 
 func flacTagsToGeneralJSON(tags map[string]string, encoder string) (map[string]string, map[string]string) {

@@ -65,6 +65,7 @@ func TestParseMatroskaStatsTags(t *testing.T) {
 
 func TestParseMatroskaGeneralTags(t *testing.T) {
 	body := append(buildMatroskaSimpleTag("IMDB", " tt32612507 "), buildMatroskaSimpleTag("TMDB", "movie/1304313")...)
+	body = append(body, buildMatroskaSimpleTag("TVDB2", "movies/19799")...)
 	tagsPayload := buildMatroskaElement(mkvIDTag, body)
 
 	_, _, _, _, generalTags := parseMatroskaTags(tagsPayload, "")
@@ -73,6 +74,9 @@ func TestParseMatroskaGeneralTags(t *testing.T) {
 	}
 	if got := generalTags["TMDB"]; got != "movie/1304313" {
 		t.Fatalf("TMDB = %q, want movie/1304313", got)
+	}
+	if got := generalTags["TVDB2"]; got != "movies/19799" {
+		t.Fatalf("TVDB2 = %q, want movies/19799", got)
 	}
 }
 
@@ -83,8 +87,8 @@ func TestParseMatroskaTrackSourceTags(t *testing.T) {
 
 	_, _, _, stats, _ := parseMatroskaTags(tagsPayload, "")
 	got := stats[123]
-	if !got.hasSource || got.source != "UHD Blu-ray" {
-		t.Fatalf("Source = %q, present=%v", got.source, got.hasSource)
+	if len(got.extras) != 1 || got.extras[0] != (jsonKV{Key: "SOURCE", Val: "UHD Blu-ray"}) {
+		t.Fatalf("extras = %#v", got.extras)
 	}
 	if !got.hasSourceID || got.sourceID != 0x1011 {
 		t.Fatalf("Source ID = %d, present=%v", got.sourceID, got.hasSourceID)

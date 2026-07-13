@@ -505,11 +505,12 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 				general.Fields = appendFieldUnique(general.Fields, field)
 			}
 			streams = append(streams, parsed.Tracks...)
+			applyLegacyMatroskaFrameRateRatio(rawWritingApp, streams)
 			generalExtras := []jsonKV{}
 			if len(parsed.attachments) > 0 {
 				generalExtras = append(generalExtras, jsonKV{Key: "Attachments", Val: strings.Join(parsed.attachments, " / ")})
 			}
-			for _, name := range []string{"IMDB", "TMDB"} {
+			for _, name := range []string{"IMDB", "TMDB", "TVDB", "TVDB2", "MyAnimeList", "TVmaze"} {
 				if value := parsed.generalTags[name]; value != "" {
 					generalExtras = append(generalExtras, jsonKV{Key: name, Val: value})
 				}
@@ -519,6 +520,12 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 					general.JSONRaw = map[string]string{}
 				}
 				general.JSONRaw["extra"] = renderJSONObject(generalExtras, false)
+			}
+			if value := parsed.generalTags["DESCRIPTION"]; value != "" {
+				general.JSON["Description"] = value
+			}
+			if value := parsed.generalTags["DATE_RELEASED"]; value != "" {
+				general.JSON["Released_Date"] = value
 			}
 			if rawWritingApp != "" {
 				general.JSON["Encoded_Application"] = rawWritingApp
@@ -539,11 +546,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			setOverallBitRate(general.JSON, stat.Size(), info.DurationSeconds)
 			general.JSON["IsStreamable"] = "Yes"
 			streamSizeSum := sumStreamSizes(streams, true)
-			// Official mediainfo does not expose large Matroska overhead as General StreamSize when
-			// it's dominated by attachments (fonts).
-			if len(parsed.attachments) == 0 {
-				setRemainingStreamSize(general.JSON, stat.Size(), streamSizeSum)
-			}
+			setRemainingStreamSize(general.JSON, stat.Size(), streamSizeSum)
 			overallModeField := overallBitRateModeForKind(streams, StreamVideo)
 			// When video doesn't provide a bit rate mode, check audio streams.
 			// DTS-HD MA (XLL) and other VBR audio codecs signal Variable overall mode.
@@ -595,6 +598,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 				addNominalBitrate: false,
 				addBitsPerPixel:   false,
 			})
+			deriveMatroskaVideoBitRateAndSize(general.JSON, streams, stat.Size())
 			// MediaInfo prefers x264 settings for bitrate/VBV constraints when available.
 			for i := range streams {
 				if streams[i].Kind != StreamVideo {
@@ -637,21 +641,24 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 					findField(streams[i].Fields, "Nominal bit rate") == "" &&
 					findField(streams[i].Fields, "Bit rate") == "" &&
 					(streams[i].JSON == nil || streams[i].JSON["BitRate"] == "") {
-					streams[i].Fields = appendFieldUnique(streams[i].Fields, Field{Name: "Nominal bit rate", Value: formatBitrate(x264Bitrate)})
+					streams[i].Fields = appendFieldUnique(streams[i].Fields, Field{Name: "Bit rate", Value: formatBitrate(x264Bitrate)})
 					if streams[i].JSON == nil {
 						streams[i].JSON = map[string]string{}
 					}
-					streams[i].JSON["BitRate_Nominal"] = strconv.FormatInt(int64(math.Round(x264Bitrate)), 10)
+					streams[i].JSON["BitRate"] = strconv.FormatInt(int64(math.Round(x264Bitrate)), 10)
 				}
 				// MediaInfo reports VBV constraints only when HRD signaling is enabled.
-				if !strings.Contains(enc, "nal_hrd=none") {
+				hrdEnabled := strings.Contains(enc, "nal_hrd=vbr") || strings.Contains(enc, "nal_hrd=cbr")
+				if hrdEnabled {
 					if maxKbps, ok := findX264VbvMaxrate(enc); ok && maxKbps > 0 {
 						maxBps := maxKbps * 1000
-						streams[i].Fields = setFieldValue(streams[i].Fields, "Maximum bit rate", formatBitrate(maxBps))
 						if streams[i].JSON == nil {
 							streams[i].JSON = map[string]string{}
 						}
-						streams[i].JSON["BitRate_Maximum"] = strconv.FormatInt(int64(math.Round(maxBps)), 10)
+						if findField(streams[i].Fields, "Maximum bit rate") == "" && streams[i].JSON["BitRate_Maximum"] == "" {
+							streams[i].Fields = setFieldValue(streams[i].Fields, "Maximum bit rate", formatBitrate(maxBps))
+							streams[i].JSON["BitRate_Maximum"] = strconv.FormatInt(int64(math.Round(maxBps)), 10)
+						}
 					}
 					if bufKbps, ok := findX264VbvBufsize(enc); ok && bufKbps > 0 {
 						bufBps := bufKbps * 1000
@@ -664,6 +671,8 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 					}
 				}
 			}
+			streamSizeSum = sumStreamSizes(streams, true)
+			setRemainingStreamSize(general.JSON, stat.Size(), streamSizeSum)
 		}
 	case "MPEG-TS":
 		if parsedInfo, parsedStreams, generalFields, ok := ParseMPEGTS(file, stat.Size(), opts.ParseSpeed); ok {
@@ -1698,6 +1707,108 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 		General: general,
 		Streams: streams,
 	}, nil
+}
+
+// deriveMatroskaVideoBitRateAndSize mirrors MediaInfo's Matroska fallback when
+// one video track lacks a measured bitrate but every audio bitrate is known.
+func deriveMatroskaVideoBitRateAndSize(generalJSON map[string]string, streams []Stream, fileSize int64) {
+	if len(generalJSON) == 0 || fileSize <= 0 {
+		return
+	}
+	overall, err := strconv.ParseFloat(generalJSON["OverallBitRate"], 64)
+	if err != nil || overall <= 0 {
+		return
+	}
+
+	videoIndex := -1
+	videoBitRate := overall * 0.99
+	for i := range streams {
+		stream := &streams[i]
+		switch stream.Kind {
+		case StreamVideo:
+			if videoIndex >= 0 || findField(stream.Fields, "Bit rate") != "" || stream.JSON["BitRate"] != "" {
+				return
+			}
+			videoIndex = i
+		case StreamAudio:
+			bitRate, ok := streamJSONBitRate(*stream)
+			if !ok {
+				return
+			}
+			videoBitRate -= bitRate / 0.99
+		case StreamText:
+			if bitRate, ok := streamJSONBitRate(*stream); ok {
+				videoBitRate -= bitRate / 0.99
+			}
+		case StreamGeneral, StreamImage, StreamMenu:
+		}
+	}
+	if videoIndex < 0 {
+		return
+	}
+	videoBitRate *= 0.99
+	if videoBitRate < 10000 {
+		return
+	}
+
+	video := &streams[videoIndex]
+	duration := 0.0
+	frameCount, frameCountErr := strconv.ParseFloat(video.JSON["FrameCount"], 64)
+	frameRate, frameRateOK := parseFloatValue(findField(video.Fields, "Frame rate"))
+	if frameCountErr == nil && frameCount > 0 && frameRateOK && frameRate > 0 {
+		duration = frameCount / frameRate
+	} else if value, ok := parseDurationSeconds(findField(video.Fields, "Duration")); ok {
+		duration = value
+	}
+	if duration <= 0 {
+		return
+	}
+
+	streamSize := int64(math.Round(videoBitRate / 8 * duration))
+	if streamSize <= 0 || streamSize >= fileSize {
+		return
+	}
+	if video.JSON == nil {
+		video.JSON = map[string]string{}
+	}
+	video.JSON["StreamSize"] = strconv.FormatInt(streamSize, 10)
+	video.Fields = setFieldValue(video.Fields, "Stream size", formatStreamSize(streamSize, fileSize))
+}
+
+// applyLegacyMatroskaFrameRateRatio preserves mkvmerge 2.x's decimal 23.976
+// rate representation, which MediaInfo exposes as 23976/1000 rather than NTSC.
+func applyLegacyMatroskaFrameRateRatio(writingApp string, streams []Stream) {
+	if !strings.HasPrefix(writingApp, "mkvmerge v2.") {
+		return
+	}
+	for i := range streams {
+		stream := &streams[i]
+		if stream.Kind != StreamVideo || math.Abs(stream.mkvH264SPS.FrameRate-23.976) >= 1e-9 {
+			continue
+		}
+		if stream.JSON == nil {
+			stream.JSON = map[string]string{}
+		}
+		stream.JSON["FrameRate_Num"] = "23976"
+		stream.JSON["FrameRate_Den"] = "1000"
+	}
+}
+
+// streamJSONBitRate returns a stream's encoded bitrate when present, then its
+// ordinary bitrate, matching MediaInfo's stream-size fallback precedence.
+func streamJSONBitRate(stream Stream) (float64, bool) {
+	for _, key := range []string{"BitRate_Encoded", "BitRate"} {
+		if value := stream.JSON[key]; value != "" {
+			bitRate, err := strconv.ParseFloat(value, 64)
+			if err == nil && bitRate > 0 {
+				return bitRate, true
+			}
+		}
+	}
+	if bitRate, ok := parseBitrateBps(findField(stream.Fields, "Bit rate")); ok && bitRate > 0 {
+		return float64(bitRate), true
+	}
+	return 0, false
 }
 
 func AnalyzeFiles(paths []string) ([]Report, int, error) {
