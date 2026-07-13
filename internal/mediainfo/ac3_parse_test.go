@@ -188,7 +188,7 @@ func TestParseEAC3DependentFrame_ChannelMap(t *testing.T) {
 	}
 }
 
-func TestParseEAC3FrameWithOptions_AddBSITypeAAtmos(t *testing.T) {
+func TestParseEAC3FrameWithOptions_AddBSITypeARequiresObjectMetadata(t *testing.T) {
 	const frameSize = 32
 	buf := make([]byte, frameSize)
 	bw := ac3BitWriter{buf: buf}
@@ -224,8 +224,11 @@ func TestParseEAC3FrameWithOptions_AddBSITypeAAtmos(t *testing.T) {
 	if gotSize != frameSize {
 		t.Fatalf("frameSize mismatch: got=%d want=%d", gotSize, frameSize)
 	}
-	if !info.hasJOC || !info.hasJOCComplex || info.jocComplexity != 16 {
-		t.Fatalf("JOC metadata mismatch: hasJOC=%v hasComplex=%v complexity=%d", info.hasJOC, info.hasJOCComplex, info.jocComplexity)
+	if info.hasJOC || !info.hasJOCComplex || info.jocComplexity != 16 {
+		t.Fatalf("type A metadata mismatch: hasJOC=%v hasComplex=%v complexity=%d", info.hasJOC, info.hasJOCComplex, info.jocComplexity)
+	}
+	if ac3HasJOCInfo(info) {
+		t.Fatal("extension type A without object-audio metadata must not identify Atmos")
 	}
 	if info.bsmod != 5 || info.serviceKind != "Commentary" {
 		t.Fatalf("service kind mismatch: bsmod=%d serviceKind=%q", info.bsmod, info.serviceKind)

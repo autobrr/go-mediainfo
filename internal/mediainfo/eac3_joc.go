@@ -142,7 +142,7 @@ func parseEAC3EMDF(payload []byte) (eac3JOCMeta, bool) {
 }
 
 func ac3HasJOCInfo(info ac3Info) bool {
-	return info.hasJOC || info.hasJOCComplex || info.jocObjects > 0 || info.hasJOCDyn || info.hasJOCBed
+	return info.hasJOC || info.jocObjects > 0 || info.hasJOCDyn || info.hasJOCBed
 }
 
 // ac3JOCComplexity returns the explicit JOC complexity index when present, or the

@@ -675,8 +675,8 @@ func parseEAC3FrameWithOptions(payload []byte, parseJOC bool) (ac3Info, int, boo
 		}
 	}
 	if parseEAC3MetadataExtension(&br, &info, int(strmtyp), int(numblkscod), int(acmod), lfeonVal == 1, int(fscod)) {
-		// Extension type A is Dolby's JOC/Atmos signal in E-AC-3 additional bitstream info.
-		info.hasJOC = true
+		// Extension type A carries the JOC complexity index, but MediaInfo only
+		// identifies Atmos when object-audio metadata is also present in EMDF.
 		info.hasJOCComplex = true
 	}
 
@@ -750,9 +750,10 @@ func parseEAC3FrameWithOptions(payload []byte, parseJOC bool) (ac3Info, int, boo
 }
 
 // parseEAC3MetadataExtension advances over E-AC-3 metadata fields through addbsi
-// and records Dolby extension type A, which signals JOC/Atmos plus its complexity
-// index. It returns false when the extension is absent or the bounded frame data
-// ends before the field can be read.
+// and records Dolby extension type A's JOC complexity index. The flag alone is
+// not sufficient to identify Atmos; object-audio metadata must also be present.
+// It returns false when the extension is absent or the bounded frame data ends
+// before the field can be read.
 func parseEAC3MetadataExtension(br *ac3BitReader, info *ac3Info, strmtyp int, numblkscod int, acmod int, lfeon bool, fscod int) bool {
 	if br == nil || info == nil {
 		return false
