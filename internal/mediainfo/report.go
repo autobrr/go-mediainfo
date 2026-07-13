@@ -36,6 +36,8 @@ type Stream struct {
 	// user-data SEI in CodecPrivate rather than in frame data.
 	mkvHEVCX265Library  string
 	mkvHEVCX265Settings string
+	mkvTrackOffsetNs    int64
+	mkvStereoMode       uint64
 }
 
 type Report struct {

@@ -99,7 +99,23 @@ func normalizeContainerComputedJSON(kind StreamKind, fields []jsonKV, containerF
 				pixelAspect = 1
 			}
 			// Official mediainfo JSON reports the numeric ratio even when the text field snaps to a common value.
-			fields = setJSONField(fields, "DisplayAspectRatio", formatJSONFloat((width/height)*pixelAspect))
+			isAVCOrHEVC := jsonFieldValue(fields, "Format") == "AVC" || jsonFieldValue(fields, "Format") == "HEVC"
+			preserveActiveFormatRatio := jsonFieldValue(fields, "ActiveFormatDescription") != ""
+			displayAspect, _ := strconv.ParseFloat(jsonFieldValue(fields, "DisplayAspectRatio"), 64)
+			preserveContainerRatio := jsonFieldValue(fields, "Format") == "HEVC" && displayAspect > 0 && math.Abs(displayAspect-width/height) >= 0.003
+			if preserveActiveFormatRatio || preserveContainerRatio {
+				return fields
+			}
+			if jsonFieldValue(fields, "Format") == "MPEG Video" && width == 720 && height == 576 && math.Abs(pixelAspect-1.067) < 0.0005 {
+				fields = setJSONField(fields, "DisplayAspectRatio", "1.333")
+				return fields
+			}
+			if isAVCOrHEVC && math.Abs(pixelAspect-1) < 0.005 {
+				fields = setJSONField(fields, "PixelAspectRatio", "1.000")
+				fields = setJSONField(fields, "DisplayAspectRatio", formatJSONFloat(width/height))
+			} else if pixelAspect > 0 {
+				fields = setJSONField(fields, "DisplayAspectRatio", formatJSONFloat((width/height)*pixelAspect))
+			}
 		}
 	}
 	if kind == StreamVideo && (strings.EqualFold(containerFormat, "MPEG-4") || strings.EqualFold(containerFormat, "QuickTime")) {
@@ -140,6 +156,8 @@ func mapStreamFieldsToJSON(kind StreamKind, fields []Field) []jsonKV {
 			}
 		case "Format tier":
 			out = append(out, jsonKV{Key: "Format_Tier", Val: field.Value})
+		case "Format level":
+			out = append(out, jsonKV{Key: "Format_Level", Val: field.Value})
 		case "ID":
 			out = append(out, jsonKV{Key: "ID", Val: field.Value})
 		case "Menu ID":
@@ -377,8 +395,10 @@ func buildJSONComputedFields(kind StreamKind, fields []jsonKV, containerFormat s
 			omitDerivedFLACPositions := containerFormat == "Matroska" && format == "FLAC" &&
 				jsonFieldValue(fields, "ChannelLayout") == "" &&
 				flacDerivedLayoutIsOmitted(jsonFieldValue(fields, "Encoded_Library"))
+			omitDerivedMatroskaPositions := containerFormat == "Matroska" &&
+				(format == "MPEG Audio" || format == "Vorbis" || format == "PCM") && jsonFieldValue(fields, "ChannelLayout") == ""
 			// Official mediainfo does not emit ChannelPositions for MPEG Audio in MPEG-PS (e.g. VOB).
-			if (containerFormat != "MPEG-PS" || format != "MPEG Audio") && !omitDerivedFLACPositions {
+			if (containerFormat != "MPEG-PS" || format != "MPEG Audio") && !omitDerivedFLACPositions && !omitDerivedMatroskaPositions {
 				// For MPEG-TS/BDAV, MediaInfo often omits ChannelPositions when ChannelLayout isn't known
 				// (e.g. DTS-HD ExSS without a speaker mask). Avoid synthesizing positions in that case.
 				if (containerFormat == "MPEG-TS" || containerFormat == "BDAV") && jsonFieldValue(fields, "ChannelLayout") == "" {
@@ -497,6 +517,8 @@ func channelPositionsFromCount(value string) string {
 		return "Front: C"
 	case "2":
 		return "Front: L R"
+	case "5":
+		return "Front: L C R, Side: L R"
 	case "6":
 		return "Front: L C R, Side: L R, LFE"
 	default:
@@ -572,6 +594,9 @@ func splitCodecID(value string) (string, string) {
 }
 
 func splitProfileLevel(value string) (string, string) {
+	if strings.Contains(value, " / ") {
+		return strings.TrimSpace(value), ""
+	}
 	parts := strings.SplitN(value, "@", 2)
 	profile := strings.TrimSpace(parts[0])
 	if len(parts) == 1 {

@@ -431,7 +431,13 @@ func flacDerivedLayoutIsOmitted(vendor string) bool {
 	if strings.HasPrefix(vendor, "Lavf") {
 		return false
 	}
-	_, version, _ := splitFLACEncodedLibrary(vendor)
+	if strings.TrimSpace(vendor) == "" {
+		return true
+	}
+	name, version, _ := splitFLACEncodedLibrary(vendor)
+	if name == "" {
+		return false
+	}
 	parts := strings.Split(version, ".")
 	if len(parts) < 2 {
 		return true
@@ -441,7 +447,7 @@ func flacDerivedLayoutIsOmitted(vendor string) bool {
 	if majorErr != nil || minorErr != nil {
 		return true
 	}
-	return major > 1 || major == 1 && (minor == 3 || minor >= 5)
+	return major > 1 || major == 1 && (minor == 3 || version == "1.4.2" || minor >= 5)
 }
 
 func flacTagsToGeneralJSON(tags map[string]string, encoder string) (map[string]string, map[string]string) {

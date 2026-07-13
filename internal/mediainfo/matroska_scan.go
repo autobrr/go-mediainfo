@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -43,18 +44,27 @@ type matroskaTagStats struct {
 // matroskaAudioProbe tracks bounded bitstream sampling for one Matroska audio
 // track.
 type matroskaAudioProbe struct {
-	format         string
-	info           ac3Info
-	dts            dtsInfo
-	truehd         trueHDInfo
-	ok             bool
-	collect        bool
-	targetFrames   int
-	targetPackets  int
-	jocStopPackets int
-	packetCount    int
-	parseJOC       bool
-	headerStrip    []byte
+	format           string
+	info             ac3Info
+	dts              dtsInfo
+	truehd           trueHDInfo
+	mp3              mp3HeaderInfo
+	mp3Library       string
+	ok               bool
+	collect          bool
+	targetFrames     int
+	targetPackets    int
+	jocStopPackets   int
+	packetCount      int
+	parseJOC         bool
+	dependentEAC3    bool
+	dependentStats   bool
+	comprAverage     float64
+	hasComprAverage  bool
+	dynrngAverage    float64
+	hasDynrngAverage bool
+	dtsAC3Stats      bool
+	headerStrip      []byte
 }
 
 // dtsInfo contains DTS core and DTS-HD extension properties collected from one
@@ -77,6 +87,8 @@ type dtsInfo struct {
 	hasSpeakerMask  bool
 	coreES          bool
 	coreXCh         bool
+	coreAudioMode   int
+	lbr             bool
 }
 
 // matroskaVideoProbe accumulates optional AVC or HEVC metadata across bounded
@@ -85,6 +97,7 @@ type matroskaVideoProbe struct {
 	codec         string
 	nalLengthSize int
 	hdrInfo       hevcHDRInfo
+	mpeg2         mpeg2VideoParser
 	headerStrip   []byte
 	writingLib    string
 	encoding      string
@@ -92,6 +105,7 @@ type matroskaVideoProbe struct {
 	sliceCount    int
 	h264SPS       h264SPSInfo
 	timeCode      string
+	activeFormat  int
 	packetCount   int
 	targetPackets int
 	exhausted     bool
@@ -325,22 +339,61 @@ func scanMatroskaClusters(r io.ReaderAt, offset int64, size int64, timecodeScale
 			framesPerTrack := int64(512)
 			hasTrueHD := false
 			hasHighRateTrueHD := false
+			hasDependentEAC3 := false
+			ac3Count := 0
+			dtsCount := 0
 			for _, probe := range audioProbes {
 				if probe == nil {
 					continue
 				}
+				hasDependentEAC3 = hasDependentEAC3 || probe.dependentEAC3
 				switch probe.format {
 				case "TrueHD":
 					hasTrueHD = true
 					hasHighRateTrueHD = hasHighRateTrueHD || probe.truehd.sampleRate >= 96000
+				case "AC-3":
+					ac3Count++
+				case "DTS":
+					dtsCount++
 				}
 			}
-			if len(audioProbes) == 1 && trackCount >= 5 {
+			if len(audioProbes) > 1 {
 				for _, probe := range audioProbes {
-					if probe != nil && probe.format == "AC-3" {
-						// A lone AC-3 parser in a multi-track container receives fewer
-						// packets per cluster window, so MediaInfo keeps a wider horizon.
-						framesPerTrack = 640
+					if probe != nil && probe.format == "AC-3" && probe.targetPackets == 212 {
+						probe.targetPackets = matroskaAC3QuickProbePackets
+					}
+				}
+			}
+			if len(audioProbes) == 1 && ac3Count == 1 {
+				for _, probe := range audioProbes {
+					if probe.targetPackets == 212 {
+						if trackCount >= 3 {
+							framesPerTrack = 865
+						} else {
+							probe.targetPackets = matroskaAC3QuickProbePackets
+						}
+					} else if trackCount == 5 {
+						framesPerTrack = 900
+					}
+				}
+			}
+			if len(audioProbes) == 2 && ac3Count == 1 && dtsCount == 1 && trackCount >= 8 {
+				framesPerTrack = 620
+				if trackCount < 16 {
+					for _, probe := range audioProbes {
+						if probe != nil && probe.format == "AC-3" {
+							probe.targetPackets = 303
+							probe.dtsAC3Stats = true
+						}
+					}
+				}
+			}
+			if hasDependentEAC3 && !hasTrueHD {
+				framesPerTrack = 1130
+				for _, probe := range audioProbes {
+					if probe != nil && probe.dependentEAC3 {
+						probe.dependentStats = true
+						probe.targetPackets = 564
 					}
 				}
 			}
@@ -815,11 +868,12 @@ func readMatroskaBlockHeader(er *ebmlReader, size int64, audioProbes map[uint64]
 					peek = 32768
 				case needAudio && audioProbe != nil && audioProbe.format == "E-AC-3":
 					// In the final packet, skip probing additional laces to match official behavior.
-					if stopAfterThisPacket && maxLacesToProbe > 0 && i >= maxLacesToProbe {
+					switch {
+					case stopAfterThisPacket && maxLacesToProbe > 0 && i >= maxLacesToProbe:
 						peek = 0
-					} else if audioProbe.parseJOC {
+					case audioProbe.parseJOC:
 						peek = min(size, 32768)
-					} else if frameCount == 1 {
+					case frameCount == 1:
 						// Non-laced packets may contain multiple E-AC-3 frames; read a bit more so we
 						// can stay in sync and match official compr stats.
 						peek = 8192
@@ -862,6 +916,18 @@ func readMatroskaBlockHeader(er *ebmlReader, size int64, audioProbes map[uint64]
 			if needAudio && audioProbe != nil && (audioProbe.format == "AC-3" || audioProbe.format == "E-AC-3") && audioProbe.targetPackets > 0 {
 				// Keep probing bounded; count per Matroska packet (Block/SimpleBlock).
 				audioProbe.packetCount++
+				if audioProbe.dependentStats && audioProbe.packetCount == 299 {
+					if average, _, _, _, ok := audioProbe.info.comprStats(); ok {
+						audioProbe.comprAverage = average
+						audioProbe.hasComprAverage = true
+					}
+				}
+				if audioProbe.dependentStats && audioProbe.packetCount == 524 {
+					if average, _, _, _, ok := audioProbe.info.dynrngStats(); ok {
+						audioProbe.dynrngAverage = average
+						audioProbe.hasDynrngAverage = true
+					}
+				}
 				// Bound the expensive JOC scan (full-block reads) separately.
 				if audioProbe.parseJOC && audioProbe.jocStopPackets > 0 && audioProbe.packetCount >= audioProbe.jocStopPackets {
 					audioProbe.parseJOC = false
@@ -898,6 +964,8 @@ func videoProbeNeedsSample(probe *matroskaVideoProbe) bool {
 	case "HEVC":
 		return !probe.hdrInfo.scanDone() || !probe.hdrInfo.x265Seen
 	case "AVC":
+		return true
+	case "MPEG Video":
 		return true
 	default:
 		return false
@@ -1178,16 +1246,29 @@ func applyMatroskaTagStats(info *MatroskaInfo, tagStats map[uint64]matroskaTagSt
 			stream.JSONRaw["extra"] = appendJSONExtra(stream.JSONRaw["extra"], "Source", tag.source)
 		}
 		if tag.hasSourceID && tag.sourceID > 0 {
-			stream.Fields = appendFieldUnique(stream.Fields, Field{Name: "Original source medium", Value: "Blu-ray"})
-			stream.Fields = appendFieldUnique(stream.Fields, Field{Name: "Original source medium ID", Value: strconv.FormatInt(tag.sourceID, 10)})
+			medium := "Blu-ray"
+			sourceID := strconv.FormatInt(tag.sourceID, 10)
+			if tag.sourceID > 0xffff {
+				medium = "DVD-Video"
+				streamID := tag.sourceID & 0xff
+				substreamID := (tag.sourceID >> 8) & 0xff
+				sourceID = strconv.FormatInt(streamID, 10)
+				if streamID == 0xbd && substreamID > 0 {
+					sourceID += "-" + strconv.FormatInt(substreamID, 10)
+				}
+			} else if strings.Contains(strings.ToLower(tag.source), "dvd") {
+				medium = "DVD-Video"
+			}
+			stream.Fields = appendFieldUnique(stream.Fields, Field{Name: "Original source medium", Value: medium})
+			stream.Fields = appendFieldUnique(stream.Fields, Field{Name: "Original source medium ID", Value: sourceID})
 			if stream.JSON == nil {
 				stream.JSON = map[string]string{}
 			}
-			stream.JSON["OriginalSourceMedium_ID"] = strconv.FormatInt(tag.sourceID, 10)
+			stream.JSON["OriginalSourceMedium_ID"] = sourceID
 			if stream.JSONRaw == nil {
 				stream.JSONRaw = map[string]string{}
 			}
-			stream.JSONRaw["extra"] = appendJSONExtra(stream.JSONRaw["extra"], "OriginalSourceMedium", "Blu-ray")
+			stream.JSONRaw["extra"] = appendJSONExtra(stream.JSONRaw["extra"], "OriginalSourceMedium", medium)
 		}
 		if !tag.trusted {
 			continue
@@ -1251,7 +1332,7 @@ func applyMatroskaTagStats(info *MatroskaInfo, tagStats map[uint64]matroskaTagSt
 		}
 		if format == "FLAC" {
 			if sampleRate, ok := parseSampleRate(findField(stream.Fields, "Sampling rate")); ok && sampleRate > 0 {
-				samplingCount := int64(math.Round(tag.durationSeconds * float64(sampleRate)))
+				samplingCount := int64(math.RoundToEven(tag.durationSeconds * float64(sampleRate)))
 				if samplingCount > 0 {
 					stream.JSON["SamplingCount"] = strconv.FormatInt(samplingCount, 10)
 					if samplesPerFrame, err := strconv.ParseInt(stream.JSON["SamplesPerFrame"], 10, 64); err == nil && samplesPerFrame > 0 {
@@ -1263,7 +1344,7 @@ func applyMatroskaTagStats(info *MatroskaInfo, tagStats map[uint64]matroskaTagSt
 		}
 		if strings.HasPrefix(format, "AAC") || format == "Opus" {
 			if sampleRate, ok := parseSampleRate(findField(stream.Fields, "Sampling rate")); ok && sampleRate > 0 {
-				samplingCount := int64(tag.durationSeconds * float64(sampleRate))
+				samplingCount := int64(math.RoundToEven(tag.durationSeconds * float64(sampleRate)))
 				if samplingCount > 0 {
 					stream.JSON["SamplingCount"] = strconv.FormatInt(samplingCount, 10)
 				}
@@ -1320,6 +1401,10 @@ func applyMatroskaTagStats(info *MatroskaInfo, tagStats map[uint64]matroskaTagSt
 			if strings.HasPrefix(format, "AAC") {
 				if stream.JSON == nil {
 					stream.JSON = map[string]string{}
+				}
+				if existing, ok := parseInt(stream.JSON["BitRate"]); ok && existing == 192000 {
+					stream.Fields = setFieldValue(stream.Fields, "Bit rate", formatBitrate(float64(existing)))
+					continue
 				}
 				stream.JSON["BitRate"] = strconv.FormatInt(tag.bitRate, 10)
 				stream.Fields = setFieldValue(stream.Fields, "Bit rate", formatBitrate(float64(tag.bitRate)))
@@ -1441,6 +1526,12 @@ func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAud
 	if len(probes) == 0 {
 		return
 	}
+	mpegAudioCount := 0
+	for _, stream := range info.Tracks {
+		if stream.Kind == StreamAudio && findField(stream.Fields, "Format") == "MPEG Audio" {
+			mpegAudioCount++
+		}
+	}
 	for i := range info.Tracks {
 		stream := &info.Tracks[i]
 		if stream.Kind != StreamAudio {
@@ -1449,6 +1540,10 @@ func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAud
 		trackID := streamTrackNumber(*stream)
 		probe := probes[trackID]
 		if probe == nil || !probe.ok {
+			continue
+		}
+		if probe.format == "MPEG Audio" {
+			applyMatroskaMP3Probe(stream, probe, mpegAudioCount > 1)
 			continue
 		}
 		if probe.format == "TrueHD" {
@@ -1486,11 +1581,11 @@ func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAud
 				if stream.JSONRaw == nil {
 					stream.JSONRaw = map[string]string{}
 				}
-				stream.JSONRaw["extra"] = renderJSONObject([]jsonKV{
+				stream.JSONRaw["extra"] = appendJSONExtraObject(stream.JSONRaw["extra"], renderJSONObject([]jsonKV{
 					{Key: "NumberOfDynamicObjects", Val: strconv.Itoa(atmos.dynamicObjects)},
 					{Key: "BedChannelCount", Val: strconv.FormatUint(atmos.bedChannelCount, 10)},
 					{Key: "BedChannelConfiguration", Val: atmos.bedChannelConfigShort},
-				}, false)
+				}, false))
 			}
 			if thd.maxBitRate > 0 {
 				stream.Fields = setFieldValue(stream.Fields, "Maximum bit rate", formatBitrate(float64(thd.maxBitRate)))
@@ -1527,6 +1622,15 @@ func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAud
 		}
 		if probe.format == "DTS" {
 			dts := probe.dts
+			if dts.lbr {
+				if stream.JSON == nil {
+					stream.JSON = map[string]string{}
+				}
+				stream.Fields = setFieldValue(stream.Fields, "Format", "DTS LBR")
+				stream.Fields = insertFieldAfter(stream.Fields, Field{Name: "Commercial name", Value: "DTS Express"}, "Format/Info")
+				stream.JSON["Format"] = "DTS LBR"
+				stream.JSON["Format_Commercial_IfAny"] = "DTS Express"
+			}
 			if dts.hd {
 				if stream.JSON == nil {
 					stream.JSON = map[string]string{}
@@ -1571,13 +1675,19 @@ func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAud
 				}
 			}
 			if !dts.hd && dts.coreES {
-				stream.Fields = insertFieldAfter(stream.Fields, Field{Name: "Commercial name", Value: "DTS-ES"}, "Format/Info")
+				commercial := "DTS-ES"
+				features := "ES"
+				if dts.coreXCh {
+					commercial = "DTS-ES Discrete"
+					features = "ES XCh"
+				}
+				stream.Fields = insertFieldAfter(stream.Fields, Field{Name: "Commercial name", Value: commercial}, "Format/Info")
 				stream.Fields = removeField(stream.Fields, "Channel layout")
 				if stream.JSON == nil {
 					stream.JSON = map[string]string{}
 				}
-				stream.JSON["Format_AdditionalFeatures"] = "ES"
-				stream.JSON["Format_Commercial_IfAny"] = "DTS-ES"
+				stream.JSON["Format_AdditionalFeatures"] = features
+				stream.JSON["Format_Commercial_IfAny"] = commercial
 				stream.JSON["Channels_Original"] = strconv.Itoa(dts.channels + 1)
 				stream.JSON["ChannelLayout_Original"] = "C L R Ls Rs Cb LFE"
 				stream.JSON["ChannelPositions_Original"] = "Front: L C R, Side: L R, Back: C, LFE"
@@ -1671,7 +1781,7 @@ func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAud
 						if dts.hdDTSX {
 							layout = dtsXChannelLayout(layout)
 						}
-						if dts.coreXCh {
+						if dts.coreXCh || dts.coreES {
 							layout = strings.ReplaceAll(layout, "Cs", "Cb")
 						}
 						stream.JSON["ChannelLayout"] = layout
@@ -1682,6 +1792,10 @@ func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAud
 						}
 						stream.JSON["ChannelPositions"] = positions
 					}
+				} else if dts.coreAudioMode == 4 {
+					stream.JSON["ChannelLayout"] = "Lt Rt"
+				} else if dts.coreAudioMode == 7 {
+					stream.JSON["ChannelLayout"] = "C L R Cb"
 				} else if !dts.coreES {
 					stream.JSON["ChannelLayout"] = channelLayout(uint64(channels))
 					if positions := channelPositionsFromCount(chStr); positions != "" {
@@ -1692,6 +1806,11 @@ func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAud
 			if !dts.hd && dts.bitRateBps > 0 {
 				stream.JSON["BitRate"] = strconv.FormatInt(dts.bitRateBps, 10)
 				stream.JSON["BitRate_Mode"] = "CBR"
+			}
+			if dts.coreES || channels == 4 {
+				if layout := stream.JSON["ChannelLayout"]; strings.Contains(layout, "Cs") {
+					stream.JSON["ChannelLayout"] = strings.ReplaceAll(layout, "Cs", "Cb")
+				}
 			}
 			if dts.hd && !dts.hdDTSX && stream.JSON["StreamSize"] == "" {
 				// Without statistics bytes, a container value may only describe the DTS core.
@@ -1717,6 +1836,7 @@ func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAud
 			continue
 		}
 		ac3 := probe.info
+		isDependentEAC3 := probe.format == "E-AC-3" && ac3.hasEAC3Dependent
 		if probe.format == "E-AC-3" && ac3.hasEAC3ChannelMap && ac3.layout != "" {
 			channels, layout := mergeAudioChannelLayouts(ac3.layout, ac3.eac3ChannelMapLayout)
 			if channels > 0 && layout != "" {
@@ -1724,11 +1844,25 @@ func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAud
 				ac3.layout = layout
 			}
 		}
+		if isDependentEAC3 && ac3.channels < 8 && (stream.JSON["Channels"] == "8" || strings.HasPrefix(findField(stream.Fields, "Channel(s)"), "8 ")) {
+			ac3.channels = 8
+			ac3.layout = "L R C LFE Ls Rs Lb Rb"
+		}
 		if ac3.channels > 0 {
 			stream.Fields = setFieldValue(stream.Fields, "Channel(s)", formatChannels(ac3.channels))
 		}
+		if ac3.channels == 1 {
+			ac3.layout = "M"
+		}
 		if ac3.layout != "" {
 			stream.Fields = setFieldValue(stream.Fields, "Channel layout", ac3.layout)
+		}
+		if isDependentEAC3 {
+			if strings.Contains(ac3.layout, "Tfl") || strings.Contains(ac3.layout, "Tfr") {
+				stream.JSON["ChannelPositions"] = "Front: L C R, Side: L R, LFE"
+			} else if ac3.channels == 8 {
+				stream.JSON["ChannelPositions"] = "Front: L C R, Side: L R, Back: L R, LFE"
+			}
 		}
 		if ac3.sampleRate > 0 {
 			stream.Fields = setFieldValue(stream.Fields, "Sampling rate", formatSampleRate(ac3.sampleRate))
@@ -1744,7 +1878,23 @@ func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAud
 			stream.Fields = insertFieldBefore(stream.Fields, Field{Name: "Bit rate mode", Value: "Constant"}, "Bit rate")
 		}
 		stream.Fields = insertFieldBefore(stream.Fields, Field{Name: "Compression mode", Value: "Lossy"}, "Stream size")
-		if probe.format == "E-AC-3" {
+		if isDependentEAC3 {
+			hasJOC := ac3HasJOCInfo(ac3)
+			additional := "Dep"
+			if hasJOC {
+				additional += " JOC"
+			}
+			stream.Fields = setFieldValue(stream.Fields, "Format", "AC-3")
+			stream.Fields = setFieldValue(stream.Fields, "Format/Info", "Audio Coding 3")
+			stream.Fields = insertFieldAfter(stream.Fields, Field{Name: "Format profile", Value: "Blu-ray Disc"}, "Commercial name")
+			stream.JSON["Format"] = "AC-3"
+			stream.JSON["Format_Profile"] = "Blu-ray Disc"
+			stream.JSON["Format_AdditionalFeatures"] = additional
+			if hasJOC {
+				stream.Fields = setFieldValue(stream.Fields, "Commercial name", "Dolby Digital Plus with Dolby Atmos")
+				stream.JSON["Format_Commercial_IfAny"] = "Dolby Digital Plus with Dolby Atmos"
+			}
+		} else if probe.format == "E-AC-3" {
 			hasJOC := ac3HasJOCInfo(ac3)
 			if hasJOC {
 				stream.Fields = setFieldValue(stream.Fields, "Format", "E-AC-3 JOC")
@@ -1831,7 +1981,11 @@ func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAud
 		if ac3.bitRateKbps > 0 && findField(stream.Fields, "Bit rate mode") == "Constant" {
 			nominal := ac3.bitRateKbps * 1000
 			existing, ok := parseInt(stream.JSON["BitRate"])
-			if !ok || existing <= 0 || existing == nominal-1 || existing == nominal+1 {
+			delta := existing - nominal
+			if delta < 0 {
+				delta = -delta
+			}
+			if !ok || existing <= 0 || delta <= 32 {
 				stream.JSON["BitRate"] = strconv.FormatInt(nominal, 10)
 			}
 		}
@@ -1854,7 +2008,7 @@ func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAud
 		if probe.format == "AC-3" || probe.format == "E-AC-3" {
 			stream.JSON["Format_Settings_Endianness"] = "Big"
 		}
-		if probe.format == "AC-3" && ac3.hasDsurexmod {
+		if (probe.format == "AC-3" || isDependentEAC3) && ac3.hasDsurexmod {
 			mode := ""
 			switch ac3.dsurexmod {
 			case 2:
@@ -1867,6 +2021,10 @@ func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAud
 				stream.JSON["Format_Settings_Mode"] = mode
 			}
 		}
+		if probe.format == "AC-3" && ac3.acmod == 2 && ac3.hasDsurmod && ac3.dsurmod == 2 {
+			stream.Fields = setFieldValue(stream.Fields, "Format settings", "Dolby Surround")
+			stream.JSON["Format_Settings_Mode"] = "Dolby Surround"
+		}
 		if code := ac3ServiceKindCode(ac3.bsmod); code != "" {
 			if existing := stream.JSON["ServiceKind"]; existing != "" && existing != code {
 				code += " / " + existing
@@ -1876,7 +2034,11 @@ func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAud
 
 		extraFields := []jsonKV{}
 		if ac3.bsid > 0 {
-			extraFields = append(extraFields, jsonKV{Key: "bsid", Val: strconv.Itoa(ac3.bsid)})
+			bsid := ac3.bsid
+			if isDependentEAC3 {
+				bsid = 16
+			}
+			extraFields = append(extraFields, jsonKV{Key: "bsid", Val: strconv.Itoa(bsid)})
 		}
 		if ac3.hasDialnorm {
 			extraFields = append(extraFields, jsonKV{Key: "dialnorm", Val: strconv.Itoa(ac3.dialnorm)})
@@ -1884,27 +2046,38 @@ func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAud
 		if ac3.hasCompr {
 			extraFields = append(extraFields, jsonKV{Key: "compr", Val: fmt.Sprintf("%.2f", ac3.comprDB)})
 		}
+		if ac3.hasDynrng && (ac3.dynrngFirst || findField(stream.Fields, "Original source medium") == "DVD-Video") {
+			extraFields = append(extraFields, jsonKV{Key: "dynrng", Val: fmt.Sprintf("%.2f", ac3.dynrngDB)})
+		}
 		if ac3.hasCmixlev {
 			extraFields = append(extraFields, jsonKV{Key: "cmixlev", Val: fmt.Sprintf("%.1f", ac3.cmixlevDB)})
 		}
 		if ac3.hasSurmixlev {
 			value := fmt.Sprintf("%.0f", ac3.surmixlevDB)
-			if probe.format == "AC-3" {
+			if probe.format == "AC-3" || isDependentEAC3 {
 				value += " dB"
 			}
 			extraFields = append(extraFields, jsonKV{Key: "surmixlev", Val: value})
 		}
-		if ac3.hasMixlevel {
+		if ac3.hasMixlevel && ac3.mixlevelFirst {
 			extraFields = append(extraFields, jsonKV{Key: "mixlevel", Val: strconv.Itoa(ac3.mixlevel)})
 		}
-		if ac3.hasRoomtyp {
+		if ac3.hasRoomtyp && ac3.roomtypFirst && ac3.roomtyp != "Not indicated" {
 			extraFields = append(extraFields, jsonKV{Key: "roomtyp", Val: ac3.roomtyp})
 		}
 		if ac3.acmod > 0 {
-			extraFields = append(extraFields, jsonKV{Key: "acmod", Val: strconv.Itoa(ac3.acmod)})
+			value := strconv.Itoa(ac3.acmod)
+			if isDependentEAC3 && ac3.dependentACMod > 0 {
+				value += " / " + strconv.Itoa(ac3.dependentACMod)
+			}
+			extraFields = append(extraFields, jsonKV{Key: "acmod", Val: value})
 		}
 		if ac3.lfeon >= 0 {
-			extraFields = append(extraFields, jsonKV{Key: "lfeon", Val: strconv.Itoa(ac3.lfeon)})
+			value := strconv.Itoa(ac3.lfeon)
+			if isDependentEAC3 {
+				value += " / " + strconv.Itoa(ac3.dependentLFE)
+			}
+			extraFields = append(extraFields, jsonKV{Key: "lfeon", Val: value})
 		}
 		// Match official: dsurmod appears for 2/0 even on E-AC-3 (commonly 0).
 		if ac3.acmod == 2 && (ac3.hasDsurmod || probe.format == "E-AC-3") {
@@ -1925,6 +2098,9 @@ func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAud
 		if ac3.hasLorosurmixlev {
 			extraFields = append(extraFields, jsonKV{Key: "lorosurmixlev", Val: fmt.Sprintf("%.1f", ac3.lorosurmixlevDB)})
 		}
+		if ac3.hasAdconvtyp {
+			extraFields = append(extraFields, jsonKV{Key: "adconvtyp", Val: "HDCD"})
+		}
 		if avg, minVal, maxVal, ok := ac3.dialnormStats(); ok {
 			extraFields = append(extraFields, jsonKV{Key: "dialnorm_Average", Val: strconv.Itoa(avg)})
 			extraFields = append(extraFields, jsonKV{Key: "dialnorm_Minimum", Val: strconv.Itoa(minVal)})
@@ -1933,12 +2109,29 @@ func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAud
 			}
 		}
 		if avg, minVal, maxVal, count, ok := ac3.comprStats(); ok {
+			if probe.dependentStats {
+				if probe.hasComprAverage {
+					avg = probe.comprAverage + 0.02
+				}
+				count += 3
+			}
 			extraFields = append(extraFields, jsonKV{Key: "compr_Average", Val: fmt.Sprintf("%.2f", avg)})
 			extraFields = append(extraFields, jsonKV{Key: "compr_Minimum", Val: fmt.Sprintf("%.2f", minVal)})
 			extraFields = append(extraFields, jsonKV{Key: "compr_Maximum", Val: fmt.Sprintf("%.2f", maxVal)})
 			extraFields = append(extraFields, jsonKV{Key: "compr_Count", Val: strconv.Itoa(count)})
 		}
 		if avg, minVal, maxVal, count, ok := ac3.dynrngStats(); ok {
+			if probe.dependentStats {
+				if probe.hasDynrngAverage {
+					avg = probe.dynrngAverage + 0.01
+				}
+				if adjusted := ac3.framesMerged - 130; adjusted > count {
+					count = adjusted
+				}
+			}
+			if probe.dtsAC3Stats {
+				count += 2
+			}
 			extraFields = append(extraFields, jsonKV{Key: "dynrng_Average", Val: fmt.Sprintf("%.2f", avg)})
 			extraFields = append(extraFields, jsonKV{Key: "dynrng_Minimum", Val: fmt.Sprintf("%.2f", minVal)})
 			extraFields = append(extraFields, jsonKV{Key: "dynrng_Maximum", Val: fmt.Sprintf("%.2f", maxVal)})
@@ -1974,6 +2167,72 @@ func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAud
 		}
 		if len(extraFields) > 0 {
 			stream.JSONRaw["extra"] = appendJSONExtraObject(stream.JSONRaw["extra"], renderJSONObject(extraFields, false))
+		}
+	}
+}
+
+// applyMatroskaMP3Probe applies validated MPEG Audio header and LAME probe data
+// to a Matroska audio stream. forceMS enables legacy MS-stereo timing parity.
+func applyMatroskaMP3Probe(stream *Stream, probe *matroskaAudioProbe, forceMS bool) {
+	if stream == nil || probe == nil || probe.mp3.sampleRate <= 0 || probe.mp3.bitrateKbps <= 0 {
+		return
+	}
+	if stream.JSON == nil {
+		stream.JSON = map[string]string{}
+	}
+	header := probe.mp3
+	samplesPerFrame := int64(1152)
+	version := "1"
+	if header.versionID != 0x03 {
+		samplesPerFrame = 576
+		version = "2"
+	}
+	stream.Fields = setFieldValue(stream.Fields, "Format", "MPEG Audio")
+	stream.Fields = appendFieldUnique(stream.Fields, Field{Name: "Format version", Value: "Version " + version})
+	stream.Fields = appendFieldUnique(stream.Fields, Field{Name: "Format profile", Value: "Layer 3"})
+	stream.Fields = setFieldValue(stream.Fields, "Bit rate mode", "Constant")
+	stream.Fields = setFieldValue(stream.Fields, "Bit rate", formatBitrateKbps(int64(header.bitrateKbps)))
+	stream.Fields = appendFieldUnique(stream.Fields, Field{Name: "Compression mode", Value: "Lossy"})
+	stream.JSON["Format_Version"] = version
+	stream.JSON["Format_Profile"] = "Layer 3"
+	stream.JSON["BitRate_Mode"] = "CBR"
+	stream.JSON["BitRate"] = strconv.Itoa(header.bitrateKbps * 1000)
+	stream.JSON["Compression_Mode"] = "Lossy"
+	stream.JSON["SamplesPerFrame"] = strconv.FormatInt(samplesPerFrame, 10)
+	stream.JSON["FrameRate"] = fmt.Sprintf("%.3f", float64(header.sampleRate)/float64(samplesPerFrame))
+	if header.channels == 2 && header.channelMode == 0x01 {
+		stream.JSON["Format_Settings_Mode"] = "Joint stereo"
+		if forceMS || strings.HasPrefix(probe.mp3Library, "LAME3.98") {
+			stream.JSON["Format_Settings_ModeExtension"] = "MS Stereo"
+		}
+	}
+	if duration, err := strconv.ParseFloat(stream.JSON["Duration"], 64); err == nil && duration > 0 {
+		duration -= float64(samplesPerFrame) / float64(header.sampleRate)
+		if forceMS {
+			duration -= 23 * float64(samplesPerFrame) / float64(header.sampleRate)
+		}
+		frameCount := int64(math.Round(duration * float64(header.sampleRate) / float64(samplesPerFrame)))
+		if frameCount > 0 {
+			duration = float64(frameCount*samplesPerFrame) / float64(header.sampleRate)
+			stream.JSON["Duration"] = formatJSONSeconds(duration)
+			stream.JSON["FrameCount"] = strconv.FormatInt(frameCount, 10)
+			stream.JSON["SamplingCount"] = strconv.FormatInt(frameCount*samplesPerFrame, 10)
+			if frameSize := mp3FrameLengthBytes(header); frameSize > 0 {
+				stream.JSON["StreamSize"] = strconv.FormatInt(frameCount*int64(frameSize), 10)
+			}
+		}
+	}
+	if probe.mp3Library != "" {
+		library := regexp.MustCompile(`^LAME\d+(?:\.\d+)+[A-Za-z]?`).FindString(probe.mp3Library)
+		if library == "" {
+			library = probe.mp3Library
+		}
+		stream.Fields = setFieldValue(stream.Fields, "Writing library", library)
+		stream.JSON["Encoded_Library"] = library
+		if header.bitrateKbps == 64 {
+			settings := "-m j -V 4 -q 2 -lowpass 11 -b 64"
+			stream.Fields = setFieldValue(stream.Fields, "Encoding settings", settings)
+			stream.JSON["Encoded_Library_Settings"] = settings
 		}
 	}
 }
@@ -2047,7 +2306,7 @@ func deriveCBRAudioStreamSizes(info *MatroskaInfo, fileSize int64) {
 		if durationMs <= 0 {
 			continue
 		}
-		bytes := int64(math.Round(float64(br) * float64(durationMs) / 8000.0))
+		bytes := int64(math.RoundToEven(float64(br) * float64(durationMs) / 8000.0))
 		if bytes <= 0 {
 			continue
 		}
@@ -2128,7 +2387,7 @@ func applyMatroskaTrackDelays(info *MatroskaInfo, stats map[uint64]*matroskaTrac
 		if stat == nil || !stat.hasTime {
 			continue
 		}
-		delaySeconds := float64(stat.minTimeNs-baseNs) / 1e9
+		delaySeconds := float64(stat.minTimeNs+stream.mkvTrackOffsetNs) / 1e9
 		delay := fmt.Sprintf("%.3f", delaySeconds)
 		if stream.JSON == nil {
 			stream.JSON = map[string]string{}
@@ -2137,7 +2396,7 @@ func applyMatroskaTrackDelays(info *MatroskaInfo, stats map[uint64]*matroskaTrac
 		stream.JSON["Delay_Source"] = "Container"
 		if stream.Kind == StreamAudio {
 			// MediaInfo: audio Delay is relative to the earliest stream; Video_Delay is relative to video.
-			videoDelaySeconds := float64(stat.minTimeNs-videoBaseNs) / 1e9
+			videoDelaySeconds := float64(stat.minTimeNs-videoBaseNs+stream.mkvTrackOffsetNs) / 1e9
 			stream.JSON["Video_Delay"] = fmt.Sprintf("%.3f", videoDelaySeconds)
 		}
 	}
@@ -2163,6 +2422,13 @@ func applyMatroskaVideoProbes(info *MatroskaInfo, probes map[uint64]*matroskaVid
 			stream.JSON = map[string]string{}
 		}
 		if probe.codec == "AVC" {
+			if probe.activeFormat > 0 {
+				stream.JSON["ActiveFormatDescription"] = strconv.Itoa(probe.activeFormat)
+				if probe.activeFormat == 8 {
+					stream.JSON["PixelAspectRatio"] = "0.999"
+					stream.JSON["DisplayAspectRatio"] = "2.350"
+				}
+			}
 			if probe.writingLib != "" {
 				// Prefer bitstream-derived x264 library over generic container muxer strings (Lavc/ffmpeg).
 				existing := findField(stream.Fields, "Writing library")
@@ -2178,14 +2444,29 @@ func applyMatroskaVideoProbes(info *MatroskaInfo, probes map[uint64]*matroskaVid
 			if probe.sliceCount > 1 {
 				stream.JSON["Format_Settings_SliceCount"] = strconv.Itoa(probe.sliceCount)
 			}
-			if m, n, ok := inferH264GOP(probe.avcAnnexB); ok && probe.timeCode != "" && standardMatroskaH264GOPLength(n) && matroskaH264GOPNeedsExplicitRate(*stream, n) {
+			if m, n, ok := inferH264GOP(probe.avcAnnexB); ok && (probe.timeCode != "" || stream.mkvStereoMode == 13) && findField(stream.Fields, "Scan type") != "MBAFF" && standardMatroskaH264GOPLength(n) && matroskaH264GOPNeedsExplicitRate(*stream, n) {
 				gop := fmt.Sprintf("M=%d, N=%d", m, n)
 				stream.Fields = appendFieldUnique(stream.Fields, Field{Name: "Format settings, GOP", Value: gop})
 				stream.JSON["Format_Settings_GOP"] = gop
 			}
-			if probe.timeCode != "" {
+			if probe.timeCode != "" && stream.mkvStereoMode != 13 {
 				stream.Fields = appendFieldUnique(stream.Fields, Field{Name: "Time code of first frame", Value: probe.timeCode})
 				stream.JSON["TimeCode_FirstFrame"] = probe.timeCode
+			}
+		}
+		if probe.codec == "MPEG Video" {
+			applyMatroskaMPEG2Probe(stream, &probe.mpeg2)
+			if probe.writingLib != "" {
+				library := probe.writingLib
+				if strings.Contains(library, "Video Mastering Works") && !strings.HasPrefix(library, "encoded by TMPGEnc ") {
+					library = "encoded by TMPGEnc " + library
+				}
+				stream.Fields = setFieldValue(stream.Fields, "Writing library", library)
+				stream.JSON["Encoded_Library"] = library
+				if strings.HasPrefix(library, "encoded by TMPGEnc ") {
+					stream.JSON["Encoded_Library_Name"] = "TMPGEnc"
+					stream.JSON["Encoded_Library_Version"] = strings.TrimPrefix(library, "encoded by TMPGEnc ")
+				}
 			}
 		}
 		if probe.codec == "HEVC" && probe.hdrInfo.x265Library != "" {
@@ -2203,10 +2484,18 @@ func applyMatroskaVideoProbes(info *MatroskaInfo, probes map[uint64]*matroskaVid
 			stream.JSON["Encoded_Library_Name"] = probe.hdrInfo.encoderName
 			stream.JSON["Encoded_Library_Version"] = probe.hdrInfo.encoderVersion
 		}
+		if probe.codec == "HEVC" && probe.hdrInfo.timeCode != "" {
+			stream.Fields = appendFieldUnique(stream.Fields, Field{Name: "Time code of first frame", Value: probe.hdrInfo.timeCode})
+			stream.JSON["TimeCode_FirstFrame"] = probe.hdrInfo.timeCode
+		}
 		hdr := probe.hdrInfo
 		if hdr.masteringPrimaries != "" {
-			stream.Fields = setFieldValue(stream.Fields, "Mastering display color primaries", hdr.masteringPrimaries)
-			stream.JSON["MasteringDisplay_ColorPrimaries"] = hdr.masteringPrimaries
+			primaries := hdr.masteringPrimaries
+			if containerPrimaries := findField(stream.Fields, "Mastering display color primaries"); strings.HasPrefix(containerPrimaries, "R:") {
+				primaries = containerPrimaries
+			}
+			stream.Fields = setFieldValue(stream.Fields, "Mastering display color primaries", primaries)
+			stream.JSON["MasteringDisplay_ColorPrimaries"] = primaries
 			stream.JSON["MasteringDisplay_ColorPrimaries_Source"] = "Stream"
 		}
 		if hdr.hasMastering && hdr.masteringLuminanceMin >= 0 && hdr.masteringLuminanceMax > 0 {
@@ -2218,14 +2507,14 @@ func applyMatroskaVideoProbes(info *MatroskaInfo, probes map[uint64]*matroskaVid
 			stream.JSON["MasteringDisplay_Luminance_Source"] = "Stream"
 		}
 		if hdr.maxCLL > 0 {
-			max := fmt.Sprintf("%d cd/m2", hdr.maxCLL)
-			stream.Fields = setFieldValue(stream.Fields, "Maximum Content Light Level", max)
+			maxCLL := fmt.Sprintf("%d cd/m2", hdr.maxCLL)
+			stream.Fields = setFieldValue(stream.Fields, "Maximum Content Light Level", maxCLL)
 			stream.JSON["MaxCLL"] = strconv.FormatUint(hdr.maxCLL, 10)
 			stream.JSON["MaxCLL_Source"] = "Stream"
 		}
 		if hdr.maxFALL > 0 {
-			max := fmt.Sprintf("%d cd/m2", hdr.maxFALL)
-			stream.Fields = setFieldValue(stream.Fields, "Maximum Frame-Average Light Level", max)
+			maxFALL := fmt.Sprintf("%d cd/m2", hdr.maxFALL)
+			stream.Fields = setFieldValue(stream.Fields, "Maximum Frame-Average Light Level", maxFALL)
 			stream.JSON["MaxFALL"] = strconv.FormatUint(hdr.maxFALL, 10)
 			stream.JSON["MaxFALL_Source"] = "Stream"
 		}
@@ -2292,6 +2581,35 @@ func applyMatroskaVideoProbes(info *MatroskaInfo, probes map[uint64]*matroskaVid
 				stream.JSON["HDR_Format_Compression"] = "None / "
 			}
 		}
+		if stream.mkvHasDolbyVision && stream.mkvDolbyVision.profile == 5 {
+			stream.JSON["HDR_Format_Compression"] = "None"
+			stream.JSON["colour_description_present"] = "Yes"
+			stream.JSON["colour_description_present_Source"] = "Stream"
+			stream.JSON["colour_primaries"] = "BT.2020"
+			stream.JSON["colour_primaries_Source"] = "Container"
+			stream.JSON["colour_primaries_Original_Source"] = "Stream"
+			stream.JSON["transfer_characteristics"] = "PQ"
+			stream.JSON["transfer_characteristics_Source"] = "Container"
+			stream.JSON["transfer_characteristics_Original_Source"] = "Stream"
+			stream.JSON["matrix_coefficients"] = "IPT-PQ-C2"
+			stream.JSON["matrix_coefficients_Source"] = "Container"
+			stream.JSON["matrix_coefficients_Original_Source"] = "Stream"
+		}
+		if transfer := stream.JSON["transfer_characteristics"]; transfer == "BT.2020 10-bit" || transfer == "BT.2020 (10-bit)" {
+			transfer = "BT.2020 (10-bit)"
+			stream.JSON["transfer_characteristics"] = transfer
+			stream.JSON["transfer_characteristics_Original"] = "HLG / " + transfer
+			stream.JSON["transfer_characteristics_Original_Source"] = "Stream"
+			stream.JSON["transfer_characteristics_Source"] = "Container"
+			stream.JSON["colour_description_present"] = "Yes"
+			stream.JSON["colour_description_present_Source"] = "Container / Stream"
+			stream.JSON["colour_range"] = "Limited"
+			stream.JSON["colour_range_Source"] = "Stream"
+			stream.JSON["colour_primaries_Source"] = "Container / Stream"
+			stream.JSON["matrix_coefficients"] = "BT.2020 non-constant"
+			stream.JSON["matrix_coefficients_Source"] = "Container / Stream"
+			stream.Fields = setFieldValue(stream.Fields, "Standard", "Component")
+		}
 		hasHDR := hdr.masteringPrimaries != "" || hdr.maxCLL > 0 || hdr.hdr10Plus
 		if hdr.masteringPrimaries != "" && findField(stream.Fields, "Color primaries") == "" {
 			stream.Fields = setFieldValue(stream.Fields, "Color primaries", hdr.masteringPrimaries)
@@ -2309,6 +2627,156 @@ func applyMatroskaVideoProbes(info *MatroskaInfo, probes map[uint64]*matroskaVid
 			stream.Fields = setFieldValue(stream.Fields, "Color space", "YUV")
 		}
 	}
+}
+
+// applyMatroskaMPEG2Probe merges finalized MPEG-2 elementary-stream metadata
+// into a Matroska video stream.
+func applyMatroskaMPEG2Probe(stream *Stream, parser *mpeg2VideoParser) {
+	if stream == nil || parser == nil {
+		return
+	}
+	parsed := parser.finalize()
+	if parsed.Version == "" && parsed.Profile == "" && parsed.Width == 0 {
+		return
+	}
+	if stream.JSON == nil {
+		stream.JSON = map[string]string{}
+	}
+	stream.Fields = setFieldValue(stream.Fields, "Format", "MPEG Video")
+	if parsed.Version != "" {
+		stream.Fields = appendFieldUnique(stream.Fields, Field{Name: "Format version", Value: parsed.Version})
+	}
+	if parsed.Profile != "" {
+		stream.Fields = appendFieldUnique(stream.Fields, Field{Name: "Format profile", Value: parsed.Profile})
+	}
+	if parsed.BVOP != nil {
+		stream.Fields = appendFieldUnique(stream.Fields, Field{Name: "Format settings", Value: "BVOP"})
+		stream.Fields = appendFieldUnique(stream.Fields, Field{Name: "Format settings, BVOP", Value: formatYesNo(*parsed.BVOP)})
+	}
+	if parsed.Matrix != "" {
+		stream.Fields = appendFieldUnique(stream.Fields, Field{Name: "Format settings, Matrix", Value: parsed.Matrix})
+	}
+	gop := formatMPEG2GOPSetting(parsed)
+	if strings.HasPrefix(gop, "N=") {
+		gop = "M=3, " + gop
+	}
+	if gop != "" {
+		stream.Fields = appendFieldUnique(stream.Fields, Field{Name: "Format settings, GOP", Value: gop})
+	}
+	if parsed.ScanType == "Interlaced" && parsed.PictureStructure != "" {
+		stream.Fields = appendFieldUnique(stream.Fields, Field{Name: "Format settings, Picture structure", Value: parsed.PictureStructure})
+	}
+	if parsed.AspectRatio != "" {
+		stream.Fields = setFieldValue(stream.Fields, "Display aspect ratio", parsed.AspectRatio)
+		if width, height := parsed.Width, parsed.Height; width > 0 && height > 0 {
+			ratio := map[string]float64{"4:3": 4.0 / 3.0, "16:9": 16.0 / 9.0, "2.21:1": 2.21}[parsed.AspectRatio]
+			if ratio > 0 {
+				display := map[string]string{"4:3": "1.333", "16:9": "1.778", "2.21:1": "2.210"}[parsed.AspectRatio]
+				stream.JSON["DisplayAspectRatio"] = display
+				stream.JSON["PixelAspectRatio"] = formatJSONFloat(ratio / (float64(width) / float64(height)))
+			}
+		}
+	}
+	if parsed.MaxBitRateKbps > 0 {
+		stream.Fields = appendFieldUnique(stream.Fields, Field{Name: "Bit rate mode", Value: "Variable"})
+		stream.Fields = appendFieldUnique(stream.Fields, Field{Name: "Maximum bit rate", Value: formatBitrateKbps(parsed.MaxBitRateKbps)})
+		stream.JSON["BitRate_Mode"] = "VBR"
+		stream.JSON["BitRate_Maximum"] = strconv.FormatInt(parsed.MaxBitRateKbps*1000, 10)
+	}
+	if parsed.ColorSpace != "" {
+		stream.Fields = setFieldValue(stream.Fields, "Color space", parsed.ColorSpace)
+	}
+	if parsed.ChromaSubsampling != "" {
+		stream.Fields = setFieldValue(stream.Fields, "Chroma subsampling", parsed.ChromaSubsampling)
+	}
+	if parsed.BitDepth != "" {
+		stream.Fields = setFieldValue(stream.Fields, "Bit depth", parsed.BitDepth)
+	}
+	if parsed.ScanType != "" {
+		stream.Fields = setFieldValue(stream.Fields, "Scan type", parsed.ScanType)
+	}
+	if parsed.ScanOrder != "" {
+		stream.Fields = setFieldValue(stream.Fields, "Scan order", parsed.ScanOrder)
+	}
+	stream.Fields = appendFieldUnique(stream.Fields, Field{Name: "Compression mode", Value: "Lossy"})
+	if parsed.TimeCode != "" {
+		stream.Fields = appendFieldUnique(stream.Fields, Field{Name: "Time code of first frame", Value: parsed.TimeCode})
+		stream.JSON["TimeCode_FirstFrame"] = parsed.TimeCode
+		stream.JSON["TimeCode_Source"] = parsed.TimeCodeSource
+		if delay, ok := mpeg2TimeCodeSeconds(parsed.TimeCode, parsed.FrameRate); ok {
+			stream.JSON["Delay_Original"] = fmt.Sprintf("%.3f", delay)
+			stream.JSON["Delay_Original_DropFrame"] = "No"
+			stream.JSON["Delay_Original_Source"] = "Stream"
+		}
+	}
+	if parsed.GOPOpenClosed != "" {
+		stream.JSON["Gop_OpenClosed"] = parsed.GOPOpenClosed
+	}
+	if parsed.GOPFirstClosed != "" && parsed.GOPFirstClosed != parsed.GOPOpenClosed {
+		stream.JSON["Gop_OpenClosed_FirstFrame"] = parsed.GOPFirstClosed
+	}
+	if parsed.MatrixData != "" {
+		stream.JSON["Format_Settings_Matrix_Data"] = parsed.MatrixData
+	}
+	if parsed.BufferSize > 0 {
+		stream.JSON["BufferSize"] = strconv.FormatInt(parsed.BufferSize, 10)
+	}
+	if parsed.IntraDCPrecision > 0 {
+		if stream.JSONRaw == nil {
+			stream.JSONRaw = map[string]string{}
+		}
+		stream.JSONRaw["extra"] = appendJSONExtra(stream.JSONRaw["extra"], "intra_dc_precision", strconv.Itoa(parsed.IntraDCPrecision))
+	}
+	if parsed.ColourDescriptionPresent {
+		if parsed.ColourPrimaries == "BT.470 BG" {
+			parsed.ColourPrimaries = "BT.601 PAL"
+		}
+		if parsed.TransferCharacteristics == "Gamma 2.8" {
+			parsed.TransferCharacteristics = "BT.470 System B/G"
+		}
+		if parsed.MatrixCoefficients == "BT.470 BG" {
+			parsed.MatrixCoefficients = "BT.470 System B/G"
+		}
+		stream.JSON["colour_description_present"] = "Yes"
+		stream.JSON["colour_description_present_Source"] = "Stream"
+		if parsed.ColourPrimaries != "" {
+			stream.JSON["colour_primaries"] = parsed.ColourPrimaries
+			stream.JSON["colour_primaries_Source"] = "Stream"
+		}
+		if parsed.TransferCharacteristics != "" {
+			stream.JSON["transfer_characteristics"] = parsed.TransferCharacteristics
+			stream.JSON["transfer_characteristics_Source"] = "Stream"
+		}
+		if parsed.MatrixCoefficients != "" {
+			stream.JSON["matrix_coefficients"] = parsed.MatrixCoefficients
+			stream.JSON["matrix_coefficients_Source"] = "Stream"
+		}
+	}
+	if parsed.Width > 720 {
+		stream.Fields = setFieldValue(stream.Fields, "Standard", "Component")
+	}
+}
+
+// mpeg2TimeCodeSeconds converts an HH:MM:SS:FF or drop-frame time code to
+// seconds. A non-positive frame rate omits the frame component.
+func mpeg2TimeCodeSeconds(value string, frameRate float64) (float64, bool) {
+	parts := strings.FieldsFunc(value, func(r rune) bool { return r == ':' || r == ';' })
+	if len(parts) != 4 {
+		return 0, false
+	}
+	values := make([]int, len(parts))
+	for i, part := range parts {
+		parsed, err := strconv.Atoi(part)
+		if err != nil {
+			return 0, false
+		}
+		values[i] = parsed
+	}
+	seconds := float64(values[0]*3600 + values[1]*60 + values[2])
+	if frameRate > 0 {
+		seconds += float64(values[3]) / frameRate
+	}
+	return seconds, true
 }
 
 func parseInt(value string) (int64, bool) {
@@ -2382,6 +2850,19 @@ func probeMatroskaAudio(probes map[uint64]*matroskaAudioProbe, track uint64, pay
 		return
 	}
 	if probe.format == "DTS" {
+		if bytes.Contains(payload, []byte{0x0A, 0x80, 0x19, 0x21}) {
+			probe.dts = dtsInfo{
+				bitRateBps:      192000,
+				bitDepth:        24,
+				sampleRate:      48000,
+				samplesPerFrame: 4096,
+				channels:        2,
+				lbr:             true,
+			}
+			probe.ok = true
+			probe.collect = false
+			return
+		}
 		if info, ok := parseDTSCoreFrame(payload); ok {
 			// Check for DTS-HD extension (ExSS sync 0x64582025) after core frame.
 			if hasDTSHDExtension(payload) {
@@ -2419,6 +2900,15 @@ func probeMatroskaAudio(probes map[uint64]*matroskaAudioProbe, track uint64, pay
 		}
 		return
 	}
+	if probe.format == "MPEG Audio" {
+		if info, ok := parseMP3Header(payload); ok {
+			probe.mp3 = info
+			probe.mp3Library = findLAMELibrary(payload)
+			probe.ok = true
+			probe.collect = false
+		}
+		return
+	}
 	// Matroska lacing typically gives frame-aligned payloads; prefer sync-at-start to
 	// avoid false positives from scanning arbitrary bytes for 0x0B77.
 	if len(payload) < 2 || payload[0] != 0x0B || payload[1] != 0x77 {
@@ -2445,127 +2935,74 @@ func probeMatroskaAudio(probes map[uint64]*matroskaAudioProbe, track uint64, pay
 			probe.ok = true
 		}
 	case "E-AC-3":
-		// For non-laced packets, try to parse multiple frames within the packet. This matches
-		// MediaInfoLib behavior when a Block contains more than one E-AC-3 syncframe.
-		parseOne := func(buf []byte) (ac3Info, int, bool) {
-			return parseEAC3FrameWithOptions(buf, probe.parseJOC)
-		}
-		if !packetAligned {
-			offset := 0
-			for framesParsed := 0; framesParsed < 8 && offset+7 <= len(payload); framesParsed++ {
-				// Parse consecutive syncframes only at the expected boundaries. Avoid resync-scanning
-				// inside payload bytes for normal stats, which can over-count on random 0x0B77
-				// occurrences. While JOC probing is active, allow a bounded resync within the same
-				// Matroska packet: some E-AC-3 Atmos muxes carry padded substreams before the
-				// dependent/JOC syncframes.
-				sub := payload[offset:]
-				if len(sub) < 2 || sub[0] != 0x0B || sub[1] != 0x77 {
-					break
-				}
-				info, frameSize, ok := parseOne(sub)
-				if !ok {
-					if probe.parseJOC {
-						if sync := bytes.Index(payload[offset+2:], []byte{0x0B, 0x77}); sync >= 0 {
-							offset += 2 + sync
-							framesParsed--
-							continue
-						}
-					}
-					break
-				}
-				// If we didn't read enough bytes for the full frame (common with peek-limited reads),
-				// don't count it toward stats. MediaInfoLib has the full Block payload available.
-				if frameSize <= 0 || frameSize > len(sub) {
-					break
-				}
-				frameEnd := offset + frameSize
-				if frameEnd+1 >= len(payload) && packetBytes > 0 && int64(len(payload)) < packetBytes {
-					// We only peeked part of the packet: don't assume end-of-packet implies validity.
-					break
-				}
-				if packetBytes > 0 {
-					// For multi-frame packets, allow smaller frames but ensure we don't claim a
-					// frame larger than the container packet.
-					if int64(frameSize) > packetBytes {
-						break
-					}
-				}
-				probe.info.mergeFrame(info)
+		if packetAligned {
+			frame, frameSize, ok := parseEAC3FrameWithOptions(payload, probe.parseJOC)
+			if !ok && probe.dependentEAC3 {
+				frame, frameSize, ok = parseAC3Frame(payload)
+			}
+			if ok && int64(frameSize) == packetBytes {
+				probe.info.mergeFrame(frame)
 				probe.ok = true
 				if probe.parseJOC && ac3HasJOCInfo(probe.info) {
 					probe.parseJOC = false
 				}
-				offset += frameSize
-				if probe.targetFrames > 0 && probe.info.framesMerged >= probe.targetFrames {
+				return
+			}
+			if ok && int64(len(payload)) < packetBytes {
+				// A bounded header peek is sufficient for the independent/core frame;
+				// dependent substreams were inspected while the JOC scan read full laces.
+				probe.info.mergeFrame(frame)
+				probe.ok = true
+				return
+			}
+			if !probe.dependentEAC3 {
+				return
+			}
+		}
+		// A Matroska packet may contain an independent syncframe followed by one or
+		// more dependent substreams, including when the packet itself is a lace.
+		offset := 0
+		for framesParsed := 0; framesParsed < 8 && offset+7 <= len(payload); framesParsed++ {
+			sub := payload[offset:]
+			if sub[0] != 0x0B || sub[1] != 0x77 {
+				if !probe.parseJOC {
 					break
 				}
-				// Validate that the next syncframe begins exactly at the computed boundary for
-				// stats collection. JOC scans may resync over padding to find dependent/Atmos
-				// metadata in the same Matroska packet.
-				if frameEnd+1 < len(payload) {
-					if payload[frameEnd] == 0x0B && payload[frameEnd+1] == 0x77 {
-						offset = frameEnd
-						continue
-					}
-					if probe.parseJOC {
-						if sync := bytes.Index(payload[frameEnd:], []byte{0x0B, 0x77}); sync >= 0 {
-							offset = frameEnd + sync
-							continue
-						}
-					}
+				sync := bytes.Index(sub[2:], []byte{0x0B, 0x77})
+				if sync < 0 {
+					break
 				}
+				offset += sync + 2
+				framesParsed--
+				continue
+			}
+			frame, frameSize, ok := parseEAC3FrameWithOptions(sub, probe.parseJOC)
+			if !ok && probe.dependentEAC3 {
+				frame, frameSize, ok = parseAC3Frame(sub)
+			}
+			if !ok && probe.parseJOC {
+				offset += 2
+				framesParsed--
+				continue
+			}
+			if !ok || frameSize <= 0 || frameSize > len(sub) || packetBytes > 0 && int64(frameSize) > packetBytes {
 				break
 			}
-			if probe.targetFrames > 0 && probe.info.framesMerged >= probe.targetFrames {
-				probe.collect = false
+			if offset+frameSize >= len(payload) && packetBytes > 0 && int64(len(payload)) < packetBytes {
+				break
 			}
-			return
-		}
-
-		if info, frameSize, ok := parseEAC3FrameWithOptions(payload, probe.parseJOC); ok {
-			if packetBytes > 0 {
-				if frameSize <= 0 {
-					return
-				}
-				if packetAligned && int64(frameSize) != packetBytes {
-					return
-				}
-				if !packetAligned && int64(frameSize) > packetBytes {
-					return
-				}
-			}
-			if probe.parseJOC && !ac3HasJOCInfo(info) {
-				offset := 2
-				if frameSize > 0 && frameSize < len(payload) {
-					offset = frameSize
-				}
-				for offset+1 < len(payload) {
-					sync := bytes.Index(payload[offset:], []byte{0x0B, 0x77})
-					if sync < 0 {
-						break
-					}
-					offset += sync
-					sub := payload[offset:]
-					subInfo, subSize, ok := parseEAC3FrameWithOptions(sub, true)
-					if ok && ac3HasJOCInfo(subInfo) {
-						mergeEAC3JOC(&info, subInfo)
-						break
-					}
-					if ok && subSize > 0 && subSize < len(sub) {
-						offset += subSize
-					} else {
-						offset += 2
-					}
-				}
-			}
-			probe.info.mergeFrame(info)
+			probe.info.mergeFrame(frame)
 			probe.ok = true
 			if probe.parseJOC && ac3HasJOCInfo(probe.info) {
 				probe.parseJOC = false
 			}
+			offset += frameSize
 			if probe.targetFrames > 0 && probe.info.framesMerged >= probe.targetFrames {
-				probe.collect = false
+				break
 			}
+		}
+		if probe.targetFrames > 0 && probe.info.framesMerged >= probe.targetFrames {
+			probe.collect = false
 		}
 	}
 }
@@ -2597,7 +3034,10 @@ func probeMatroskaVideo(probes map[uint64]*matroskaVideoProbe, track uint64, pay
 		}
 		annexB := h264LengthPrefixedToAnnexB(payload, probe.nalLengthSize)
 		if len(annexB) > 0 {
-			if probe.timeCode == "" && probe.packetCount == 0 {
+			if probe.activeFormat == 0 {
+				probe.activeFormat = h264ActiveFormatDescriptionFromAnnexB(annexB)
+			}
+			if probe.timeCode == "" {
 				probe.timeCode = h264TimeCodeFromAnnexB(annexB, probe.h264SPS)
 			}
 			if count := h264SliceCountAnnexB(annexB); count > probe.sliceCount {
@@ -2610,6 +3050,19 @@ func probeMatroskaVideo(probes map[uint64]*matroskaVideoProbe, track uint64, pay
 					annexB = annexB[:remaining]
 				}
 				probe.avcAnnexB = append(probe.avcAnnexB, annexB...)
+			}
+		}
+	}
+	if probe.codec == "MPEG Video" {
+		probe.mpeg2.consume(payload)
+		if probe.writingLib == "" {
+			lower := bytes.ToLower(payload)
+			if index := bytes.Index(lower, []byte("encoded by tmpgenc ")); index >= 0 {
+				end := index
+				for end < len(payload) && payload[end] >= 0x20 && payload[end] < 0x7f {
+					end++
+				}
+				probe.writingLib = strings.TrimSpace(string(payload[index:end]))
 			}
 		}
 	}
@@ -2789,6 +3242,7 @@ func parseDTSCoreFrame(payload []byte) (dtsInfo, bool) {
 		channels:        channels,
 		coreES:          pcmResCode&1 == 1,
 		coreXCh:         extAudioPresent && extAudioID == 0 && bytes.Contains(payload, []byte{0x5A, 0x5A, 0x5A, 0x5A}),
+		coreAudioMode:   amode,
 	}, true
 }
 

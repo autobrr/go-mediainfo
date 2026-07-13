@@ -10,6 +10,10 @@ func mapMatroskaCodecID(codecID string, trackType uint64) (StreamKind, string) {
 		return StreamVideo, "VP9"
 	case "V_VP8":
 		return StreamVideo, "VP8"
+	case "V_MPEG2":
+		return StreamVideo, "MPEG Video"
+	case "V_MS/VFW/FOURCC":
+		return StreamVideo, "Video"
 	case "A_AAC":
 		return StreamAudio, "AAC"
 	case "A_AAC-2":
@@ -22,8 +26,10 @@ func mapMatroskaCodecID(codecID string, trackType uint64) (StreamKind, string) {
 		return StreamAudio, "Opus"
 	case "A_FLAC":
 		return StreamAudio, "FLAC"
-	case "A_MPEG/L2":
+	case "A_MPEG/L2", "A_MPEG/L3":
 		return StreamAudio, "MPEG Audio"
+	case "A_VORBIS":
+		return StreamAudio, "Vorbis"
 	case "A_DTS":
 		return StreamAudio, "DTS"
 	case "A_TRUEHD":
@@ -38,6 +44,12 @@ func mapMatroskaCodecID(codecID string, trackType uint64) (StreamKind, string) {
 		return StreamText, "UTF-8"
 	case "S_TEXT/ASS":
 		return StreamText, "ASS"
+	case "S_TEXT/SSA":
+		return StreamText, "SSA"
+	case "S_TEXT/WEBVTT":
+		return StreamText, "S_TEXT/WEBVTT"
+	case "S_VOBSUB":
+		return StreamText, "VobSub"
 	case "S_HDMV/PGS":
 		return StreamText, "PGS"
 	default:
@@ -51,6 +63,8 @@ func mapMatroskaFormatInfo(format string) string {
 		return "Advanced Video Codec"
 	case "HEVC":
 		return "High Efficiency Video Coding"
+	case "VC-1":
+		return "SMPTE VC-1"
 	case "VP9":
 		return "Google VP9"
 	case "VP8":
@@ -81,6 +95,10 @@ func mapMatroskaFormatInfo(format string) string {
 		return "Dolby TrueHD"
 	case "PCM":
 		return "PCM"
+	case "Vorbis":
+		return "Vorbis"
+	case "MPEG Video":
+		return "MPEG Video"
 	default:
 		return ""
 	}

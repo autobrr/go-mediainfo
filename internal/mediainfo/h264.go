@@ -28,8 +28,9 @@ type h264SPSInfo struct {
 	MatrixCoefficients      string
 	HasColorDescription     bool
 	ProfileID               byte
+	ConstraintFlags         byte
 	LevelID                 byte
-	// HEVC-only: chroma_sample_loc_type_top_field from the SPS VUI, present only when
+	// Chroma sample location from the SPS VUI, present only when
 	// chroma_loc_info_present_flag is set. MediaInfo reports it as "Type <ChromaSampleLoc>".
 	HasChromaLoc    bool
 	ChromaSampleLoc int
@@ -123,6 +124,9 @@ type h264FieldOptions struct {
 
 func buildH264Fields(profile string, level string, spsInfo h264SPSInfo, ppsCABAC *bool, opts h264FieldOptions) []Field {
 	fields := []Field{}
+	if profile == "High" && spsInfo.ConstraintFlags&0x08 != 0 {
+		profile = "Progressive High"
+	}
 	if profile != "" {
 		if level != "" {
 			fields = append(fields, Field{Name: "Format profile", Value: fmt.Sprintf("%s@%s", profile, level)})
@@ -134,6 +138,9 @@ func buildH264Fields(profile string, level string, spsInfo h264SPSInfo, ppsCABAC
 		// MediaInfo reports AVC/H.264 as YUV when chroma information is present.
 		fields = append(fields, Field{Name: "Color space", Value: "YUV"})
 		fields = append(fields, Field{Name: "Chroma subsampling", Value: spsInfo.ChromaFormat})
+		if spsInfo.HasChromaLoc {
+			fields = append(fields, Field{Name: "Chroma subsampling position", Value: fmt.Sprintf("Type %d", spsInfo.ChromaSampleLoc)})
+		}
 	}
 	if spsInfo.BitDepth > 0 {
 		fields = append(fields, Field{Name: "Bit depth", Value: formatBitDepth(uint8(spsInfo.BitDepth))})
@@ -207,7 +214,7 @@ func parseH264SPS(nal []byte) h264SPSInfo {
 	rbsp := nalToRBSP(nal)
 	br := newBitReader(rbsp)
 	profileID := br.readBitsValue(8)
-	_ = br.readBitsValue(8) // constraint flags + reserved
+	constraintFlags := br.readBitsValue(8)
 	levelID := br.readBitsValue(8)
 	_ = br.readUE()
 
@@ -226,6 +233,8 @@ func parseH264SPS(nal []byte) h264SPSInfo {
 	transferCharacteristics := ""
 	matrixCoefficients := ""
 	hasColorDescription := false
+	hasChromaLoc := false
+	chromaSampleLoc := 0
 	bitRate := int64(0)
 	hasBitRate := false
 	bitRateCBR := false
@@ -392,8 +401,9 @@ func parseH264SPS(nal []byte) h264SPSInfo {
 			}
 		}
 		if br.readBitsValue(1) == 1 {
+			chromaSampleLoc = br.readUE()
 			_ = br.readUE()
-			_ = br.readUE()
+			hasChromaLoc = true
 		}
 		if br.readBitsValue(1) == 1 {
 			numUnitsInTick := br.readBitsValue(32)
@@ -477,7 +487,10 @@ func parseH264SPS(nal []byte) h264SPSInfo {
 		MatrixCoefficients:      matrixCoefficients,
 		HasColorDescription:     hasColorDescription,
 		ProfileID:               byte(profileID),
+		ConstraintFlags:         byte(constraintFlags),
 		LevelID:                 byte(levelID),
+		HasChromaLoc:            hasChromaLoc,
+		ChromaSampleLoc:         chromaSampleLoc,
 		Width:                   uint64(width),
 		Height:                  uint64(height),
 		CodedWidth:              uint64(codedWidth),
@@ -746,6 +759,51 @@ func h264TimeCodeFromAnnexB(payload []byte, sps h264SPSInfo) string {
 		return true
 	})
 	return timeCode
+}
+
+// h264ActiveFormatDescriptionFromAnnexB returns the DTG1 active-format code
+// carried in registered ITU-T T.35 user data, or zero when absent.
+func h264ActiveFormatDescriptionFromAnnexB(payload []byte) int {
+	activeFormat := 0
+	scanAnnexBNALs(payload, func(nal []byte) bool {
+		if len(nal) == 0 || nal[0]&0x1F != 6 {
+			return true
+		}
+		rbsp := nalToRBSP(nal)
+		for pos := 0; pos < len(rbsp); {
+			payloadType := 0
+			for pos < len(rbsp) && rbsp[pos] == 0xFF {
+				payloadType += 255
+				pos++
+			}
+			if pos >= len(rbsp) {
+				break
+			}
+			payloadType += int(rbsp[pos])
+			pos++
+			payloadSize := 0
+			for pos < len(rbsp) && rbsp[pos] == 0xFF {
+				payloadSize += 255
+				pos++
+			}
+			if pos >= len(rbsp) {
+				break
+			}
+			payloadSize += int(rbsp[pos])
+			pos++
+			if payloadSize > len(rbsp)-pos {
+				break
+			}
+			data := rbsp[pos : pos+payloadSize]
+			if payloadType == 4 && len(data) >= 9 && data[0] == 0xB5 && data[1] == 0x00 && data[2] == 0x31 && string(data[3:7]) == "DTG1" && data[7]&0x40 != 0 {
+				activeFormat = int(data[8] & 0x0F)
+				return false
+			}
+			pos += payloadSize
+		}
+		return true
+	})
+	return activeFormat
 }
 
 // parseH264PicTimingTimeCode decodes a pic_timing payload using SPS delay

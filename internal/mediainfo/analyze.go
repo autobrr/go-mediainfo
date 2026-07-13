@@ -497,23 +497,61 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			info = parsed.Container
 			general.JSON = map[string]string{}
 			var rawWritingApp string
+			var rawWritingLibrary string
 			for _, field := range parsed.General {
 				if field.Name == "Writing application" {
 					rawWritingApp = field.Value
 					field.Value = normalizeWritingApplication(field.Value)
 				}
+				if field.Name == "Writing library" {
+					rawWritingLibrary = field.Value
+				}
 				general.Fields = appendFieldUnique(general.Fields, field)
 			}
 			streams = append(streams, parsed.Tracks...)
+			coverNames := []string{}
+			coverMimes := []string{}
+			for _, attachment := range parsed.attachmentInfo {
+				imageStream, ok := matroskaAttachmentImageStream(attachment)
+				if !ok {
+					continue
+				}
+				streams = append(streams, imageStream)
+				coverNames = append(coverNames, attachment.name)
+				mime := attachment.mime
+				if mime == "" {
+					if strings.EqualFold(filepath.Ext(attachment.name), ".png") {
+						mime = "image/png"
+					} else {
+						mime = "image/jpeg"
+					}
+				}
+				coverMimes = append(coverMimes, mime)
+			}
+			if len(coverNames) > 0 {
+				values := make([]string, len(coverNames))
+				types := make([]string, len(coverNames))
+				for i := range coverNames {
+					values[i] = "Yes"
+					types[i] = "Cover"
+				}
+				general.JSON["Cover"] = strings.Join(values, " / ")
+				general.JSON["Cover_Description"] = strings.Join(coverNames, " / ")
+				general.JSON["Cover_Mime"] = strings.Join(coverMimes, " / ")
+				general.JSON["Cover_Type"] = strings.Join(types, " / ")
+			}
 			applyLegacyMatroskaFrameRateRatio(rawWritingApp, streams)
 			generalExtras := []jsonKV{}
 			if len(parsed.attachments) > 0 {
 				generalExtras = append(generalExtras, jsonKV{Key: "Attachments", Val: strings.Join(parsed.attachments, " / ")})
 			}
-			for _, name := range []string{"IMDB", "TMDB", "TVDB", "TVDB2", "MyAnimeList", "TVmaze"} {
+			for _, name := range []string{"IMDB", "TMDB", "TVDB", "TVDB2", "MyAnimeList", "TVmaze", "Douban", "ACTOR", "DIRECTOR", "SUBTITLE", "SUMMARY", "SHOW"} {
 				if value := parsed.generalTags[name]; value != "" {
 					generalExtras = append(generalExtras, jsonKV{Key: name, Val: value})
 				}
+			}
+			if value := firstNonEmpty(parsed.generalTags["SOURCE"], parsed.generalTags["Source"]); value != "" {
+				generalExtras = append(generalExtras, jsonKV{Key: "Source", Val: value})
 			}
 			if len(generalExtras) > 0 {
 				if general.JSONRaw == nil {
@@ -527,6 +565,21 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			if value := parsed.generalTags["DATE_RELEASED"]; value != "" {
 				general.JSON["Released_Date"] = value
 			}
+			if value := parsed.generalTags["DATE_RECORDED"]; value != "" {
+				general.JSON["Recorded_Date"] = value
+			} else if value := parsed.generalTags["DATE"]; value != "" {
+				general.JSON["Recorded_Date"] = strings.Replace(value, "T", " ", 1)
+			}
+			if value := parsed.generalTags["GENRE"]; value != "" {
+				general.JSON["Genre"] = value
+			}
+			if value := parsed.generalTags["ENCODED_BY"]; value != "" {
+				general.JSON["EncodedBy"] = value
+			}
+			if value := parsed.generalTags["TITLE"]; value != "" && findField(general.Fields, "Title") == "" {
+				general.JSON["Title"] = value
+				general.JSON["Movie"] = value
+			}
 			if rawWritingApp != "" {
 				general.JSON["Encoded_Application"] = rawWritingApp
 				if name, version, _ := splitWritingApplication(rawWritingApp); exposeWritingApplicationComponents(name, version) {
@@ -536,22 +589,33 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 					}
 				}
 			}
+			if rawWritingLibrary != "" {
+				if encoder := parsed.generalTags["ENCODER"]; strings.HasPrefix(encoder, "Lavf") && !strings.Contains(rawWritingLibrary, encoder) {
+					rawWritingLibrary += " / " + encoder
+					general.Fields = setFieldValue(general.Fields, "Writing library", rawWritingLibrary)
+				}
+				general.JSON["Encoded_Library"] = rawWritingLibrary
+				if name, version, _ := splitWritingApplication(rawWritingLibrary); exposeWritingApplicationComponents(name, version) {
+					general.JSON["Encoded_Library_Name"] = name
+					general.JSON["Encoded_Library_Version"] = version
+				}
+			}
 			// MediaInfo emits both Title and Movie for Matroska Segment/Info/Title.
 			if title := findField(general.Fields, "Title"); title != "" {
 				general.JSON["Movie"] = title
 			}
 			if info.DurationSeconds > 0 {
-				general.JSON["Duration"] = formatJSONFloat(info.DurationSeconds)
+				general.JSON["Duration"] = formatJSONFloat(info.DurationSeconds + 1e-9)
 			}
 			setOverallBitRate(general.JSON, stat.Size(), info.DurationSeconds)
 			general.JSON["IsStreamable"] = "Yes"
 			streamSizeSum := sumStreamSizes(streams, true)
 			setRemainingStreamSize(general.JSON, stat.Size(), streamSizeSum)
 			overallModeField := overallBitRateModeForKind(streams, StreamVideo)
-			// When video doesn't provide a bit rate mode, check audio streams.
-			// DTS-HD MA (XLL) and other VBR audio codecs signal Variable overall mode.
-			if overallModeField == "" {
-				overallModeField = overallBitRateModeForKind(streams, StreamAudio)
+			// Variable audio makes the complete payload variable even when video is CBR.
+			audioModeField := overallBitRateModeForKind(streams, StreamAudio)
+			if overallModeField == "" || audioModeField == "Variable" {
+				overallModeField = audioModeField
 			}
 			// When video doesn't provide a bit rate mode, check audio streams.
 			// DTS-HD MA (XLL) and other VBR audio codecs signal Variable overall mode.
@@ -641,11 +705,11 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 					findField(streams[i].Fields, "Nominal bit rate") == "" &&
 					findField(streams[i].Fields, "Bit rate") == "" &&
 					(streams[i].JSON == nil || streams[i].JSON["BitRate"] == "") {
-					streams[i].Fields = appendFieldUnique(streams[i].Fields, Field{Name: "Bit rate", Value: formatBitrate(x264Bitrate)})
+					streams[i].Fields = appendFieldUnique(streams[i].Fields, Field{Name: "Nominal bit rate", Value: formatBitrate(x264Bitrate)})
 					if streams[i].JSON == nil {
 						streams[i].JSON = map[string]string{}
 					}
-					streams[i].JSON["BitRate"] = strconv.FormatInt(int64(math.Round(x264Bitrate)), 10)
+					streams[i].JSON["BitRate_Nominal"] = strconv.FormatInt(int64(math.Round(x264Bitrate)), 10)
 				}
 				// MediaInfo reports VBV constraints only when HRD signaling is enabled.
 				hrdEnabled := strings.Contains(enc, "nal_hrd=vbr") || strings.Contains(enc, "nal_hrd=cbr")
@@ -672,7 +736,11 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 				}
 			}
 			streamSizeSum = sumStreamSizes(streams, true)
-			setRemainingStreamSize(general.JSON, stat.Size(), streamSizeSum)
+			if matroskaPayloadStreamSizesKnown(streams) {
+				setRemainingStreamSize(general.JSON, stat.Size(), streamSizeSum)
+			} else {
+				delete(general.JSON, "StreamSize")
+			}
 		}
 	case "MPEG-TS":
 		if parsedInfo, parsedStreams, generalFields, ok := ParseMPEGTS(file, stat.Size(), opts.ParseSpeed); ok {
@@ -1772,18 +1840,54 @@ func deriveMatroskaVideoBitRateAndSize(generalJSON map[string]string, streams []
 		video.JSON = map[string]string{}
 	}
 	video.JSON["StreamSize"] = strconv.FormatInt(streamSize, 10)
+	bitRate := math.Round(float64(streamSize) * 8 / duration)
+	if nominal, ok := findX264Bitrate(findField(video.Fields, "Encoding settings")); ok && nominal > 0 {
+		bitRate = nominal
+	}
+	video.JSON["BitRate"] = strconv.FormatInt(int64(bitRate), 10)
+	video.Fields = setFieldValue(video.Fields, "Bit rate", formatBitrate(bitRate))
 	video.Fields = setFieldValue(video.Fields, "Stream size", formatStreamSize(streamSize, fileSize))
+}
+
+// matroskaPayloadStreamSizesKnown reports whether every payload-bearing
+// Matroska stream has a computed byte size. Subtitle sizes may remain unknown
+// because MediaInfo assigns their bytes to the General remainder.
+func matroskaPayloadStreamSizesKnown(streams []Stream) bool {
+	for _, stream := range streams {
+		switch stream.Kind {
+		case StreamVideo, StreamAudio, StreamImage:
+			if stream.JSON == nil || stream.JSON["StreamSize"] == "" {
+				return false
+			}
+		case StreamText:
+			// Missing subtitle sizes are intentionally part of General remainder.
+		case StreamGeneral, StreamMenu:
+		}
+	}
+	return true
 }
 
 // applyLegacyMatroskaFrameRateRatio preserves mkvmerge 2.x's decimal 23.976
 // rate representation, which MediaInfo exposes as 23976/1000 rather than NTSC.
 func applyLegacyMatroskaFrameRateRatio(writingApp string, streams []Stream) {
-	if !strings.HasPrefix(writingApp, "mkvmerge v2.") {
+	if !strings.HasPrefix(writingApp, "mkvmerge v2.") && !strings.HasPrefix(writingApp, "Lavf") {
 		return
 	}
 	for i := range streams {
 		stream := &streams[i]
-		if stream.Kind != StreamVideo || math.Abs(stream.mkvH264SPS.FrameRate-23.976) >= 1e-9 {
+		if stream.Kind != StreamVideo {
+			continue
+		}
+		stream.JSONSkipFrameRateRatio = true
+		if strings.HasPrefix(writingApp, "Lavf") {
+			duration, durationErr := strconv.ParseFloat(stream.JSON["Duration"], 64)
+			frameRate, frameRateOK := parseFloatValue(findField(stream.Fields, "Frame rate"))
+			if durationErr == nil && duration > 0 && frameRateOK && frameRate > 0 {
+				stream.JSON["FrameCount"] = strconv.FormatInt(int64(math.Round(duration*frameRate)), 10)
+			}
+			continue
+		}
+		if math.Abs(stream.mkvH264SPS.FrameRate-23.976) >= 1e-9 {
 			continue
 		}
 		if stream.JSON == nil {

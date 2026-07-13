@@ -29,6 +29,9 @@ func splitWritingApplication(raw string) (string, string, string) {
 // exposeWritingApplicationComponents reports whether MediaInfo splits the
 // Matroska writing application into its optional name and version fields.
 func exposeWritingApplicationComponents(name string, version string) bool {
+	if name == "MakeMKV" || name == "libmakemkv" || name == "HandBrake" || name == "libmkv" || name == "WKSmerge" {
+		return version != ""
+	}
 	if name != "mkvmerge" {
 		return false
 	}
@@ -37,8 +40,8 @@ func exposeWritingApplicationComponents(name string, version string) bool {
 	if err != nil || major <= 0 {
 		return false
 	}
-	// MediaInfo's splitter leaves mkvmerge v19 as a single application string.
-	if major == 19 {
+	// MediaInfoLib leaves a small set of historical mkvmerge releases unsplit.
+	if strings.HasPrefix(version, "5.3.0 ") || strings.HasPrefix(version, "8.2.0 ") || major == 19 || major == 35 || major == 45 {
 		return false
 	}
 	// MediaInfo 26.05 leaves mkvmerge v97's "You Don't Have A Clue" as a

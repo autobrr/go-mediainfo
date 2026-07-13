@@ -7,6 +7,7 @@ import (
 	"io"
 	"math"
 	"math/big"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -35,6 +36,8 @@ const (
 	mkvIDAttachments         = 0x1941A469
 	mkvIDAttachedFile        = 0x61A7
 	mkvIDFileName            = 0x466E
+	mkvIDFileMimeType        = 0x4660
+	mkvIDFileData            = 0x465C
 	mkvIDTag                 = 0x7373
 	mkvIDTagTargets          = 0x63C0
 	mkvIDSimpleTag           = 0x67C8
@@ -60,6 +63,8 @@ const (
 	mkvIDCodecID             = 0x86
 	mkvIDCodecPrivate        = 0x63A2
 	mkvIDCodecName           = 0x258688
+	mkvIDCodecDelay          = 0x56AA
+	mkvIDSeekPreRoll         = 0x56BB
 	mkvIDContentEncodings    = 0x6D80
 	mkvIDContentEncoding     = 0x6240
 	mkvIDContentEncodingType = 0x5033
@@ -82,6 +87,7 @@ const (
 	mkvIDDisplayHeight       = 0x54BA
 	mkvIDDisplayUnit         = 0x54B2
 	mkvIDAspectRatioType     = 0x54B3
+	mkvIDStereoMode          = 0x53B8
 	mkvIDPixelCropTop        = 0x54AA
 	mkvIDPixelCropBottom     = 0x54BB
 	mkvIDPixelCropLeft       = 0x54CC
@@ -107,6 +113,7 @@ const (
 	mkvIDSamplingRate        = 0xB5
 	mkvIDOutputSamplingRate  = 0x78B5
 	mkvIDChannels            = 0x9F
+	mkvIDAudioBitDepth       = 0x6264
 	mkvIDDocType             = 0x4282
 	mkvIDDocTypeVersion      = 0x4287
 	mkvIDTimecode            = 0xE7
@@ -139,16 +146,26 @@ const matroskaAVCQuickProbePackets = 256
 // MatroskaInfo contains parsed container, General, and track metadata plus the
 // Segment byte range and timestamp scale used for bounded cluster scans.
 type MatroskaInfo struct {
-	Container     ContainerInfo
-	General       []Field
-	Tracks        []Stream
-	SegmentOffset int64
-	SegmentSize   int64
-	TimecodeScale uint64
-	durationPrec  int
-	tagStats      map[uint64]matroskaTagStats
-	generalTags   map[string]string
-	attachments   []string
+	Container      ContainerInfo
+	General        []Field
+	Tracks         []Stream
+	SegmentOffset  int64
+	SegmentSize    int64
+	TimecodeScale  uint64
+	durationPrec   int
+	tagStats       map[uint64]matroskaTagStats
+	generalTags    map[string]string
+	attachments    []string
+	attachmentInfo []matroskaAttachment
+}
+
+// matroskaAttachment holds attachment metadata and, for small image
+// attachments, the payload needed to derive an Image stream.
+type matroskaAttachment struct {
+	name string
+	mime string
+	data []byte
+	size int64
 }
 
 // ParseMatroska parses a Matroska stream with the default analysis options.
@@ -197,12 +214,21 @@ func ParseMatroskaWithOptions(r io.ReaderAt, size int64, opts AnalyzeOptions) (M
 	}
 	if info.SegmentOffset > 0 && info.SegmentSize > 0 && info.TimecodeScale > 0 {
 		if size > scanSize {
+			if !matroskaHasMenu(info.Tracks) {
+				if seekPos, ok := findMatroskaSeekPosition(buf, int(info.SegmentOffset), mkvIDChapters); ok {
+					chaptersOffset := info.SegmentOffset + int64(seekPos)
+					if editions := scanMatroskaChaptersFromFile(r, chaptersOffset, size); len(editions) > 0 {
+						info.Tracks = appendMatroskaChapterMenus(info.Tracks, editions)
+					}
+				}
+			}
 			// If Attachments were truncated by the initial scan buffer, resolve them via SeekHead and
 			// parse lazily (seek-skipping file payloads).
-			attachmentsOffset := int64(0)
-			if seekPos, ok := findMatroskaSeekPosition(buf, int(info.SegmentOffset), mkvIDAttachments); ok {
-				attachmentsOffset = info.SegmentOffset + int64(seekPos)
-			} else {
+			attachmentOffsets := []int64{}
+			for _, seekPos := range findMatroskaSeekPositions(buf, int(info.SegmentOffset), mkvIDAttachments) {
+				attachmentOffsets = append(attachmentOffsets, info.SegmentOffset+int64(seekPos))
+			}
+			if len(attachmentOffsets) == 0 {
 				// Some files omit Attachments from SeekHead. Fall back to a bounded scan in the initial buffer.
 				needle := []byte{0x19, 0x41, 0xA4, 0x69}
 				start := int(info.SegmentOffset)
@@ -216,22 +242,22 @@ func ParseMatroskaWithOptions(r io.ReaderAt, size int64, opts AnalyzeOptions) (M
 						end = len(buf)
 					}
 					if idx := bytes.Index(buf[start:end], needle); idx >= 0 {
-						attachmentsOffset = info.SegmentOffset + int64(idx)
+						attachmentOffsets = append(attachmentOffsets, info.SegmentOffset+int64(idx))
 					}
 				}
 			}
-			if attachmentsOffset > 0 {
-				if names := scanMatroskaAttachmentsFromFile(r, attachmentsOffset, size); len(names) > 0 {
-					seen := map[string]struct{}{}
-					for _, n := range info.attachments {
-						seen[n] = struct{}{}
-					}
-					for _, n := range names {
-						if _, ok := seen[n]; ok {
-							continue
+			if len(attachmentOffsets) > 0 {
+				var attachments []matroskaAttachment
+				for _, attachmentsOffset := range attachmentOffsets {
+					attachments = append(attachments, scanMatroskaAttachmentsFromFile(r, attachmentsOffset, size)...)
+				}
+				if len(attachments) > 0 {
+					info.attachments = info.attachments[:0]
+					for _, attachment := range attachments {
+						info.attachments = append(info.attachments, attachment.name)
+						if len(attachment.data) > 0 {
+							info.attachmentInfo = appendMatroskaAttachmentUnique(info.attachmentInfo, attachment)
 						}
-						seen[n] = struct{}{}
-						info.attachments = append(info.attachments, n)
 					}
 				}
 			}
@@ -292,12 +318,12 @@ func ParseMatroskaWithOptions(r io.ReaderAt, size int64, opts AnalyzeOptions) (M
 				}
 			}
 			// Fallback: some muxers place Tags at EOF. Scan a bounded tail chunk for languages/encoders.
-			if needLangs && len(tagLangs) == 0 && size > (32<<20) {
+			if ((needLangs && len(tagLangs) == 0) || (len(info.tagStats) == 0 && len(tagStats) == 0) || len(generalTags) == 0) && size > (32<<20) {
 				tailSize := min(size, int64(32<<20))
 				if tailSize > 0 {
 					tail := make([]byte, tailSize)
 					if _, err := r.ReadAt(tail, size-tailSize); err == nil || err == io.EOF {
-						enc, settings, langs, _, tailGeneralTags := parseMatroskaTagsFromBuffer(tail, encodedDate)
+						enc, settings, langs, tailStats, tailGeneralTags := parseMatroskaTagsFromBuffer(tail, encodedDate)
 						if len(enc) > 0 {
 							tagEncoders = enc
 						}
@@ -306,6 +332,30 @@ func ParseMatroskaWithOptions(r io.ReaderAt, size int64, opts AnalyzeOptions) (M
 						}
 						if len(langs) > 0 {
 							tagLangs = langs
+						}
+						tailStatsHaveSource := false
+						for _, stat := range tailStats {
+							if stat.hasSource || stat.hasSourceID {
+								tailStatsHaveSource = true
+								break
+							}
+						}
+						for uid, stat := range tailStats {
+							if tagStats == nil {
+								tagStats = map[uint64]matroskaTagStats{}
+							}
+							current, exists := tagStats[uid]
+							if (!exists || !current.trusted) && tailStatsHaveSource {
+								tagStats[uid] = stat
+								continue
+							}
+							if !exists {
+								continue
+							}
+							// Preserve trusted head/SeekHead measurements; a tail window may
+							// contain an older duplicate Tags element with stale numeric stats.
+							mergeMatroskaTagStats(&current, matroskaTagStats{source: stat.source, hasSource: stat.hasSource, sourceID: stat.sourceID, hasSourceID: stat.hasSourceID, extras: stat.extras})
+							tagStats[uid] = current
 						}
 						for name, value := range tailGeneralTags {
 							if generalTags == nil {
@@ -355,12 +405,13 @@ func ParseMatroskaWithOptions(r io.ReaderAt, size int64, opts AnalyzeOptions) (M
 				switch stream.Kind {
 				case StreamAudio:
 					format := findField(stream.Fields, "Format")
-					if format != "AC-3" && format != "E-AC-3" && format != "DTS" && format != "TrueHD" {
+					if format != "AC-3" && format != "E-AC-3" && format != "DTS" && format != "TrueHD" && format != "MPEG Audio" {
 						continue
 					}
 					probe := &matroskaAudioProbe{
-						format:      format,
-						headerStrip: stream.mkvHeaderStripBytes,
+						format:        format,
+						headerStrip:   stream.mkvHeaderStripBytes,
+						dependentEAC3: findField(stream.Fields, "Codec ID") == "A_EAC3" && strings.HasPrefix(findField(stream.Fields, "Channel(s)"), "8 "),
 					}
 					if format == "E-AC-3" {
 						// dec3 can omit JOC signaling on Atmos Matroska tracks; keep a bounded
@@ -387,6 +438,9 @@ func ParseMatroskaWithOptions(r io.ReaderAt, size int64, opts AnalyzeOptions) (M
 						probe.collect = true
 						if opts.ParseSpeed < 1 {
 							probe.targetPackets = matroskaAC3QuickProbePackets
+							if strings.HasPrefix(findField(stream.Fields, "Channel(s)"), "2 ") {
+								probe.targetPackets = 212
+							}
 						}
 					}
 					if format == "DTS" {
@@ -401,6 +455,9 @@ func ParseMatroskaWithOptions(r io.ReaderAt, size int64, opts AnalyzeOptions) (M
 						if sampleRate, ok := parseSampleRate(findField(stream.Fields, "Sampling rate")); ok {
 							probe.truehd.sampleRate = int(sampleRate)
 						}
+					}
+					if format == "MPEG Audio" && opts.ParseSpeed < 1 {
+						probe.targetPackets = 1
 					}
 					audioProbes[id] = probe
 				case StreamVideo:
@@ -434,6 +491,10 @@ func ParseMatroskaWithOptions(r io.ReaderAt, size int64, opts AnalyzeOptions) (M
 						}
 						probe.targetPackets = matroskaHEVCQuickProbePackets
 						videoProbes[id] = probe
+						continue
+					}
+					if format == "MPEG Video" {
+						videoProbes[id] = &matroskaVideoProbe{codec: format, targetPackets: 64}
 					}
 				case StreamGeneral, StreamText, StreamImage, StreamMenu:
 					continue
@@ -473,6 +534,24 @@ func ParseMatroskaWithOptions(r io.ReaderAt, size int64, opts AnalyzeOptions) (M
 				applyMatroskaTrackDelays(&info, stats)
 				applyMatroskaAudioProbes(&info, audioProbes)
 				applyMatroskaVideoProbes(&info, videoProbes)
+			}
+		}
+	}
+	if strings.HasPrefix(info.generalTags["ENCODER"], "Lavf") {
+		for i := range info.Tracks {
+			stream := &info.Tracks[i]
+			if stream.Kind != StreamVideo || stream.JSON == nil {
+				continue
+			}
+			tag := info.tagStats[streamTrackUID(*stream)]
+			delay, delayErr := strconv.ParseFloat(stream.JSON["Delay"], 64)
+			if !tag.hasDuration || tag.durationSeconds <= 0 || delayErr != nil || delay <= 0 {
+				continue
+			}
+			duration := tag.durationSeconds - delay
+			stream.JSON["Duration"] = fmt.Sprintf("%.*f", min(max(tag.durationPrec, 3), 9), duration)
+			if fps, ok := parseFPS(findField(stream.Fields, "Frame rate")); ok && fps > 0 {
+				stream.JSON["FrameCount"] = strconv.FormatInt(int64(math.Round(duration*fps)), 10)
 			}
 		}
 	}
@@ -559,6 +638,14 @@ func ParseMatroskaWithOptions(r io.ReaderAt, size int64, opts AnalyzeOptions) (M
 		}
 		stream.JSON["FrameCount"] = strconv.FormatInt(int64(rounded), 10)
 	}
+	for i := range info.Tracks {
+		stream := &info.Tracks[i]
+		if findField(stream.Fields, "Format") == "FLAC" && stream.JSON != nil && stream.JSON["BitRate"] == "" && stream.JSON["StreamSize"] == "" {
+			delete(stream.JSON, "FrameCount")
+			delete(stream.JSON, "FrameRate")
+			delete(stream.JSON, "SamplesPerFrame")
+		}
+	}
 	deriveCBRAudioStreamSizes(&info, size)
 	return info, true
 }
@@ -590,9 +677,20 @@ func shouldApplyMatroskaClusterCounts(parseSpeed float64, size int64, tagStatsCo
 }
 
 func findMatroskaSeekPosition(buf []byte, segmentOffset int, targetID uint64) (uint64, bool) {
-	if segmentOffset <= 0 || segmentOffset >= len(buf) {
+	positions := findMatroskaSeekPositions(buf, segmentOffset, targetID)
+	if len(positions) == 0 {
 		return 0, false
 	}
+	return positions[0], true
+}
+
+// findMatroskaSeekPositions returns every segment-relative SeekPosition for
+// targetID found in top-level SeekHead elements.
+func findMatroskaSeekPositions(buf []byte, segmentOffset int, targetID uint64) []uint64 {
+	if segmentOffset <= 0 || segmentOffset >= len(buf) {
+		return nil
+	}
+	var positions []uint64
 	pos := segmentOffset
 	for pos < len(buf) {
 		id, idLen, ok := readVintID(buf, pos)
@@ -609,16 +707,25 @@ func findMatroskaSeekPosition(buf []byte, segmentOffset int, targetID uint64) (u
 			dataEnd = len(buf)
 		}
 		if id == mkvIDSeekHead {
-			if seekPos, ok := parseMatroskaSeekHead(buf[dataStart:dataEnd], targetID); ok {
-				return seekPos, true
-			}
+			positions = append(positions, parseMatroskaSeekHeadPositions(buf[dataStart:dataEnd], targetID)...)
 		}
 		pos = dataEnd
 	}
-	return 0, false
+	return positions
 }
 
 func parseMatroskaSeekHead(buf []byte, targetID uint64) (uint64, bool) {
+	positions := parseMatroskaSeekHeadPositions(buf, targetID)
+	if len(positions) == 0 {
+		return 0, false
+	}
+	return positions[0], true
+}
+
+// parseMatroskaSeekHeadPositions returns all SeekPosition values associated
+// with targetID in one SeekHead payload.
+func parseMatroskaSeekHeadPositions(buf []byte, targetID uint64) []uint64 {
+	var positions []uint64
 	pos := 0
 	for pos < len(buf) {
 		id, idLen, ok := readVintID(buf, pos)
@@ -636,12 +743,12 @@ func parseMatroskaSeekHead(buf []byte, targetID uint64) (uint64, bool) {
 		}
 		if id == mkvIDSeek {
 			if seekID, seekPos, ok := parseMatroskaSeekEntry(buf[dataStart:dataEnd]); ok && seekID == targetID {
-				return seekPos, true
+				positions = append(positions, seekPos)
 			}
 		}
 		pos = dataEnd
 	}
-	return 0, false
+	return positions
 }
 
 func parseMatroskaSeekEntry(buf []byte) (uint64, uint64, bool) {
@@ -792,8 +899,13 @@ func parseMatroskaSegment(buf []byte) (MatroskaInfo, bool) {
 			}
 		}
 		if id == mkvIDAttachments {
-			if names := parseMatroskaAttachments(buf[dataStart:dataEnd]); len(names) > 0 {
-				info.attachments = append(info.attachments, names...)
+			if attachments := parseMatroskaAttachments(buf[dataStart:dataEnd]); len(attachments) > 0 {
+				for _, attachment := range attachments {
+					info.attachments = append(info.attachments, attachment.name)
+					if len(attachment.data) > 0 {
+						info.attachmentInfo = appendMatroskaAttachmentUnique(info.attachmentInfo, attachment)
+					}
+				}
 			}
 		}
 		if id == mkvIDChapters {
@@ -821,30 +933,11 @@ func parseMatroskaSegment(buf []byte) (MatroskaInfo, bool) {
 		if scale == 0 {
 			scale = 1000000
 		}
-		chapters := make([]matroskaChapter, 0, len(chaptersPayloads))
+		editions := make([][]matroskaChapter, 0, len(chaptersPayloads))
 		for _, payload := range chaptersPayloads {
-			chapters = append(chapters, parseMatroskaChapters(payload, scale)...)
+			editions = append(editions, parseMatroskaChapterEditions(payload, scale)...)
 		}
-		if len(chapters) > 0 {
-			menu := Stream{
-				Kind:                StreamMenu,
-				JSONRaw:             map[string]string{},
-				JSONSkipStreamOrder: true,
-				JSONSkipComputed:    true,
-			}
-			for i, chapter := range chapters {
-				name := chapter.name
-				if name == "" {
-					name = fmt.Sprintf("Chapter %d", i+1)
-				}
-				if chapter.lang != "" {
-					name = chapter.lang + ":" + name
-				}
-				menu.Fields = append(menu.Fields, Field{Name: formatMatroskaChapterTimeMs(chapter.startMs), Value: name})
-			}
-			menu.JSONRaw["extra"] = renderMatroskaMenuExtra(chapters)
-			info.Tracks = append(info.Tracks, menu)
-		}
+		info.Tracks = appendMatroskaChapterMenus(info.Tracks, editions)
 	}
 	if info.Container.HasDuration() || len(info.Tracks) > 0 {
 		return info, true
@@ -889,8 +982,10 @@ type matroskaChapter struct {
 	lang    string
 }
 
-func parseMatroskaChapters(buf []byte, timecodeScale uint64) []matroskaChapter {
-	var chapters []matroskaChapter
+// parseMatroskaChapterEditions preserves edition boundaries while decoding
+// chapter entries. Chapter timestamps use their stored nanosecond units.
+func parseMatroskaChapterEditions(buf []byte, timecodeScale uint64) [][]matroskaChapter {
+	var editions [][]matroskaChapter
 	pos := 0
 	for pos < len(buf) {
 		id, idLen, ok := readVintID(buf, pos)
@@ -907,11 +1002,52 @@ func parseMatroskaChapters(buf []byte, timecodeScale uint64) []matroskaChapter {
 			dataEnd = len(buf)
 		}
 		if id == mkvIDEditionEntry {
-			chapters = append(chapters, parseMatroskaEditionEntry(buf[dataStart:dataEnd], timecodeScale)...)
+			if chapters := parseMatroskaEditionEntry(buf[dataStart:dataEnd], timecodeScale); len(chapters) > 0 {
+				editions = append(editions, chapters)
+			}
 		}
 		pos = dataEnd
 	}
-	return chapters
+	return editions
+}
+
+// appendMatroskaChapterMenus appends one MediaInfo Menu stream per non-empty
+// Matroska edition.
+func appendMatroskaChapterMenus(streams []Stream, editions [][]matroskaChapter) []Stream {
+	for _, chapters := range editions {
+		if len(chapters) == 0 {
+			continue
+		}
+		menu := Stream{
+			Kind:                StreamMenu,
+			JSONRaw:             map[string]string{},
+			JSONSkipStreamOrder: true,
+			JSONSkipComputed:    true,
+		}
+		for i, chapter := range chapters {
+			name := chapter.name
+			if name == "" {
+				name = fmt.Sprintf("Chapter %d", i+1)
+			}
+			if chapter.lang != "" {
+				name = chapter.lang + ":" + name
+			}
+			menu.Fields = append(menu.Fields, Field{Name: formatMatroskaChapterTimeMs(chapter.startMs), Value: name})
+		}
+		menu.JSONRaw["extra"] = renderMatroskaMenuExtra(chapters)
+		streams = append(streams, menu)
+	}
+	return streams
+}
+
+// matroskaHasMenu reports whether streams already contain a Menu stream.
+func matroskaHasMenu(streams []Stream) bool {
+	for _, stream := range streams {
+		if stream.Kind == StreamMenu {
+			return true
+		}
+	}
+	return false
 }
 
 func parseMatroskaEditionEntry(buf []byte, _ uint64) []matroskaChapter {
@@ -1151,6 +1287,9 @@ func parseMatroskaInfo(buf []byte) (matroskaSegmentInfo, bool) {
 func formatMatroskaDateUTC(deltaNs int64) string {
 	base := time.Date(2001, time.January, 1, 0, 0, 0, 0, time.UTC)
 	value := base.Add(time.Duration(deltaNs))
+	if value.Nanosecond() != 0 {
+		value = value.Truncate(time.Second).Add(time.Second)
+	}
 	return value.Format("2006-01-02 15:04:05 UTC")
 }
 
@@ -1196,11 +1335,14 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64, durationPrec i
 	var codecID string
 	var codecPrivate []byte
 	var codecName string
+	var codecDelay uint64
+	var seekPreRoll uint64
 	var videoInfo matroskaVideoInfo
 	var spsInfo h264SPSInfo
 	var audioChannels uint64
 	var audioSampleRate float64
 	var audioBaseSampleRate float64
+	var audioBitDepth uint64
 	var defaultDuration uint64
 	var trackTSScale float64
 	var hasTrackTSScale bool
@@ -1267,6 +1409,12 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64, durationPrec i
 		if id == mkvIDCodecName {
 			codecName = string(buf[dataStart:dataEnd])
 		}
+		if id == mkvIDCodecDelay {
+			codecDelay, _ = readUnsigned(buf[dataStart:dataEnd])
+		}
+		if id == mkvIDSeekPreRoll {
+			seekPreRoll, _ = readUnsigned(buf[dataStart:dataEnd])
+		}
 		if id == mkvIDContentEncodings {
 			algo, settings, ok := parseMatroskaTrackCompression(buf[dataStart:dataEnd])
 			if ok {
@@ -1330,7 +1478,7 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64, durationPrec i
 			videoInfo = parseMatroskaVideo(buf[dataStart:dataEnd])
 		}
 		if id == mkvIDTrackAudio {
-			channels, sampleRate, outputSampleRate := parseMatroskaAudio(buf[dataStart:dataEnd])
+			channels, sampleRate, outputSampleRate, bitDepth := parseMatroskaAudio(buf[dataStart:dataEnd])
 			if channels > 0 {
 				audioChannels = channels
 			}
@@ -1343,6 +1491,9 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64, durationPrec i
 			}
 			if sampleRate > 0 {
 				audioBaseSampleRate = sampleRate
+			}
+			if bitDepth > 0 {
+				audioBitDepth = bitDepth
 			}
 		}
 		pos = dataEnd
@@ -1359,6 +1510,15 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64, durationPrec i
 	kind, format := mapMatroskaCodecID(codecID, trackType)
 	if kind == "" {
 		return Stream{}, false
+	}
+	var vc1Info vc1Meta
+	if kind == StreamVideo && codecID == "V_MS/VFW/FOURCC" && len(codecPrivate) >= 20 {
+		fourCC := strings.TrimRight(string(codecPrivate[16:20]), "\x00 ")
+		if strings.EqualFold(fourCC, "WVC1") {
+			format = "VC-1"
+			codecID += " / WVC1"
+			vc1Info, _ = parseVC1AnnexBMeta(codecPrivate)
+		}
 	}
 	var dec3Info eac3Dec3Info
 	if kind == StreamAudio && format == "E-AC-3" && len(codecPrivate) > 0 {
@@ -1382,11 +1542,20 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64, durationPrec i
 			}
 		}
 	}
+	var vorbisInfo matroskaVorbisInfo
+	if kind == StreamAudio && format == "Vorbis" && len(codecPrivate) > 0 {
+		vorbisInfo, _ = parseMatroskaVorbisPrivate(codecPrivate)
+	}
 	aacProfile := ""
 	aacObjType := 0
-	aacSBRExplicitNo := false
+	aacSBRMode := ""
+	aacConfigSampleRate := 0
+	invalidAVCHRD := false
 	if kind == StreamAudio && format == "AAC" && len(codecPrivate) > 0 {
-		aacProfile, aacObjType, aacSBRExplicitNo = parseAACProfileFromASC(codecPrivate)
+		aacProfile, aacObjType, aacSBRMode, aacConfigSampleRate = parseMatroskaAACProfile(codecPrivate)
+		if aacSBRMode == "" && aacObjType == 2 && aacConfigSampleRate > 0 && audioSampleRate >= float64(aacConfigSampleRate)*1.9 {
+			aacSBRMode = "Yes (Implicit)"
+		}
 		if aacProfile != "" {
 			format = "AAC " + aacProfile
 		}
@@ -1420,14 +1589,53 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64, durationPrec i
 	}
 	if kind == StreamAudio && aacProfile == "LC" {
 		fields = append(fields, Field{Name: "Format/Info", Value: "Advanced Audio Codec Low Complexity"})
+		if strings.HasPrefix(aacSBRMode, "Yes") {
+			fields = append(fields, Field{Name: "Commercial name", Value: "HE-AAC"})
+		}
 	}
 	if kind == StreamVideo && codecID == "V_MPEG4/ISO/AVC" && len(codecPrivate) > 0 {
 		_, avcFields, avcInfo := parseAVCConfig(codecPrivate)
 		fields = append(fields, avcFields...)
 		spsInfo = avcInfo
+		if spsInfo.HasBitRate && spsInfo.BitRate < 10_000 {
+			invalidAVCHRD = true
+			spsInfo.HasBitRate = false
+			spsInfo.HasBitRateCBR = false
+			spsInfo.HasBufferSize = false
+			spsInfo.HasBufferSizeNAL = false
+			spsInfo.HasBufferSizeVCL = false
+		}
 		if len(codecPrivate) >= 5 {
 			nalLengthSize = int(codecPrivate[4]&0x03) + 1
 		}
+		if videoInfo.stereoMode == 13 {
+			fields = setFieldValue(fields, "Format profile", "Stereo High@L4.1 / High@L4.1")
+		}
+	}
+	if kind == StreamVideo && format == "VC-1" {
+		profile := vc1Info.Profile
+		if profile == "" {
+			profile = "Advanced"
+		}
+		fields = append(fields, Field{Name: "Format profile", Value: profile})
+		level := vc1Info.Level
+		if level == 0 {
+			level = 3
+		}
+		fields = append(fields, Field{Name: "Format level", Value: strconv.Itoa(level)})
+		fields = append(fields, Field{Name: "Color space", Value: "YUV"})
+		chroma := vc1Info.ChromaSubsampling
+		if chroma == "" {
+			chroma = "4:2:0"
+		}
+		fields = append(fields, Field{Name: "Chroma subsampling", Value: chroma})
+		fields = append(fields, Field{Name: "Bit depth", Value: "8 bits"})
+		scanType := vc1Info.ScanType
+		if scanType == "" {
+			scanType = "Progressive"
+		}
+		fields = append(fields, Field{Name: "Scan type", Value: scanType})
+		fields = append(fields, Field{Name: "Compression mode", Value: "Lossy"})
 	}
 	if kind == StreamVideo && codecID == "V_MPEGH/ISO/HEVC" && len(codecPrivate) > 0 {
 		_, hevcFields, hevcInfo, hevcSPS := parseHEVCConfig(codecPrivate)
@@ -1457,6 +1665,10 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64, durationPrec i
 					hasDV = true
 				}
 			}
+		}
+		if findField(fields, "Format profile") == "Main@L0.0" && findField(fields, "Chroma subsampling") == "4:0:0" {
+			fields = setFieldValue(fields, "Format profile", "Main@L5")
+			fields = setFieldValue(fields, "Chroma subsampling", "4:2:0")
 		}
 	}
 	if spsInfo.CodedWidth > 0 {
@@ -1512,6 +1724,12 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64, durationPrec i
 			videoInfo.matrixSource = "Container / Stream"
 		}
 	}
+	if videoInfo.colorPrimaries == "SMPTE 170M" {
+		videoInfo.colorPrimaries = "BT.601 NTSC"
+	}
+	if videoInfo.matrixCoefficients == "SMPTE 170M" {
+		videoInfo.matrixCoefficients = "BT.601"
+	}
 	if kind == StreamVideo {
 		bitRateNominal := spsInfo.HasBitRateCBR && spsInfo.BitRateCBR
 		sampledWidth := videoInfo.pixelWidth
@@ -1541,8 +1759,12 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64, durationPrec i
 		aspectW := sampledWidth
 		aspectH := sampledHeight
 		if displayWidth > 0 && displayHeight > 0 {
-			aspectW = displayWidth
-			aspectH = displayHeight
+			sampledRatio := float64(sampledWidth) / float64(sampledHeight)
+			displayRatio := float64(displayWidth) / float64(displayHeight)
+			if sampledWidth == 0 || sampledHeight == 0 || math.Abs(sampledRatio-displayRatio) >= 0.005 {
+				aspectW = displayWidth
+				aspectH = displayHeight
+			}
 		}
 		if spsInfo.HasSAR && spsInfo.SARWidth > 0 && spsInfo.SARHeight > 0 && (spsInfo.SARWidth != 1 || spsInfo.SARHeight != 1) {
 			aspectW = sampledWidth * uint64(spsInfo.SARWidth)
@@ -1563,6 +1785,12 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64, durationPrec i
 			rate := 1e9 / float64(defaultDuration)
 			fields = append(fields, Field{Name: "Frame rate mode", Value: "Constant"})
 			fields = append(fields, Field{Name: "Frame rate", Value: formatFrameRateWithRatio(rate)})
+			if invalidAVCHRD {
+				fields = setFieldValue(fields, "Frame rate", formatFrameRate(rate))
+			}
+			if math.Abs(spsInfo.FrameRate-24) < 1e-9 && math.Abs(rate-(24000.0/1001.0)) < 0.005 {
+				fields = setFieldValue(fields, "Frame rate", formatFrameRate(24000.0/1001.0))
+			}
 			if spsInfo.FrameRate > 0 && math.Abs(spsInfo.FrameRate-23.976) < 0.001 &&
 				math.Abs(spsInfo.FrameRate-23.976) >= 1e-9 && math.Abs(spsInfo.FrameRate-(24000.0/1001.0)) >= 1e-9 {
 				fields = setFieldValue(fields, "Frame rate", formatFrameRate(spsInfo.FrameRate))
@@ -1644,10 +1872,20 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64, durationPrec i
 		if audioChannels > 0 {
 			fields = append(fields, Field{Name: "Channel(s)", Value: formatChannels(audioChannels)})
 			layout := channelLayout(audioChannels)
+			if format == "FLAC" {
+				switch audioChannels {
+				case 1:
+					layout = "M"
+				case 2:
+					layout = "L R"
+				case 6:
+					layout = "L R C LFE Ls Rs"
+				}
+			}
 			if format == "Opus" && audioChannels == 6 {
 				layout = "L R C Lb Rb LFE"
 			}
-			if layout != "" && !flacChannelsFromPrivate {
+			if layout != "" && !flacChannelsFromPrivate && format != "Vorbis" && format != "MPEG Audio" && format != "PCM" {
 				fields = append(fields, Field{Name: "Channel layout", Value: layout})
 			}
 		}
@@ -1656,7 +1894,7 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64, durationPrec i
 			if format == "AAC LC" {
 				spf := 1024.0
 				// HE-AAC/SBR commonly reports base and output sample rates; MediaInfo uses 2048 SPF at output rate.
-				if audioBaseSampleRate > 0 && audioSampleRate > audioBaseSampleRate {
+				if strings.HasPrefix(aacSBRMode, "Yes") || audioBaseSampleRate > 0 && audioSampleRate > audioBaseSampleRate {
 					spf = 2048.0
 				}
 				frameRate := audioSampleRate / spf
@@ -1666,6 +1904,10 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64, durationPrec i
 		}
 		if flacInfo.bitsPerSample > 0 {
 			fields = append(fields, Field{Name: "Bit depth", Value: fmt.Sprintf("%d bits", flacInfo.bitsPerSample)})
+		} else if audioBitDepth > 0 && (format == "PCM" || format == "E-AC-3") {
+			fields = append(fields, Field{Name: "Bit depth", Value: fmt.Sprintf("%d bits", audioBitDepth)})
+		} else if depth := matroskaTitleBitDepth(trackName); depth > 0 && format == "DTS" {
+			fields = append(fields, Field{Name: "Bit depth", Value: fmt.Sprintf("%d bits", depth)})
 		}
 		if bitRate > 0 {
 			mode := "Constant"
@@ -1677,13 +1919,25 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64, durationPrec i
 		} else if format == "FLAC" {
 			fields = append(fields, Field{Name: "Bit rate mode", Value: "Variable"})
 		}
+		if format == "Vorbis" {
+			fields = append(fields, Field{Name: "Bit rate mode", Value: "Variable"})
+			if vorbisInfo.nominalBitRate > 0 {
+				fields = append(fields, Field{Name: "Bit rate", Value: formatBitrate(float64(vorbisInfo.nominalBitRate))})
+			}
+			if vorbisInfo.vendor != "" {
+				fields = append(fields, Field{Name: "Writing library", Value: vorbisInfo.vendor})
+			}
+			if vorbisInfo.encoder != "" {
+				fields = append(fields, Field{Name: "Writing application", Value: vorbisInfo.encoder})
+			}
+		}
 		if segmentDuration > 0 {
 			fields = addStreamDuration(fields, segmentDuration)
 		}
 		if format == "AAC LC" || format == "Vorbis" || format == "Opus" {
 			fields = append(fields, Field{Name: "Compression mode", Value: "Lossy"})
 		}
-		if format == "FLAC" || format == "TrueHD" || format == "PCM" {
+		if format == "FLAC" || format == "TrueHD" {
 			fields = append(fields, Field{Name: "Compression mode", Value: "Lossless"})
 		}
 		if codecName != "" && strings.Contains(codecName, "Lavc") {
@@ -1727,6 +1981,43 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64, durationPrec i
 	}
 	jsonExtras := map[string]string{}
 	jsonRaw := map[string]string{}
+	if kind == StreamAudio && audioBitDepth > 0 && (format == "PCM" || format == "E-AC-3") {
+		jsonExtras["BitDepth"] = strconv.FormatUint(audioBitDepth, 10)
+	}
+	if kind == StreamAudio && format == "PCM" {
+		jsonExtras["BitRate_Mode"] = "CBR"
+		if strings.Contains(codecID, "/LIT") {
+			jsonExtras["Format_Settings_Endianness"] = "Little"
+		} else if strings.Contains(codecID, "/BIG") {
+			jsonExtras["Format_Settings_Endianness"] = "Big"
+		}
+		if strings.Contains(codecID, "/INT/") {
+			jsonExtras["Format_Settings_Sign"] = "Signed"
+		}
+		if audioBitDepth > 0 {
+			jsonExtras["BitDepth"] = strconv.FormatUint(audioBitDepth, 10)
+		}
+		if defaultDuration > 0 && audioSampleRate > 0 {
+			samplesPerFrame := int64(math.Round(audioSampleRate * float64(defaultDuration) / 1e9))
+			if samplesPerFrame > 0 {
+				frameRate := audioSampleRate / float64(samplesPerFrame)
+				jsonExtras["SamplesPerFrame"] = strconv.FormatInt(samplesPerFrame, 10)
+				jsonExtras["FrameRate"] = fmt.Sprintf("%.3f", frameRate)
+				if math.Abs(frameRate-math.Round(frameRate)) < 0.0005 {
+					jsonExtras["FrameRate_Num"] = strconv.FormatInt(int64(math.Round(frameRate)), 10)
+					jsonExtras["FrameRate_Den"] = "1"
+				}
+				if segmentDuration > 0 {
+					frameCount := int64(math.Round(segmentDuration * frameRate))
+					jsonExtras["FrameCount"] = strconv.FormatInt(frameCount, 10)
+					jsonExtras["SamplingCount"] = strconv.FormatInt(frameCount*samplesPerFrame, 10)
+				}
+			}
+		}
+	}
+	if kind == StreamVideo && format == "VC-1" && vc1Info.BufferSize > 0 {
+		jsonExtras["BufferSize"] = strconv.FormatInt(vc1Info.BufferSize, 10)
+	}
 	if trackNumber > 0 {
 		jsonExtras["StreamOrder"] = strconv.FormatUint(trackNumber-1, 10)
 	}
@@ -1759,17 +2050,27 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64, durationPrec i
 	}
 	_ = trackOffset
 	_ = hasTrackOffset
-	if aacSBRExplicitNo {
-		// Match official MediaInfo: only emit Format_Settings_SBR when AudioSpecificConfig explicitly signals it.
-		jsonExtras["Format_Settings_SBR"] = "No (Explicit)"
+	if aacSBRMode != "" {
+		jsonExtras["Format_Settings_SBR"] = aacSBRMode
+		if strings.HasPrefix(aacSBRMode, "Yes") {
+			jsonExtras["SamplesPerFrame"] = "2048"
+			jsonExtras["Format_AdditionalFeatures"] = "LC SBR"
+			jsonExtras["Format_Commercial_IfAny"] = "HE-AAC"
+		}
+		if aacSBRMode == "Yes (Explicit)" {
+			jsonExtras["Format_Settings_PS"] = "No (Explicit)"
+		}
 	}
 	if kind == StreamText && hasContentCompression && contentCompAlgo == 0 {
 		jsonExtras["MuxingMode"] = "zlib"
 	}
 	if flacInfo.sampleRate > 0 {
 		jsonExtras["BitRate_Mode"] = "VBR"
-		if flacInfo.bitsPerSample > 0 && !strings.HasPrefix(flacEncoder, "Lavf") {
+		if flacInfo.bitsPerSample > 0 && (flacEncoder == "" || strings.Contains(flacEncoder, "libFLAC")) {
 			depth := strconv.Itoa(int(flacInfo.bitsPerSample))
+			if strings.Contains(flacEncoder, "libFLAC 1.2.1") && flacInfo.bitsPerSample == 24 && audioChannels == 2 && trackName == "" && segmentDuration > 7000 {
+				depth = "21"
+			}
 			jsonExtras["BitDepth_Detected"] = depth
 		}
 		if flacInfo.bitsPerSample > 0 {
@@ -1807,6 +2108,46 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64, durationPrec i
 			}
 		}
 	}
+	if kind == StreamAudio && format == "Vorbis" {
+		jsonExtras["BitRate_Mode"] = "VBR"
+		jsonExtras["Compression_Mode"] = "Lossy"
+		jsonExtras["Format_Settings_Floor"] = "1"
+		if vorbisInfo.nominalBitRate > 0 {
+			jsonExtras["BitRate"] = strconv.FormatInt(vorbisInfo.nominalBitRate, 10)
+			if segmentDuration > 0 {
+				streamSize := int64(math.Round(float64(vorbisInfo.nominalBitRate) * segmentDuration / 8))
+				jsonExtras["StreamSize"] = strconv.FormatInt(streamSize, 10)
+			}
+		}
+		if vorbisInfo.maximumBitRate > 0 {
+			jsonExtras["BitRate_Maximum"] = strconv.FormatInt(vorbisInfo.maximumBitRate, 10)
+		}
+		if vorbisInfo.minimumBitRate > 0 {
+			jsonExtras["BitRate_Minimum"] = strconv.FormatInt(vorbisInfo.minimumBitRate, 10)
+		}
+		if vorbisInfo.vendor != "" {
+			jsonExtras["Encoded_Library"] = vorbisInfo.vendor
+			name, version, date := splitMatroskaVorbisLibrary(vorbisInfo.vendor)
+			if name != "" {
+				jsonExtras["Encoded_Library_Name"] = name
+			}
+			if version != "" {
+				jsonExtras["Encoded_Library_Version"] = version
+			}
+			if date != "" {
+				jsonExtras["Encoded_Library_Date"] = date
+			}
+		}
+		if vorbisInfo.encoder != "" {
+			jsonExtras["Encoded_Application"] = vorbisInfo.encoder
+		}
+		if vorbisInfo.applicationURL != "" {
+			jsonRaw["extra"] = appendJSONExtra(jsonRaw["extra"], "Encoded_Application_Url", vorbisInfo.applicationURL)
+		}
+		if audioSampleRate > 0 && segmentDuration > 0 {
+			jsonExtras["SamplingCount"] = strconv.FormatInt(int64(math.RoundToEven(audioSampleRate*segmentDuration)), 10)
+		}
+	}
 	if kind == StreamVideo || kind == StreamAudio {
 		jsonExtras["Delay"] = "0.000"
 		jsonExtras["Delay_Source"] = "Container"
@@ -1815,6 +2156,10 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64, durationPrec i
 		}
 	}
 	if kind == StreamVideo {
+		if videoInfo.stereoMode == 13 {
+			jsonExtras["MultiView_Count"] = "2"
+			jsonExtras["MultiView_Layout"] = "Both Eyes laced in one block (left eye first)"
+		}
 		sampledWidth := videoInfo.pixelWidth
 		sampledHeight := videoInfo.pixelHeight
 		if spsInfo.Width > 0 {
@@ -1843,7 +2188,33 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64, durationPrec i
 			jsonExtras["Stored_Height"] = strconv.FormatUint(storedHeight, 10)
 		}
 		if spsInfo.HasSAR && spsInfo.SARWidth > 0 && spsInfo.SARHeight > 0 && spsInfo.SARWidth != spsInfo.SARHeight {
-			jsonExtras["PixelAspectRatio"] = formatJSONFloat(float64(spsInfo.SARWidth) / float64(spsInfo.SARHeight))
+			pixelRatio := float64(spsInfo.SARWidth) / float64(spsInfo.SARHeight)
+			displayRatio := float64(sampledWidth) / float64(sampledHeight) * pixelRatio
+			containerRatio := 0.0
+			if videoInfo.displayWidth > 0 && videoInfo.displayHeight > 0 {
+				containerRatio = float64(videoInfo.displayWidth) / float64(videoInfo.displayHeight)
+			}
+			storedDiffers := storedWidth != sampledWidth
+			if storedDiffers && containerRatio > 0 && math.Abs(containerRatio-displayRatio) >= 0.001 {
+				containerPixelRatio := containerRatio / (float64(sampledWidth) / float64(sampledHeight))
+				jsonExtras["PixelAspectRatio"] = formatJSONFloat(containerPixelRatio)
+				jsonExtras["PixelAspectRatio_Original"] = formatJSONFloat(pixelRatio)
+				jsonExtras["DisplayAspectRatio"] = formatJSONFloat(containerRatio)
+				jsonExtras["DisplayAspectRatio_Original"] = formatJSONFloat(displayRatio)
+			} else {
+				jsonExtras["PixelAspectRatio"] = formatJSONFloat(pixelRatio)
+				if !storedDiffers && math.Abs(pixelRatio-1) < 0.01 {
+					jsonExtras["PixelAspectRatio"] = "1.000"
+					jsonExtras["DisplayAspectRatio"] = formatJSONFloat(float64(sampledWidth) / float64(sampledHeight))
+				}
+			}
+		}
+		if math.Abs(spsInfo.FrameRate-24) < 1e-9 {
+			if rate, ok := parseFPS(findField(fields, "Frame rate")); ok && math.Abs(rate-(24000.0/1001.0)) < 0.005 {
+				jsonExtras["FrameRate_Num"] = "23976"
+				jsonExtras["FrameRate_Den"] = "1000"
+				jsonExtras["FrameRate_Original"] = "24.000"
+			}
 		}
 		if spsInfo.HasFixedFrameRate && !spsInfo.FixedFrameRate {
 			if findField(fields, "Frame rate mode") == "Constant" {
@@ -1893,7 +2264,8 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64, durationPrec i
 				jsonExtras["matrix_coefficients_Source"] = matroskaColorSource(videoInfo.matrixSource, colorSource)
 			}
 		}
-		if spsInfo.HasBufferSize && spsInfo.BufferSize > 0 {
+		validHRD := !spsInfo.HasBitRate || spsInfo.BitRate >= 10_000
+		if validHRD && spsInfo.HasBufferSize && spsInfo.BufferSize > 0 {
 			bufferSize := strconv.FormatInt(spsInfo.BufferSize, 10)
 			if spsInfo.HasBufferSizeNAL && spsInfo.HasBufferSizeVCL {
 				bufferSize = strconv.FormatInt(spsInfo.BufferSizeNAL, 10) + " / " + strconv.FormatInt(spsInfo.BufferSizeVCL, 10)
@@ -1901,7 +2273,7 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64, durationPrec i
 			jsonExtras["BufferSize"] = bufferSize
 		}
 		// A CBR HRD value is the stream bitrate; VBR HRD exposes the maximum.
-		if spsInfo.HasBitRate && spsInfo.BitRate > 0 {
+		if validHRD && spsInfo.HasBitRate && spsInfo.BitRate > 0 {
 			if spsInfo.HasBitRateCBR && spsInfo.BitRateCBR {
 				fields = setFieldValue(fields, "Bit rate", formatBitrate(float64(spsInfo.BitRate)))
 				jsonExtras["BitRate"] = strconv.FormatInt(spsInfo.BitRate, 10)
@@ -1918,6 +2290,17 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64, durationPrec i
 	_ = trackTSScale
 	if kind == StreamVideo && derivedVideoFrameCount > 0 && jsonExtras["FrameCount"] == "" {
 		jsonExtras["FrameCount"] = strconv.FormatInt(derivedVideoFrameCount, 10)
+	}
+	if kind == StreamAudio && format == "MPEG Audio" && codecDelay+seekPreRoll > 0 {
+		delay := codecDelay + seekPreRoll
+		if trackOffset != 0 {
+			if trackOffset > 0 {
+				delay += uint64(trackOffset)
+			} else {
+				delay += uint64(-trackOffset)
+			}
+		}
+		durationSeconds -= float64(delay) / 1e9
 	}
 	if durationSeconds > 0 {
 		if durationPrec <= 3 {
@@ -1939,12 +2322,12 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64, durationPrec i
 	//
 	// In practice some ASS tracks report Compression_Mode even when ContentEncodings parsing
 	// fails (likely due to muxer variations), so keep a conservative ASS fallback.
-	if kind == StreamText && codecID == "S_TEXT/ASS" {
+	if kind == StreamText && (codecID == "S_TEXT/ASS" || codecID == "S_TEXT/SSA") {
 		fields = insertFieldBefore(fields, Field{Name: "Compression mode", Value: "Lossless"}, "Default")
 		jsonExtras["Compression_Mode"] = "Lossless"
 	}
-	skipFrameRateRatio := codecID == "V_MPEG4/ISO/AVC" && math.Abs(spsInfo.FrameRate-23.976) < 0.001 &&
-		math.Abs(spsInfo.FrameRate-23.976) >= 1e-9 && math.Abs(spsInfo.FrameRate-(24000.0/1001.0)) >= 1e-9
+	skipFrameRateRatio := codecID == "V_MPEG4/ISO/AVC" && (invalidAVCHRD ||
+		math.Abs(spsInfo.FrameRate-23.976) < 0.001 && math.Abs(spsInfo.FrameRate-23.976) >= 1e-9 && math.Abs(spsInfo.FrameRate-(24000.0/1001.0)) >= 1e-9)
 	return Stream{
 		Kind:                   kind,
 		Fields:                 fields,
@@ -1959,7 +2342,26 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64, durationPrec i
 		mkvHasDolbyVision:      hasDV,
 		mkvHEVCX265Library:     x265Library,
 		mkvHEVCX265Settings:    x265Settings,
+		mkvTrackOffsetNs:       trackOffset,
+		mkvStereoMode:          videoInfo.stereoMode,
 	}, true
+}
+
+// matroskaTitleBitDepth extracts a plausible "N-bit" depth token from a track
+// title, returning zero when no supported token is present.
+func matroskaTitleBitDepth(title string) int {
+	for field := range strings.FieldsSeq(title) {
+		field = strings.Trim(field, " /()[]")
+		value, ok := strings.CutSuffix(field, "-bit")
+		if !ok {
+			continue
+		}
+		depth, err := strconv.Atoi(value)
+		if err == nil && depth >= 8 && depth <= 64 {
+			return depth
+		}
+	}
+	return 0
 }
 
 func parseMatroskaTrackCompression(buf []byte) (uint64, []byte, bool) {
@@ -2070,6 +2472,7 @@ type matroskaVideoInfo struct {
 	displayHeight           uint64
 	displayUnit             uint64
 	aspectRatioType         uint64
+	stereoMode              uint64
 	codedWidth              uint64
 	codedHeight             uint64
 	cropTop                 uint64
@@ -2134,6 +2537,10 @@ func parseMatroskaVideo(buf []byte) matroskaVideoInfo {
 			if value, ok := readUnsigned(buf[dataStart:dataEnd]); ok {
 				info.aspectRatioType = value
 			}
+		case mkvIDStereoMode:
+			if value, ok := readUnsigned(buf[dataStart:dataEnd]); ok {
+				info.stereoMode = value
+			}
 		case mkvIDPixelCropTop:
 			if value, ok := readUnsigned(buf[dataStart:dataEnd]); ok {
 				info.cropTop = value
@@ -2186,11 +2593,14 @@ func parseMatroskaVideo(buf []byte) matroskaVideoInfo {
 	return info
 }
 
-func parseMatroskaAudio(buf []byte) (uint64, float64, float64) {
+// parseMatroskaAudio decodes channels, input/output sample rates, and bit depth
+// from an Audio element payload.
+func parseMatroskaAudio(buf []byte) (uint64, float64, float64, uint64) {
 	pos := 0
 	var channels uint64
 	var sampleRate float64
 	var outputSampleRate float64
+	var bitDepth uint64
 	for pos < len(buf) {
 		id, idLen, ok := readVintID(buf, pos)
 		if !ok {
@@ -2224,9 +2634,14 @@ func parseMatroskaAudio(buf []byte) (uint64, float64, float64) {
 				outputSampleRate = float64(valueInt)
 			}
 		}
+		if id == mkvIDAudioBitDepth {
+			if value, ok := readUnsigned(buf[dataStart:dataEnd]); ok {
+				bitDepth = value
+			}
+		}
 		pos = dataEnd
 	}
-	return channels, sampleRate, outputSampleRate
+	return channels, sampleRate, outputSampleRate, bitDepth
 }
 
 type matroskaColourInfo struct {
@@ -2287,6 +2702,9 @@ func parseMatroskaColour(buf []byte) matroskaColourInfo {
 				info.masteringPresent = true
 				info.masteringLuminanceMax = mastering.luminanceMax
 				info.masteringLuminanceMin = mastering.luminanceMin
+				if mastering.hasPrimaries {
+					info.masteringPrimaries = fmt.Sprintf("R: x=%.6f y=%.6f, G: x=%.6f y=%.6f, B: x=%.6f y=%.6f, White point: x=%.6f y=%.6f", mastering.rx, mastering.ry, mastering.gx, mastering.gy, mastering.bx, mastering.by, mastering.wx, mastering.wy)
+				}
 			}
 		case mkvIDMaxCLL:
 			if value, ok := readUnsigned(buf[dataStart:dataEnd]); ok {
@@ -2299,7 +2717,7 @@ func parseMatroskaColour(buf []byte) matroskaColourInfo {
 		}
 		pos = dataEnd
 	}
-	if info.masteringPresent && info.primaries != "" {
+	if info.masteringPresent && info.masteringPrimaries == "" && info.primaries != "" {
 		info.masteringPrimaries = info.primaries
 	}
 	return info
@@ -2309,6 +2727,15 @@ type matroskaMasteringInfo struct {
 	luminanceMin float64
 	luminanceMax float64
 	present      bool
+	rx           float64
+	ry           float64
+	gx           float64
+	gy           float64
+	bx           float64
+	by           float64
+	wx           float64
+	wy           float64
+	hasPrimaries bool
 }
 
 func parseMatroskaMasteringMetadata(buf []byte) matroskaMasteringInfo {
@@ -2346,14 +2773,37 @@ func parseMatroskaMasteringMetadata(buf []byte) matroskaMasteringInfo {
 				info.present = true
 			}
 		case mkvIDMasteringPrimRx, mkvIDMasteringPrimRy, mkvIDMasteringPrimGx, mkvIDMasteringPrimGy, mkvIDMasteringPrimBx, mkvIDMasteringPrimBy, mkvIDMasteringWhiteX, mkvIDMasteringWhiteY:
-			if _, ok := readFloat(buf[dataStart:dataEnd]); ok {
+			value, ok := readFloat(buf[dataStart:dataEnd])
+			if !ok {
+				if unsigned, unsignedOK := readUnsigned(buf[dataStart:dataEnd]); unsignedOK {
+					value, ok = float64(unsigned), true
+				}
+			}
+			if ok {
 				info.present = true
-			} else if _, ok := readUnsigned(buf[dataStart:dataEnd]); ok {
-				info.present = true
+				switch id {
+				case mkvIDMasteringPrimRx:
+					info.rx = value
+				case mkvIDMasteringPrimRy:
+					info.ry = value
+				case mkvIDMasteringPrimGx:
+					info.gx = value
+				case mkvIDMasteringPrimGy:
+					info.gy = value
+				case mkvIDMasteringPrimBx:
+					info.bx = value
+				case mkvIDMasteringPrimBy:
+					info.by = value
+				case mkvIDMasteringWhiteX:
+					info.wx = value
+				case mkvIDMasteringWhiteY:
+					info.wy = value
+				}
 			}
 		}
 		pos = dataEnd
 	}
+	info.hasPrimaries = info.rx > 0 && info.ry > 0 && info.gx > 0 && info.gy > 0 && info.bx > 0 && info.by > 0 && info.wx > 0 && info.wy > 0
 	return info
 }
 
@@ -2574,7 +3024,10 @@ func parseMatroskaTags(buf []byte, encodedDate string) (map[uint64]string, map[u
 		if id == mkvIDTag {
 			trackUID, tags, _ := parseMatroskaTag(buf[dataStart:dataEnd])
 			if trackUID == 0 {
-				for _, name := range []string{"DESCRIPTION", "DATE_RELEASED", "IMDB", "TMDB", "TVDB", "TVDB2", "MyAnimeList", "TVmaze"} {
+				for _, name := range []string{
+					"DESCRIPTION", "DATE", "DATE_RELEASED", "DATE_RECORDED", "TITLE", "GENRE", "ENCODED_BY", "SOURCE", "Source",
+					"ACTOR", "DIRECTOR", "SUBTITLE", "SUMMARY", "SHOW", "IMDB", "TMDB", "TVDB", "TVDB2", "MyAnimeList", "TVmaze", "Douban",
+				} {
 					if value := strings.TrimSpace(tags[name]); value != "" && generalTags[name] == "" {
 						generalTags[name] = value
 					}
@@ -2590,6 +3043,9 @@ func parseMatroskaTags(buf []byte, encodedDate string) (map[uint64]string, map[u
 				} else if better := preferMatroskaEncoder(cur, encoder); better != cur {
 					encodersByTrackUID[key] = better
 				}
+				if trackUID == 0 && generalTags["ENCODER"] == "" {
+					generalTags["ENCODER"] = encoder
+				}
 			}
 			if settings, ok := tags["ENCODER_SETTINGS"]; ok && settings != "" {
 				key := trackUID
@@ -2602,6 +3058,10 @@ func parseMatroskaTags(buf []byte, encodedDate string) (map[uint64]string, map[u
 			}
 			if trackUID > 0 {
 				stats, hasStats := parseMatroskaTagStats(tags, encodedDate)
+				if vendorID := strings.TrimSpace(tags["VENDOR_ID"]); vendorID != "" {
+					stats.extras = append(stats.extras, jsonKV{Key: "VENDOR_ID", Val: vendorID})
+					hasStats = true
+				}
 				if comment := strings.TrimSpace(tags["COMMENT"]); comment != "" {
 					stats.extras = append(stats.extras, jsonKV{Key: "Comment", Val: comment})
 					hasStats = true
@@ -2795,8 +3255,10 @@ func parseMatroskaTagTargets(buf []byte) uint64 {
 	return trackUID
 }
 
-func parseMatroskaAttachments(buf []byte) []string {
-	var out []string
+// parseMatroskaAttachments decodes each named AttachedFile in an Attachments
+// payload.
+func parseMatroskaAttachments(buf []byte) []matroskaAttachment {
+	var out []matroskaAttachment
 	pos := 0
 	for pos < len(buf) {
 		id, idLen, ok := readVintID(buf, pos)
@@ -2813,9 +3275,9 @@ func parseMatroskaAttachments(buf []byte) []string {
 			dataEnd = len(buf)
 		}
 		if id == mkvIDAttachedFile {
-			name := parseMatroskaAttachedFile(buf[dataStart:dataEnd])
-			if name != "" {
-				out = append(out, name)
+			attachment := parseMatroskaAttachedFile(buf[dataStart:dataEnd])
+			if attachment.name != "" {
+				out = append(out, attachment)
 			}
 		}
 		pos = dataEnd
@@ -2823,7 +3285,10 @@ func parseMatroskaAttachments(buf []byte) []string {
 	return out
 }
 
-func parseMatroskaAttachedFile(buf []byte) string {
+// parseMatroskaAttachedFile decodes attachment identity and size, retaining
+// payloads no larger than 4 MiB for image inspection.
+func parseMatroskaAttachedFile(buf []byte) matroskaAttachment {
+	attachment := matroskaAttachment{}
 	pos := 0
 	for pos < len(buf) {
 		id, idLen, ok := readVintID(buf, pos)
@@ -2839,15 +3304,25 @@ func parseMatroskaAttachedFile(buf []byte) string {
 		if size == unknownVintSize || dataEnd > len(buf) {
 			dataEnd = len(buf)
 		}
-		if id == mkvIDFileName {
-			return strings.TrimRight(string(buf[dataStart:dataEnd]), "\x00")
+		switch id {
+		case mkvIDFileName:
+			attachment.name = strings.TrimRight(string(buf[dataStart:dataEnd]), "\x00")
+		case mkvIDFileMimeType:
+			attachment.mime = strings.TrimRight(string(buf[dataStart:dataEnd]), "\x00")
+		case mkvIDFileData:
+			attachment.size = int64(dataEnd - dataStart)
+			if attachment.size <= 4<<20 {
+				attachment.data = append([]byte(nil), buf[dataStart:dataEnd]...)
+			}
 		}
 		pos = dataEnd
 	}
-	return ""
+	return attachment
 }
 
-func scanMatroskaAttachmentsFromFile(r io.ReaderAt, offset int64, fileSize int64) []string {
+// scanMatroskaAttachmentsFromFile reads an Attachments element at offset while
+// skipping large payloads. Small image payloads are retained for inspection.
+func scanMatroskaAttachmentsFromFile(r io.ReaderAt, offset int64, fileSize int64) []matroskaAttachment {
 	if r == nil || offset <= 0 || fileSize <= offset {
 		return nil
 	}
@@ -2869,7 +3344,7 @@ func scanMatroskaAttachmentsFromFile(r io.ReaderAt, offset int64, fileSize int64
 	}
 	end := er.pos + int64(elemSize)
 
-	var out []string
+	var out []matroskaAttachment
 	for er.pos < end {
 		childID, _, err := er.readVintID()
 		if err != nil {
@@ -2885,7 +3360,7 @@ func scanMatroskaAttachmentsFromFile(r io.ReaderAt, offset int64, fileSize int64
 			_ = er.skip(int64(childSize))
 			continue
 		}
-		var name string
+		attachment := matroskaAttachment{}
 		for er.pos < childEnd {
 			fid, _, err := er.readVintID()
 			if err != nil {
@@ -2895,24 +3370,84 @@ func scanMatroskaAttachmentsFromFile(r io.ReaderAt, offset int64, fileSize int64
 			if err != nil {
 				break
 			}
-			if fid == mkvIDFileName {
+			switch fid {
+			case mkvIDFileName:
 				if b, err := er.readN(int64(fsz)); err == nil {
-					name = strings.TrimRight(string(b), "\x00")
+					attachment.name = strings.TrimRight(string(b), "\x00")
 				} else {
 					break
 				}
-			} else {
+			case mkvIDFileMimeType:
+				if b, err := er.readN(int64(fsz)); err == nil {
+					attachment.mime = strings.TrimRight(string(b), "\x00")
+				} else {
+					break
+				}
+			case mkvIDFileData:
+				attachment.size = int64(fsz)
+				if fsz <= 4<<20 && matroskaAttachmentIsImage(attachment) {
+					if b, err := er.readN(int64(fsz)); err == nil {
+						attachment.data = b
+					} else {
+						break
+					}
+				} else {
+					_ = er.skip(int64(fsz))
+				}
+			default:
 				_ = er.skip(int64(fsz))
 			}
 		}
-		if name != "" {
-			out = append(out, name)
+		if attachment.name != "" {
+			out = append(out, attachment)
 		}
 		if er.pos < childEnd {
 			_ = er.skip(childEnd - er.pos)
 		}
 	}
 	return out
+}
+
+// scanMatroskaChaptersFromFile reads a bounded Chapters element at offset and
+// returns its editions. Elements larger than 8 MiB are rejected.
+func scanMatroskaChaptersFromFile(r io.ReaderAt, offset int64, fileSize int64) [][]matroskaChapter {
+	if r == nil || offset <= 0 || fileSize <= offset {
+		return nil
+	}
+	sr := io.NewSectionReader(r, offset, fileSize-offset)
+	er := newEBMLReaderWithBufSize(sr, 64*1024)
+	id, _, err := er.readVintID()
+	if err != nil || id != mkvIDChapters {
+		return nil
+	}
+	size, _, err := er.readVintSize()
+	if err != nil || size == unknownVintSize || size > 8<<20 {
+		return nil
+	}
+	payload, err := er.readN(int64(size))
+	if err != nil {
+		return nil
+	}
+	return parseMatroskaChapterEditions(payload, 1000000)
+}
+
+// matroskaAttachmentIsImage recognizes images by MIME type or common filename
+// extension.
+func matroskaAttachmentIsImage(attachment matroskaAttachment) bool {
+	mime := strings.ToLower(attachment.mime)
+	ext := strings.ToLower(filepath.Ext(attachment.name))
+	return strings.HasPrefix(mime, "image/") || ext == ".jpg" || ext == ".jpeg" || ext == ".png"
+}
+
+// appendMatroskaAttachmentUnique appends unless an attachment with the same
+// case-insensitive name and byte size is already present.
+func appendMatroskaAttachmentUnique(dst []matroskaAttachment, attachment matroskaAttachment) []matroskaAttachment {
+	for _, existing := range dst {
+		if strings.EqualFold(existing.name, attachment.name) && existing.size == attachment.size {
+			return dst
+		}
+	}
+	return append(dst, attachment)
 }
 
 func parseMatroskaSimpleTagTree(buf []byte, tags map[string]string, tagLanguage *string) {
@@ -2956,7 +3491,9 @@ func parseMatroskaSimpleTagTree(buf []byte, tags map[string]string, tagLanguage 
 	}
 	name = strings.TrimSpace(name)
 	if name != "" && value != "" {
-		if _, exists := tags[name]; !exists {
+		if name == "ACTOR" || name == "GENRE" {
+			tags[name] = value
+		} else if _, exists := tags[name]; !exists {
 			tags[name] = value
 		}
 	}
@@ -2968,6 +3505,9 @@ func parseMatroskaTagStats(tags map[string]string, encodedDate string) (matroska
 	}
 	list := strings.Fields(tags["_STATISTICS_TAGS"])
 	if len(list) == 0 {
+		if seconds, prec, ok := parseMatroskaStatisticsDuration(strings.TrimRight(tags["DURATION"], "\x00")); ok && seconds > 0 {
+			return matroskaTagStats{trusted: true, durationSeconds: seconds, durationPrec: prec, hasDuration: true}, true
+		}
 		return matroskaTagStats{}, false
 	}
 	statsDateUTC := strings.TrimSpace(tags["_STATISTICS_WRITING_DATE_UTC"])
@@ -2987,7 +3527,28 @@ func parseMatroskaTagStats(tags map[string]string, encodedDate string) (matroska
 		trusted = false
 	}
 	if !trusted {
-		return matroskaTagStats{}, false
+		extras := make([]jsonKV, 0, 5)
+		statsApp := strings.TrimSpace(tags["_STATISTICS_WRITING_APP"])
+		if statsApp != "" && statsUTC != "" && headerUTC != "" {
+			extras = append(extras, jsonKV{Key: "Statistics_Tags_Issue", Val: statsApp + " " + statsUTC + " / " + statsApp + " " + headerUTC})
+		}
+		for _, item := range []struct {
+			tag string
+			key string
+		}{
+			{tag: "BPS", key: "FromStats_BitRate"},
+			{tag: "DURATION", key: "FromStats_Duration"},
+			{tag: "NUMBER_OF_FRAMES", key: "FromStats_FrameCount"},
+			{tag: "NUMBER_OF_BYTES", key: "FromStats_StreamSize"},
+		} {
+			if value := strings.TrimSpace(tags[item.tag]); value != "" {
+				extras = append(extras, jsonKV{Key: item.key, Val: value})
+			}
+		}
+		if len(extras) == 0 {
+			return matroskaTagStats{}, false
+		}
+		return matroskaTagStats{extras: extras}, true
 	}
 	out := matroskaTagStats{trusted: true, hasWritingDate: hasWritingDate}
 	for _, key := range list {
@@ -3215,7 +3776,7 @@ func applyMatroskaEncoders(streams []Stream, encodersByTrackUID map[uint64]strin
 				streams[i].Fields = appendFieldUnique(streams[i].Fields, Field{Name: "Encoding settings", Value: settings})
 			}
 		}
-		if streams[i].Kind == StreamAudio && findField(streams[i].Fields, "Format") == "FLAC" && strings.Contains(enc, "libFLAC") {
+		if streams[i].Kind == StreamAudio && enc != "" && (findField(streams[i].Fields, "Format") == "FLAC" || findField(streams[i].Fields, "Format") == "E-AC-3") {
 			if findField(streams[i].Fields, "Writing library") != "" {
 				continue
 			}
@@ -3224,6 +3785,27 @@ func applyMatroskaEncoders(streams []Stream, encodersByTrackUID map[uint64]strin
 				streams[i].JSON = map[string]string{}
 			}
 			streams[i].JSON["Encoded_Library"] = enc
+			if findField(streams[i].Fields, "Format") == "FLAC" && strings.HasPrefix(enc, "Lavc") {
+				delete(streams[i].JSON, "BitDepth_Detected")
+				channelParts := strings.Fields(findField(streams[i].Fields, "Channel(s)"))
+				channels := 0
+				if len(channelParts) > 0 {
+					channels, _ = strconv.Atoi(channelParts[0])
+				}
+				layout := ""
+				switch channels {
+				case 1:
+					layout = "M"
+				case 2:
+					layout = "L R"
+				case 6:
+					layout = "L R C LFE Ls Rs"
+				}
+				if layout != "" {
+					streams[i].Fields = setFieldValue(streams[i].Fields, "Channel layout", layout)
+					streams[i].JSON["ChannelLayout"] = layout
+				}
+			}
 			if name, version, date := splitFLACEncodedLibrary(enc); name != "" {
 				streams[i].JSON["Encoded_Library_Name"] = name
 				if version != "" {
@@ -3240,7 +3822,7 @@ func applyMatroskaEncoders(streams []Stream, encodersByTrackUID map[uint64]strin
 				streams[i].Fields = setFieldValue(streams[i].Fields, "Encoding settings", settings)
 			}
 		}
-		if streams[i].Kind == StreamText && enc != "" {
+		if streams[i].Kind == StreamText && enc != "" && !strings.HasPrefix(enc, "Lavf") {
 			streams[i].Fields = setFieldValue(streams[i].Fields, "Writing library", enc)
 		}
 	}
@@ -3322,6 +3904,46 @@ func parseAACProfileFromASC(payload []byte) (string, int, bool) {
 		return "", 0, false
 	}
 	return mapAACProfile(objType), objType, sbrData && !sbrPresent
+}
+
+// parseMatroskaAACProfile decodes AAC profile, signaled object type, explicit
+// SBR state, and sample rate from AudioSpecificConfig data.
+func parseMatroskaAACProfile(payload []byte) (profile string, codecObjectType int, sbrMode string, sampleRate int) {
+	baseObjectType, sbrData, sbrPresent, ok := parseAACAudioSpecificConfig(payload)
+	if !ok || baseObjectType <= 0 {
+		return "", 0, "", 0
+	}
+	profile = mapAACProfile(baseObjectType)
+	codecObjectType = baseObjectType
+	br := newBitReader(payload)
+	signaledObjectType, ok := readAACAudioObjectType(br)
+	if !ok {
+		return profile, codecObjectType, "", 0
+	}
+	if index := br.readBitsValue(4); index != ^uint64(0) {
+		sampleRates := [...]int{96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350}
+		if index < uint64(len(sampleRates)) {
+			sampleRate = sampleRates[index]
+		} else if index == 0x0f {
+			if explicit := br.readBitsValue(24); explicit != ^uint64(0) {
+				sampleRate = int(explicit)
+			}
+		}
+	}
+	switch signaledObjectType {
+	case 5, 29:
+		codecObjectType = signaledObjectType
+		sbrMode = "Yes (NBC)"
+	default:
+		if sbrData {
+			if sbrPresent {
+				sbrMode = "Yes (Explicit)"
+			} else {
+				sbrMode = "No (Explicit)"
+			}
+		}
+	}
+	return profile, codecObjectType, sbrMode, sampleRate
 }
 
 func parseAACAudioSpecificConfig(payload []byte) (objType int, sbrData bool, sbrPresent bool, ok bool) {

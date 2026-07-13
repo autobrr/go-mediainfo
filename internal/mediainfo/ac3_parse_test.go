@@ -470,7 +470,7 @@ func TestParseEAC3FrameWithOptions_MixDef3MetadataAlignment(t *testing.T) {
 	}
 }
 
-func TestParseEAC3FrameWithOptions_Acmod4DoesNotReadSurroundMixLevels(t *testing.T) {
+func TestParseEAC3FrameWithOptions_Acmod4ReadsSurroundMixLevels(t *testing.T) {
 	const frameSize = 32
 	buf := make([]byte, frameSize)
 	bw := ac3BitWriter{buf: buf}
@@ -488,6 +488,8 @@ func TestParseEAC3FrameWithOptions_Acmod4DoesNotReadSurroundMixLevels(t *testing
 	bw.writeBits(0, 1)                // compre
 	bw.writeBits(1, 1)                // mixmdate
 	bw.writeBits(3, 2)                // dmixmod: reserved literal
+	bw.writeBits(4, 3)                // ltrtsurmixlev: -3.0 dB
+	bw.writeBits(4, 3)                // lorosurmixlev: -3.0 dB
 	bw.writeBits(0, 1)                // pgmscle
 	bw.writeBits(0, 1)                // extpgmscle
 	bw.writeBits(0, 2)                // mixdef
@@ -506,8 +508,8 @@ func TestParseEAC3FrameWithOptions_Acmod4DoesNotReadSurroundMixLevels(t *testing
 	if !info.hasDmixmod || info.dmixmod != "3" {
 		t.Fatalf("dmixmod mismatch: present=%v value=%q", info.hasDmixmod, info.dmixmod)
 	}
-	if info.hasLtrtsurmixlev || info.hasLorosurmixlev {
-		t.Fatal("acmod=4 must not read surround mix-level fields")
+	if !info.hasLtrtsurmixlev || !info.hasLorosurmixlev {
+		t.Fatal("acmod=4 must read surround mix-level fields")
 	}
 	if info.bsmod != 5 || info.serviceKind != "Commentary" {
 		t.Fatalf("service kind mismatch: bsmod=%d serviceKind=%q", info.bsmod, info.serviceKind)
