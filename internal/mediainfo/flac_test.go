@@ -72,3 +72,20 @@ func TestFLACDerivedLayoutIsOmitted(t *testing.T) {
 		}
 	}
 }
+
+// FuzzParseMatroskaFLACPrivate verifies that bare STREAMINFO, complete fLaC
+// metadata, and truncated metadata blocks remain bounded for arbitrary input.
+func FuzzParseMatroskaFLACPrivate(f *testing.F) {
+	streamInfo, err := hex.DecodeString("1000100000001000210c0bb802f00e5b6540864d55f003143d8bad47d3b997fae64c")
+	if err != nil {
+		f.Fatal(err)
+	}
+	complete := append([]byte("fLaC\x80\x00\x00\x22"), streamInfo...)
+	f.Add(streamInfo)
+	f.Add(complete)
+	f.Add([]byte("fLaC\x00\x00\x00\x22\x10"))
+
+	f.Fuzz(func(_ *testing.T, data []byte) {
+		parseMatroskaFLACPrivate(data)
+	})
+}
