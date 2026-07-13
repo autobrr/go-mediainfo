@@ -704,6 +704,8 @@ func parseEAC3FrameWithOptions(payload []byte, parseJOC bool) (ac3Info, int, boo
 		bsid:          int(bsid),
 		bsmod:         info.bsmod,
 		acmod:         int(acmod),
+		dsurmod:       info.dsurmod,
+		hasDsurmod:    info.hasDsurmod,
 		lfeon:         int(lfeonVal),
 		serviceKind:   ac3ServiceKind(info.bsmod),
 		frameRate:     frameRate,
@@ -946,8 +948,13 @@ func parseEAC3MetadataExtension(br *ac3BitReader, info *ac3Info, strmtyp int, nu
 		}
 		info.bsmod = int(bsmod)
 		info.serviceKind = ac3ServiceKind(int(bsmod))
-		if acmod == 2 && !br.skipBits(4) {
-			return false
+		if acmod == 2 {
+			dsurmod, ok := br.readBits(2)
+			if !ok || !br.skipBits(2) { // dheadphonmod
+				return false
+			}
+			info.dsurmod = int(dsurmod)
+			info.hasDsurmod = true
 		}
 		if acmod >= 6 && !br.skipBits(2) {
 			return false

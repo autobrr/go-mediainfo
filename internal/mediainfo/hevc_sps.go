@@ -399,14 +399,10 @@ func skipHEVCShortTermRefPicSet(br *bitReader, idx int, sets []hevcShortTermRPS)
 		interPred = v == 1
 	}
 	if interPred {
-		deltaIdxMinus1, ok := br.readUEWithOk()
-		if !ok || deltaIdxMinus1 < 0 {
-			return 0, false
-		}
-		refIdx := idx - (deltaIdxMinus1 + 1)
-		if refIdx < 0 || refIdx >= idx {
-			refIdx = idx - 1
-		}
+		// delta_idx_minus1 exists only when an extra RPS is parsed from a
+		// slice header (stRpsIdx == num_short_term_ref_pic_sets). SPS entries
+		// always predict from the immediately preceding set.
+		refIdx := idx - 1
 		if br.readBitsValue(1) == ^uint64(0) { // delta_rps_sign
 			return 0, false
 		}

@@ -330,7 +330,8 @@ func TestParseEAC3FrameWithOptions_ConvertedStreamMetadataAlignment(t *testing.T
 	bw.writeBits(1, 1)                // infomdate
 	bw.writeBits(5, 3)                // bsmod: Commentary
 	bw.writeBits(0, 2)                // copyright/original
-	bw.writeBits(0, 4)                // acmod=2 metadata
+	bw.writeBits(1, 2)                // dsurmod: Dolby Surround encoded
+	bw.writeBits(0, 2)                // dheadphonmod
 	bw.writeBits(0, 1)                // audprodie
 	bw.writeBits(0, 1)                // source sample rate
 	bw.writeBits(0, 6)                // convsync
@@ -345,6 +346,9 @@ func TestParseEAC3FrameWithOptions_ConvertedStreamMetadataAlignment(t *testing.T
 	}
 	if info.bsmod != 5 || info.serviceKind != "Commentary" {
 		t.Fatalf("service kind mismatch: bsmod=%d serviceKind=%q", info.bsmod, info.serviceKind)
+	}
+	if !info.hasDsurmod || info.dsurmod != 1 {
+		t.Fatalf("dsurmod mismatch: present=%v value=%d", info.hasDsurmod, info.dsurmod)
 	}
 }
 

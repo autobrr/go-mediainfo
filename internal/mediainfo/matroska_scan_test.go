@@ -2,6 +2,7 @@ package mediainfo
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 )
 
@@ -87,6 +88,61 @@ func TestProbeMatroskaAudio_EAC3MultiFrameNonLacedPacket(t *testing.T) {
 	}
 }
 
+func TestReadMatroskaBlockHeader_JOCStopDoesNotCapStatsLaces(t *testing.T) {
+	block := []byte{0x81, 0x00, 0x00, 0x04, 0x03} // track 1, fixed lacing, 4 frames
+	for code := uint32(1); code <= 4; code++ {
+		block = append(block, makeEAC3Frame(t, 16, code)...)
+	}
+	probe := &matroskaAudioProbe{
+		format:         "E-AC-3",
+		collect:        true,
+		parseJOC:       false,
+		jocStopPackets: 1,
+		targetPackets:  10,
+		packetCount:    1,
+	}
+	probe.info.hasJOC = true
+	er := newEBMLReader(bytes.NewReader(block))
+
+	_, _, _, frames, err := readMatroskaBlockHeader(er, int64(len(block)), map[uint64]*matroskaAudioProbe{1: probe}, nil, 0)
+	if err != nil {
+		t.Fatalf("readMatroskaBlockHeader: %v", err)
+	}
+	if frames != 4 {
+		t.Fatalf("frames = %d, want 4", frames)
+	}
+	if got := probe.info.dialnormCount; got != 4 {
+		t.Fatalf("dialnormCount = %d, want 4", got)
+	}
+}
+
+func TestReadMatroskaBlockHeader_FrameLimitStopsMidLace(t *testing.T) {
+	block := []byte{0x81, 0x00, 0x00, 0x04, 0x03} // track 1, fixed lacing, 4 frames
+	for code := uint32(1); code <= 4; code++ {
+		block = append(block, makeEAC3Frame(t, 16, code)...)
+	}
+	probe := &matroskaAudioProbe{format: "E-AC-3", collect: true}
+	er := newEBMLReader(bytes.NewReader(block))
+
+	_, _, _, frames, err := readMatroskaBlockHeader(er, int64(len(block)), map[uint64]*matroskaAudioProbe{1: probe}, nil, 1)
+	if err != nil {
+		t.Fatalf("readMatroskaBlockHeader: %v", err)
+	}
+	if frames != 1 {
+		t.Fatalf("frames = %d, want 1", frames)
+	}
+	if got := probe.info.dialnormCount; got != 1 {
+		t.Fatalf("dialnormCount = %d, want 1", got)
+	}
+}
+
+func TestMatroskaBlockFrameLimitIncludesCrossingFrame(t *testing.T) {
+	globalFrames := int64(2560)
+	if got := matroskaBlockFrameLimit(&globalFrames, 2560); got != 1 {
+		t.Fatalf("matroskaBlockFrameLimit() = %d, want 1", got)
+	}
+}
+
 func TestApplyMatroskaStats_AudioDurationAlsoSetsJSON(t *testing.T) {
 	info := MatroskaInfo{
 		Tracks: []Stream{
@@ -118,6 +174,38 @@ func TestApplyMatroskaStats_AudioDurationAlsoSetsJSON(t *testing.T) {
 	}
 }
 
+func TestApplyMatroskaAudioProbesEmitsAC3DynrngStats(t *testing.T) {
+	dynrngs := make([]uint32, 256)
+	dynrngs[0] = 3
+	dynrngs[1] = 1
+	info := MatroskaInfo{Tracks: []Stream{{
+		Kind:   StreamAudio,
+		Fields: []Field{{Name: "ID", Value: "1"}, {Name: "Format", Value: "AC-3"}, {Name: "Bit rate mode", Value: "Constant"}},
+		JSON:   map[string]string{"BitRate": "767999"},
+	}}}
+	probes := map[uint64]*matroskaAudioProbe{1: {
+		format: "AC-3",
+		ok:     true,
+		info: ac3Info{
+			bsid:        6,
+			bitRateKbps: 768,
+			dynrngs:     dynrngs,
+			dynrngeSeen: true,
+		},
+	}}
+
+	applyMatroskaAudioProbes(&info, probes)
+	if got := info.Tracks[0].JSON["BitRate"]; got != "768000" {
+		t.Fatalf("BitRate = %q, want 768000", got)
+	}
+	extra := info.Tracks[0].JSONRaw["extra"]
+	for _, field := range []string{"dynrng_Average", "dynrng_Minimum", "dynrng_Maximum", "dynrng_Count"} {
+		if !strings.Contains(extra, `"`+field+`"`) {
+			t.Fatalf("extra missing %s: %s", field, extra)
+		}
+	}
+}
+
 func TestReadMatroskaBlockHeader_InvalidEBMLLacingCount(t *testing.T) {
 	// track=1, timecode=0, flags=EBML lacing, lace count byte=0 (frameCount=1; malformed for EBML lacing)
 	block := []byte{0x81, 0x00, 0x00, 0x06, 0x00, 0x81, 0x00}
@@ -125,7 +213,7 @@ func TestReadMatroskaBlockHeader_InvalidEBMLLacingCount(t *testing.T) {
 	audio := map[uint64]*matroskaAudioProbe{
 		1: {format: "E-AC-3", collect: true},
 	}
-	if _, _, _, _, err := readMatroskaBlockHeader(er, int64(len(block)), audio, nil); err == nil {
+	if _, _, _, _, err := readMatroskaBlockHeader(er, int64(len(block)), audio, nil, 0); err == nil {
 		t.Fatalf("expected error for malformed EBML lacing frame count")
 	}
 }
@@ -148,7 +236,7 @@ func TestReadMatroskaBlockHeader_EBMLLacingOversizedLaceRejected(t *testing.T) {
 	audio := map[uint64]*matroskaAudioProbe{
 		1: {format: "E-AC-3", collect: true, parseJOC: true, targetPackets: 1},
 	}
-	if _, _, _, _, err := readMatroskaBlockHeader(er, int64(len(block)), audio, nil); err == nil {
+	if _, _, _, _, err := readMatroskaBlockHeader(er, int64(len(block)), audio, nil, 0); err == nil {
 		t.Fatalf("expected error for oversized EBML lacing frame size")
 	}
 }

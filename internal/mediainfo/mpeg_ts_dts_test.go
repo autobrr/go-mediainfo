@@ -58,6 +58,33 @@ func TestInferBDAVStreamDTS(t *testing.T) {
 	}
 }
 
+func TestParseDTSCoreFrameUsesActualPaddedFrameRate(t *testing.T) {
+	frame := make([]byte, 424)
+	copy(frame, []byte{0x7F, 0xFE, 0x80, 0x01})
+	pos := 32
+	writeBits(frame, &pos, 0, 1)    // FrameType
+	writeBits(frame, &pos, 0, 5)    // Deficit sample count
+	writeBits(frame, &pos, 0, 1)    // CRC present
+	writeBits(frame, &pos, 15, 7)   // 512 samples per frame
+	writeBits(frame, &pos, 423, 14) // 424-byte primary frame
+	writeBits(frame, &pos, 2, 6)    // stereo channel arrangement
+	writeBits(frame, &pos, 13, 4)   // 48 kHz
+	writeBits(frame, &pos, 9, 5)    // nominal 320 kb/s transmission code
+	writeBits(frame, &pos, 0, 13)   // optional core flags through predictor history
+	writeBits(frame, &pos, 0, 1)    // multirate interpolator
+	writeBits(frame, &pos, 0, 4)    // encoder software revision
+	writeBits(frame, &pos, 0, 2)    // copy history
+	writeBits(frame, &pos, 2, 2)    // 24-bit resolution
+
+	info, ok := parseDTSCoreFrame(frame)
+	if !ok {
+		t.Fatal("parseDTSCoreFrame returned ok=false")
+	}
+	if info.bitRateBps != 318000 {
+		t.Fatalf("bitRateBps = %d, want 318000", info.bitRateBps)
+	}
+}
+
 func TestConsumeDTSCoreAndHDExtension(t *testing.T) {
 	entry := tsStream{format: "DTS"}
 	core := buildDTSCoreFrame(7, 1, 15)

@@ -153,7 +153,7 @@ func FuzzReadMatroskaBlockHeader(f *testing.F) {
 		}
 		audio, video := mkvProbeMaps(mode)
 		er := newEBMLReader(bytes.NewReader(data))
-		_, _, _, _, _ = readMatroskaBlockHeader(er, size, audio, video)
+		_, _, _, _, _ = readMatroskaBlockHeader(er, size, audio, video, 0)
 	})
 }
 

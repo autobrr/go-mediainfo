@@ -1,6 +1,31 @@
 package mediainfo
 
-import "testing"
+import (
+	"encoding/hex"
+	"testing"
+)
+
+func TestParseHEVCSPSInterPredictedRPSKeepsVUIAlignment(t *testing.T) {
+	// Real hvcC with an inter-predicted short-term RPS followed by BT.2020/PQ VUI
+	// and chroma location type 2. Reading delta_idx_minus1 inside the SPS shifts
+	// the remaining syntax and loses all VUI metadata.
+	raw := "01022000000090000000000096f000fcfdfafa00000f04a00001001840010c01ffff02200000030090000003000003009695c090a100010049420101022000000300900000030000030096a001e020021c4d9e5792429185164aaacb9b9ebce40977eb9978f016a1220136c2000007d20000bb81f455ef7e00e5001ca801ca003951a2000100084401c13ca2958f24a70001001a4e01051559bffb2fb66311e2a3550050c249004801640a289380"
+	config, err := hex.DecodeString(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, _, _, sps := parseHEVCConfig(config)
+	if !sps.HasColorRange || sps.ColorRange != "Limited" {
+		t.Fatalf("color range = %q, present=%v", sps.ColorRange, sps.HasColorRange)
+	}
+	if sps.ColorPrimaries != "BT.2020" || sps.TransferCharacteristics != "PQ" || sps.MatrixCoefficients != "BT.2020 non-constant" {
+		t.Fatalf("unexpected color description: %+v", sps)
+	}
+	if !sps.HasChromaLoc || sps.ChromaSampleLoc != 2 {
+		t.Fatalf("chroma location = %d, present=%v", sps.ChromaSampleLoc, sps.HasChromaLoc)
+	}
+}
 
 // hevcBitBuf is a minimal MSB-first bit accumulator for crafting HEVC SPS RBSP in
 // tests, with an Exp-Golomb (ue) writer.

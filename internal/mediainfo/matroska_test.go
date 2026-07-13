@@ -35,7 +35,7 @@ func TestParseMatroskaTracks(t *testing.T) {
 
 func TestParseMatroskaStatsTags(t *testing.T) {
 	tagsPayload := buildMatroskaTagForStats(123)
-	encoders, settings, langs, stats := parseMatroskaTags(tagsPayload, "")
+	encoders, settings, langs, stats, _ := parseMatroskaTags(tagsPayload, "")
 	if got := encoders[123]; got != "Lavf60.3.100" {
 		t.Fatalf("unexpected encoder: %q", got)
 	}
@@ -60,6 +60,36 @@ func TestParseMatroskaStatsTags(t *testing.T) {
 	}
 	if !entry.hasBitRate || entry.bitRate != 166000 {
 		t.Fatalf("unexpected bitrate: %+v", entry)
+	}
+}
+
+func TestParseMatroskaGeneralTags(t *testing.T) {
+	body := append(buildMatroskaSimpleTag("IMDB", " tt32612507 "), buildMatroskaSimpleTag("TMDB", "movie/1304313")...)
+	tagsPayload := buildMatroskaElement(mkvIDTag, body)
+
+	_, _, _, _, generalTags := parseMatroskaTags(tagsPayload, "")
+	if got := generalTags["IMDB"]; got != "tt32612507" {
+		t.Fatalf("IMDB = %q, want tt32612507", got)
+	}
+	if got := generalTags["TMDB"]; got != "movie/1304313" {
+		t.Fatalf("TMDB = %q, want movie/1304313", got)
+	}
+}
+
+func TestParseMatroskaTrackAccessibilityFlags(t *testing.T) {
+	payload := buildMatroskaElement(mkvIDTrackNumber, []byte{0x01})
+	payload = append(payload, buildMatroskaElement(mkvIDTrackType, []byte{0x11})...)
+	payload = append(payload, buildMatroskaElement(mkvIDCodecID, []byte("S_TEXT/UTF8"))...)
+	payload = append(payload, buildMatroskaElement(mkvIDFlagHearingImpaired, []byte{0x01})...)
+	payload = append(payload, buildMatroskaElement(mkvIDFlagOriginal, []byte{0x01})...)
+	payload = append(payload, buildMatroskaElement(mkvIDFlagCommentary, []byte{0x01})...)
+
+	stream, ok := parseMatroskaTrackEntry(payload, 0, 0)
+	if !ok {
+		t.Fatal("expected valid Matroska text track")
+	}
+	if got := stream.JSON["ServiceKind"]; got != "HI / O / C" {
+		t.Fatalf("ServiceKind = %q, want %q", got, "HI / O / C")
 	}
 }
 
@@ -106,6 +136,50 @@ func TestApplyMatroskaTagStats(t *testing.T) {
 	}
 	if info.Tracks[0].JSON["FrameCount"] != "1200" {
 		t.Fatalf("unexpected frame count json: %#v", info.Tracks[0].JSON)
+	}
+}
+
+func TestApplyMatroskaTagStatsKeepsContainerCBR(t *testing.T) {
+	info := MatroskaInfo{Tracks: []Stream{{
+		Kind: StreamAudio,
+		Fields: []Field{
+			{Name: "Format", Value: "E-AC-3"},
+			{Name: "ID", Value: "1"},
+			{Name: "Bit rate mode", Value: "Constant"},
+			{Name: "Bit rate", Value: "768 kb/s"},
+		},
+		JSON: map[string]string{
+			"UniqueID":   "123",
+			"BitRate":    "768000",
+			"StreamSize": "371521536",
+			"Duration":   "3870.019000000",
+		},
+	}}}
+
+	applyMatroskaTagStats(&info, map[uint64]matroskaTagStats{123: {
+		trusted: true, bitRate: 767999, hasBitRate: true,
+		dataBytes: 371521536, hasDataBytes: true,
+		durationSeconds: 3870.019, hasDuration: true,
+	}}, 0)
+
+	if got := info.Tracks[0].JSON["BitRate"]; got != "768000" {
+		t.Fatalf("BitRate = %q, want 768000", got)
+	}
+}
+
+func TestApplyMatroskaTagStatsRoundsTextDurationToNanoseconds(t *testing.T) {
+	info := MatroskaInfo{Tracks: []Stream{{
+		Kind:   StreamText,
+		Fields: []Field{{Name: "ID", Value: "1"}},
+		JSON:   map[string]string{"UniqueID": "123"},
+	}}}
+
+	applyMatroskaTagStats(&info, map[uint64]matroskaTagStats{123: {
+		trusted: true, durationSeconds: 8313.166, hasDuration: true,
+	}}, 0)
+
+	if got := info.Tracks[0].JSON["Duration"]; got != "8313.166000000" {
+		t.Fatalf("Duration = %q, want 8313.166000000", got)
 	}
 }
 
@@ -481,6 +555,56 @@ func TestApplyMatroskaVideoProbes_X265SEIOverridesContainerEncoder(t *testing.T)
 	}
 	if got := findField(stream.Fields, "Encoding settings"); got != "wpp / me=0" {
 		t.Fatalf("Encoding settings = %q, want wpp / me=0", got)
+	}
+}
+
+func TestApplyMatroskaVideoProbes_DolbyVisionWithStaticHDR10(t *testing.T) {
+	info := MatroskaInfo{Tracks: []Stream{{
+		Kind: StreamVideo,
+		Fields: []Field{
+			{Name: "ID", Value: "1"},
+		},
+		mkvHasDolbyVision: true,
+		mkvDolbyVision: dolbyVisionConfig{
+			versionMajor:    1,
+			profile:         8,
+			level:           6,
+			rpuPresent:      true,
+			blPresent:       true,
+			compatibilityID: 1,
+		},
+	}}}
+	probes := map[uint64]*matroskaVideoProbe{1: {
+		codec: "HEVC",
+		hdrInfo: hevcHDRInfo{
+			hasMastering:          true,
+			masteringLuminanceMin: 0.005,
+			masteringLuminanceMax: 1000,
+			maxCLL:                705,
+			maxFALL:               144,
+		},
+	}}
+
+	applyMatroskaVideoProbes(&info, probes)
+
+	json := info.Tracks[0].JSON
+	if got := json["HDR_Format"]; got != "Dolby Vision / SMPTE ST 2086" {
+		t.Fatalf("HDR_Format = %q", got)
+	}
+	if got := json["HDR_Format_Compression"]; got != "None / " {
+		t.Fatalf("HDR_Format_Compression = %q", got)
+	}
+	if got := json["MasteringDisplay_Luminance_Min"]; got != "0.0050" {
+		t.Fatalf("MasteringDisplay_Luminance_Min = %q", got)
+	}
+	if got := json["MasteringDisplay_Luminance_Max"]; got != "1000" {
+		t.Fatalf("MasteringDisplay_Luminance_Max = %q", got)
+	}
+	if got := json["MaxCLL"]; got != "705" {
+		t.Fatalf("MaxCLL = %q", got)
+	}
+	if got := json["MaxFALL"]; got != "144" {
+		t.Fatalf("MaxFALL = %q", got)
 	}
 }
 

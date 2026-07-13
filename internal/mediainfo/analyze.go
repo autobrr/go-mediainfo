@@ -11,6 +11,7 @@ import (
 	"strings"
 )
 
+// AnalyzeFile analyzes one local media file with the default MediaInfo-compatible options.
 func AnalyzeFile(path string) (Report, error) {
 	return AnalyzeFileWithOptions(path, defaultAnalyzeOptions())
 }
@@ -58,6 +59,7 @@ func overallBitRateModeForKind(streams []Stream, kind StreamKind) string {
 	return mode
 }
 
+// AnalyzeFileWithOptions analyzes one local media file with opts and returns filesystem or open errors.
 func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 	opts = normalizeAnalyzeOptions(opts)
 	stat, err := os.Stat(path)
@@ -503,15 +505,29 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 				general.Fields = appendFieldUnique(general.Fields, field)
 			}
 			streams = append(streams, parsed.Tracks...)
+			generalExtras := []jsonKV{}
 			if len(parsed.attachments) > 0 {
+				generalExtras = append(generalExtras, jsonKV{Key: "Attachments", Val: strings.Join(parsed.attachments, " / ")})
+			}
+			for _, name := range []string{"IMDB", "TMDB"} {
+				if value := parsed.generalTags[name]; value != "" {
+					generalExtras = append(generalExtras, jsonKV{Key: name, Val: value})
+				}
+			}
+			if len(generalExtras) > 0 {
 				if general.JSONRaw == nil {
 					general.JSONRaw = map[string]string{}
 				}
-				// Match official JSON: attachments are nested under General.extra.Attachments.
-				general.JSONRaw["extra"] = "{\"Attachments\":\"" + strings.Join(parsed.attachments, " / ") + "\"}"
+				general.JSONRaw["extra"] = renderJSONObject(generalExtras, false)
 			}
 			if rawWritingApp != "" {
 				general.JSON["Encoded_Application"] = rawWritingApp
+				if name, version, _ := splitWritingApplication(rawWritingApp); exposeWritingApplicationComponents(name, version) {
+					general.JSON["Encoded_Application_Name"] = name
+					if version != "" {
+						general.JSON["Encoded_Application_Version"] = version
+					}
+				}
 			}
 			// MediaInfo emits both Title and Movie for Matroska Segment/Info/Title.
 			if title := findField(general.Fields, "Title"); title != "" {

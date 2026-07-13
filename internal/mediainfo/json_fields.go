@@ -356,7 +356,7 @@ func buildJSONComputedFields(kind StreamKind, fields []jsonKV, containerFormat s
 		}
 		// MediaInfo emits FrameRate_Num/Den for some containers even when the displayed frame rate
 		// field lacks a "(num/den)" hint (e.g. BDAV and MPEG-TS).
-		if (containerFormat == "MPEG-4" || containerFormat == "MPEG-TS" || containerFormat == "BDAV") &&
+		if (containerFormat == "MPEG-4" || containerFormat == "MPEG-TS" || containerFormat == "BDAV" || containerFormat == "Matroska") &&
 			jsonFieldValue(fields, "FrameRate_Num") == "" && jsonFieldValue(fields, "FrameRate_Den") == "" {
 			num, den := rationalizeFrameRate(frameRate)
 			if num > 0 && den > 0 {
