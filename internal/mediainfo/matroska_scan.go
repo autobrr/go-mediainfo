@@ -1637,6 +1637,16 @@ func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAud
 		if ac3.hasSurmixlev {
 			extraFields = append(extraFields, jsonKV{Key: "surmixlev", Val: fmt.Sprintf("%.0f", ac3.surmixlevDB)})
 		}
+		if ac3.acmod > 0 {
+			extraFields = append(extraFields, jsonKV{Key: "acmod", Val: strconv.Itoa(ac3.acmod)})
+		}
+		if ac3.lfeon >= 0 {
+			extraFields = append(extraFields, jsonKV{Key: "lfeon", Val: strconv.Itoa(ac3.lfeon)})
+		}
+		// Match official: dsurmod appears for 2/0 even on E-AC-3 (commonly 0).
+		if ac3.acmod == 2 && (ac3.hasDsurmod || probe.format == "E-AC-3") {
+			extraFields = append(extraFields, jsonKV{Key: "dsurmod", Val: strconv.Itoa(ac3.dsurmod)})
+		}
 		if ac3.hasDmixmod {
 			extraFields = append(extraFields, jsonKV{Key: "dmixmod", Val: ac3.dmixmod})
 		}
@@ -1651,16 +1661,6 @@ func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAud
 		}
 		if ac3.hasLorosurmixlev {
 			extraFields = append(extraFields, jsonKV{Key: "lorosurmixlev", Val: fmt.Sprintf("%.1f", ac3.lorosurmixlevDB)})
-		}
-		if ac3.acmod > 0 {
-			extraFields = append(extraFields, jsonKV{Key: "acmod", Val: strconv.Itoa(ac3.acmod)})
-		}
-		if ac3.lfeon >= 0 {
-			extraFields = append(extraFields, jsonKV{Key: "lfeon", Val: strconv.Itoa(ac3.lfeon)})
-		}
-		// Match official: dsurmod appears for 2/0 even on E-AC-3 (commonly 0).
-		if ac3.acmod == 2 && (ac3.hasDsurmod || probe.format == "E-AC-3") {
-			extraFields = append(extraFields, jsonKV{Key: "dsurmod", Val: strconv.Itoa(ac3.dsurmod)})
 		}
 		if avg, minVal, maxVal, ok := ac3.dialnormStats(); ok {
 			extraFields = append(extraFields, jsonKV{Key: "dialnorm_Average", Val: strconv.Itoa(avg)})

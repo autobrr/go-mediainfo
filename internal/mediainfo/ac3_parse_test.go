@@ -245,6 +245,61 @@ func TestParseEAC3FrameWithOptions_AddBSITypeARequiresObjectMetadata(t *testing.
 	}
 }
 
+func TestParseEAC3FrameWithOptions_MixingMetadata(t *testing.T) {
+	const frameSize = 32
+	buf := make([]byte, frameSize)
+	bw := ac3BitWriter{buf: buf}
+
+	bw.writeBits(0x0B77, 16)          // syncword
+	bw.writeBits(0, 2)                // independent stream
+	bw.writeBits(0, 3)                // substreamid
+	bw.writeBits((frameSize/2)-1, 11) // frmsiz
+	bw.writeBits(0, 2)                // fscod: 48 kHz
+	bw.writeBits(3, 2)                // numblkscod: 6 blocks / 1536 samples
+	bw.writeBits(7, 3)                // acmod: 3/2
+	bw.writeBits(1, 1)                // lfeon
+	bw.writeBits(16, 5)               // bsid
+	bw.writeBits(31, 5)               // dialnorm
+	bw.writeBits(0, 1)                // compre
+	bw.writeBits(1, 1)                // mixmdate
+	bw.writeBits(2, 2)                // dmixmod: Lo/Ro
+	bw.writeBits(4, 3)                // ltrtcmixlev: -3.0 dB
+	bw.writeBits(4, 3)                // lorocmixlev: -3.0 dB
+	bw.writeBits(4, 3)                // ltrtsurmixlev: -3.0 dB
+	bw.writeBits(4, 3)                // lorosurmixlev: -3.0 dB
+	bw.writeBits(0, 1)                // lfemixlevcode
+	bw.writeBits(0, 1)                // pgmscle
+	bw.writeBits(0, 1)                // extpgmscle
+	bw.writeBits(0, 2)                // mixdef
+	bw.writeBits(0, 1)                // frmmixcfginfoe
+	bw.writeBits(0, 1)                // infomdate
+	bw.writeBits(0, 1)                // addbsie
+
+	info, gotSize, ok := parseEAC3FrameWithOptions(buf, false)
+	if !ok {
+		t.Fatal("parseEAC3FrameWithOptions returned ok=false")
+	}
+	if gotSize != frameSize {
+		t.Fatalf("frameSize mismatch: got=%d want=%d", gotSize, frameSize)
+	}
+	if !info.hasDmixmod || info.dmixmod != "Lo/Ro" {
+		t.Fatalf("dmixmod mismatch: present=%v value=%q", info.hasDmixmod, info.dmixmod)
+	}
+	for name, got := range map[string]struct {
+		present bool
+		value   float64
+	}{
+		"ltrtcmixlev":   {info.hasLtrtcmixlev, info.ltrtcmixlevDB},
+		"ltrtsurmixlev": {info.hasLtrtsurmixlev, info.ltrtsurmixlevDB},
+		"lorocmixlev":   {info.hasLorocmixlev, info.lorocmixlevDB},
+		"lorosurmixlev": {info.hasLorosurmixlev, info.lorosurmixlevDB},
+	} {
+		if !got.present || got.value != -3.0 {
+			t.Errorf("%s mismatch: present=%v value=%v", name, got.present, got.value)
+		}
+	}
+}
+
 func buildEMDFJOCPayload() []byte {
 	body := make([]byte, 6)
 	bw := ac3BitWriter{buf: body}

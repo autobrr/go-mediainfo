@@ -28,3 +28,17 @@ func TestMapStreamFieldsToJSONDisplayAspectRatioDecimal(t *testing.T) {
 		t.Fatalf("DisplayAspectRatio=%q want %q", value, "1.200")
 	}
 }
+
+func TestSortJSONAudioFieldsPlacesTitleBeforeLanguageAndExtra(t *testing.T) {
+	fields := sortJSONFields(StreamAudio, []jsonKV{
+		{Key: "extra", Val: `{}`},
+		{Key: "Language", Val: "en"},
+		{Key: "Title", Val: "E-AC-3 5.1"},
+	})
+
+	for i, key := range []string{"Title", "Language", "extra"} {
+		if fields[i].Key != key {
+			t.Fatalf("field %d=%q want %q", i, fields[i].Key, key)
+		}
+	}
+}

@@ -745,6 +745,16 @@ func parseEAC3FrameWithOptions(payload []byte, parseJOC bool) (ac3Info, int, boo
 		hasEAC3ChannelMap:     info.hasEAC3ChannelMap,
 		eac3ChannelMapLayout:  info.eac3ChannelMapLayout,
 		eac3ChannelMapChannel: info.eac3ChannelMapChannel,
+		dmixmod:               info.dmixmod,
+		hasDmixmod:            info.hasDmixmod,
+		ltrtcmixlevDB:         info.ltrtcmixlevDB,
+		hasLtrtcmixlev:        info.hasLtrtcmixlev,
+		ltrtsurmixlevDB:       info.ltrtsurmixlevDB,
+		hasLtrtsurmixlev:      info.hasLtrtsurmixlev,
+		lorocmixlevDB:         info.lorocmixlevDB,
+		hasLorocmixlev:        info.hasLorocmixlev,
+		lorosurmixlevDB:       info.lorosurmixlevDB,
+		hasLorosurmixlev:      info.hasLorosurmixlev,
 	}
 	return info, frameSize, true
 }
@@ -762,17 +772,48 @@ func parseEAC3MetadataExtension(br *ac3BitReader, info *ac3Info, strmtyp int, nu
 		return false
 	} else if mixmdate == 1 {
 		if acmod > 2 {
-			if !br.skipBits(2) {
+			dmixmod, ok := br.readBits(2)
+			if !ok {
 				return false
 			}
+			if value := ac3PreferredDownmix(dmixmod); value != "" {
+				info.dmixmod = value
+				info.hasDmixmod = true
+			}
 			if acmod&1 != 0 {
-				if !br.skipBits(6) {
+				ltrtcmixlev, ok := br.readBits(3)
+				if !ok {
 					return false
+				}
+				if value, ok := ac3ExtendedMixLevelDB(ltrtcmixlev); ok {
+					info.ltrtcmixlevDB = value
+					info.hasLtrtcmixlev = true
+				}
+				lorocmixlev, ok := br.readBits(3)
+				if !ok {
+					return false
+				}
+				if value, ok := ac3ExtendedMixLevelDB(lorocmixlev); ok {
+					info.lorocmixlevDB = value
+					info.hasLorocmixlev = true
 				}
 			}
 			if acmod&4 != 0 {
-				if !br.skipBits(6) {
+				ltrtsurmixlev, ok := br.readBits(3)
+				if !ok {
 					return false
+				}
+				if value, ok := ac3ExtendedMixLevelDB(ltrtsurmixlev); ok {
+					info.ltrtsurmixlevDB = value
+					info.hasLtrtsurmixlev = true
+				}
+				lorosurmixlev, ok := br.readBits(3)
+				if !ok {
+					return false
+				}
+				if value, ok := ac3ExtendedMixLevelDB(lorosurmixlev); ok {
+					info.lorosurmixlevDB = value
+					info.hasLorosurmixlev = true
 				}
 			}
 		}

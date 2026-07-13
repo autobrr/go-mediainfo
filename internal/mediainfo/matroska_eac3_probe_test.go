@@ -198,7 +198,7 @@ func TestApplyMatroskaAudioProbes_EAC3JOCTextMetadata(t *testing.T) {
 	if got := stream.JSON["Format_AdditionalFeatures"]; got != "JOC" {
 		t.Fatalf("JSON Format_AdditionalFeatures=%q, want JOC", got)
 	}
-	if got := stream.JSONRaw["extra"]; !strings.Contains(got, `"dmixmod":"Lo/Ro"`) {
-		t.Fatalf("extra missing dmixmod: %s", got)
+	if got := stream.JSONRaw["extra"]; !strings.Contains(got, `"acmod":"7","lfeon":"1","dmixmod":"Lo/Ro"`) {
+		t.Fatalf("extra missing or misordering E-AC-3 mixing metadata: %s", got)
 	}
 }

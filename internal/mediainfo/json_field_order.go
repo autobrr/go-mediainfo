@@ -167,12 +167,13 @@ var jsonAudioFieldOrder = map[string]int{
 	"Encoded_Library":            34,
 	"StreamSize":                 35,
 	"Source_StreamSize":          36,
-	"Language":                   37,
-	"ServiceKind":                38,
-	"Default":                    39,
-	"Forced":                     40,
-	"AlternateGroup":             41,
-	"extra":                      42,
+	"Title":                      37,
+	"Language":                   38,
+	"ServiceKind":                39,
+	"Default":                    40,
+	"Forced":                     41,
+	"AlternateGroup":             42,
+	"extra":                      43,
 }
 
 var jsonTextFieldOrder = map[string]int{
