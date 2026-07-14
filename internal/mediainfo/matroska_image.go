@@ -52,7 +52,7 @@ func matroskaAttachmentImageStream(attachment matroskaAttachment) (Stream, bool)
 			extra = append(extra, jsonKV{Key: "colour_primaries_ICC_Description", Val: iccDescription})
 			stream.JSONRaw["extra"] = renderJSONObject(extra, false)
 		}
-		size -= int64(metadataBytes)
+		size = subtractAttachmentMetadataSize(size, metadataBytes)
 	} else if width, height, depth, gamma, ok := parsePNGAttachment(data); ok {
 		stream.Fields = append(stream.Fields, Field{Name: "Format", Value: "PNG"})
 		stream.JSON["Format_Compression"] = "Deflate"
@@ -83,12 +83,22 @@ func matroskaAttachmentImageStream(attachment matroskaAttachment) (Stream, bool)
 		if len(extra) > 0 {
 			stream.JSONRaw["extra"] = renderJSONObject(extra, false)
 		}
-		size -= int64(metadataBytes)
+		size = subtractAttachmentMetadataSize(size, metadataBytes)
 	} else {
 		return Stream{}, false
 	}
 	stream.JSON["StreamSize"] = strconv.FormatInt(size, 10)
 	return stream, true
+}
+
+// subtractAttachmentMetadataSize removes excluded metadata without allowing a
+// malformed declared attachment size to produce a negative stream size.
+func subtractAttachmentMetadataSize(size int64, metadataBytes int) int64 {
+	metadataSize := int64(metadataBytes)
+	if size <= metadataSize {
+		return 0
+	}
+	return size - metadataSize
 }
 
 // matroskaAttachmentImageMIME derives the MIME type from a recognized image
@@ -211,12 +221,13 @@ func parsePNGAttachment(data []byte) (width, height, depth int, gamma string, ok
 	return width, height, depth, gamma, ok
 }
 
-// parsePNGAttachmentMetadata identifies supported ICC data and returns the
-// textual-chunk bytes MediaInfo excludes from attached-image stream size.
+// parsePNGAttachmentMetadata identifies the first supported ICC profile before
+// IEND and returns the textual-chunk bytes MediaInfo excludes from image size.
 func parsePNGAttachmentMetadata(data []byte) (iccSpace, iccDescription string, metadataBytes int) {
 	if len(data) < 8 || !bytes.Equal(data[:8], []byte{0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A}) {
 		return "", "", 0
 	}
+	seenICCP := false
 	for pos := 8; pos+12 <= len(data); {
 		length := uint64(binary.BigEndian.Uint32(data[pos : pos+4]))
 		if length > uint64(len(data)-pos-12) {
@@ -226,9 +237,15 @@ func parsePNGAttachmentMetadata(data []byte) (iccSpace, iccDescription string, m
 		kind := string(data[pos+4 : pos+8])
 		payload := data[pos+8 : pos+8+chunkLen]
 		switch kind {
+		case "IEND":
+			return iccSpace, iccDescription, metadataBytes
 		case "iTXt", "tEXt", "zTXt":
 			metadataBytes += chunkLen + 12
 		case "iCCP":
+			if seenICCP {
+				break
+			}
+			seenICCP = true
 			separator := bytes.IndexByte(payload, 0)
 			if separator < 0 || separator+2 >= len(payload) || payload[separator+1] != 0 {
 				break

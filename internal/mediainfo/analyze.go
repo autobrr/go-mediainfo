@@ -110,6 +110,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 	info := ContainerInfo{}
 	streams := []Stream{}
 	matroskaGoGeneralStreamSize := ""
+	matroskaCanRetainGeneralStreamSize := false
 	switch format {
 	case "MPEG-4", "QuickTime":
 		if parsed, ok := ParseMP4(file, stat.Size()); ok {
@@ -498,6 +499,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 	case "Matroska":
 		if parsed, ok := ParseMatroskaWithOptions(file, stat.Size(), opts); ok {
 			info = parsed.Container
+			matroskaCanRetainGeneralStreamSize = len(parsed.attachments) == 0
 			general.JSON = map[string]string{}
 			var rawWritingApp string
 			var rawWritingLibrary string
@@ -659,9 +661,6 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			}
 			streamSizeSum := sumStreamSizes(streams, true)
 			setRemainingStreamSize(general.JSON, stat.Size(), streamSizeSum)
-			if len(parsed.attachments) == 0 {
-				matroskaGoGeneralStreamSize = general.JSON["StreamSize"]
-			}
 			overallModeField := overallBitRateModeForKind(streams, StreamVideo)
 			// Variable audio makes the complete payload variable even when video is CBR.
 			audioModeField := overallBitRateModeForKind(streams, StreamAudio)
@@ -754,13 +753,21 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 					if existingBps > 0 {
 						delta := math.Abs(float64(existingBps)-x264Bitrate) / x264Bitrate
 						constantTarget := strings.Contains(enc, "rc=2pass") || strings.Contains(enc, "rc=cbr")
-						if delta < 0.02 || constantTarget {
+						// Constant targets tolerate muxing overhead, but a larger mismatch
+						// identifies a trimmed or remuxed payload whose measured rate wins.
+						if delta < 0.02 || constantTarget && delta < 0.05 {
 							streams[i].Fields = setFieldValue(streams[i].Fields, "Bit rate", formatBitrate(x264Bitrate))
 							if streams[i].JSON == nil {
 								streams[i].JSON = map[string]string{}
 							}
 							streams[i].JSON["BitRate"] = strconv.FormatInt(int64(math.Round(x264Bitrate)), 10)
 							delete(streams[i].JSON, "BitRate_Nominal")
+						} else if constantTarget {
+							streams[i].Fields = setFieldValue(streams[i].Fields, "Nominal bit rate", formatBitrate(x264Bitrate))
+							if streams[i].JSON == nil {
+								streams[i].JSON = map[string]string{}
+							}
+							streams[i].JSON["BitRate_Nominal"] = strconv.FormatInt(int64(math.Round(x264Bitrate)), 10)
 						}
 					}
 				}
@@ -1844,6 +1851,11 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 	}
 	sortStreams(streams)
 	if format == "Matroska" {
+		if matroskaCanRetainGeneralStreamSize {
+			finalSizes := map[string]string{}
+			setRemainingStreamSize(finalSizes, stat.Size(), sumStreamSizes(streams, true))
+			matroskaGoGeneralStreamSize = finalSizes["StreamSize"]
+		}
 		restoreMatroskaGoJSONFields(&general, streams, matroskaGoGeneralStreamSize)
 	}
 	return Report{
