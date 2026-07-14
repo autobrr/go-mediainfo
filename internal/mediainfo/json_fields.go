@@ -35,6 +35,9 @@ func buildJSONMedia(report Report) jsonMediaOut {
 	return jsonMediaOut{Ref: report.Ref, Tracks: tracks}
 }
 
+// withMatroskaGoJSON returns a stream copy with staged Matroska extensions
+// merged into cloned JSON maps. Existing report fields take precedence, and
+// the source stream remains unchanged.
 func withMatroskaGoJSON(stream Stream) Stream {
 	if len(stream.mkvGoJSON) == 0 && len(stream.mkvGoJSONRaw) == 0 {
 		return stream

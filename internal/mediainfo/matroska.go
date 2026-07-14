@@ -2420,6 +2420,7 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64, durationPrec i
 	}, true
 }
 
+// setMatroskaGoJSON stages the first non-empty value for a Matroska JSON key.
 func setMatroskaGoJSON(stream *Stream, key, value string) {
 	if stream == nil || key == "" || value == "" {
 		return
@@ -2432,6 +2433,8 @@ func setMatroskaGoJSON(stream *Stream, key, value string) {
 	}
 }
 
+// matroskaGoChannelPositions returns the retained Go JSON speaker positions
+// for supported Matroska channel counts.
 func matroskaGoChannelPositions(channels uint64) string {
 	switch channels {
 	case 1:
@@ -2445,6 +2448,9 @@ func matroskaGoChannelPositions(channels uint64) string {
 	}
 }
 
+// matroskaGoFormatLevel extracts the first profile's level from a compound
+// stereoscopic profile. Single-profile levels remain represented by the
+// ordinary Format profile mapping.
 func matroskaGoFormatLevel(profile string) string {
 	if !strings.Contains(profile, " / ") {
 		return ""

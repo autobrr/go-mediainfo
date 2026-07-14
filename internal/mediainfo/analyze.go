@@ -1803,8 +1803,9 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 	}, nil
 }
 
-// restoreMatroskaGoJSONFields stages report-level Go extensions only after
-// MediaInfo-compatible calculations and text ordering are complete.
+// restoreMatroskaGoJSONFields stages General and first-Menu Go extensions only
+// after MediaInfo-compatible calculations and text ordering are complete. It
+// mutates private JSON state without changing shared report fields.
 func restoreMatroskaGoJSONFields(general *Stream, streams []Stream, generalStreamSize string) {
 	if general == nil {
 		return
@@ -1848,6 +1849,8 @@ func restoreMatroskaGoJSONFields(general *Stream, streams []Stream, generalStrea
 	}
 }
 
+// matroskaJSONFieldProvided reports whether ordinary JSON construction already
+// supplies key, preventing a staged Go extension from replacing parity output.
 func matroskaJSONFieldProvided(stream Stream, key string) bool {
 	if stream.JSON[key] != "" {
 		return true
