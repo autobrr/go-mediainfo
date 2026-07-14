@@ -2,6 +2,7 @@ package mediainfo
 
 import (
 	"fmt"
+	"maps"
 	"math"
 	"os"
 	"path/filepath"
@@ -17,11 +18,14 @@ type jsonKV struct {
 }
 
 func buildJSONMedia(report Report) jsonMediaOut {
+	jsonReport := report
+	jsonReport.General = withMatroskaGoJSON(report.General)
 	tracks := make([]jsonTrackOut, 0, len(report.Streams)+1)
-	tracks = append(tracks, jsonTrackOut{Fields: buildJSONGeneralFields(report)})
+	tracks = append(tracks, jsonTrackOut{Fields: buildJSONGeneralFields(jsonReport)})
 	containerFormat := findField(report.General.Fields, "Format")
 	sorted := orderTracks(report.Streams)
 	forEachStreamWithKindIndex(sorted, func(stream Stream, index, total, order int) {
+		stream = withMatroskaGoJSON(stream)
 		typeOrder := 0
 		if total > 1 {
 			typeOrder = index
@@ -29,6 +33,36 @@ func buildJSONMedia(report Report) jsonMediaOut {
 		tracks = append(tracks, jsonTrackOut{Fields: buildJSONStreamFields(stream, order, typeOrder, containerFormat)})
 	})
 	return jsonMediaOut{Ref: report.Ref, Tracks: tracks}
+}
+
+func withMatroskaGoJSON(stream Stream) Stream {
+	if len(stream.mkvGoJSON) == 0 && len(stream.mkvGoJSONRaw) == 0 {
+		return stream
+	}
+	stream.JSON = maps.Clone(stream.JSON)
+	if stream.JSON == nil {
+		stream.JSON = map[string]string{}
+	}
+	for key, value := range stream.mkvGoJSON {
+		if value != "" && !matroskaJSONFieldProvided(stream, key) {
+			stream.JSON[key] = value
+		}
+	}
+	stream.JSONRaw = maps.Clone(stream.JSONRaw)
+	if stream.JSONRaw == nil {
+		stream.JSONRaw = map[string]string{}
+	}
+	for key, value := range stream.mkvGoJSONRaw {
+		if value == "" {
+			continue
+		}
+		if key == "extra" {
+			stream.JSONRaw[key] = appendJSONExtraObject(stream.JSONRaw[key], value)
+		} else if stream.JSONRaw[key] == "" {
+			stream.JSONRaw[key] = value
+		}
+	}
+	return stream
 }
 
 func buildJSONGeneralFields(report Report) []jsonKV {

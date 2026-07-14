@@ -38,6 +38,10 @@ type Stream struct {
 	mkvHEVCX265Settings string
 	mkvTrackOffsetNs    int64
 	mkvStereoMode       uint64
+	// mkvGoJSON retains intentional Go-only JSON extensions until all
+	// MediaInfo-compatible report calculations have completed.
+	mkvGoJSON    map[string]string
+	mkvGoJSONRaw map[string]string
 }
 
 type Report struct {

@@ -107,6 +107,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 
 	info := ContainerInfo{}
 	streams := []Stream{}
+	matroskaGoGeneralStreamSize := ""
 	switch format {
 	case "MPEG-4", "QuickTime":
 		if parsed, ok := ParseMP4(file, stat.Size()); ok {
@@ -611,6 +612,9 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			general.JSON["IsStreamable"] = "Yes"
 			streamSizeSum := sumStreamSizes(streams, true)
 			setRemainingStreamSize(general.JSON, stat.Size(), streamSizeSum)
+			if len(parsed.attachments) == 0 {
+				matroskaGoGeneralStreamSize = general.JSON["StreamSize"]
+			}
 			overallModeField := overallBitRateModeForKind(streams, StreamVideo)
 			// Variable audio makes the complete payload variable even when video is CBR.
 			audioModeField := overallBitRateModeForKind(streams, StreamAudio)
@@ -662,6 +666,14 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 				addNominalBitrate: false,
 				addBitsPerPixel:   false,
 			})
+			goNominalBitRate := make([]bool, len(streams))
+			for i := range streams {
+				if streams[i].Kind != StreamVideo {
+					continue
+				}
+				goNominalBitRate[i] = findField(streams[i].Fields, "Bit rate") == "" &&
+					(streams[i].JSON == nil || streams[i].JSON["BitRate"] == "")
+			}
 			deriveMatroskaVideoBitRateAndSize(general.JSON, streams, stat.Size())
 			// MediaInfo prefers x264 settings for bitrate/VBV constraints when available.
 			for i := range streams {
@@ -677,6 +689,9 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 				}
 
 				x264Bitrate, x264HasBitrate := findX264Bitrate(enc)
+				if goNominalBitRate[i] && x264HasBitrate && x264Bitrate > 0 {
+					setMatroskaGoJSON(&streams[i], "BitRate_Nominal", strconv.FormatInt(int64(math.Round(x264Bitrate)), 10))
+				}
 				if x264HasBitrate && x264Bitrate > 0 {
 					// Match official mediainfo: when a container-derived bitrate exists, prefer x264's
 					// nominal bitrate if it's very close, and do not emit BitRate_Nominal.
@@ -712,6 +727,14 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 					streams[i].JSON["BitRate_Nominal"] = strconv.FormatInt(int64(math.Round(x264Bitrate)), 10)
 				}
 				// MediaInfo reports VBV constraints only when HRD signaling is enabled.
+				if !strings.Contains(enc, "nal_hrd=none") {
+					if maxKbps, ok := findX264VbvMaxrate(enc); ok && maxKbps > 0 {
+						setMatroskaGoJSON(&streams[i], "BitRate_Maximum", strconv.FormatInt(int64(math.Round(maxKbps*1000)), 10))
+					}
+					if bufKbps, ok := findX264VbvBufsize(enc); ok && bufKbps > 0 {
+						setMatroskaGoJSON(&streams[i], "BufferSize", strconv.FormatInt(int64(math.Round(bufKbps*1000)), 10))
+					}
+				}
 				hrdEnabled := strings.Contains(enc, "nal_hrd=vbr") || strings.Contains(enc, "nal_hrd=cbr")
 				if hrdEnabled {
 					if maxKbps, ok := findX264VbvMaxrate(enc); ok && maxKbps > 0 {
@@ -1770,11 +1793,79 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 		sortFields(streams[i].Kind, streams[i].Fields)
 	}
 	sortStreams(streams)
+	if format == "Matroska" {
+		restoreMatroskaGoJSONFields(&general, streams, matroskaGoGeneralStreamSize)
+	}
 	return Report{
 		Ref:     path,
 		General: general,
 		Streams: streams,
 	}, nil
+}
+
+// restoreMatroskaGoJSONFields stages report-level Go extensions only after
+// MediaInfo-compatible calculations and text ordering are complete.
+func restoreMatroskaGoJSONFields(general *Stream, streams []Stream, generalStreamSize string) {
+	if general == nil {
+		return
+	}
+	goVariable := false
+	for _, stream := range streams {
+		if stream.mkvGoJSON["BitRate_Mode"] == "VBR" {
+			goVariable = true
+		}
+	}
+	if general.mkvGoJSON == nil {
+		general.mkvGoJSON = map[string]string{}
+	}
+	if general.JSON["StreamSize"] == "" && generalStreamSize != "" {
+		general.mkvGoJSON["StreamSize"] = generalStreamSize
+	}
+	if general.JSON["OverallBitRate_Mode"] == "" && goVariable {
+		general.mkvGoJSON["OverallBitRate_Mode"] = "VBR"
+	}
+	if len(general.mkvGoJSON) == 0 {
+		general.mkvGoJSON = nil
+	}
+
+	firstMenu := -1
+	for i := range streams {
+		if streams[i].Kind != StreamMenu {
+			continue
+		}
+		if firstMenu < 0 {
+			firstMenu = i
+			continue
+		}
+		addition := streams[i].JSONRaw["extra"]
+		if addition == "" {
+			continue
+		}
+		if streams[firstMenu].mkvGoJSONRaw == nil {
+			streams[firstMenu].mkvGoJSONRaw = map[string]string{}
+		}
+		streams[firstMenu].mkvGoJSONRaw["extra"] = appendJSONExtraObject(streams[firstMenu].mkvGoJSONRaw["extra"], addition)
+	}
+}
+
+func matroskaJSONFieldProvided(stream Stream, key string) bool {
+	if stream.JSON[key] != "" {
+		return true
+	}
+	switch key {
+	case "ChannelLayout", "ChannelPositions":
+		return findField(stream.Fields, "Channel layout") != ""
+	case "Compression_Mode":
+		return findField(stream.Fields, "Compression mode") != ""
+	case "BitRate_Mode":
+		return findField(stream.Fields, "Bit rate mode") != ""
+	case "BitRate_Nominal":
+		return findField(stream.Fields, "Nominal bit rate") != ""
+	case "BitRate_Maximum":
+		return findField(stream.Fields, "Maximum bit rate") != ""
+	default:
+		return false
+	}
 }
 
 // deriveMatroskaVideoBitRateAndSize mirrors MediaInfo's Matroska fallback when
