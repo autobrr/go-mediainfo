@@ -196,6 +196,14 @@ func ParseMatroskaWithOptions(r io.ReaderAt, size int64, opts AnalyzeOptions) (M
 	if !ok {
 		return MatroskaInfo{}, false
 	}
+	if len(info.Tracks) == 0 && size > scanSize && info.SegmentOffset > 0 {
+		if seekPos, found := findMatroskaSeekPosition(buf, int(info.SegmentOffset), mkvIDTracks); found {
+			tracksOffset := info.SegmentOffset + int64(seekPos)
+			if tracks, parsed := scanMatroskaTracksFromFile(r, tracksOffset, size, info.Container.DurationSeconds, info.durationPrec); parsed {
+				info.Tracks = tracks
+			}
+		}
+	}
 	needsDolbyVisionProbe := false
 	for i := range info.Tracks {
 		if info.Tracks[i].Kind == StreamVideo && findField(info.Tracks[i].Fields, "Format") == "HEVC" {
@@ -275,6 +283,12 @@ func ParseMatroskaWithOptions(r io.ReaderAt, size int64, opts AnalyzeOptions) (M
 			if stream.Kind == StreamVideo && findField(stream.Fields, "Format") == "AVC" &&
 				(findField(stream.Fields, "Writing library") == "" || findField(stream.Fields, "Encoding settings") == "") {
 				needEncoders = true
+			}
+			if stream.Kind == StreamAudio && findField(stream.Fields, "Writing library") == "" {
+				switch findField(stream.Fields, "Format") {
+				case "AC-3", "E-AC-3", "FLAC", "Opus":
+					needEncoders = true
+				}
 			}
 		}
 		if (!matroskaHasCompleteTagStats(info.Tracks, info.tagStats) || needEncoders || needLangs || info.generalTags["ENCODER"] == "") && size > scanSize {
@@ -760,9 +774,9 @@ func parseMatroskaSeekHeadPositions(buf []byte, targetID uint64) []uint64 {
 			break
 		}
 		dataStart := pos + idLen + sizeLen
-		dataEnd := dataStart + int(size)
-		if size == unknownVintSize || dataEnd > len(buf) {
-			dataEnd = len(buf)
+		dataEnd := len(buf)
+		if size != unknownVintSize && size <= uint64(len(buf)-dataStart) {
+			dataEnd = dataStart + int(size)
 		}
 		if id == mkvIDSeek {
 			if seekID, seekPos, ok := parseMatroskaSeekEntry(buf[dataStart:dataEnd]); ok && seekID == targetID {
@@ -1315,6 +1329,14 @@ func formatMatroskaDateUTC(deltaNs int64) string {
 		value = value.Truncate(time.Second).Add(time.Second)
 	}
 	return value.Format("2006-01-02 15:04:05 UTC")
+}
+
+func formatMatroskaTagEncodedDate(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	return value + " UTC"
 }
 
 func parseMatroskaTracks(buf []byte, segmentDuration float64, durationPrec int) ([]Stream, bool) {
@@ -3077,9 +3099,9 @@ func matroskaScanForCRC(buf []byte, start int, end int) bool {
 			return false
 		}
 		dataStart := pos + idLen + sizeLen
-		dataEnd := dataStart + int(size)
-		if size == unknownVintSize || dataEnd > len(buf) {
-			dataEnd = len(buf)
+		dataEnd := len(buf)
+		if size != unknownVintSize && size <= uint64(len(buf)-dataStart) {
+			dataEnd = dataStart + int(size)
 		}
 		if id == mkvIDCRC32 {
 			return true
@@ -3096,8 +3118,9 @@ func matroskaScanForCRC(buf []byte, start int, end int) bool {
 
 func matroskaIsMasterID(id uint64) bool {
 	switch id {
-	case mkvIDSegment, mkvIDInfo, mkvIDTracks, mkvIDTags, mkvIDTag, mkvIDSimpleTag,
-		mkvIDTrackEntry, mkvIDTrackVideo, mkvIDTrackAudio, mkvIDColour, mkvIDCluster, mkvIDBlockGroup:
+	case mkvIDEBML, mkvIDSegment, mkvIDSeekHead, mkvIDSeek, mkvIDInfo, mkvIDTracks, mkvIDTags, mkvIDTag, mkvIDTagTargets, mkvIDSimpleTag,
+		mkvIDAttachments, mkvIDAttachedFile, mkvIDChapters, mkvIDEditionEntry, mkvIDChapterAtom, mkvIDChapterDisplay,
+		mkvIDTrackEntry, mkvIDTrackVideo, mkvIDTrackAudio, mkvIDColour, mkvIDMasteringMetadata, mkvIDCluster, mkvIDBlockGroup:
 		return true
 	default:
 		return false
@@ -3152,8 +3175,11 @@ func parseMatroskaTags(buf []byte, encodedDate string) (map[uint64]string, map[u
 			trackUID, tags, tagLanguage := parseMatroskaTag(buf[dataStart:dataEnd])
 			if trackUID == 0 {
 				for _, name := range []string{
-					"DESCRIPTION", "DATE", "DATE_RELEASED", "DATE_RECORDED", "TITLE", "GENRE", "ENCODED_BY", "SOURCE", "Source",
-					"ACTOR", "DIRECTOR", "SUBTITLE", "SUMMARY", "SHOW", "IMDB", "TMDB", "TVDB", "TVDB2", "MyAnimeList", "TVmaze", "Douban",
+					"DESCRIPTION", "DATE", "DATE_RELEASED", "DATE_RECORDED", "CREATION_TIME", "TITLE", "GENRE", "ENCODED_BY", "SOURCE", "Source",
+					"ARTIST", "ACTOR", "DIRECTOR", "PRODUCER", "PRODUCTION_STUDIO", "SCREENPLAY_BY", "WRITTEN_BY",
+					"COMMENT", "CONTENT_TYPE", "COPYRIGHT", "SYNOPSIS", "SUBTITLE", "SUMMARY", "SHOW",
+					"EPISODE_ID", "EPISODE_NUMBER", "SEASON_NUMBER", "Encoder",
+					"IMDB", "TMDB", "TVDB", "TVDB2", "MyAnimeList", "TVmaze", "Douban",
 				} {
 					if value := strings.TrimSpace(tags[name]); value != "" && generalTags[name] == "" {
 						generalTags[name] = value
@@ -3174,7 +3200,8 @@ func parseMatroskaTags(buf []byte, encodedDate string) (map[uint64]string, map[u
 					generalTags["ENCODER"] = encoder
 				}
 			}
-			if settings, ok := tags["ENCODER_SETTINGS"]; ok && settings != "" {
+			settings := firstNonEmpty(tags["ENCODER_SETTINGS"], tags["ENCODER_OPTIONS"])
+			if settings != "" {
 				key := trackUID
 				if key == 0 {
 					key = 0
@@ -3188,12 +3215,21 @@ func parseMatroskaTags(buf []byte, encodedDate string) (map[uint64]string, map[u
 					langsByTrackUID[trackUID] = tagLanguage
 				}
 				stats, hasStats := parseMatroskaTagStats(tags, encodedDate)
+				if creationTime := formatMatroskaTagEncodedDate(tags["CREATION_TIME"]); creationTime != "" {
+					stats.encodedDate = creationTime
+					stats.hasEncodedDate = true
+					hasStats = true
+				}
 				if vendorID := strings.TrimSpace(tags["VENDOR_ID"]); vendorID != "" {
 					stats.extras = append(stats.extras, jsonKV{Key: "VENDOR_ID", Val: vendorID})
 					hasStats = true
 				}
 				if comment := strings.TrimSpace(tags["COMMENT"]); comment != "" {
 					stats.extras = append(stats.extras, jsonKV{Key: "Comment", Val: comment})
+					hasStats = true
+				}
+				if encodedBy := strings.TrimSpace(tags["ENCODED_BY"]); encodedBy != "" {
+					stats.extras = append(stats.extras, jsonKV{Key: "EncodedBy", Val: encodedBy})
 					hasStats = true
 				}
 				if format := strings.TrimSpace(tags["FORMAT"]); format != "" {
@@ -3318,6 +3354,9 @@ func matroskaEncoderScore(value string) int {
 	}
 	if strings.HasPrefix(lower, "x264 - ") || strings.HasPrefix(lower, "x265 - ") {
 		score += 3
+	}
+	if strings.HasPrefix(lower, "lavf") {
+		score++
 	}
 	// Prefer codec encoder identifiers over muxer/toolchain names.
 	if strings.Contains(lower, "lavc") || strings.Contains(lower, "ffmpeg") {
@@ -3457,6 +3496,34 @@ func parseMatroskaAttachedFile(buf []byte) matroskaAttachment {
 		pos = dataEnd
 	}
 	return attachment
+}
+
+// scanMatroskaTracksFromFile reads a Tracks element resolved through SeekHead
+// when the element falls outside the initial bounded metadata window.
+func scanMatroskaTracksFromFile(r io.ReaderAt, offset int64, fileSize int64, segmentDuration float64, durationPrec int) ([]Stream, bool) {
+	if r == nil || offset <= 0 || fileSize <= offset {
+		return nil, false
+	}
+	sr := io.NewSectionReader(r, offset, fileSize-offset)
+	er := newEBMLReaderWithBufSize(sr, 256*1024)
+	start := er.pos
+	id, _, err := er.readVintID()
+	if err != nil || id != mkvIDTracks {
+		return nil, false
+	}
+	elemSize, _, err := er.readVintSize()
+	if err != nil || elemSize == unknownVintSize || elemSize > 32<<20 {
+		return nil, false
+	}
+	remaining := fileSize - offset - (er.pos - start)
+	if elemSize > uint64(remaining) {
+		return nil, false
+	}
+	payload, err := er.readN(int64(elemSize))
+	if err != nil {
+		return nil, false
+	}
+	return parseMatroskaTracks(payload, segmentDuration, durationPrec)
 }
 
 // scanMatroskaAttachmentsFromFile reads an Attachments element at offset while
@@ -3750,7 +3817,13 @@ func parseMatroskaSimpleTagTree(buf []byte, tags map[string]string, tagLanguage 
 	}
 	name = strings.TrimSpace(name)
 	if name != "" && value != "" {
-		if name == "ACTOR" || name == "GENRE" {
+		if name == "ENCODER" {
+			if current := tags[name]; current == "" {
+				tags[name] = value
+			} else {
+				tags[name] = preferMatroskaEncoder(current, value)
+			}
+		} else if name == "ACTOR" || name == "GENRE" {
 			tags[name] = value
 		} else if _, exists := tags[name]; !exists {
 			tags[name] = value
@@ -3782,8 +3855,6 @@ func parseMatroskaTagStats(tags map[string]string, encodedDate string) (matroska
 	trusted := true
 	if headerUTC != "" && statsUTC != "" {
 		trusted = statsUTC >= headerUTC
-	} else if headerUTC != "" && statsUTC == "" {
-		trusted = false
 	}
 	if !trusted {
 		extras := make([]jsonKV, 0, 5)
@@ -3811,7 +3882,10 @@ func parseMatroskaTagStats(tags map[string]string, encodedDate string) (matroska
 	}
 	out := matroskaTagStats{trusted: true, hasWritingDate: hasWritingDate}
 	for _, key := range list {
-		value := strings.TrimSpace(tags[key])
+		if key == "DURATION" {
+			out.expectsDuration = true
+		}
+		value := strings.TrimSpace(strings.TrimRight(tags[key], "\x00"))
 		if value == "" {
 			continue
 		}
@@ -3958,6 +4032,10 @@ func mergeMatroskaTagStats(dst *matroskaTagStats, src matroskaTagStats) {
 		dst.sourceID = src.sourceID
 		dst.hasSourceID = true
 	}
+	if src.hasEncodedDate {
+		dst.encodedDate = src.encodedDate
+		dst.hasEncodedDate = true
+	}
 	for _, extra := range src.extras {
 		seen := false
 		for _, existing := range dst.extras {
@@ -3984,6 +4062,9 @@ func mergeMatroskaTagStats(dst *matroskaTagStats, src matroskaTagStats) {
 		} else if dst.hasDuration && src.durationSeconds == dst.durationSeconds && src.durationPrec > dst.durationPrec {
 			dst.durationPrec = src.durationPrec
 		}
+	}
+	if src.expectsDuration {
+		dst.expectsDuration = true
 	}
 	if src.hasFrameCount {
 		if !dst.hasFrameCount || src.frameCount > dst.frameCount {
@@ -4016,18 +4097,18 @@ func applyMatroskaEncoders(streams []Stream, encodersByTrackUID map[uint64]strin
 	for i := range streams {
 		uid := streamTrackUID(streams[i])
 		enc := encodersByTrackUID[uid]
-		if enc == "" {
-			enc = encodersByTrackUID[0]
-		}
 		settings := settingsByTrackUID[uid]
-		if settings == "" {
-			settings = settingsByTrackUID[0]
-		}
 
 		if streams[i].Kind == StreamVideo {
+			if enc == "" {
+				enc = encodersByTrackUID[0]
+			}
+			if settings == "" {
+				settings = settingsByTrackUID[0]
+			}
 			lowerEnc := strings.ToLower(enc)
 			// Avoid tagging muxing apps as a codec encoder; keep this conservative.
-			isCodecEncoder := strings.Contains(lowerEnc, "x264") || strings.Contains(lowerEnc, "x265")
+			isCodecEncoder := strings.Contains(lowerEnc, "x264") || strings.Contains(lowerEnc, "x265") || strings.Contains(lowerEnc, "elemental h.264") || strings.Contains(lowerEnc, "avc coding")
 			if isCodecEncoder && enc != "" && findField(streams[i].Fields, "Writing library") == "" {
 				streams[i].Fields = appendFieldUnique(streams[i].Fields, Field{Name: "Writing library", Value: enc})
 			}
@@ -4035,7 +4116,7 @@ func applyMatroskaEncoders(streams []Stream, encodersByTrackUID map[uint64]strin
 				streams[i].Fields = appendFieldUnique(streams[i].Fields, Field{Name: "Encoding settings", Value: settings})
 			}
 		}
-		if streams[i].Kind == StreamAudio && enc != "" && (findField(streams[i].Fields, "Format") == "FLAC" || findField(streams[i].Fields, "Format") == "E-AC-3") {
+		if streams[i].Kind == StreamAudio && enc != "" && (findField(streams[i].Fields, "Format") == "FLAC" || findField(streams[i].Fields, "Format") == "AC-3" || findField(streams[i].Fields, "Format") == "E-AC-3") {
 			if findField(streams[i].Fields, "Writing library") != "" {
 				continue
 			}
@@ -4044,6 +4125,9 @@ func applyMatroskaEncoders(streams []Stream, encodersByTrackUID map[uint64]strin
 				streams[i].JSON = map[string]string{}
 			}
 			streams[i].JSON["Encoded_Library"] = enc
+			if findField(streams[i].Fields, "Format") == "AC-3" && strings.Contains(enc, "ac3_fixed") {
+				streams[i].JSON["BitDepth"] = "16"
+			}
 			if findField(streams[i].Fields, "Format") == "FLAC" && strings.HasPrefix(enc, "Lavc") {
 				delete(streams[i].JSON, "BitDepth_Detected")
 				channelParts := strings.Fields(findField(streams[i].Fields, "Channel(s)"))

@@ -119,14 +119,15 @@ func buildJSONStreamFields(stream Stream, order int, typeOrder int, containerFor
 	}
 	fields = append(fields, mapStreamFieldsToJSON(stream.Kind, stream.Fields)...)
 	fields = applyJSONExtras(fields, stream.JSON, stream.JSONRaw)
-	fields = normalizeContainerComputedJSON(stream.Kind, fields, containerFormat)
+	fields = normalizeContainerComputedJSON(stream.Kind, fields, containerFormat, stream.JSONPreserveDisplayAR)
 	if !stream.JSONSkipComputed {
 		fields = append(fields, buildJSONComputedFields(stream.Kind, fields, containerFormat, stream.JSONSkipFrameRateRatio)...)
 	}
 	return sortJSONFields(stream.Kind, fields)
 }
 
-func normalizeContainerComputedJSON(kind StreamKind, fields []jsonKV, containerFormat string) []jsonKV {
+func normalizeContainerComputedJSON(kind StreamKind, fields []jsonKV, containerFormat string, preserveDisplayAspect ...bool) []jsonKV {
+	preserveMatroskaDisplayAspect := len(preserveDisplayAspect) > 0 && preserveDisplayAspect[0]
 	if kind == StreamVideo && strings.EqualFold(containerFormat, "Matroska") {
 		width, _ := strconv.ParseFloat(jsonFieldValue(fields, "Width"), 64)
 		height, _ := strconv.ParseFloat(jsonFieldValue(fields, "Height"), 64)
@@ -140,17 +141,26 @@ func normalizeContainerComputedJSON(kind StreamKind, fields []jsonKV, containerF
 			preserveActiveFormatRatio := jsonFieldValue(fields, "ActiveFormatDescription") != ""
 			displayAspect, _ := strconv.ParseFloat(jsonFieldValue(fields, "DisplayAspectRatio"), 64)
 			preserveContainerRatio := jsonFieldValue(fields, "Format") == "HEVC" && displayAspect > 0 && math.Abs(displayAspect-width/height) >= 0.003
-			if preserveActiveFormatRatio || preserveContainerRatio {
+			if preserveMatroskaDisplayAspect || preserveActiveFormatRatio || preserveContainerRatio && math.Abs(pixelAspect-1) < 0.0005 {
+				return fields
+			}
+			if isAVCOrHEVC && math.Abs(pixelAspect-1) < 0.005 {
+				fields = setJSONField(fields, "PixelAspectRatio", "1.000")
+				fields = setJSONField(fields, "DisplayAspectRatio", formatJSONFloat(width/height))
+				return fields
+			}
+			computedDisplayAspect := (width / height) * pixelAspect
+			if displayAspect > 0 && math.Abs(displayAspect-computedDisplayAspect) < 0.001 {
+				return fields
+			}
+			if preserveContainerRatio {
 				return fields
 			}
 			if jsonFieldValue(fields, "Format") == "MPEG Video" && width == 720 && height == 576 && math.Abs(pixelAspect-1.067) < 0.0005 {
 				fields = setJSONField(fields, "DisplayAspectRatio", "1.333")
 				return fields
 			}
-			if isAVCOrHEVC && math.Abs(pixelAspect-1) < 0.005 {
-				fields = setJSONField(fields, "PixelAspectRatio", "1.000")
-				fields = setJSONField(fields, "DisplayAspectRatio", formatJSONFloat(width/height))
-			} else if pixelAspect > 0 {
+			if pixelAspect > 0 {
 				fields = setJSONField(fields, "DisplayAspectRatio", formatJSONFloat((width/height)*pixelAspect))
 			}
 		}

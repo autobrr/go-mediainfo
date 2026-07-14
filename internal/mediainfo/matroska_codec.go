@@ -48,6 +48,8 @@ func mapMatroskaCodecID(codecID string, trackType uint64) (StreamKind, string) {
 		return StreamText, "SSA"
 	case "S_TEXT/WEBVTT":
 		return StreamText, "S_TEXT/WEBVTT"
+	case "D_WEBVTT/SUBTITLES":
+		return StreamText, "D_WEBVTT/SUBTITLES"
 	case "S_VOBSUB":
 		return StreamText, "VobSub"
 	case "S_HDMV/PGS":

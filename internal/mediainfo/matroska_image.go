@@ -2,8 +2,11 @@ package mediainfo
 
 import (
 	"bytes"
+	"compress/zlib"
 	"encoding/binary"
 	"fmt"
+	"io"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -11,9 +14,13 @@ import (
 // matroskaAttachmentImageStream converts a JPEG or PNG attachment into the
 // Image stream fields emitted by MediaInfo for Matroska cover art.
 func matroskaAttachmentImageStream(attachment matroskaAttachment) (Stream, bool) {
+	jsonFields := map[string]string{"MuxingMode": "Attachment"}
+	if isMatroskaCoverAttachment(attachment.name) {
+		jsonFields["Type"] = "Cover"
+	}
 	stream := Stream{
 		Kind:                StreamImage,
-		JSON:                map[string]string{"Type": "Cover", "MuxingMode": "Attachment"},
+		JSON:                jsonFields,
 		JSONRaw:             map[string]string{},
 		JSONSkipStreamOrder: true,
 		JSONSkipComputed:    true,
@@ -57,14 +64,38 @@ func matroskaAttachmentImageStream(attachment matroskaAttachment) (Stream, bool)
 		stream.JSON["ColorSpace"] = "RGB"
 		stream.JSON["BitDepth"] = strconv.Itoa(depth)
 		stream.JSON["Compression_Mode"] = "Lossless"
+		extra := []jsonKV{}
 		if gamma != "" {
-			stream.JSONRaw["extra"] = renderJSONObject([]jsonKV{{Key: "Gamma", Val: gamma}}, false)
+			extra = append(extra, jsonKV{Key: "Gamma", Val: gamma})
 		}
+		iccSpace, iccDescription, metadataBytes := parsePNGAttachmentMetadata(data)
+		if iccDescription != "" {
+			stream.JSON["colour_description_present"] = "Yes"
+			stream.JSON["colour_range"] = "Full"
+			stream.JSON["colour_primaries"] = "BT.709"
+			stream.JSON["transfer_characteristics"] = "sRGB/sYCC"
+			stream.JSON["matrix_coefficients"] = "Identity"
+			if iccSpace != "" {
+				extra = append(extra, jsonKV{Key: "ColorSpace_ICC", Val: iccSpace})
+			}
+			extra = append(extra, jsonKV{Key: "colour_primaries_ICC_Description", Val: iccDescription})
+		}
+		if len(extra) > 0 {
+			stream.JSONRaw["extra"] = renderJSONObject(extra, false)
+		}
+		size -= int64(metadataBytes)
 	} else {
 		return Stream{}, false
 	}
 	stream.JSON["StreamSize"] = strconv.FormatInt(size, 10)
 	return stream, true
+}
+
+// isMatroskaCoverAttachment recognizes the filename conventions MediaInfo uses
+// to promote an attached image to General cover metadata.
+func isMatroskaCoverAttachment(name string) bool {
+	stem := strings.ToLower(strings.TrimSuffix(filepath.Base(name), filepath.Ext(name)))
+	return stem == "cover" || strings.HasPrefix(stem, "cover_") || strings.HasPrefix(stem, "cover ") || strings.HasPrefix(stem, "small_cover")
 }
 
 // parseJPEGAttachment reads dimensions, sample depth, chroma sampling, known
@@ -166,4 +197,42 @@ func parsePNGAttachment(data []byte) (width, height, depth int, gamma string, ok
 		pos += 12 + chunkLen
 	}
 	return width, height, depth, gamma, ok
+}
+
+// parsePNGAttachmentMetadata identifies supported ICC data and returns the
+// textual-chunk bytes MediaInfo excludes from attached-image stream size.
+func parsePNGAttachmentMetadata(data []byte) (iccSpace, iccDescription string, metadataBytes int) {
+	if len(data) < 8 || !bytes.Equal(data[:8], []byte{0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A}) {
+		return "", "", 0
+	}
+	for pos := 8; pos+12 <= len(data); {
+		length := uint64(binary.BigEndian.Uint32(data[pos : pos+4]))
+		if length > uint64(len(data)-pos-12) {
+			break
+		}
+		chunkLen := int(length)
+		kind := string(data[pos+4 : pos+8])
+		payload := data[pos+8 : pos+8+chunkLen]
+		switch kind {
+		case "iTXt", "tEXt", "zTXt":
+			metadataBytes += chunkLen + 12
+		case "iCCP":
+			separator := bytes.IndexByte(payload, 0)
+			if separator < 0 || separator+2 >= len(payload) || payload[separator+1] != 0 {
+				break
+			}
+			reader, err := zlib.NewReader(bytes.NewReader(payload[separator+2:]))
+			if err != nil {
+				break
+			}
+			profile, readErr := io.ReadAll(io.LimitReader(reader, (4<<20)+1))
+			closeErr := reader.Close()
+			if readErr == nil && closeErr == nil && len(profile) <= 4<<20 && bytes.Contains(profile, []byte("sRGB IEC61966-2.1")) {
+				iccSpace = "RGB"
+				iccDescription = "sRGB IEC61966-2.1"
+			}
+		}
+		pos += 12 + chunkLen
+	}
+	return iccSpace, iccDescription, metadataBytes
 }

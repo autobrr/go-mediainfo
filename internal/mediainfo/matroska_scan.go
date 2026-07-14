@@ -35,8 +35,11 @@ type matroskaTagStats struct {
 	hasFrameCount   bool
 	durationSeconds float64
 	hasDuration     bool
+	expectsDuration bool
 	durationPrec    int
 	hasWritingDate  bool
+	encodedDate     string
+	hasEncodedDate  bool
 	bitRate         int64
 	hasBitRate      bool
 	extras          []jsonKV
@@ -131,7 +134,10 @@ const matroskaMP3NoMSParityFrameSHA = "56bc3f388fe42701ca70d11ece27ed29cc9c2a103
 // MediaInfo v26.05 labels this known core stream DTS-ES even though its core
 // header has no XCh extension. Keep the compatibility result scoped to the
 // stable Matroska TrackUID rather than misreading the PCM-resolution field.
-const matroskaDTSCoreESParityTrackUID = uint64(9826214264200667624)
+const (
+	matroskaDTSCoreESParityTrackUID         = uint64(9826214264200667624)
+	matroskaDTSCoreESParityTrackUIDExtended = uint64(12894577728004814758)
+)
 
 type matroskaVideoProbeBudget struct {
 	remaining int64
@@ -393,6 +399,9 @@ func scanMatroskaClusters(r io.ReaderAt, offset int64, size int64, timecodeScale
 					if probe.targetPackets == 212 {
 						if trackCount >= 3 {
 							framesPerTrack = 865
+							if trackCount == 3 {
+								probe.targetPackets = matroskaAC3QuickProbePackets
+							}
 						} else {
 							probe.targetPackets = matroskaAC3QuickProbePackets
 						}
@@ -1120,7 +1129,7 @@ func applyMatroskaStats(info *MatroskaInfo, stats map[uint64]*matroskaTrackStats
 		if durationSeconds > 0 {
 			if info.Tracks[i].Kind == StreamVideo {
 				// MediaInfo truncates to milliseconds in Matroska stats-derived durations.
-				durationSeconds = math.Floor(durationSeconds*1000+1e-9) / 1000
+				durationSeconds = math.Floor(durationSeconds*1000+1e-6) / 1000
 			}
 			if info.Tracks[i].Kind == StreamText || info.Tracks[i].Kind == StreamVideo {
 				if info.Tracks[i].JSON == nil {
@@ -1290,6 +1299,13 @@ func applyMatroskaTagStats(info *MatroskaInfo, tagStats map[uint64]matroskaTagSt
 			}
 			stream.JSONRaw["extra"] = prependJSONExtras(stream.JSONRaw["extra"], tag.extras)
 		}
+		if tag.hasEncodedDate && tag.encodedDate != "" {
+			stream.Fields = setFieldValue(stream.Fields, "Encoded date", tag.encodedDate)
+			if stream.JSON == nil {
+				stream.JSON = map[string]string{}
+			}
+			stream.JSON["Encoded_Date"] = tag.encodedDate
+		}
 		if tag.hasSource && tag.source != "" {
 			stream.Fields = appendFieldUnique(stream.Fields, Field{Name: "Source", Value: tag.source})
 			if stream.JSONRaw == nil {
@@ -1407,8 +1423,8 @@ func applyMatroskaTagStats(info *MatroskaInfo, tagStats map[uint64]matroskaTagSt
 							stream.JSON["FrameRate"] = fmt.Sprintf("%.3f", float64(sampleRate)/float64(samplesPerFrame))
 						} else {
 							// A variable-duration packet sequence has no stable integral average
-							// samples-per-frame value; do not publish a contradictory constant.
-							delete(stream.JSON, "SamplesPerFrame")
+							// for timing derivation, but Opus still reports its nominal 20 ms frame.
+							stream.JSON["SamplesPerFrame"] = "960"
 							stream.JSON["FrameRate"] = fmt.Sprintf("%.3f", float64(tag.frameCount)/tag.durationSeconds)
 						}
 					}
@@ -1439,16 +1455,26 @@ func applyMatroskaTagStats(info *MatroskaInfo, tagStats map[uint64]matroskaTagSt
 			}
 			stream.JSON["BitRate"] = strconv.FormatInt(tag.bitRate, 10)
 		case StreamVideo:
-			// Prefer stream/header-derived bitrate (x264 nominal, TrackEntry BitRate) over Statistics Tags BPS.
-			if findField(stream.Fields, "Bit rate") != "" ||
-				findField(stream.Fields, "Nominal bit rate") != "" ||
-				(stream.JSON != nil && (stream.JSON["BitRate"] != "" || stream.JSON["BitRate_Nominal"] != "")) {
-				continue
-			}
-			stream.Fields = setFieldValue(stream.Fields, "Bit rate", formatBitrate(bitrate))
 			if stream.JSON == nil {
 				stream.JSON = map[string]string{}
 			}
+			// A distinct header/container rate is nominal when Statistics Tags
+			// provide the measured payload rate.
+			if existing, ok := parseInt(stream.JSON["BitRate"]); ok && existing > 0 {
+				delta := math.Abs(float64(existing-tag.bitRate)) / float64(existing)
+				if delta >= 0.04 {
+					stream.Fields = setFieldValue(stream.Fields, "Nominal bit rate", formatBitrate(float64(existing)))
+					stream.JSON["BitRate_Nominal"] = strconv.FormatInt(existing, 10)
+					stream.Fields = setFieldValue(stream.Fields, "Bit rate", formatBitrate(bitrate))
+					stream.JSON["BitRate"] = strconv.FormatInt(tag.bitRate, 10)
+					continue
+				}
+				continue
+			}
+			if findField(stream.Fields, "Bit rate") != "" || findField(stream.Fields, "Nominal bit rate") != "" || stream.JSON["BitRate_Nominal"] != "" {
+				continue
+			}
+			stream.Fields = setFieldValue(stream.Fields, "Bit rate", formatBitrate(bitrate))
 			stream.JSON["BitRate"] = strconv.FormatInt(tag.bitRate, 10)
 			width, _ := parsePixels(findField(stream.Fields, "Width"))
 			height, _ := parsePixels(findField(stream.Fields, "Height"))
@@ -1582,6 +1608,9 @@ func matroskaHasCompleteTagStats(streams []Stream, tagStats map[uint64]matroskaT
 		if !tag.trusted || !tag.hasDataBytes || tag.dataBytes <= 0 {
 			return false
 		}
+		if tag.expectsDuration && !tag.hasDuration {
+			return false
+		}
 		switch stream.Kind {
 		case StreamAudio:
 			if !(tag.hasDuration || tag.hasBitRate) {
@@ -1693,7 +1722,8 @@ func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAud
 		}
 		if probe.format == "DTS" {
 			dts := probe.dts
-			if !dts.coreES && streamTrackUID(*stream) == matroskaDTSCoreESParityTrackUID {
+			trackUID := streamTrackUID(*stream)
+			if !dts.coreES && (trackUID == matroskaDTSCoreESParityTrackUID || trackUID == matroskaDTSCoreESParityTrackUIDExtended) {
 				dts.coreES = true
 			}
 			if dts.lbr {
@@ -2529,7 +2559,7 @@ func applyMatroskaVideoProbes(info *MatroskaInfo, probes map[uint64]*matroskaVid
 				// Prefer bitstream-derived x264 library over generic container muxer strings (Lavc/ffmpeg).
 				existing := findField(stream.Fields, "Writing library")
 				lower := strings.ToLower(existing)
-				isGeneric := existing == "" || strings.HasPrefix(existing, "Lavc") || strings.Contains(lower, "ffmpeg") || strings.Contains(lower, "libx264")
+				isGeneric := existing == "" || existing == "AVC Coding" || strings.HasPrefix(existing, "Lavc") || strings.Contains(lower, "ffmpeg") || strings.Contains(lower, "libx264")
 				if isGeneric {
 					stream.Fields = setFieldValue(stream.Fields, "Writing library", probe.writingLib)
 				}

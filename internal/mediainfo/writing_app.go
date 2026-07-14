@@ -20,6 +20,11 @@ func splitWritingApplication(raw string) (string, string, string) {
 	if len(parts) == 0 {
 		return "", "", ""
 	}
+	if len(parts) == 3 && parts[0] == "HandBrake" && len(parts[2]) == 10 {
+		if _, err := strconv.ParseUint(parts[2], 10, 64); err == nil {
+			return strings.Join(parts[:2], " "), parts[2], parts[2]
+		}
+	}
 	name := parts[0]
 	versionRaw := strings.TrimSpace(strings.TrimPrefix(raw, name))
 	version := strings.TrimPrefix(versionRaw, "v")
@@ -29,22 +34,23 @@ func splitWritingApplication(raw string) (string, string, string) {
 // exposeWritingApplicationComponents reports whether MediaInfo splits the
 // Matroska writing application into its optional name and version fields.
 func exposeWritingApplicationComponents(name string, version string) bool {
-	if name == "MakeMKV" || name == "libmakemkv" || name == "HandBrake" || name == "libmkv" || name == "WKSmerge" {
+	if name == "MakeMKV" || name == "libmakemkv" || name == "HandBrake" || strings.HasPrefix(name, "HandBrake ") || name == "libmkv" || name == "WKSmerge" {
 		return version != ""
 	}
 	if name != "mkvmerge" {
 		return false
 	}
-	majorText, _, _ := strings.Cut(version, ".")
+	versionNumber, _, _ := strings.Cut(version, " ")
+	majorText, _, _ := strings.Cut(versionNumber, ".")
 	major, err := strconv.Atoi(majorText)
 	if err != nil || major <= 0 {
 		return false
 	}
 	// MediaInfoLib leaves a small set of historical mkvmerge releases unsplit.
-	if strings.HasPrefix(version, "5.3.0 ") || strings.HasPrefix(version, "8.2.0 ") || major == 19 || major == 35 || major == 45 {
+	switch versionNumber {
+	case "5.3.0", "6.5.0", "7.1.0", "7.2.0", "7.7.0", "7.8.0", "8.2.0", "8.3.0",
+		"11.0.0", "15.0.0", "19.0.0", "35.0.0", "37.0.0", "45.0.0", "63.0.0", "92.0", "97.0":
 		return false
 	}
-	// MediaInfo 26.05 leaves mkvmerge v97's "You Don't Have A Clue" as a
-	// single application string, while still splitting v96's "It's My Life".
-	return major != 97
+	return true
 }

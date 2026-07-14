@@ -24,8 +24,11 @@ type Stream struct {
 	JSONSkipStreamOrder    bool
 	JSONSkipComputed       bool
 	JSONSkipFrameRateRatio bool
-	eac3Dec3               eac3Dec3Info
-	nalLengthSize          int
+	// JSONPreserveDisplayAR keeps an explicit Matroska display ratio from being
+	// replaced by the shared width, height, and pixel-ratio normalization.
+	JSONPreserveDisplayAR bool
+	eac3Dec3              eac3Dec3Info
+	nalLengthSize         int
 	// mkvH264SPS retains CodecPrivate timing metadata needed to decode frame SEI.
 	mkvH264SPS          h264SPSInfo
 	mkvHeaderStripBytes []byte

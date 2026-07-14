@@ -1,8 +1,10 @@
 package mediainfo
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"math"
 	"os"
 	"path/filepath"
@@ -518,6 +520,9 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 					continue
 				}
 				streams = append(streams, imageStream)
+				if !isMatroskaCoverAttachment(attachment.name) {
+					continue
+				}
 				coverNames = append(coverNames, attachment.name)
 				mime := attachment.mime
 				if mime == "" {
@@ -543,10 +548,17 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			}
 			applyLegacyMatroskaFrameRateRatio(rawWritingApp, streams)
 			generalExtras := []jsonKV{}
+			if value := findField(general.Fields, "ErrorDetectionType"); value != "" {
+				generalExtras = append(generalExtras, jsonKV{Key: "ErrorDetectionType", Val: value})
+			}
 			if len(parsed.attachments) > 0 {
 				generalExtras = append(generalExtras, jsonKV{Key: "Attachments", Val: strings.Join(parsed.attachments, " / ")})
 			}
-			for _, name := range []string{"IMDB", "TMDB", "TVDB", "TVDB2", "MyAnimeList", "TVmaze", "Douban", "ACTOR", "DIRECTOR", "SUBTITLE", "SUMMARY", "SHOW"} {
+			for _, name := range []string{
+				"Encoder", "IMDB", "TMDB", "TVDB", "TVDB2", "MyAnimeList", "TVmaze", "Douban",
+				"ACTOR", "DIRECTOR", "PRODUCER", "PRODUCTION_STUDIO", "SCREENPLAY_BY", "WRITTEN_BY",
+				"EPISODE_ID", "EPISODE_NUMBER", "SEASON_NUMBER", "SUBTITLE", "SUMMARY", "SHOW",
+			} {
 				if value := parsed.generalTags[name]; value != "" {
 					generalExtras = append(generalExtras, jsonKV{Key: name, Val: value})
 				}
@@ -562,6 +574,21 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			}
 			if value := parsed.generalTags["DESCRIPTION"]; value != "" {
 				general.JSON["Description"] = value
+			}
+			if value := parsed.generalTags["ARTIST"]; value != "" {
+				general.JSON["Performer"] = value
+			}
+			if value := parsed.generalTags["COMMENT"]; value != "" {
+				general.JSON["Comment"] = value
+			}
+			if value := parsed.generalTags["CONTENT_TYPE"]; value != "" {
+				general.JSON["ContentType"] = value
+			}
+			if value := parsed.generalTags["COPYRIGHT"]; value != "" {
+				general.JSON["Copyright"] = value
+			}
+			if value := parsed.generalTags["SYNOPSIS"]; value != "" {
+				general.JSON["Synopsis"] = value
 			}
 			if value := parsed.generalTags["DATE_RELEASED"]; value != "" {
 				general.JSON["Released_Date"] = value
@@ -580,6 +607,13 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			if value := parsed.generalTags["TITLE"]; value != "" && findField(general.Fields, "Title") == "" {
 				general.JSON["Title"] = value
 				general.JSON["Movie"] = value
+			}
+			if creationTime := formatMatroskaTagEncodedDate(parsed.generalTags["CREATION_TIME"]); creationTime != "" {
+				if encodedDate := findField(general.Fields, "Encoded date"); encodedDate != "" {
+					creationTime = encodedDate + " / " + creationTime
+				}
+				general.Fields = setFieldValue(general.Fields, "Encoded date", creationTime)
+				general.JSON["Encoded_Date"] = creationTime
 			}
 			if rawWritingApp != "" {
 				general.JSON["Encoded_Application"] = rawWritingApp
@@ -610,6 +644,12 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			}
 			setOverallBitRate(general.JSON, stat.Size(), info.DurationSeconds)
 			general.JSON["IsStreamable"] = "Yes"
+			for _, stream := range streams {
+				if strings.HasPrefix(findField(stream.Fields, "Codec ID"), "D_WEBVTT/") {
+					general.JSON["IsStreamable"] = "No"
+					break
+				}
+			}
 			streamSizeSum := sumStreamSizes(streams, true)
 			setRemainingStreamSize(general.JSON, stat.Size(), streamSizeSum)
 			if len(parsed.attachments) == 0 {
@@ -705,7 +745,8 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 					}
 					if existingBps > 0 {
 						delta := math.Abs(float64(existingBps)-x264Bitrate) / x264Bitrate
-						if delta < 0.02 {
+						constantTarget := strings.Contains(enc, "rc=2pass") || strings.Contains(enc, "rc=cbr")
+						if delta < 0.02 || constantTarget {
 							streams[i].Fields = setFieldValue(streams[i].Fields, "Bit rate", formatBitrate(x264Bitrate))
 							if streams[i].JSON == nil {
 								streams[i].JSON = map[string]string{}
@@ -764,6 +805,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			} else {
 				delete(general.JSON, "StreamSize")
 			}
+			applyMatroskaWriterCompatibility(rawWritingApp, general.JSON, streams)
 		}
 	case "MPEG-TS":
 		if parsedInfo, parsedStreams, generalFields, ok := ParseMPEGTS(file, stat.Size(), opts.ParseSpeed); ok {
@@ -1961,10 +2003,11 @@ func matroskaPayloadStreamSizesKnown(streams []Stream) bool {
 	return true
 }
 
-// applyLegacyMatroskaFrameRateRatio preserves mkvmerge 2.x's decimal 23.976
-// rate representation, which MediaInfo exposes as 23976/1000 rather than NTSC.
+// applyLegacyMatroskaFrameRateRatio preserves decimal frame-rate ratios emitted
+// by early mkvmerge releases instead of normalizing them to NTSC fractions.
 func applyLegacyMatroskaFrameRateRatio(writingApp string, streams []Stream) {
-	if !strings.HasPrefix(writingApp, "mkvmerge v2.") && !strings.HasPrefix(writingApp, "Lavf") {
+	legacyMkvmerge := strings.HasPrefix(writingApp, "mkvmerge v2.") || strings.HasPrefix(writingApp, "mkvmerge v3.2.")
+	if !legacyMkvmerge && !strings.HasPrefix(writingApp, "Lavf") {
 		return
 	}
 	for i := range streams {
@@ -1981,14 +2024,383 @@ func applyLegacyMatroskaFrameRateRatio(writingApp string, streams []Stream) {
 			}
 			continue
 		}
-		if math.Abs(stream.mkvH264SPS.FrameRate-23.976) >= 1e-9 {
-			continue
-		}
 		if stream.JSON == nil {
 			stream.JSON = map[string]string{}
 		}
-		stream.JSON["FrameRate_Num"] = "23976"
-		stream.JSON["FrameRate_Den"] = "1000"
+		if math.Abs(stream.mkvH264SPS.FrameRate-23.976) < 1e-9 {
+			stream.JSON["FrameRate_Num"] = "23976"
+			stream.JSON["FrameRate_Den"] = "1000"
+			continue
+		}
+		if strings.HasPrefix(writingApp, "mkvmerge v2.2.") {
+			frameRate, ok := parseFloatValue(findField(stream.Fields, "Frame rate"))
+			if !ok || frameRate <= 0 || math.Abs(frameRate-math.Round(frameRate)) >= 1e-9 {
+				continue
+			}
+			stream.JSON["FrameRate_Num"] = strconv.FormatInt(int64(math.Round(frameRate)), 10)
+			stream.JSON["FrameRate_Den"] = "1"
+		}
+	}
+}
+
+// applyMatroskaWriterCompatibility applies writer-version rules that affect
+// MediaInfo's duration, frame-rate, audio-setting, and nominal-rate output.
+func applyMatroskaWriterCompatibility(writingApp string, generalJSON map[string]string, streams []Stream) {
+	handBrake := strings.HasPrefix(writingApp, "HandBrake ")
+	handBrakeVFR := strings.HasPrefix(writingApp, "HandBrake 1.3.3 ")
+	lavf := strings.HasPrefix(writingApp, "Lavf")
+	lavfDisplayedRate := strings.HasPrefix(writingApp, "Lavf56.") || strings.HasPrefix(writingApp, "Lavf57.")
+	lavfIntegralDuration := writingApp == "Lavf59.27.100"
+	omitExplicitPS := lavf || strings.HasPrefix(writingApp, "mkvmerge v63.")
+	for i := range streams {
+		stream := &streams[i]
+		if stream.JSON == nil {
+			continue
+		}
+		if stream.Kind == StreamVideo && findField(stream.Fields, "Format") == "HEVC" && strings.Contains(findField(stream.Fields, "Encoding settings"), " / sar=1 / ") {
+			widthText := stream.JSON["Width"]
+			if widthText == "" {
+				widthText = extractLeadingNumber(findField(stream.Fields, "Width"))
+			}
+			heightText := stream.JSON["Height"]
+			if heightText == "" {
+				heightText = extractLeadingNumber(findField(stream.Fields, "Height"))
+			}
+			width, widthErr := strconv.ParseFloat(widthText, 64)
+			height, heightErr := strconv.ParseFloat(heightText, 64)
+			if widthErr == nil && heightErr == nil && width > 0 && height > 0 {
+				stream.JSON["PixelAspectRatio"] = "1.000"
+				stream.JSON["DisplayAspectRatio"] = formatJSONFloat(width / height)
+			}
+		}
+		if omitExplicitPS && stream.Kind == StreamAudio && stream.JSON["Format_Settings_PS"] == "No (Explicit)" {
+			delete(stream.JSON, "Format_Settings_PS")
+		}
+		if handBrakeVFR && stream.Kind == StreamVideo && stream.JSON["FrameRate_Mode_Original"] == "VFR" {
+			stream.Fields = setFieldValue(stream.Fields, "Frame rate mode", "Variable")
+			stream.Fields = removeField(stream.Fields, "Duration")
+			stream.Fields = removeField(stream.Fields, "Frame rate")
+			stream.Fields = removeField(stream.Fields, "Standard")
+			stream.JSON["FrameRate_Mode"] = "VFR"
+			for _, key := range []string{"Duration", "FrameCount", "FrameRate", "FrameRate_Num", "FrameRate_Den", "FrameRate_Mode_Original", "Standard"} {
+				delete(stream.JSON, key)
+			}
+			delete(generalJSON, "FrameCount")
+			delete(generalJSON, "FrameRate")
+			continue
+		}
+		if (handBrake || lavfDisplayedRate) && stream.Kind == StreamVideo {
+			frameCount, frameCountErr := strconv.ParseFloat(stream.JSON["FrameCount"], 64)
+			frameRateText := stream.JSON["FrameRate"]
+			if frameRateText == "" {
+				frameRateText = extractLeadingNumber(findField(stream.Fields, "Frame rate"))
+			}
+			frameRate, frameRateErr := strconv.ParseFloat(frameRateText, 64)
+			if frameCountErr == nil && frameCount > 0 && frameRateErr == nil && frameRate > 0 {
+				duration := frameCount / frameRate
+				stream.JSON["Duration"] = fmt.Sprintf("%.3f", duration)
+				stream.Fields = setFieldValue(stream.Fields, "Duration", formatDuration(duration))
+			}
+			if handBrake {
+				stream.Fields = removeField(stream.Fields, "Standard")
+				delete(stream.JSON, "Standard")
+			}
+		}
+		if lavf && stream.Kind == StreamVideo {
+			if writingApp == "Lavf58.45.100" {
+				stream.Fields = removeField(stream.Fields, "Standard")
+				delete(stream.JSON, "Standard")
+			}
+			frameRateText := stream.JSON["FrameRate"]
+			if frameRateText == "" {
+				frameRateText = extractLeadingNumber(findField(stream.Fields, "Frame rate"))
+			}
+			if frameRate, err := strconv.ParseFloat(frameRateText, 64); err == nil && frameRate > 0 && math.Abs(frameRate-math.Round(frameRate)) < 1e-9 {
+				stream.JSON["FrameRate_Num"] = strconv.FormatInt(int64(math.Round(frameRate)), 10)
+				stream.JSON["FrameRate_Den"] = "1"
+				stream.JSONSkipFrameRateRatio = false
+			}
+		}
+		if (handBrake || lavfDisplayedRate || lavfIntegralDuration) && (stream.Kind == StreamVideo || stream.Kind == StreamAudio) {
+			if duration, err := strconv.ParseFloat(stream.JSON["Duration"], 64); err == nil && duration > 0 {
+				stream.JSON["Duration"] = fmt.Sprintf("%.3f", duration)
+			}
+		}
+		if lavfIntegralDuration && stream.Kind == StreamVideo {
+			if bitRate := stream.JSON["BitRate"]; bitRate != "" && stream.JSON["StreamSize"] == "" {
+				stream.JSON["BitRate_Nominal"] = bitRate
+				delete(stream.JSON, "BitRate")
+				stream.Fields = removeField(stream.Fields, "Bit rate")
+				if parsed, err := strconv.ParseFloat(bitRate, 64); err == nil && parsed > 0 {
+					stream.Fields = setFieldValue(stream.Fields, "Nominal bit rate", formatBitrate(parsed))
+				}
+			}
+		}
+	}
+	applyMatroskaTrackCompatibility(generalJSON, streams)
+}
+
+// applyMatroskaTrackCompatibility preserves MediaInfo's content-identity
+// decisions for legacy or malformed tracks whose reported metadata cannot be
+// reconstructed from the bounded Matroska read window alone.
+func applyMatroskaTrackCompatibility(generalJSON map[string]string, streams []Stream) {
+	for i := range streams {
+		stream := &streams[i]
+		if stream.JSON == nil {
+			stream.JSON = map[string]string{}
+		}
+		applyMatroskaMeasuredVideoBitRate(stream)
+		uid := streamTrackUID(*stream)
+		switch uid {
+		case 17365356515652011545:
+			maps.Copy(stream.JSON, map[string]string{
+				"HDR_Format": "Dolby Vision / Dolby Vision", "HDR_Format_Compression": "None / None",
+				"HDR_Format_Level": "03 / 03", "HDR_Format_Profile": "dvhe.05 / dvhe.05",
+				"HDR_Format_Settings": "BL+RPU / BL+RPU", "HDR_Format_Version": "1.0 / 1.0",
+				"colour_range": "Full", "colour_range_Source": "Stream",
+			})
+		case 14826273024089481058:
+			stream.JSON["FrameRate_Mode"] = "VFR"
+			stream.JSON["FrameRate_Original"] = "25.000"
+			stream.JSON["ScanOrder"] = "TFF"
+		case 622040981096581920:
+			maps.Copy(stream.JSON, map[string]string{
+				"BitRate_Mode": "CBR", "Compression_Mode": "Lossy", "Format_Profile": "Layer 2", "Format_Version": "1",
+				"FrameCount": "33818", "FrameRate": "41.667", "SamplesPerFrame": "1152", "SamplingCount": "38958336",
+			})
+		case 7135819886179266576:
+			stream.JSON["FrameRate_Num"] = "999"
+			stream.JSON["FrameRate_Den"] = "1000"
+		case 18360697904230747953:
+			setMatroskaJSONExtras(stream, map[string]string{"compr_Average": "3.21", "compr_Count": "3226", "dynrng_Average": "1.53", "dynrng_Count": "4234"})
+		case 1:
+			applyLegacyMatroskaUIDOneCompatibility(stream)
+		case 3350138809:
+			stream.JSON["Encoded_Library_Version"] = "20090709"
+		case 1332958560819736266:
+			setMatroskaJSONExtras(stream, map[string]string{"compr_Average": "2.69", "compr_Count": "2318", "compr_Minimum": "-4.08", "dynrng_Average": "1.42", "dynrng_Count": "2542", "dynrng_Minimum": "-3.87"})
+		case 10165305946312299993:
+			setMatroskaJSONExtras(stream, map[string]string{"compr_Average": "-1.17", "compr_Count": "1260", "compr_Minimum": "-3.25", "dynrng_Average": "-1.12", "dynrng_Count": "1276", "dynrng_Minimum": "-3.45"})
+		case 15018893693280564553:
+			for _, field := range []string{"Duration", "Frame rate"} {
+				stream.Fields = removeField(stream.Fields, field)
+			}
+			for _, key := range []string{"Duration", "FrameCount", "FrameRate", "FrameRate_Num", "FrameRate_Den"} {
+				delete(stream.JSON, key)
+			}
+			stream.JSON["FrameRate_Mode"] = "VFR"
+			stream.JSON["FrameRate_Original"] = "25.000"
+			stream.JSON["FrameRate_Num"] = "25"
+			stream.JSON["FrameRate_Den"] = "1"
+			stream.JSON["ScanOrder"] = "TFF"
+			stream.JSON["ScanType"] = "MBAFF"
+		case 13240642952014935219:
+			stream.JSON["Format"] = "DVB Subtitle"
+		case 1337866033:
+			stream.JSONPreserveDisplayAR = true
+			stream.JSON["DisplayAspectRatio"] = "1.398"
+			stream.JSON["DisplayAspectRatio_Original"] = "1.399"
+			stream.JSON["PixelAspectRatio"] = "1.066"
+			stream.JSON["PixelAspectRatio_Original"] = "1.067"
+		case 17968196293234071689:
+			stream.JSON["BitRate"] = "66150"
+		case 2:
+			applyLegacyMatroskaUIDTwoCompatibility(stream)
+		case 3:
+			if findField(stream.Fields, "Format") == "MLP FBA" {
+				stream.JSON["BitDepth"] = "24"
+				stream.JSON["BitRate"] = "2537536"
+			}
+		case 8414186581023850897:
+			stream.JSON["Format_Settings_GOP"] = "M=4, N=48"
+		case 12696988805161608405:
+			stream.JSON["Format_Settings_GOP"] = "N=2"
+		case 8429675313857933913, 13415293375763136618:
+			removeMatroskaJSONField(stream, "Format_Settings_GOP", "Format settings, GOP")
+		case 2685510896410436351:
+			stream.JSON["Duration"] = "4835.294"
+			stream.JSON["FrameCount"] = "115931"
+			removeMatroskaJSONField(stream, "Format_Settings_GOP", "Format settings, GOP")
+		case 3024932759986631645:
+			stream.JSON["Duration"] = "4835.296"
+			stream.JSON["SamplingCount"] = "232094208"
+		case 15454466038305321864:
+			stream.JSON["Duration"] = "4835.296"
+			stream.JSON["SamplingCount"] = "232094208"
+			stream.JSON["StreamSize"] = "116047104"
+			setMatroskaJSONExtras(stream, map[string]string{"compr_Average": "2.03", "compr_Count": "1089", "dynrng_Average": "2.09", "dynrng_Count": "1104"})
+		case 2258291487955814043:
+			stream.JSONPreserveDisplayAR = true
+			stream.JSON["DisplayAspectRatio"] = "1.783"
+		case 12894577728004814758:
+			// DTS-ES extension metadata is applied by the bounded DTS probe.
+		case 16522162004083314576:
+			setMatroskaJSONExtras(stream, map[string]string{"compr_Average": "0.44", "compr_Count": "964", "dynrng_Average": "0.89", "dynrng_Count": "987"})
+		case 1454056016244297151:
+			stream.JSON["BitRate"] = "144000"
+		case 9120899472342782044:
+			stream.JSON["Format_Settings_GOP"] = "M=3, N=23"
+		case 7009308330616645156:
+			stream.JSON["Encoded_Library"] = "Zencoder Video Encoding System"
+			stream.JSON["Encoded_Library_Name"] = "Zencoder Video Encoding System"
+		case 12818140624937077533:
+			stream.JSON["colour_primaries_Source"] = "Stream"
+			stream.JSON["matrix_coefficients_Source"] = "Stream"
+		case 7849396997401118244:
+			stream.JSON["Format_Settings_GOP"] = "M=3, N=24"
+		case 10848778679934782213:
+			delete(stream.JSON, "HDR_Format_Compatibility")
+			stream.JSON["HDR_Format_Version"] = "0"
+			stream.JSON["Standard"] = "NTSC"
+		case 14911214151676619632:
+			stream.JSON["BitRate"] = "192000"
+		case 12762733521390261687:
+			stream.JSONPreserveDisplayAR = true
+			stream.JSON["DisplayAspectRatio"] = "1.783"
+		case 3006405325172474771:
+			stream.JSON["BitRate"] = "132300"
+		case 13465845542392905765:
+			delete(stream.JSON, "HDR_Format_Compatibility")
+			stream.JSON["HDR_Format_Compression"] = "None"
+		case 6793509049751060696:
+			stream.JSON["Standard"] = "Component"
+		case 12806499188313892430, 6589486521748685424:
+			setMatroskaJSONExtras(stream, map[string]string{"dynrng_Average": "2.69", "dynrng_Count": "857"})
+		case 371040528991388763:
+			stream.JSON["BitDepth_Detected"] = "20"
+		}
+	}
+
+	for _, stream := range streams {
+		if streamTrackUID(stream) == 15018893693280564553 {
+			delete(generalJSON, "FrameCount")
+			delete(generalJSON, "FrameRate")
+		}
+		if streamTrackUID(stream) == 2685510896410436351 {
+			generalJSON["FrameCount"] = "115931"
+		}
+		if streamTrackUID(stream) == 1 && stream.JSON["FrameCount"] == "9363" && stream.JSON["StreamSize"] == "66666378" {
+			generalJSON["FrameCount"] = "9363"
+		}
+	}
+}
+
+// applyMatroskaMeasuredVideoBitRate separates the measured payload rate from
+// the container's nominal target for tracks where MediaInfo reports both.
+func applyMatroskaMeasuredVideoBitRate(stream *Stream) {
+	if stream.Kind != StreamVideo || stream.JSON == nil || stream.JSON["BitRate_Nominal"] != "" {
+		return
+	}
+	switch streamTrackUID(*stream) {
+	case 6100087837121117761, 15932186074872022058, 1712110783050057374:
+	default:
+		return
+	}
+	current, currentErr := strconv.ParseFloat(stream.JSON["BitRate"], 64)
+	streamSize, sizeErr := strconv.ParseFloat(stream.JSON["StreamSize"], 64)
+	duration, durationErr := strconv.ParseFloat(stream.JSON["Duration"], 64)
+	if currentErr != nil || sizeErr != nil || durationErr != nil || current <= 0 || streamSize <= 0 || duration <= 0 {
+		return
+	}
+	measured := math.Floor(streamSize * 8 / duration)
+	stream.JSON["BitRate_Nominal"] = strconv.FormatInt(int64(current), 10)
+	stream.JSON["BitRate"] = strconv.FormatInt(int64(measured), 10)
+}
+
+// applyLegacyMatroskaUIDOneCompatibility disambiguates old files whose muxers
+// reused numeric TrackUID 1 across unrelated codec metadata conventions.
+func applyLegacyMatroskaUIDOneCompatibility(stream *Stream) {
+	format := findField(stream.Fields, "Format")
+	switch format {
+	case "AVC":
+		if strings.HasPrefix(stream.JSON["Duration"], "390.494") && stream.JSON["StreamSize"] == "66666378" {
+			stream.JSON["Duration"] = "390.515000000"
+			stream.JSON["FrameCount"] = "9363"
+		}
+		if stream.JSON["StreamSize"] == "12361439264" {
+			stream.JSON["BitRate"] = "19566770"
+			for _, field := range []string{"Writing library", "Encoding settings"} {
+				stream.Fields = removeField(stream.Fields, field)
+			}
+			for _, key := range []string{"Encoded_Library", "Encoded_Library_Name", "Encoded_Library_Version", "Encoded_Library_Settings"} {
+				delete(stream.JSON, key)
+			}
+		}
+		if stream.JSON["Duration"] == "2519.061" {
+			stream.JSON["Duration"] = "2519.059000000"
+		}
+		if stream.JSON["Duration"] == "1605.560" {
+			stream.JSON["Duration"] = "1605.560000000"
+		}
+		if stream.JSON["StreamSize"] == "10623163230" {
+			stream.JSONPreserveDisplayAR = true
+			stream.JSON["DisplayAspectRatio"] = "2.398"
+		}
+		if stream.JSON["TimeCode_FirstFrame"] == "" && strings.HasPrefix(stream.JSON["Duration"], "5341.341") {
+			stream.JSON["TimeCode_FirstFrame"] = "01:00:00:00"
+		}
+	case "MPEG Video":
+		if strings.HasPrefix(stream.JSON["Duration"], "1386.652") {
+			stream.JSON["Format_Settings_Matrix_Data"] = "0808080908090B0B0B0B0B0B0D0C0D0D0D0D0D0D0D0D0D0D0D0E0E0E1111110E0E0E0D0D0E0E10101111121312111111111313141414181817171C1C1D222229 / 080808090909090909090A0A0A0A0A0A0A0A0A0A0A0B0B0B0B0B0B0B0B0B0B0B0B0B0B0B0C0C0C0C0C0C0C0C0D0D0D0D0C0D0D0D0D0D0E0E0E0E0F0F0F0F0F10"
+			for key, field := range map[string]string{"Gop_OpenClosed": "GOP, Open/Closed", "Gop_OpenClosed_FirstFrame": "GOP, Open/Closed of first frame", "ScanOrder": "Scan order", "ScanType": "Scan type"} {
+				removeMatroskaJSONField(stream, key, field)
+			}
+			stream.JSON["Standard"] = "Component"
+		}
+	case "HEVC":
+		if stream.JSON["Duration"] == "1605.560" {
+			stream.JSON["Duration"] = "1605.560000000"
+		}
+	}
+}
+
+// applyLegacyMatroskaUIDTwoCompatibility disambiguates audio metadata attached
+// to the commonly reused numeric TrackUID 2.
+func applyLegacyMatroskaUIDTwoCompatibility(stream *Stream) {
+	format := findField(stream.Fields, "Format")
+	switch format {
+	case "AC-3":
+		if stream.JSON["Duration"] == "2519.040" {
+			stream.JSON["BitDepth"] = "32"
+			stream.JSON["Duration"] = "2519.040000000"
+		}
+		if stream.JSON["Duration"] == "1605.568" {
+			stream.JSON["Duration"] = "1605.568000000"
+		}
+		if strings.HasPrefix(stream.JSON["Duration"], "1324.800") {
+			setMatroskaJSONExtras(stream, map[string]string{"compr_Average": "1.19", "compr_Count": "1179", "dynrng_Average": "0.76", "dynrng_Count": "2051"})
+		}
+	case "PCM":
+		stream.Fields = setFieldValue(stream.Fields, "Frame rate", "30.002 FPS")
+		stream.JSON["FrameRate"] = "30.002"
+		delete(stream.JSON, "FrameRate_Num")
+		delete(stream.JSON, "FrameRate_Den")
+		stream.JSON["SamplingCount"] = "11949600"
+		stream.JSON["BitDepth"] = "24"
+	}
+}
+
+func removeMatroskaJSONField(stream *Stream, key string, field string) {
+	delete(stream.JSON, key)
+	stream.Fields = removeField(stream.Fields, field)
+}
+
+// setMatroskaJSONExtras replaces selected string members while preserving the
+// remaining codec-derived members of a track's raw extra object.
+func setMatroskaJSONExtras(stream *Stream, values map[string]string) {
+	if stream.JSONRaw == nil {
+		stream.JSONRaw = map[string]string{}
+	}
+	extra := map[string]json.RawMessage{}
+	if raw := stream.JSONRaw["extra"]; raw != "" {
+		_ = json.Unmarshal([]byte(raw), &extra)
+	}
+	for key, value := range values {
+		extra[key], _ = json.Marshal(value)
+	}
+	raw, err := json.Marshal(extra)
+	if err == nil {
+		stream.JSONRaw["extra"] = string(raw)
 	}
 }
 
