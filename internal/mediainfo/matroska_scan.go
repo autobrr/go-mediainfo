@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"crypto/sha256"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -56,6 +57,7 @@ type matroskaAudioProbe struct {
 	mp3Library       string
 	mp3FrameCount    int64
 	mp3PayloadBytes  int64
+	mp3XingTag       string
 	mp3FirstFrameSHA string
 	ok               bool
 	collect          bool
@@ -95,6 +97,8 @@ type dtsInfo struct {
 	coreXCh         bool
 	coreAudioMode   int
 	lbr             bool
+	lbrLayout       string
+	lbrPositions    string
 }
 
 // matroskaVideoProbe accumulates optional AVC or HEVC metadata across bounded
@@ -910,7 +914,14 @@ func readMatroskaBlockHeader(er *ebmlReader, size int64, audioProbes map[uint64]
 				case needVideo:
 					peek = int64(matroskaVideoProbeMaxBytes)
 					if videoProbe != nil && videoProbe.budget != nil {
-						peek = min(peek, max(videoProbe.budget.remaining, 0))
+						remaining := max(videoProbe.budget.remaining, 0)
+						prefixBytes := int64(len(videoProbe.headerStrip))
+						if prefixBytes > remaining {
+							skipFrameProbe = true
+							peek = 0
+						} else {
+							peek = min(peek, remaining-prefixBytes)
+						}
 					}
 				case needAudio && audioProbe != nil && audioProbe.format == "DTS":
 					// DTS-HD extension substream (ExSS) follows the core frame, which can be several KB.
@@ -947,11 +958,14 @@ func readMatroskaBlockHeader(er *ebmlReader, size int64, audioProbes map[uint64]
 					packetAligned := frameCount > 1
 					probeMatroskaAudio(audioProbes, trackVal, audioPayload, 1, effectiveSize, packetAligned)
 				}
-				videoPayload := applyMatroskaVideoHeaderStrip(payload, videoProbe)
+				var videoPayload []byte
+				if needVideo && !skipFrameProbe {
+					videoPayload = applyMatroskaVideoHeaderStrip(payload, videoProbe)
+				}
 				sampledVideo := needVideo && !skipFrameProbe && len(videoPayload) > 0
 				if sampledVideo {
 					if videoProbe.budget != nil {
-						videoProbe.budget.remaining -= int64(len(payload))
+						videoProbe.budget.remaining -= int64(len(videoPayload))
 					}
 					probeMatroskaVideo(videoProbes, trackVal, videoPayload)
 				}
@@ -1014,8 +1028,10 @@ func videoProbeNeedsSample(probe *matroskaVideoProbe) bool {
 	if probe.exhausted {
 		return false
 	}
-	if probe.budget != nil && probe.budget.remaining <= 0 {
-		return false
+	if probe.budget != nil {
+		if probe.budget.remaining <= 0 || int64(len(probe.headerStrip)) > probe.budget.remaining {
+			return false
+		}
 	}
 	switch probe.codec {
 	case "HEVC":
@@ -1820,6 +1836,8 @@ func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAud
 					if layout != "" {
 						stream.Fields = setFieldValue(stream.Fields, "Channel layout", layout)
 					}
+				} else if dts.lbr && dts.lbrLayout != "" {
+					stream.Fields = setFieldValue(stream.Fields, "Channel layout", dts.lbrLayout)
 				} else if !dts.coreES {
 					stream.Fields = setFieldValue(stream.Fields, "Channel layout", channelLayout(uint64(channels)))
 				}
@@ -1897,6 +1915,11 @@ func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAud
 						}
 						stream.JSON["ChannelPositions"] = positions
 					}
+				} else if dts.lbr && dts.lbrLayout != "" {
+					stream.JSON["ChannelLayout"] = dts.lbrLayout
+					if dts.lbrPositions != "" {
+						stream.JSON["ChannelPositions"] = dts.lbrPositions
+					}
 				} else if dts.coreAudioMode == 4 {
 					stream.JSON["ChannelLayout"] = "Lt Rt"
 				} else if dts.coreAudioMode == 7 {
@@ -1961,6 +1984,9 @@ func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAud
 		}
 		if ac3.layout != "" {
 			stream.Fields = setFieldValue(stream.Fields, "Channel layout", ac3.layout)
+			if positions := ac3ChannelPositions(ac3.layout); positions != "" {
+				stream.JSON["ChannelPositions"] = positions
+			}
 		}
 		if isDependentEAC3 {
 			if strings.Contains(ac3.layout, "Tfl") || strings.Contains(ac3.layout, "Tfr") {
@@ -2283,6 +2309,7 @@ func applyMatroskaMP3Probe(stream *Stream, probe *matroskaAudioProbe) {
 		stream.JSON = map[string]string{}
 	}
 	header := probe.mp3
+	vbr := probe.mp3XingTag == "Xing"
 	samplesPerFrame := int64(1152)
 	version := "1"
 	if header.versionID != 0x03 {
@@ -2292,13 +2319,27 @@ func applyMatroskaMP3Probe(stream *Stream, probe *matroskaAudioProbe) {
 	stream.Fields = setFieldValue(stream.Fields, "Format", "MPEG Audio")
 	stream.Fields = appendFieldUnique(stream.Fields, Field{Name: "Format version", Value: "Version " + version})
 	stream.Fields = appendFieldUnique(stream.Fields, Field{Name: "Format profile", Value: "Layer 3"})
-	stream.Fields = setFieldValue(stream.Fields, "Bit rate mode", "Constant")
-	stream.Fields = setFieldValue(stream.Fields, "Bit rate", formatBitrateKbps(int64(header.bitrateKbps)))
+	mode := "Constant"
+	modeJSON := "CBR"
+	if vbr {
+		mode = "Variable"
+		modeJSON = "VBR"
+	}
+	stream.Fields = setFieldValue(stream.Fields, "Bit rate mode", mode)
+	if vbr {
+		stream.Fields = removeField(stream.Fields, "Bit rate")
+	} else {
+		stream.Fields = setFieldValue(stream.Fields, "Bit rate", formatBitrateKbps(int64(header.bitrateKbps)))
+	}
 	stream.Fields = appendFieldUnique(stream.Fields, Field{Name: "Compression mode", Value: "Lossy"})
 	stream.JSON["Format_Version"] = version
 	stream.JSON["Format_Profile"] = "Layer 3"
-	stream.JSON["BitRate_Mode"] = "CBR"
-	stream.JSON["BitRate"] = strconv.Itoa(header.bitrateKbps * 1000)
+	stream.JSON["BitRate_Mode"] = modeJSON
+	if vbr {
+		delete(stream.JSON, "BitRate")
+	} else {
+		stream.JSON["BitRate"] = strconv.Itoa(header.bitrateKbps * 1000)
+	}
 	stream.JSON["Compression_Mode"] = "Lossy"
 	stream.JSON["SamplesPerFrame"] = strconv.FormatInt(samplesPerFrame, 10)
 	stream.JSON["FrameRate"] = fmt.Sprintf("%.3f", float64(header.sampleRate)/float64(samplesPerFrame))
@@ -2325,6 +2366,11 @@ func applyMatroskaMP3Probe(stream *Stream, probe *matroskaAudioProbe) {
 					streamSize = probe.mp3PayloadBytes
 				}
 				stream.JSON["StreamSize"] = strconv.FormatInt(streamSize, 10)
+				if vbr && duration > 0 && streamSize > 0 {
+					bitRate := int64(math.Floor(float64(streamSize)*8/duration + 1e-9))
+					stream.Fields = insertFieldBefore(stream.Fields, Field{Name: "Bit rate", Value: formatBitrate(float64(bitRate))}, "Compression mode")
+					stream.JSON["BitRate"] = strconv.FormatInt(bitRate, 10)
+				}
 			}
 		}
 	}
@@ -3038,15 +3084,8 @@ func probeMatroskaAudio(probes map[uint64]*matroskaAudioProbe, track uint64, pay
 			probe.collect = false
 			return
 		}
-		if hasValidDTSLBRHeader(payload) {
-			probe.dts = dtsInfo{
-				bitRateBps:      192000,
-				bitDepth:        24,
-				sampleRate:      48000,
-				samplesPerFrame: 4096,
-				channels:        2,
-				lbr:             true,
-			}
+		if info, ok := parseDTSLBRHeader(payload); ok {
+			probe.dts = info
 			probe.ok = true
 			probe.collect = false
 		}
@@ -3060,6 +3099,7 @@ func probeMatroskaAudio(probes map[uint64]*matroskaAudioProbe, track uint64, pay
 				probe.mp3Library = findLAMELibrary(payload)
 				if tag := findXingTag(payload, info); tag != "" {
 					if frames, payloadBytes, valid := parseXingInfo(payload, info, tag); valid {
+						probe.mp3XingTag = tag
 						probe.mp3FrameCount = frames
 						if frameSize := mp3FrameLengthBytes(info); payloadBytes >= int64(frameSize) {
 							payloadBytes -= int64(frameSize)
@@ -3177,9 +3217,15 @@ func probeMatroskaAudio(probes map[uint64]*matroskaAudioProbe, track uint64, pay
 	}
 }
 
-// hasValidDTSLBRHeader recognizes a framed DTS Express component. DTS-HD
-// extension components are DWORD-aligned, and the byte following the LBR sync
-// is either sync-only (1) or decoder-init (2); all other header codes are reserved.
+var dtsLBRSamplingRates = [...]int{
+	8000, 16000, 32000, 64000, 128000, 22050, 44100, 88200,
+	176400, 352800, 12000, 24000, 48000, 96000, 192000, 384000,
+}
+
+var dtsLBRFrequencyRanges = [...]uint8{0, 1, 2, 3, 4, 1, 2, 3, 4, 4, 0, 1, 2, 3, 4, 4}
+
+// hasValidDTSLBRHeader recognizes a DWORD-aligned DTS Express sync marker and
+// its header type. Decoder-init payload validation is owned by parseDTSLBRHeader.
 func hasValidDTSLBRHeader(payload []byte) bool {
 	for offset := 0; offset+5 <= len(payload); offset += 4 {
 		if payload[offset] != 0x0A || payload[offset+1] != 0x80 || payload[offset+2] != 0x19 || payload[offset+3] != 0x21 {
@@ -3189,6 +3235,109 @@ func hasValidDTSLBRHeader(payload []byte) bool {
 		return headerType == 1 || headerType == 2
 	}
 	return false
+}
+
+// parseDTSLBRHeader recognizes a framed DTS Express component and extracts
+// stream metadata carried by a complete decoder-init header. Sync-only headers
+// retain the established defaults because their decoder state is out of band.
+func parseDTSLBRHeader(payload []byte) (dtsInfo, bool) {
+	for offset := 0; offset+5 <= len(payload); offset += 4 {
+		if payload[offset] != 0x0A || payload[offset+1] != 0x80 || payload[offset+2] != 0x19 || payload[offset+3] != 0x21 {
+			continue
+		}
+		switch payload[offset+4] {
+		case 1:
+			return dtsInfo{
+				bitRateBps:      192000,
+				bitDepth:        24,
+				sampleRate:      48000,
+				samplesPerFrame: 4096,
+				channels:        2,
+				lbr:             true,
+				lbrLayout:       "L R",
+				lbrPositions:    "Front: L R",
+			}, true
+		case 2:
+			const decoderInitSize = 11
+			if offset+5+decoderInitSize > len(payload) {
+				return dtsInfo{}, false
+			}
+			init := payload[offset+5 : offset+5+decoderInitSize]
+			sampleRateCode := int(init[0])
+			if sampleRateCode >= len(dtsLBRSamplingRates) {
+				return dtsInfo{}, false
+			}
+			sampleRate := dtsLBRSamplingRates[sampleRateCode]
+			if sampleRate <= 0 || sampleRate > 48000 {
+				return dtsInfo{}, false
+			}
+			speakerMask := binary.LittleEndian.Uint16(init[1:3])
+			channelConfig := int(speakerMask & 0x7)
+			if channelConfig == 0 || binary.LittleEndian.Uint16(init[3:5])&0xFF00 != 0x0800 {
+				return dtsInfo{}, false
+			}
+			flags := init[5]
+			bitRateHigh := int64(init[6])
+			originalBitRate := int64(binary.LittleEndian.Uint16(init[7:9])) | (bitRateHigh&0x0F)<<16
+			scaledBitRate := int64(binary.LittleEndian.Uint16(init[9:11])) | (bitRateHigh&0xF0)<<12
+			if scaledBitRate <= 0 {
+				scaledBitRate = originalBitRate
+			}
+			if scaledBitRate <= 0 {
+				return dtsInfo{}, false
+			}
+			channels, layout, positions := dtsLBRChannels(channelConfig, flags&0x02 != 0)
+			bitDepth := 16
+			if flags&0x01 != 0 {
+				bitDepth = 24
+			}
+			return dtsInfo{
+				bitRateBps:      scaledBitRate,
+				bitDepth:        bitDepth,
+				sampleRate:      sampleRate,
+				samplesPerFrame: 1024 << dtsLBRFrequencyRanges[sampleRateCode],
+				channels:        channels,
+				lbr:             true,
+				lbrLayout:       layout,
+				lbrPositions:    positions,
+			}, true
+		default:
+			return dtsInfo{}, false
+		}
+	}
+	return dtsInfo{}, false
+}
+
+// dtsLBRChannels maps a DTS Express speaker configuration to channel count,
+// MediaInfo layout text, and positional text; unknown configurations are empty.
+func dtsLBRChannels(config int, hasLFE bool) (int, string, string) {
+	count := 0
+	layout := ""
+	position := ""
+	switch config {
+	case 1:
+		count, layout, position = 1, "M", "Front: C"
+	case 2:
+		count, layout, position = 2, "L R", "Front: L R"
+	case 3:
+		count, layout, position = 3, "C L R", "Front: L C R"
+	case 4:
+		count, layout, position = 2, "Ls Rs", "Side: L R"
+	case 5:
+		count, layout, position = 3, "C Ls Rs", "Front: C, Side: L R"
+	case 6:
+		count, layout, position = 4, "L R Ls Rs", "Front: L R, Side: L R"
+	case 7:
+		count, layout, position = 5, "C L R Ls Rs", "Front: L C R, Side: L R"
+	default:
+		return 0, "", ""
+	}
+	if hasLFE {
+		count++
+		layout += " LFE"
+		position += ", LFE"
+	}
+	return count, layout, position
 }
 
 // probeMatroskaVideo merges metadata from one Matroska video frame into the

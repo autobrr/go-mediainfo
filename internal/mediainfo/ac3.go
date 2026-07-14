@@ -1927,6 +1927,15 @@ func ac3ChannelLayout(acmod int, lfeon bool) (uint64, string) {
 	return uint64(len(layout)), strings.Join(layout, " ")
 }
 
+// ac3ChannelPositions returns topology-specific positions that cannot be
+// reconstructed from the channel count alone.
+func ac3ChannelPositions(layout string) string {
+	if layout == "L R Ls Rs LFE" {
+		return "Front: L R, Side: L R, LFE"
+	}
+	return ""
+}
+
 func ac3ServiceKind(bsmod int) string {
 	switch bsmod {
 	case 0:

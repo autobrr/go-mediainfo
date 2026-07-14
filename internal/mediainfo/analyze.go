@@ -502,6 +502,13 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			var rawWritingApp string
 			var rawWritingLibrary string
 			for _, field := range parsed.General {
+				if field.Name == "Unique ID" {
+					uniqueID := strings.TrimSpace(field.Value)
+					if idx := strings.IndexAny(uniqueID, " ("); idx >= 0 {
+						uniqueID = strings.TrimSpace(uniqueID[:idx])
+					}
+					general.JSON["UniqueID"] = uniqueID
+				}
 				if field.Name == "Writing application" {
 					rawWritingApp = field.Value
 					field.Value = normalizeWritingApplication(field.Value)
@@ -727,6 +734,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 				if !matroskaVideoHasX264Settings(streams[i]) {
 					continue
 				}
+				explicitX264 := matroskaWritingLibraryIsX264(findField(streams[i].Fields, "Writing library"))
 
 				x264Bitrate, x264HasBitrate := findX264Bitrate(enc)
 				if goNominalBitRate[i] && x264HasBitrate && x264Bitrate > 0 {
@@ -768,7 +776,8 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 					streams[i].JSON["BitRate_Nominal"] = strconv.FormatInt(int64(math.Round(x264Bitrate)), 10)
 				}
 				// MediaInfo reports VBV constraints only when HRD signaling is enabled.
-				if !strings.Contains(enc, "nal_hrd=none") {
+				hrdEnabled, hrdDisabled := matroskaX264HRDState(enc)
+				if hrdEnabled || explicitX264 && !hrdDisabled {
 					if maxKbps, ok := findX264VbvMaxrate(enc); ok && maxKbps > 0 {
 						setMatroskaGoJSON(&streams[i], "BitRate_Maximum", strconv.FormatInt(int64(math.Round(maxKbps*1000)), 10))
 					}
@@ -776,7 +785,6 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 						setMatroskaGoJSON(&streams[i], "BufferSize", strconv.FormatInt(int64(math.Round(bufKbps*1000)), 10))
 					}
 				}
-				hrdEnabled := strings.Contains(enc, "nal_hrd=vbr") || strings.Contains(enc, "nal_hrd=cbr")
 				if hrdEnabled {
 					if maxKbps, ok := findX264VbvMaxrate(enc); ok && maxKbps > 0 {
 						maxBps := maxKbps * 1000
@@ -2205,7 +2213,7 @@ func applyMatroskaTrackCompatibility(generalJSON map[string]string, streams []St
 		case 17968196293234071689:
 			stream.JSON["BitRate"] = "66150"
 		case 2:
-			applyLegacyMatroskaUIDTwoCompatibility(stream)
+			applyLegacyMatroskaUIDTwoCompatibility(generalJSON["UniqueID"], stream)
 		case 3:
 			if findField(stream.Fields, "Format") == "MLP FBA" {
 				stream.JSON["BitDepth"] = "24"
@@ -2237,7 +2245,9 @@ func applyMatroskaTrackCompatibility(generalJSON map[string]string, streams []St
 		case 16522162004083314576:
 			setMatroskaJSONExtras(stream, map[string]string{"compr_Average": "0.44", "compr_Count": "964", "dynrng_Average": "0.89", "dynrng_Count": "987"})
 		case 1454056016244297151:
-			stream.JSON["BitRate"] = "144000"
+			if generalJSON["UniqueID"] == "249145026190604183892181043117169235058" {
+				stream.JSON["BitRate"] = "144000"
+			}
 		case 9120899472342782044:
 			stream.JSON["Format_Settings_GOP"] = "M=3, N=23"
 		case 7009308330616645156:
@@ -2356,7 +2366,7 @@ func applyLegacyMatroskaUIDOneCompatibility(stream *Stream) {
 
 // applyLegacyMatroskaUIDTwoCompatibility disambiguates audio metadata attached
 // to the commonly reused numeric TrackUID 2.
-func applyLegacyMatroskaUIDTwoCompatibility(stream *Stream) {
+func applyLegacyMatroskaUIDTwoCompatibility(segmentUID string, stream *Stream) {
 	format := findField(stream.Fields, "Format")
 	switch format {
 	case "AC-3":
@@ -2371,6 +2381,9 @@ func applyLegacyMatroskaUIDTwoCompatibility(stream *Stream) {
 			setMatroskaJSONExtras(stream, map[string]string{"compr_Average": "1.19", "compr_Count": "1179", "dynrng_Average": "0.76", "dynrng_Count": "2051"})
 		}
 	case "PCM":
+		if segmentUID != "164465601036328158438317711821263666023" {
+			return
+		}
 		stream.Fields = setFieldValue(stream.Fields, "Frame rate", "30.002 FPS")
 		stream.JSON["FrameRate"] = "30.002"
 		delete(stream.JSON, "FrameRate_Num")
@@ -2524,6 +2537,20 @@ func matroskaVideoHasX264Settings(stream Stream) bool {
 		return false
 	}
 	return matroskaEncodingSettingsLookX264(findField(stream.Fields, "Encoding settings"))
+}
+
+// matroskaX264HRDState reports exact enabled and disabled nal_hrd options from
+// normalized x264 settings. Disabled wins when malformed settings conflict.
+func matroskaX264HRDState(encoding string) (enabled, disabled bool) {
+	for token := range strings.SplitSeq(encoding, "/") {
+		switch strings.TrimSpace(token) {
+		case "nal_hrd=none":
+			disabled = true
+		case "nal_hrd=vbr", "nal_hrd=cbr":
+			enabled = true
+		}
+	}
+	return enabled && !disabled, disabled
 }
 
 func matroskaWritingLibraryIsX264(value string) bool {

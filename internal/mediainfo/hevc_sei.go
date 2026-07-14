@@ -241,7 +241,7 @@ func parseHEVCTimeCode(payload []byte, info *hevcHDRInfo) {
 			}
 		}
 		if !completeTimestamp || seconds > 59 || minutes > 59 || hours > 31 || frames > 511 {
-			return
+			continue
 		}
 		info.timeCode = fmt.Sprintf("%02d:%02d:%02d:%02d", hours, minutes, seconds, frames)
 		return

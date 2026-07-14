@@ -91,6 +91,18 @@ func matroskaAttachmentImageStream(attachment matroskaAttachment) (Stream, bool)
 	return stream, true
 }
 
+// matroskaAttachmentImageMIME derives the MIME type from a recognized image
+// payload. Declared attachment metadata remains authoritative to callers.
+func matroskaAttachmentImageMIME(data []byte) string {
+	if _, _, _, _, _, _, _, ok := parseJPEGAttachment(data); ok {
+		return "image/jpeg"
+	}
+	if _, _, _, _, ok := parsePNGAttachment(data); ok {
+		return "image/png"
+	}
+	return ""
+}
+
 // isMatroskaCoverAttachment recognizes the filename conventions MediaInfo uses
 // to promote an attached image to General cover metadata.
 func isMatroskaCoverAttachment(name string) bool {
