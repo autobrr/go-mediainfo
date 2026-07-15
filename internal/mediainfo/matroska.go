@@ -201,19 +201,21 @@ func ParseMatroskaWithOptions(r io.ReaderAt, size int64, opts AnalyzeOptions) (M
 		return MatroskaInfo{}, false
 	}
 
-	info, ok := parseMatroska(buf)
+	assetBudget := &embeddedAssetBudget{}
+	info, ok := parseMatroskaWithBudget(buf, assetBudget)
 	if !ok {
 		return MatroskaInfo{}, false
 	}
 	if len(info.Tracks) == 0 && size > scanSize && info.SegmentOffset > 0 {
 		if seekPos, found := findMatroskaSeekPosition(buf, int(info.SegmentOffset), mkvIDTracks); found {
-			tracksOffset := info.SegmentOffset + int64(seekPos)
-			tracks, parsed, err := scanMatroskaTracksFromFile(r, tracksOffset, size, info.Container.DurationSeconds, info.durationPrec)
-			if err != nil {
-				return MatroskaInfo{}, false
-			}
-			if parsed {
-				info.Tracks = tracks
+			if tracksOffset, reason := checkedEmbeddedOffset(info.SegmentOffset, seekPos, size); reason == embeddedAssetAccepted {
+				tracks, parsed, err := scanMatroskaTracksFromFile(r, tracksOffset, size, info.Container.DurationSeconds, info.durationPrec)
+				if err != nil {
+					return MatroskaInfo{}, false
+				}
+				if parsed {
+					info.Tracks = tracks
+				}
 			}
 		}
 	}
@@ -240,9 +242,10 @@ func ParseMatroskaWithOptions(r io.ReaderAt, size int64, opts AnalyzeOptions) (M
 		if size > scanSize {
 			if !matroskaHasMenu(info.Tracks) {
 				if seekPos, ok := findMatroskaSeekPosition(buf, int(info.SegmentOffset), mkvIDChapters); ok {
-					chaptersOffset := info.SegmentOffset + int64(seekPos)
-					if editions := scanMatroskaChaptersFromFile(r, chaptersOffset, size); len(editions) > 0 {
-						info.Tracks = appendMatroskaChapterMenus(info.Tracks, editions)
+					if chaptersOffset, reason := checkedEmbeddedOffset(info.SegmentOffset, seekPos, size); reason == embeddedAssetAccepted {
+						if editions := scanMatroskaChaptersFromFile(r, chaptersOffset, size); len(editions) > 0 {
+							info.Tracks = appendMatroskaChapterMenus(info.Tracks, editions)
+						}
 					}
 				}
 			}
@@ -250,7 +253,9 @@ func ParseMatroskaWithOptions(r io.ReaderAt, size int64, opts AnalyzeOptions) (M
 			// parse lazily (seek-skipping file payloads).
 			attachmentOffsets := []int64{}
 			for _, seekPos := range findMatroskaSeekPositions(buf, int(info.SegmentOffset), mkvIDAttachments) {
-				attachmentOffsets = append(attachmentOffsets, info.SegmentOffset+int64(seekPos))
+				if attachmentOffset, reason := checkedEmbeddedOffset(info.SegmentOffset, seekPos, size); reason == embeddedAssetAccepted {
+					attachmentOffsets = append(attachmentOffsets, attachmentOffset)
+				}
 			}
 			if len(attachmentOffsets) == 0 {
 				// Some files omit Attachments from SeekHead. Fall back to a bounded scan in the initial buffer.
@@ -273,7 +278,7 @@ func ParseMatroskaWithOptions(r io.ReaderAt, size int64, opts AnalyzeOptions) (M
 			if len(attachmentOffsets) > 0 {
 				var attachments []matroskaAttachment
 				for _, attachmentsOffset := range attachmentOffsets {
-					attachments = append(attachments, scanMatroskaAttachmentsFromFile(r, attachmentsOffset, size)...)
+					attachments = append(attachments, scanMatroskaAttachmentsFromFile(r, attachmentsOffset, size, assetBudget)...)
 				}
 				if len(attachments) > 0 {
 					rescannedNames := make([]string, 0, len(attachments))
@@ -314,8 +319,7 @@ func ParseMatroskaWithOptions(r io.ReaderAt, size int64, opts AnalyzeOptions) (M
 			// Prefer SeekHead for a precise offset, but some files omit Tags entries.
 			tagsRead := false
 			if seekPos, ok := findMatroskaSeekPosition(buf, int(info.SegmentOffset), mkvIDTags); ok {
-				tagsOffset := info.SegmentOffset + int64(seekPos)
-				if tagsOffset > 0 && tagsOffset < size {
+				if tagsOffset, reason := checkedEmbeddedOffset(info.SegmentOffset, seekPos, size); reason == embeddedAssetAccepted {
 					tagsSize := min(size-tagsOffset, int64(8<<20))
 					if tagsSize > 0 {
 						tagsBuf := make([]byte, tagsSize)
@@ -817,9 +821,12 @@ func parseMatroskaSeekEntry(buf []byte) (uint64, uint64, bool) {
 			break
 		}
 		dataStart := pos + idLen + sizeLen
-		dataEnd := dataStart + int(size)
-		if size == unknownVintSize || dataEnd > len(buf) {
-			dataEnd = len(buf)
+		if dataStart > len(buf) {
+			break
+		}
+		dataEnd := len(buf)
+		if size != unknownVintSize && size <= uint64(len(buf)-dataStart) {
+			dataEnd = dataStart + int(size)
 		}
 		switch id {
 		case mkvIDSeekID:
@@ -839,6 +846,15 @@ func parseMatroskaSeekEntry(buf []byte) (uint64, uint64, bool) {
 }
 
 func parseMatroska(buf []byte) (MatroskaInfo, bool) {
+	return parseMatroskaWithBudget(buf, &embeddedAssetBudget{})
+}
+
+// parseMatroskaWithBudget parses the initial bounded Matroska metadata window
+// while charging retained attachment metadata to the analysis budget.
+func parseMatroskaWithBudget(buf []byte, assetBudget *embeddedAssetBudget) (MatroskaInfo, bool) {
+	if assetBudget == nil {
+		assetBudget = &embeddedAssetBudget{}
+	}
 	pos := 0
 	var headerFields []Field
 	for pos < len(buf) {
@@ -851,20 +867,23 @@ func parseMatroska(buf []byte) (MatroskaInfo, bool) {
 			break
 		}
 		dataStart := pos + idLen + sizeLen
-		dataEnd := dataStart + int(size)
-		if size == unknownVintSize || dataEnd > len(buf) {
-			dataEnd = len(buf)
+		if dataStart > len(buf) {
+			break
+		}
+		dataEnd := len(buf)
+		if size != unknownVintSize && size <= uint64(len(buf)-dataStart) {
+			dataEnd = dataStart + int(size)
 		}
 		if id == mkvIDEBML {
 			headerFields = parseMatroskaHeader(buf[dataStart:dataEnd])
 		}
 		if id == mkvIDSegment {
-			if info, ok := parseMatroskaSegment(buf[dataStart:dataEnd]); ok {
+			if info, ok := parseMatroskaSegmentWithBudget(buf[dataStart:dataEnd], assetBudget); ok {
 				if len(headerFields) > 0 {
 					info.General = append(headerFields, info.General...)
 				}
 				info.SegmentOffset = int64(dataStart)
-				if size != unknownVintSize {
+				if size != unknownVintSize && size <= math.MaxInt64 {
 					info.SegmentSize = int64(size)
 				}
 				return info, true
@@ -876,6 +895,15 @@ func parseMatroska(buf []byte) (MatroskaInfo, bool) {
 }
 
 func parseMatroskaSegment(buf []byte) (MatroskaInfo, bool) {
+	return parseMatroskaSegmentWithBudget(buf, &embeddedAssetBudget{})
+}
+
+// parseMatroskaSegmentWithBudget parses bounded Segment metadata and accounts
+// for every retained attachment name, MIME value, and payload prefix.
+func parseMatroskaSegmentWithBudget(buf []byte, assetBudget *embeddedAssetBudget) (MatroskaInfo, bool) {
+	if assetBudget == nil {
+		assetBudget = &embeddedAssetBudget{}
+	}
 	info := MatroskaInfo{}
 	encodersByTrackUID := map[uint64]string{}
 	settingsByTrackUID := map[uint64]string{}
@@ -894,6 +922,9 @@ func parseMatroskaSegment(buf []byte) (MatroskaInfo, bool) {
 			break
 		}
 		dataStart := pos + idLen + sizeLen
+		if dataStart > len(buf) {
+			break
+		}
 		completeElement := size != unknownVintSize && size <= uint64(len(buf)-dataStart)
 		dataEnd := len(buf)
 		if completeElement {
@@ -949,8 +980,8 @@ func parseMatroskaSegment(buf []byte) (MatroskaInfo, bool) {
 				}
 			}
 		}
-		if id == mkvIDAttachments {
-			if attachments := parseMatroskaAttachments(buf[dataStart:dataEnd]); len(attachments) > 0 {
+		if id == mkvIDAttachments && completeElement {
+			if attachments := parseMatroskaAttachmentsWithBudget(buf[dataStart:dataEnd], assetBudget); len(attachments) > 0 {
 				for _, attachment := range attachments {
 					info.attachments = append(info.attachments, attachment.name)
 					if len(attachment.data) > 0 {
@@ -3519,6 +3550,15 @@ func parseMatroskaTagTargets(buf []byte) matroskaTagTarget {
 // parseMatroskaAttachments decodes each named AttachedFile in an Attachments
 // payload.
 func parseMatroskaAttachments(buf []byte) []matroskaAttachment {
+	return parseMatroskaAttachmentsWithBudget(buf, &embeddedAssetBudget{})
+}
+
+// parseMatroskaAttachmentsWithBudget decodes bounded AttachedFile metadata until
+// the input ends or the per-analysis item budget is exhausted.
+func parseMatroskaAttachmentsWithBudget(buf []byte, assetBudget *embeddedAssetBudget) []matroskaAttachment {
+	if assetBudget == nil {
+		assetBudget = &embeddedAssetBudget{}
+	}
 	var out []matroskaAttachment
 	pos := 0
 	for pos < len(buf) {
@@ -3534,12 +3574,15 @@ func parseMatroskaAttachments(buf []byte) []matroskaAttachment {
 		if dataStart > len(buf) {
 			break
 		}
-		dataEnd := len(buf)
-		if size != unknownVintSize && size <= uint64(len(buf)-dataStart) {
-			dataEnd = dataStart + int(size)
+		if size == unknownVintSize || size > uint64(len(buf)-dataStart) {
+			break
 		}
+		dataEnd := dataStart + int(size)
 		if id == mkvIDAttachedFile {
-			attachment := parseMatroskaAttachedFile(buf[dataStart:dataEnd])
+			if reason := assetBudget.reserveItem(); reason != embeddedAssetAccepted {
+				break
+			}
+			attachment := parseMatroskaAttachedFile(buf[dataStart:dataEnd], assetBudget)
 			if attachment.name != "" {
 				out = append(out, attachment)
 			}
@@ -3551,8 +3594,10 @@ func parseMatroskaAttachments(buf []byte) []matroskaAttachment {
 
 // parseMatroskaAttachedFile decodes attachment identity and size, retaining
 // payloads no larger than 4 MiB for image inspection.
-func parseMatroskaAttachedFile(buf []byte) matroskaAttachment {
+func parseMatroskaAttachedFile(buf []byte, assetBudget *embeddedAssetBudget) matroskaAttachment {
 	attachment := matroskaAttachment{}
+	payloadStart := -1
+	payloadEnd := -1
 	pos := 0
 	for pos < len(buf) {
 		id, idLen, ok := readVintID(buf, pos)
@@ -3564,28 +3609,40 @@ func parseMatroskaAttachedFile(buf []byte) matroskaAttachment {
 			break
 		}
 		dataStart := pos + idLen + sizeLen
-		completeElement := size != unknownVintSize && size <= uint64(len(buf)-dataStart)
-		dataEnd := len(buf)
-		if completeElement {
-			dataEnd = dataStart + int(size)
+		if dataStart > len(buf) {
+			break
 		}
+		if size == unknownVintSize || size > uint64(len(buf)-dataStart) {
+			break
+		}
+		dataEnd := dataStart + int(size)
 		switch id {
 		case mkvIDFileName:
-			attachment.name = strings.TrimRight(string(buf[dataStart:dataEnd]), "\x00")
-		case mkvIDFileMimeType:
-			attachment.mime = strings.TrimRight(string(buf[dataStart:dataEnd]), "\x00")
-		case mkvIDFileData:
-			if size <= math.MaxInt64 {
-				attachment.size = int64(size)
-			} else {
-				attachment.size = int64(dataEnd - dataStart)
+			if assetBudget.reserveString(size, embeddedAssetMaxNameBytes) == embeddedAssetAccepted {
+				attachment.name = strings.TrimRight(string(buf[dataStart:dataEnd]), "\x00")
 			}
-			attachment.complete = completeElement
-			if attachment.size <= 4<<20 {
-				attachment.data = append([]byte(nil), buf[dataStart:dataEnd]...)
+		case mkvIDFileMimeType:
+			if assetBudget.reserveString(size, embeddedAssetMaxMIMEBytes) == embeddedAssetAccepted {
+				attachment.mime = strings.TrimRight(string(buf[dataStart:dataEnd]), "\x00")
+			}
+		case mkvIDFileData:
+			attachment.size = int64(size)
+			attachment.complete = true
+			if attachment.size <= embeddedAssetMaxPayloadBytes {
+				payloadStart = dataStart
+				payloadEnd = dataEnd
 			}
 		}
 		pos = dataEnd
+	}
+	if payloadStart >= 0 && attachment.mime == "" {
+		attachment.mime = matroskaAttachmentImageMIME(buf[payloadStart:payloadEnd])
+	}
+	if payloadStart >= 0 && matroskaAttachmentIsImage(attachment) {
+		payloadSize := uint64(payloadEnd - payloadStart)
+		if assetBudget.reservePayload(payloadSize, embeddedAssetMaxPayloadBytes) == embeddedAssetAccepted {
+			attachment.data = append([]byte(nil), buf[payloadStart:payloadEnd]...)
+		}
 	}
 	if attachment.mime == "" {
 		attachment.mime = matroskaAttachmentImageMIME(attachment.data)
@@ -3638,16 +3695,20 @@ func scanMatroskaTracksFromFile(r io.ReaderAt, offset int64, fileSize int64, seg
 }
 
 // scanMatroskaAttachmentsFromFile reads an Attachments element at offset while
-// skipping large payloads. Small image payloads are retained for inspection.
-func scanMatroskaAttachmentsFromFile(r io.ReaderAt, offset int64, fileSize int64) []matroskaAttachment {
+// proving every nested range before reading or seeking. It skips unsupported or
+// over-budget payloads and retains only bounded image data for inspection.
+func scanMatroskaAttachmentsFromFile(r io.ReaderAt, offset int64, fileSize int64, assetBudget *embeddedAssetBudget) []matroskaAttachment {
 	if r == nil || offset <= 0 || fileSize <= offset {
 		return nil
 	}
+	if assetBudget == nil {
+		assetBudget = &embeddedAssetBudget{}
+	}
 	// Attachments can be large (fonts). Use EBML seek skipping to avoid reading file data payloads.
-	sr := io.NewSectionReader(r, offset, fileSize-offset)
+	sectionSize := fileSize - offset
+	sr := io.NewSectionReader(r, offset, sectionSize)
 	er := newEBMLReaderWithBufSize(sr, 256*1024)
 
-	start := er.pos
 	id, _, err := er.readVintID()
 	if err != nil || id != mkvIDAttachments {
 		return nil
@@ -3657,11 +3718,15 @@ func scanMatroskaAttachmentsFromFile(r io.ReaderAt, offset int64, fileSize int64
 		return nil
 	}
 	if elemSize == unknownVintSize {
-		elemSize = uint64((fileSize - offset) - (er.pos - start))
+		return nil
 	}
-	end := er.pos + int64(elemSize)
+	end, reason := checkedEmbeddedRange(er.pos, elemSize, sectionSize)
+	if reason != embeddedAssetAccepted {
+		return nil
+	}
 
 	var out []matroskaAttachment
+outer:
 	for er.pos < end {
 		childID, _, err := er.readVintID()
 		if err != nil {
@@ -3672,12 +3737,24 @@ func scanMatroskaAttachmentsFromFile(r io.ReaderAt, offset int64, fileSize int64
 			break
 		}
 		childStart := er.pos
-		childEnd := childStart + int64(childSize)
+		childEnd, reason := checkedEmbeddedRange(childStart, childSize, end)
+		if reason != embeddedAssetAccepted {
+			break
+		}
 		if childID != mkvIDAttachedFile {
-			_ = er.skip(int64(childSize))
+			if err := er.skip(childEnd - er.pos); err != nil {
+				break
+			}
 			continue
 		}
+		if assetBudget.reserveItem() != embeddedAssetAccepted {
+			break
+		}
 		attachment := matroskaAttachment{}
+		var pendingDataStart int64
+		var pendingDataSize int64
+		hasPendingData := false
+	fields:
 		for er.pos < childEnd {
 			fid, _, err := er.readVintID()
 			if err != nil {
@@ -3687,40 +3764,69 @@ func scanMatroskaAttachmentsFromFile(r io.ReaderAt, offset int64, fileSize int64
 			if err != nil {
 				break
 			}
+			fieldStart := er.pos
+			fieldEnd, reason := checkedEmbeddedRange(fieldStart, fsz, childEnd)
+			if reason != embeddedAssetAccepted {
+				break
+			}
+			fieldSize := fieldEnd - fieldStart
 			switch fid {
 			case mkvIDFileName:
-				if b, err := er.readN(int64(fsz)); err == nil {
+				if assetBudget.reserveString(fsz, embeddedAssetMaxNameBytes) != embeddedAssetAccepted {
+					if err := er.skip(fieldSize); err != nil {
+						break outer
+					}
+					continue
+				}
+				if b, err := er.readN(fieldSize); err == nil {
 					attachment.name = strings.TrimRight(string(b), "\x00")
 				} else {
-					break
+					break fields
 				}
 			case mkvIDFileMimeType:
-				if b, err := er.readN(int64(fsz)); err == nil {
+				if assetBudget.reserveString(fsz, embeddedAssetMaxMIMEBytes) != embeddedAssetAccepted {
+					if err := er.skip(fieldSize); err != nil {
+						break outer
+					}
+					continue
+				}
+				if b, err := er.readN(fieldSize); err == nil {
 					attachment.mime = strings.TrimRight(string(b), "\x00")
 				} else {
-					break
+					break fields
 				}
 			case mkvIDFileData:
-				attachment.size = int64(fsz)
-				if fsz <= 4<<20 && matroskaAttachmentIsImage(attachment) {
-					if b, err := er.readN(int64(fsz)); err == nil {
-						attachment.data = b
-						attachment.complete = true
-					} else {
-						break
-					}
-				} else {
-					_ = er.skip(int64(fsz))
+				attachment.size = fieldSize
+				pendingDataStart = fieldStart
+				pendingDataSize = fieldSize
+				hasPendingData = true
+				if err := er.skip(fieldSize); err != nil {
+					break outer
 				}
 			default:
-				_ = er.skip(int64(fsz))
+				if err := er.skip(fieldSize); err != nil {
+					break outer
+				}
+			}
+		}
+		if hasPendingData && matroskaAttachmentIsImage(attachment) {
+			absoluteStart, offsetReason := checkedEmbeddedOffset(offset, uint64(pendingDataStart), fileSize)
+			_, rangeReason := checkedEmbeddedRange(absoluteStart, uint64(pendingDataSize), fileSize)
+			if offsetReason == embeddedAssetAccepted && rangeReason == embeddedAssetAccepted && assetBudget.reservePayload(uint64(pendingDataSize), embeddedAssetMaxPayloadBytes) == embeddedAssetAccepted {
+				data := make([]byte, int(pendingDataSize))
+				if _, err := io.ReadFull(io.NewSectionReader(r, absoluteStart, pendingDataSize), data); err == nil {
+					attachment.data = data
+					attachment.complete = true
+				}
 			}
 		}
 		if attachment.name != "" {
 			out = append(out, attachment)
 		}
 		if er.pos < childEnd {
-			_ = er.skip(childEnd - er.pos)
+			if err := er.skip(childEnd - er.pos); err != nil {
+				break
+			}
 		}
 	}
 	return out

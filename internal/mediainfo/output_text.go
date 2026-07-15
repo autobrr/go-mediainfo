@@ -36,7 +36,7 @@ func writeStream(buf *bytes.Buffer, title string, stream Stream) {
 	for _, field := range stream.Fields {
 		buf.WriteString(padRight(field.Name, 41))
 		buf.WriteString(": ")
-		buf.WriteString(field.Value)
+		buf.WriteString(escapeOutputControls(field.Value))
 		buf.WriteString("\n")
 	}
 }

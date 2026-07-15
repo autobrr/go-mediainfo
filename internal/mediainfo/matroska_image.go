@@ -126,6 +126,7 @@ func parseJPEGAttachment(data []byte) (width, height, depth int, subsampling, ic
 	if len(data) < 4 || data[0] != 0xFF || data[1] != 0xD8 {
 		return 0, 0, 0, "", "", "", 0, false
 	}
+	hasSRGBProfile := bytes.Contains(data, []byte("sRGB IEC61966-2.1"))
 	for pos := 2; pos+4 <= len(data); {
 		if data[pos] != 0xFF {
 			pos++
@@ -158,7 +159,7 @@ func parseJPEGAttachment(data []byte) (width, height, depth int, subsampling, ic
 		}
 		if marker == 0xE2 && bytes.Contains(segment, []byte("ICC_PROFILE")) {
 			iccSpace = "RGB"
-			if bytes.Contains(segment, []byte("sRGB IEC61966-2.1")) || bytes.Contains(data, []byte("sRGB IEC61966-2.1")) {
+			if hasSRGBProfile {
 				iccDescription = "sRGB IEC61966-2.1"
 			}
 		}
@@ -181,7 +182,7 @@ func parseJPEGAttachment(data []byte) (width, height, depth int, subsampling, ic
 		}
 		pos += length
 	}
-	if iccDescription == "" && bytes.Contains(data, []byte("sRGB IEC61966-2.1")) {
+	if iccDescription == "" && hasSRGBProfile {
 		iccSpace = "RGB"
 		iccDescription = "sRGB IEC61966-2.1"
 	}

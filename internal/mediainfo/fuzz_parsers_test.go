@@ -2,6 +2,7 @@ package mediainfo
 
 import (
 	"bytes"
+	"encoding/binary"
 	"testing"
 )
 
@@ -58,6 +59,49 @@ func FuzzParseMatroskaContainers(f *testing.F) {
 		opts.ParseSpeed = float64(speed) / 255.0
 		opts = normalizeAnalyzeOptions(opts)
 		_, _ = ParseMatroskaWithOptions(bytes.NewReader(data), int64(len(data)), opts)
+	})
+}
+
+// FuzzMatroskaAttachmentSecurity exercises checked size arithmetic, budget
+// transitions, and the lazy attachment scanner with a logical file size that is
+// independent of the bounded in-memory fuzz payload.
+func FuzzMatroskaAttachmentSecurity(f *testing.F) {
+	name := buildMatroskaElement(mkvIDFileName, []byte("cover.jpg"))
+	attachment := buildMatroskaElement(mkvIDAttachedFile, name)
+	f.Add(buildMatroskaElement(mkvIDAttachments, attachment), uint32(0))
+	f.Add([]byte{0x19, 0x41, 0xA4, 0x69, 0x01, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}, ^uint32(0))
+	f.Add([]byte{}, uint32(0))
+
+	f.Fuzz(func(t *testing.T, data []byte, logicalExtra uint32) {
+		data = fuzzLimit(data)
+		if len(data) >= 24 {
+			start := int64(binary.LittleEndian.Uint64(data[0:8]))
+			size := binary.LittleEndian.Uint64(data[8:16])
+			limit := int64(binary.LittleEndian.Uint64(data[16:24]))
+			_, _ = checkedEmbeddedRange(start, size, limit)
+			_, _ = checkedEmbeddedOffset(start, size, limit)
+		}
+
+		budget := &embeddedAssetBudget{}
+		for pos := 0; pos+9 <= len(data); pos += 9 {
+			size := binary.LittleEndian.Uint64(data[pos+1 : pos+9])
+			switch data[pos] % 3 {
+			case 0:
+				_ = budget.reserveItem()
+			case 1:
+				_ = budget.reserveString(size, embeddedAssetMaxNameBytes)
+			case 2:
+				_ = budget.reservePayload(size, embeddedAssetMaxPayloadBytes)
+			}
+		}
+
+		stored := append([]byte{0}, data...)
+		extra := int64(logicalExtra % (1 << 20))
+		reader := &sparseRecordingReaderAt{data: stored}
+		_ = scanMatroskaAttachmentsFromFile(reader, 1, int64(len(stored))+extra, &embeddedAssetBudget{})
+		if reader.maxRead > int(embeddedAssetMaxPayloadBytes) {
+			t.Fatalf("lazy scanner requested %d bytes", reader.maxRead)
+		}
 	})
 }
 

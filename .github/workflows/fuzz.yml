@@ -29,12 +29,13 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: go fuzz (10m)
+      - name: go fuzz (12m)
         run: |
           set -euo pipefail
           go test ./internal/mediainfo -run=^$ -fuzz=FuzzParseAC3FrameParsers -fuzztime=2m
           go test ./internal/mediainfo -run=^$ -fuzz=FuzzParseMPEGTSPacketizers -fuzztime=2m
           go test ./internal/mediainfo -run=^$ -fuzz=FuzzParseMatroskaContainers -fuzztime=2m
+          go test ./internal/mediainfo -run=^$ -fuzz=FuzzMatroskaAttachmentSecurity -fuzztime=2m
           go test ./internal/mediainfo -run=^$ -fuzz=FuzzReadMatroskaBlockHeader -fuzztime=2m
           go test ./internal/mediainfo -run=^$ -fuzz=FuzzScanMatroskaClusters -fuzztime=2m
 
@@ -46,4 +47,3 @@ jobs:
           if-no-files-found: ignore
           path: |
             testdata/fuzz/
-

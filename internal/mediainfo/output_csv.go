@@ -30,7 +30,7 @@ func writeCSVTrack(buf *bytes.Buffer, trackType string, stream Stream) {
 	for _, field := range stream.Fields {
 		buf.WriteString(field.Name)
 		buf.WriteString(",")
-		buf.WriteString(field.Value)
+		buf.WriteString(safeCSVOutputValue(field.Value))
 		buf.WriteString("\n")
 	}
 	buf.WriteString("\n")

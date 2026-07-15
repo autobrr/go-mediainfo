@@ -103,6 +103,21 @@ Footer includes `ReportBy : go-mediainfo - vX.Y.Z`.
 - `--Info-Parameters`
 - `-f, --Full` (reserved; currently no-op)
 
+## Embedded metadata safety
+
+Embedded attachments and cover art are inspected in memory only; they are never
+extracted, written, or executed. Per-file parsing limits embedded assets to 256,
+attachment names to 4 KiB each, MIME values to 1 KiB each, and retained metadata
+strings to 1 MiB total. Matroska image inspection retains at most 4 MiB per image
+and 32 MiB total; ID3 image probes retain at most 64 KiB each; ICC decompression
+is capped at 4 MiB. FLAC picture payloads are skipped after their bounded headers.
+
+Malformed, truncated, unknown-sized, or over-limit embedded metadata is omitted
+while valid audio/video tracks continue parsing. This intentionally differs from
+upstream output for hostile inputs. Text and CSV outputs visibly escape control
+characters; CSV also neutralizes formula-leading metadata and formula-bearing
+injected cells. JSON continues to use Go JSON escaping.
+
 ## Commands
 
 - `update` (self-update this binary; release builds only)
