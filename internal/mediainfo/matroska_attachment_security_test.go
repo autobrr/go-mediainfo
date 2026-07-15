@@ -150,6 +150,19 @@ func TestParseMatroskaAttachmentsDefersPayloadUntilIdentity(t *testing.T) {
 	}
 }
 
+func TestParseJPEGAttachmentAcceptsSegmentEndingAtPayloadBoundary(t *testing.T) {
+	data := []byte{
+		0xFF, 0xD8,
+		0xFF, 0xC0, 0x00, 0x0B,
+		0x08, 0x00, 0x10, 0x00, 0x10, 0x01, 0x01, 0x11, 0x00,
+	}
+
+	width, height, depth, _, _, _, _, ok := parseJPEGAttachment(data)
+	if !ok || width != 16 || height != 16 || depth != 8 {
+		t.Fatalf("parseJPEGAttachment() = %dx%d depth %d, ok %v", width, height, depth, ok)
+	}
+}
+
 func BenchmarkParseJPEGAttachmentAPP2(b *testing.B) {
 	for _, size := range []int{64 << 10, 1 << 20, 2 << 20, 4 << 20} {
 		b.Run(strconv.Itoa(size), func(b *testing.B) {

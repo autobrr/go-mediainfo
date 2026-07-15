@@ -246,7 +246,7 @@ func parseJPEGAttachment(data []byte) (width, height, depth int, subsampling, ic
 			break
 		}
 		length := int(binary.BigEndian.Uint16(data[pos : pos+2]))
-		if length < 2 || pos+length > len(data) {
+		if length < 2 || length > len(data)-pos {
 			break
 		}
 		segment := data[pos+2 : pos+length]

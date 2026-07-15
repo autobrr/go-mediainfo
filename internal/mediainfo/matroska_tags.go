@@ -105,7 +105,14 @@ func mergeMatroskaScopedTags(dst *matroskaScopedTags, src matroskaScopedTags) {
 
 // mergeMatroskaTagSet copies only normalized names absent from dst.
 func mergeMatroskaTagSet(dst *matroskaTagSet, src matroskaTagSet) {
-	for _, field := range src.sorted() {
+	fields := make([]matroskaTagField, 0, len(src.values))
+	for _, field := range src.values {
+		fields = append(fields, field)
+	}
+	sort.SliceStable(fields, func(i, j int) bool {
+		return fields[i].order < fields[j].order
+	})
+	for _, field := range fields {
 		if _, exists := dst.values[field.name]; !exists {
 			dst.set(field)
 		}
@@ -386,7 +393,7 @@ func applyMatroskaGeneralTags(general *Stream, set matroskaTagSet) {
 		delete(known, "Title")
 	}
 	for name, value := range known {
-		if general.JSON[name] == "" {
+		if !streamHasJSONField(*general, name) {
 			general.JSON[name] = value
 		}
 	}

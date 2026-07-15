@@ -51,6 +51,43 @@ func TestParseMatroskaTagsRetainsArbitraryGeneralMetadata(t *testing.T) {
 	}
 }
 
+func TestMergeMatroskaTagSetPreservesSourceEncounterOrder(t *testing.T) {
+	dst := matroskaTagSet{}
+	dst.set(matroskaTagField{rawName: "HEAD", name: "HEAD", value: "head"})
+	src := matroskaTagSet{}
+	src.set(matroskaTagField{rawName: "Z_LAST_WINDOW_FIRST", name: "Z_LAST_WINDOW_FIRST", value: "first"})
+	src.set(matroskaTagField{rawName: "A_LAST_WINDOW_SECOND", name: "A_LAST_WINDOW_SECOND", value: "second"})
+
+	mergeMatroskaTagSet(&dst, src)
+
+	if got := dst.values["Z_LAST_WINDOW_FIRST"].order; got != 1 {
+		t.Fatalf("first source field order = %d, want 1", got)
+	}
+	if got := dst.values["A_LAST_WINDOW_SECOND"].order; got != 2 {
+		t.Fatalf("second source field order = %d, want 2", got)
+	}
+}
+
+func TestApplyMatroskaGeneralTagsPreservesParserDerivedFields(t *testing.T) {
+	set := matroskaTagSet{}
+	set.set(matroskaTagField{rawName: "Format", name: "Format", value: "Spoofed"})
+	set.set(matroskaTagField{rawName: "COMMENT", name: "Comment", value: "Tag comment"})
+	general := Stream{
+		Kind:   StreamGeneral,
+		Fields: []Field{{Name: "Format", Value: "Matroska"}},
+		JSON:   map[string]string{},
+	}
+
+	applyMatroskaGeneralTags(&general, set)
+	fields := buildJSONGeneralFields(Report{General: general})
+	if got := jsonFieldValue(fields, "Format"); got != "Matroska" {
+		t.Fatalf("Format = %q, want parser-derived Matroska", got)
+	}
+	if got := jsonFieldValue(fields, "Comment"); got != "Tag comment" {
+		t.Fatalf("Comment = %q, want Tag comment", got)
+	}
+}
+
 func TestMatroskaGeneralTagAliasesUseMediaInfoJSONNames(t *testing.T) {
 	body := buildMatroskaElement(mkvIDTagTargets, nil)
 	for name, value := range map[string]string{
