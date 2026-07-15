@@ -75,6 +75,12 @@ type Stream struct {
 	mkvGoJSON    map[string]string
 	mkvGoJSONRaw map[string]string
 	dynamicJSON  []dynamicJSONField
+	// reportStore is attached only to General to preserve Report's public three-field layout.
+	reportStore *fieldStore
+	// reportSnapshot detects caller mutation before a renderer reuses reportStore.
+	reportSnapshot *legacyReportState
+	// canonicalSeed retains parser-direct entries until analysis attaches the report store.
+	canonicalSeed []fieldEntry
 }
 
 type Report struct {

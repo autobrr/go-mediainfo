@@ -5,15 +5,18 @@ import (
 	"encoding/json"
 )
 
+// jsonMediaOut is the legacy renderer's media object assembled from structured fields.
 type jsonMediaOut struct {
 	Ref    string
 	Tracks []jsonTrackOut
 }
 
+// jsonTrackOut is one ordered legacy JSON track.
 type jsonTrackOut struct {
 	Fields []jsonKV
 }
 
+// RenderJSON renders reports as MediaInfo-compatible JSON from structured projections.
 func RenderJSON(reports []Report) string {
 	if len(reports) == 1 {
 		return renderJSONPayload(buildJSONPayload(reports[0])) + "\n"
@@ -25,6 +28,7 @@ func RenderJSON(reports []Report) string {
 	return renderJSONPayloads(payloads) + "\n"
 }
 
+// jsonPayloadOut contains one top-level JSON payload and library metadata.
 type jsonPayloadOut struct {
 	CreatingLibrary []jsonKV
 	Media           jsonMediaOut
@@ -33,8 +37,18 @@ type jsonPayloadOut struct {
 func buildJSONPayload(report Report) jsonPayloadOut {
 	return jsonPayloadOut{
 		CreatingLibrary: jsonCreatingLibraryFields(),
-		Media:           buildJSONMedia(report),
+		Media:           buildProjectedJSONMedia(report),
 	}
+}
+
+// buildProjectedJSONMedia adapts the ordered structured projection to the JSON renderer.
+func buildProjectedJSONMedia(report Report) jsonMediaOut {
+	projected := projectStructuredReport(report)
+	tracks := make([]jsonTrackOut, 0, len(projected.Streams))
+	for _, stream := range projected.Streams {
+		tracks = append(tracks, jsonTrackOut{Fields: structuredFieldsToJSON(stream.Fields)})
+	}
+	return jsonMediaOut{Ref: projected.Ref, Tracks: tracks}
 }
 
 func jsonCreatingLibraryFields() []jsonKV {

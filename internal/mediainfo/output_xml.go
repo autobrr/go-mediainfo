@@ -33,6 +33,7 @@ type orderedKV struct {
 	val orderedValue
 }
 
+// RenderXML renders reports as MediaInfo XML from the shared structured projection.
 func RenderXML(reports []Report) string {
 	var buf bytes.Buffer
 	buf.WriteString("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
@@ -51,29 +52,89 @@ func RenderXML(reports []Report) string {
 }
 
 func renderXMLMedia(report Report) string {
+	projected := projectStructuredReportFor(report, structuredProjectionXML)
 	var buf bytes.Buffer
 	buf.WriteString("<media")
-	if report.Ref != "" {
-		buf.WriteString(fmt.Sprintf(" ref=\"%s\"", xmlEscapeAttr(report.Ref)))
+	if projected.Ref != "" {
+		fmt.Fprintf(&buf, " ref=\"%s\"", xmlEscapeAttr(projected.Ref))
 	}
 	buf.WriteString(">\n")
-
-	buf.WriteString(renderXMLTrack("General", 0, buildJSONGeneralFields(report)))
-
-	containerFormat := findField(report.General.Fields, "Format")
-	sorted := orderTracks(report.Streams)
-	forEachStreamWithKindIndex(sorted, func(stream Stream, index, total, order int) {
-		typeOrder := 0
-		if total > 1 {
-			typeOrder = index
-		}
-		// typeorder is rendered as a track attribute in XML, so omit @typeorder from fields.
-		fields := buildJSONStreamFields(stream, order, 0, containerFormat)
-		buf.WriteString(renderXMLTrack(string(stream.Kind), typeOrder, fields))
-	})
+	for _, stream := range projected.Streams {
+		buf.WriteString(renderXMLStructuredTrack(string(stream.Kind), stream.TypeOrder, stream.Fields))
+	}
 
 	buf.WriteString("</media>\n")
 	return buf.String()
+}
+
+// renderXMLStructuredTrack renders one structured stream, preserving projected field order.
+func renderXMLStructuredTrack(trackType string, typeOrder int, fields []structuredField) string {
+	var buf bytes.Buffer
+	fmt.Fprintf(&buf, "<track type=\"%s\"", xmlEscapeAttr(trackType))
+	if typeOrder > 0 {
+		fmt.Fprintf(&buf, " typeorder=\"%d\"", typeOrder)
+	}
+	buf.WriteString(">\n")
+	for _, field := range fields {
+		if field.Key == "@type" {
+			continue
+		}
+		if field.Key == "extra" {
+			buf.WriteString(renderXMLStructuredExtra(field.Value))
+			continue
+		}
+		buf.WriteString(renderXMLField(field.Key, structuredNodeText(field.Value)))
+	}
+	buf.WriteString("</track>\n")
+	return buf.String()
+}
+
+// renderXMLStructuredExtra expands an object-valued extra field into XML elements.
+func renderXMLStructuredExtra(value structuredNode) string {
+	if value.Kind != structuredObject {
+		return renderXMLField("extra", structuredNodeText(value))
+	}
+	var buf bytes.Buffer
+	buf.WriteString("<extra>\n")
+	for _, member := range value.Object {
+		buf.WriteString(renderStructuredXML(member.Key, member.Value))
+	}
+	buf.WriteString("</extra>\n")
+	return buf.String()
+}
+
+// renderStructuredXML recursively renders a structured node beneath key.
+func renderStructuredXML(key string, value structuredNode) string {
+	name := xmlFieldName(key)
+	switch value.Kind {
+	case structuredObject:
+		var buf bytes.Buffer
+		fmt.Fprintf(&buf, "<%s>\n", name)
+		for _, member := range value.Object {
+			buf.WriteString(renderStructuredXML(member.Key, member.Value))
+		}
+		fmt.Fprintf(&buf, "</%s>\n", name)
+		return buf.String()
+	case structuredArray:
+		var buf bytes.Buffer
+		fmt.Fprintf(&buf, "<%s>\n", name)
+		for _, item := range value.Array {
+			switch item.Kind {
+			case structuredObject:
+				for _, member := range item.Object {
+					buf.WriteString(renderStructuredXML(member.Key, member.Value))
+				}
+			case structuredArray:
+			case structuredString, structuredNumber, structuredBool, structuredNull, structuredRaw:
+				buf.WriteString(xmlEscape(structuredNodeText(item)))
+			}
+		}
+		fmt.Fprintf(&buf, "</%s>\n", name)
+		return buf.String()
+	case structuredString, structuredNumber, structuredBool, structuredNull, structuredRaw:
+		return fmt.Sprintf("<%s>%s</%s>\n", name, xmlEscape(structuredNodeText(value)), name)
+	}
+	return ""
 }
 
 func renderXMLTrack(trackType string, typeOrder int, fields []jsonKV) string {

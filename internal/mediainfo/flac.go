@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -32,6 +33,7 @@ type flacStreamInfo struct {
 // data. Oversized or malformed comments and pictures are skipped without
 // preventing valid audio parsing. It returns false when the reader cannot be
 // rewound/read or the input does not begin with a valid FLAC signature.
+// ParseFLAC reads FLAC container metadata and returns legacy-compatible streams and General JSON data.
 func ParseFLAC(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, map[string]string, map[string]string, bool) {
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		return ContainerInfo{}, nil, nil, nil, false
@@ -160,56 +162,32 @@ func ParseFLAC(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, map[str
 		}(),
 	}
 
-	fields := []Field{
-		{Name: "Format", Value: "FLAC"},
-	}
-	fields = appendChannelFields(fields, uint64(channels))
-	fields = appendSampleRateField(fields, float64(sampleRate))
-	if bitsPerSample > 0 {
-		fields = append(fields, Field{Name: "Bit depth", Value: formatBitDepth(bitsPerSample)})
-	}
-	fields = append(fields, Field{Name: "Bit rate mode", Value: "Variable"})
-	fields = addStreamCommon(fields, duration, bitrate)
-
-	streamJSON := map[string]string{}
-	streamJSONRaw := map[string]string{}
-	if duration > 0 {
-		streamJSON["Duration"] = formatJSONSeconds(duration)
-	}
-	if totalSamples > 0 {
-		streamJSON["SamplingCount"] = strconv.FormatUint(totalSamples, 10)
-	}
-	streamJSON["Compression_Mode"] = "Lossless"
+	rawBitrate := ""
+	streamSize := int64(0)
 	if audioStart > 0 && audioStart < size {
-		payload := size - audioStart
-		streamJSON["StreamSize"] = strconv.FormatInt(payload, 10)
+		streamSize = size - audioStart
 		if totalSamples > 0 && sampleRate > 0 {
 			// MediaInfo's FLAC bitrates use Duration in integer milliseconds.
 			durationMs := int64((totalSamples*1000 + uint64(sampleRate)/2) / uint64(sampleRate))
 			if durationMs > 0 {
 				// Round to nearest b/s (MediaInfo output is exact integer).
-				br := (payload*8000 + durationMs/2) / durationMs
+				br := (streamSize*8000 + durationMs/2) / durationMs
 				if br > 0 {
-					streamJSON["BitRate"] = strconv.FormatInt(br, 10)
+					rawBitrate = strconv.FormatInt(br, 10)
 				}
 			}
 		}
 	}
+	encodedLibraryName := ""
+	encodedLibraryVersion := ""
+	encodedLibraryDate := ""
 	if encoder != "" {
 		// Match MediaInfo naming: ENCODER becomes Encoded_Application (General) and Encoded_Library (Audio).
-		streamJSON["Encoded_Library"] = encoder
 		if name, version, date := splitFLACEncodedLibrary(encoder); name != "" {
-			streamJSON["Encoded_Library_Name"] = name
-			if version != "" {
-				streamJSON["Encoded_Library_Version"] = version
-			}
-			if date != "" {
-				streamJSON["Encoded_Library_Date"] = date
-			}
+			encodedLibraryName = name
+			encodedLibraryVersion = version
+			encodedLibraryDate = date
 		}
-	}
-	if md5Hex != "" {
-		streamJSONRaw["extra"] = renderJSONObject([]jsonKV{{Key: "MD5_Unencoded", Val: md5Hex}}, false)
 	}
 
 	generalJSON, generalJSONRaw := flacTagsToGeneralJSON(tags, encoder)
@@ -221,7 +199,96 @@ func ParseFLAC(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, map[str
 		}
 	}
 
-	return info, []Stream{{Kind: StreamAudio, Fields: fields, JSON: streamJSON, JSONRaw: streamJSONRaw, JSONSkipStreamOrder: true}}, generalJSON, generalJSONRaw, true
+	audioStream := canonicalFLACAudioStream(channels, sampleRate, bitsPerSample, totalSamples, duration, bitrate, rawBitrate, streamSize, encoder, encodedLibraryName, encodedLibraryVersion, encodedLibraryDate, md5Hex)
+	return info, []Stream{audioStream}, generalJSON, generalJSONRaw, true
+}
+
+// canonicalFLACAudioStream records FLAC audio facts in canonical units before creating a legacy snapshot.
+func canonicalFLACAudioStream(channels uint8, sampleRate uint32, bitsPerSample uint8, totalSamples uint64, duration, displayBitrate float64, rawBitrate string, streamSize int64, encoder, encodedLibraryName, encodedLibraryVersion, encodedLibraryDate, md5Hex string) Stream {
+	store := &fieldStore{}
+	ref := store.Prepare(StreamAudio)
+	store.streams[ref].SkipStreamOrder = true
+	store.Fill(ref, "Format", "FLAC", fillReplace)
+	if duration > 0 {
+		store.Fill(ref, "Duration", strconv.FormatInt(int64(math.Round(duration*1000)), 10), fillReplace)
+	}
+	store.Fill(ref, "BitRate_Mode", "Variable", fillReplace)
+	if rawBitrate != "" {
+		store.Fill(ref, "BitRate", rawBitrate, fillReplace)
+		if displayBitrate > 0 {
+			store.Fill(ref, "BitRate/String", formatBitrate(displayBitrate), fillReplace)
+		}
+	} else if displayBitrate > 0 {
+		store.Fill(ref, "BitRate", strconv.FormatInt(int64(math.Round(displayBitrate)), 10), fillReplace)
+	}
+	if channels > 0 {
+		channelText := strconv.Itoa(int(channels))
+		store.Fill(ref, "Channels", channelText, fillReplace)
+		if positions := channelPositionsFromCount(channelText); positions != "" {
+			fillGeneratedStructured(store, ref, "ChannelPositions", positions)
+		}
+		if layout := channelLayout(uint64(channels)); layout != "" {
+			store.Fill(ref, "ChannelLayout", layout, fillReplace)
+		}
+	}
+	if sampleRate > 0 {
+		store.Fill(ref, "SamplingRate", strconv.FormatUint(uint64(sampleRate), 10), fillReplace)
+	}
+	if bitsPerSample > 0 {
+		store.Fill(ref, "BitDepth", strconv.Itoa(int(bitsPerSample)), fillReplace)
+	}
+
+	overrides := []jsonKV{{Key: "Compression_Mode", Val: "Lossless"}}
+	if duration > 0 {
+		overrides = append(overrides, jsonKV{Key: "Duration", Val: formatJSONSeconds(duration)})
+	}
+	if totalSamples > 0 {
+		overrides = append(overrides, jsonKV{Key: "SamplingCount", Val: strconv.FormatUint(totalSamples, 10)})
+	}
+	if rawBitrate != "" {
+		overrides = append(overrides, jsonKV{Key: "BitRate", Val: rawBitrate})
+	}
+	if streamSize > 0 {
+		overrides = append(overrides, jsonKV{Key: "StreamSize", Val: strconv.FormatInt(streamSize, 10)})
+	}
+	if encoder != "" {
+		overrides = append(overrides, jsonKV{Key: "Encoded_Library", Val: encoder})
+	}
+	if encodedLibraryName != "" {
+		overrides = append(overrides, jsonKV{Key: "Encoded_Library_Name", Val: encodedLibraryName})
+	}
+	if encodedLibraryVersion != "" {
+		overrides = append(overrides, jsonKV{Key: "Encoded_Library_Version", Val: encodedLibraryVersion})
+	}
+	if encodedLibraryDate != "" {
+		overrides = append(overrides, jsonKV{Key: "Encoded_Library_Date", Val: encodedLibraryDate})
+	}
+	sort.Slice(overrides, func(left, right int) bool { return overrides[left].Key < overrides[right].Key })
+	for _, override := range overrides {
+		name := fieldName(override.Key)
+		if _, ok := store.Get(ref, name); !ok {
+			fillGeneratedStructured(store, ref, name, override.Val)
+		}
+		store.MarkLegacyJSON(ref, name, override.Val, false)
+	}
+	if md5Hex != "" {
+		raw := renderJSONObject([]jsonKV{{Key: "MD5_Unencoded", Val: md5Hex}}, false)
+		node, err := parseStructuredNode(raw)
+		if err != nil {
+			node = structuredNode{Kind: structuredRaw, Text: raw}
+		}
+		_, known := structuredFieldSpec(StreamAudio, "extra")
+		store.appendEntry(store.stream(ref), fieldEntry{
+			Name:          "extra",
+			Value:         fieldValue{Text: raw},
+			Dynamic:       !known,
+			Options:       fieldOptions{ShowStructured: true, ShowXML: true, ValueType: fieldValueNode},
+			StructuredKey: "extra",
+			Node:          &node,
+		})
+		store.MarkLegacyJSON(ref, "extra", raw, true)
+	}
+	return canonicalStreamSnapshot(store, ref, canonicalStreamPolicy{SkipStreamOrder: true})
 }
 
 func parseFLACPicture(data []byte) (mime string, typ string, ok bool) {

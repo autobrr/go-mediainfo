@@ -5,14 +5,26 @@ import (
 	"html"
 )
 
+// RenderHTML renders reports as an escaped HTML table using the text projection.
 func RenderHTML(reports []Report) string {
 	var buf bytes.Buffer
 	buf.WriteString("<html><head><meta charset=\"utf-8\"/></head><body>")
 	for _, report := range reports {
+		projected := projectTextReport(report)
 		buf.WriteString("<table>")
-		buf.WriteString(renderHTMLStream("General", report.General))
-		for _, entry := range enumerateStreams(report.Streams) {
-			buf.WriteString(renderHTMLStream(entry.Title, entry.Stream))
+		if len(projected.Streams) > 0 {
+			buf.WriteString(renderHTMLFields("General", projected.Streams[0].Kind, projected.Streams[0].Fields))
+		}
+		streams := projected.Streams[1:]
+		counts := make(map[StreamKind]int)
+		for _, stream := range streams {
+			counts[stream.Kind]++
+		}
+		kindIndex := make(map[StreamKind]int)
+		for _, stream := range streams {
+			kindIndex[stream.Kind]++
+			title := streamTitle(stream.Kind, kindIndex[stream.Kind], counts[stream.Kind])
+			buf.WriteString(renderHTMLFields(title, stream.Kind, stream.Fields))
 		}
 		buf.WriteString("</table>")
 	}
@@ -21,7 +33,12 @@ func RenderHTML(reports []Report) string {
 }
 
 func renderHTMLStream(title string, stream Stream) string {
-	fields := orderFieldsForJSON(stream.Kind, stream.Fields)
+	return renderHTMLFields(title, stream.Kind, stream.Fields)
+}
+
+// renderHTMLFields renders one ordered text-projection stream as table rows.
+func renderHTMLFields(title string, kind StreamKind, sourceFields []Field) string {
+	fields := orderFieldsForJSON(kind, sourceFields)
 	var buf bytes.Buffer
 	buf.WriteString("<tr><th colspan=\"2\">")
 	buf.WriteString(html.EscapeString(title))

@@ -1811,11 +1811,13 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 		}
 		restoreMatroskaGoJSONFields(&general, streams, matroskaGoGeneralStreamSize)
 	}
-	return Report{
+	report := Report{
 		Ref:     path,
 		General: general,
 		Streams: streams,
-	}, nil
+	}
+	attachCanonicalStore(&report)
+	return report, nil
 }
 
 // restoreMatroskaGoJSONFields stages General and first-Menu Go extensions only

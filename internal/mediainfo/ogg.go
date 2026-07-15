@@ -9,6 +9,7 @@ import (
 	"strings"
 )
 
+// ParseOgg reads Vorbis or Opus stream metadata and returns legacy-compatible audio and General fields.
 func ParseOgg(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, []Field, map[string]string, bool) {
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		return ContainerInfo{}, nil, nil, nil, false
@@ -109,32 +110,6 @@ func ParseOgg(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, []Field,
 		format = "Unknown"
 	}
 
-	streamFields := []Field{
-		{Name: "Format", Value: format},
-	}
-	if serial != 0 {
-		streamFields = append(streamFields, Field{Name: "ID", Value: strconv.FormatUint(uint64(serial), 10)})
-	}
-	streamFields = appendChannelFields(streamFields, uint64(channels))
-	streamFields = append(streamFields, Field{Name: "Compression mode", Value: "Lossy"})
-	if sampleRate > 0 {
-		streamFields = append(streamFields, Field{Name: "Sampling rate", Value: formatSampleRate(float64(sampleRate))})
-	}
-	streamFields = addStreamDuration(streamFields, duration)
-	if tagVendor != "" {
-		// Match official: audio Encoded_Library comes from OpusTags vendor (e.g. Lavf...).
-		streamFields = append(streamFields, Field{Name: "Writing library", Value: strings.TrimSpace(tagVendor)})
-	}
-
-	streamJSON := map[string]string{}
-	if sampleRate > 0 && duration > 0 {
-		// Match official: SamplingCount is derived from integer milliseconds duration.
-		durationMs := int64(math.Round(duration * 1000))
-		if durationMs > 0 {
-			streamJSON["SamplingCount"] = strconv.FormatInt(durationMs*int64(sampleRate)/1000, 10)
-		}
-	}
-
 	generalFields := []Field{}
 	if tagEncoder != "" {
 		// Match official: General Encoded_Application comes from OpusTags ENCODER (Lavc... libopus).
@@ -142,13 +117,47 @@ func ParseOgg(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, []Field,
 	}
 	generalJSON := map[string]string{}
 
-	streams := []Stream{{
-		Kind:                StreamAudio,
-		Fields:              streamFields,
-		JSON:                streamJSON,
-		JSONSkipStreamOrder: true,
-	}}
+	audioStream := canonicalOggAudioStream(format, serial, channels, sampleRate, duration, tagVendor)
+	streams := []Stream{audioStream}
 	return info, streams, generalFields, generalJSON, true
+}
+
+// canonicalOggAudioStream records Ogg audio facts in canonical units before creating a legacy snapshot.
+func canonicalOggAudioStream(format string, serial uint32, channels uint8, sampleRate uint32, duration float64, encodedLibrary string) Stream {
+	store := &fieldStore{}
+	ref := store.Prepare(StreamAudio)
+	store.streams[ref].SkipStreamOrder = true
+	if serial != 0 {
+		store.Fill(ref, "ID", strconv.FormatUint(uint64(serial), 10), fillReplace)
+	}
+	store.Fill(ref, "Format", format, fillReplace)
+	durationMilliseconds := int64(0)
+	if duration > 0 {
+		durationMilliseconds = int64(math.Round(duration * 1000))
+		store.Fill(ref, "Duration", strconv.FormatInt(durationMilliseconds, 10), fillReplace)
+	}
+	if channels > 0 {
+		store.Fill(ref, "Channels", strconv.Itoa(int(channels)), fillReplace)
+		if positions := channelPositionsFromCount(strconv.Itoa(int(channels))); positions != "" {
+			fillGeneratedStructured(store, ref, "ChannelPositions", positions)
+		}
+		if layout := channelLayout(uint64(channels)); layout != "" {
+			store.Fill(ref, "ChannelLayout", layout, fillReplace)
+		}
+	}
+	if sampleRate > 0 {
+		store.Fill(ref, "SamplingRate", strconv.FormatUint(uint64(sampleRate), 10), fillReplace)
+		if durationMilliseconds > 0 {
+			value := strconv.FormatInt(durationMilliseconds*int64(sampleRate)/1000, 10)
+			fillGeneratedStructured(store, ref, "SamplingCount", value)
+			store.MarkLegacyJSON(ref, "SamplingCount", value, false)
+		}
+	}
+	store.Fill(ref, "Compression_Mode", "Lossy", fillReplace)
+	if encodedLibrary != "" {
+		store.Fill(ref, "Encoded_Library", strings.TrimSpace(encodedLibrary), fillReplace)
+	}
+	return canonicalStreamSnapshot(store, ref, canonicalStreamPolicy{SkipStreamOrder: true})
 }
 
 func parseOggIdentification(data []byte) (uint32, uint8, string) {

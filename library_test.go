@@ -182,6 +182,36 @@ func TestStreamKindAlias(t *testing.T) {
 	}
 }
 
+func TestReportPublicLayoutCompatibility(t *testing.T) {
+	reportType := reflect.TypeFor[Report]()
+	if reportType.NumField() != 3 {
+		t.Fatalf("Report has %d fields, want 3", reportType.NumField())
+	}
+	for index, want := range []string{"Ref", "General", "Streams"} {
+		if got := reportType.Field(index).Name; got != want {
+			t.Fatalf("Report field %d = %q, want %q", index, got, want)
+		}
+	}
+}
+
+func TestRenderHonorsMutatedAnalyzedLegacyReport(t *testing.T) {
+	report, err := AnalyzeFile(filepath.Join("samples", "sample.wav"))
+	if err != nil {
+		t.Fatalf("AnalyzeFile: %v", err)
+	}
+	if report.General.JSON == nil {
+		report.General.JSON = map[string]string{}
+	}
+	report.General.JSON["Format"] = "Caller override"
+	output, err := Render([]Report{report}, OutputJSON)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if !strings.Contains(output, `"Format":"Caller override"`) {
+		t.Fatalf("mutated legacy override was ignored: %s", output)
+	}
+}
+
 func TestRenderUnknownFormat(t *testing.T) {
 	if _, err := Render(nil, OutputFormat("UNKNOWN")); err == nil {
 		t.Fatal("Render error = nil, want non-nil")
