@@ -74,7 +74,8 @@ func ParseFLAC(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, map[str
 			break
 		}
 		blockReadOK := true
-		if blockType == 0 {
+		switch blockType {
+		case 0:
 			if blockLen >= 34 {
 				var streamInfo [34]byte
 				if _, err := io.ReadFull(file, streamInfo[:]); err != nil {
@@ -83,7 +84,7 @@ func ParseFLAC(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, map[str
 					sampleRate, channels, bitsPerSample, totalSamples, md5Hex = parseFLACStreamInfo(streamInfo[:])
 				}
 			}
-		} else if blockType == 4 {
+		case 4:
 			// VorbisComment. Primary source for tags like ENCODER, TITLE, ALBUM, etc.
 			if assetBudget.reserveString(uint64(blockLen), embeddedAssetMaxStringBytes) == embeddedAssetAccepted {
 				buf := make([]byte, blockLen)
@@ -108,7 +109,7 @@ func ParseFLAC(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, map[str
 					}
 				}
 			}
-		} else if blockType == 6 {
+		case 6:
 			// METADATA_BLOCK_PICTURE (cover art). Only its bounded type/MIME prefix is needed.
 			if assetBudget.reserveItem() == embeddedAssetAccepted && coverMIME == "" {
 				mime, typ, ok, err := readFLACPictureHeader(file, int64(blockLen), assetBudget)

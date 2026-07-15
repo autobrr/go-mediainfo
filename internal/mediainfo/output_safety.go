@@ -7,6 +7,8 @@ import (
 	"unicode/utf8"
 )
 
+const uppercaseHexDigits = "0123456789ABCDEF"
+
 // escapeOutputControls renders control characters visibly so untrusted media
 // metadata cannot create terminal actions or forge text/CSV records.
 func escapeOutputControls(value string) string {
@@ -29,10 +31,9 @@ func escapeOutputControls(value string) string {
 	for i := first; i < len(value); {
 		r, size := utf8.DecodeRuneInString(value[i:])
 		if r == utf8.RuneError && size == 1 && value[i] >= 0x80 && value[i] <= 0x9F {
-			const hex = "0123456789ABCDEF"
 			out.WriteString(`\x`)
-			out.WriteByte(hex[value[i]>>4])
-			out.WriteByte(hex[value[i]&0x0F])
+			out.WriteByte(uppercaseHexDigits[value[i]>>4])
+			out.WriteByte(uppercaseHexDigits[value[i]&0x0F])
 			i++
 			continue
 		}
@@ -50,15 +51,13 @@ func escapeOutputControls(value string) string {
 		default:
 			switch {
 			case r < 0x20:
-				const hex = "0123456789ABCDEF"
 				out.WriteString(`\x`)
-				out.WriteByte(hex[byte(r)>>4])
-				out.WriteByte(hex[byte(r)&0x0F])
+				out.WriteByte(uppercaseHexDigits[byte(r)>>4])
+				out.WriteByte(uppercaseHexDigits[byte(r)&0x0F])
 			case r >= 0x80 && r <= 0x9F:
-				const hex = "0123456789ABCDEF"
 				out.WriteString(`\u00`)
-				out.WriteByte(hex[byte(r)>>4])
-				out.WriteByte(hex[byte(r)&0x0F])
+				out.WriteByte(uppercaseHexDigits[byte(r)>>4])
+				out.WriteByte(uppercaseHexDigits[byte(r)&0x0F])
 			default:
 				out.WriteString(value[i : i+size])
 			}
