@@ -3,6 +3,7 @@ package mediainfo
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/json"
 	"io"
 	"strings"
 	"testing"
@@ -37,7 +38,7 @@ func TestParseMatroskaTracks(t *testing.T) {
 
 func TestParseMatroskaStatsTags(t *testing.T) {
 	tagsPayload := buildMatroskaTagForStats(123)
-	encoders, settings, langs, stats, _ := parseMatroskaTags(tagsPayload, "")
+	encoders, settings, langs, stats, _, _ := parseMatroskaTags(tagsPayload, "")
 	if got := encoders[123]; got != "Lavf60.3.100" {
 		t.Fatalf("unexpected encoder: %q", got)
 	}
@@ -68,9 +69,10 @@ func TestParseMatroskaStatsTags(t *testing.T) {
 func TestParseMatroskaGeneralTags(t *testing.T) {
 	body := append(buildMatroskaSimpleTag("IMDB", " tt32612507 "), buildMatroskaSimpleTag("TMDB", "movie/1304313")...)
 	body = append(body, buildMatroskaSimpleTag("TVDB2", "movies/19799")...)
-	tagsPayload := buildMatroskaElement(mkvIDTag, body)
+	targets := buildMatroskaElement(mkvIDTagTargets, nil)
+	tagsPayload := buildMatroskaElement(mkvIDTag, append(targets, body...))
 
-	_, _, _, _, generalTags := parseMatroskaTags(tagsPayload, "")
+	_, _, _, _, generalTags, _ := parseMatroskaTags(tagsPayload, "")
 	if got := generalTags["IMDB"]; got != "tt32612507" {
 		t.Fatalf("IMDB = %q, want tt32612507", got)
 	}
@@ -87,7 +89,7 @@ func TestParseMatroskaTrackSourceTags(t *testing.T) {
 	targets := buildMatroskaElement(mkvIDTagTargets, buildMatroskaElement(mkvIDTagTrackUID, encodeMatroskaUint(123)))
 	tagsPayload := buildMatroskaElement(mkvIDTag, append(targets, body...))
 
-	_, _, _, stats, _ := parseMatroskaTags(tagsPayload, "")
+	_, _, _, stats, _, _ := parseMatroskaTags(tagsPayload, "")
 	got := stats[123]
 	if len(got.extras) != 1 || got.extras[0] != (jsonKV{Key: "SOURCE", Val: "UHD Blu-ray"}) {
 		t.Fatalf("extras = %#v", got.extras)
@@ -689,7 +691,7 @@ func TestMatroskaTagCompletenessIsPerTrack(t *testing.T) {
 
 func TestParseMatroskaTagsCarriesTagLanguage(t *testing.T) {
 	tag := buildMatroskaLanguageTag(7, "jpn")
-	_, _, langs, _, _ := parseMatroskaTags(tag, "")
+	_, _, langs, _, _, _ := parseMatroskaTags(tag, "")
 	if got := langs[7]; got != "jpn" {
 		t.Fatalf("TagLanguage = %q, want jpn", got)
 	}
@@ -718,12 +720,18 @@ func TestParseMatroskaLanguageOnlyTagsFromHeadAndTailWindows(t *testing.T) {
 		{name: "tail", position: 33 << 20},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
+			generalBody := buildMatroskaElement(mkvIDTagTargets, nil)
+			generalBody = append(generalBody, buildMatroskaSimpleTag("WINDOW_GENERAL", tt.name)...)
+			trackBody := buildMatroskaElement(mkvIDTagTargets, buildMatroskaElement(mkvIDTagTrackUID, encodeMatroskaUint(7)))
+			trackBody = append(trackBody, buildMatroskaSimpleTag("WINDOW_TRACK", tt.name)...)
+			tags := append(buildMatroskaLanguageTag(7, "jpn"), buildMatroskaElement(mkvIDTag, generalBody)...)
+			tags = append(tags, buildMatroskaElement(mkvIDTag, trackBody)...)
 			segment := append(buildMatroskaInfo(), buildMatroskaAudioTracks(7)...)
 			if len(segment) >= tt.position {
 				t.Fatalf("metadata length %d exceeds tag position", len(segment))
 			}
 			segment = append(segment, make([]byte, tt.position-len(segment))...)
-			segment = append(segment, buildMatroskaElement(mkvIDTags, buildMatroskaLanguageTag(7, "jpn"))...)
+			segment = append(segment, buildMatroskaElement(mkvIDTags, tags)...)
 			file := append(buildMatroskaID(mkvIDSegment), 0xFF)
 			file = append(file, segment...)
 
@@ -734,7 +742,49 @@ func TestParseMatroskaLanguageOnlyTagsFromHeadAndTailWindows(t *testing.T) {
 			if got := info.Tracks[0].JSON["Language"]; got == "" {
 				t.Fatal("language-only Tags fallback did not reach audio output")
 			}
+			if got := info.scopedTags.general.get("WINDOW_GENERAL"); got != tt.name {
+				t.Fatalf("General fallback tag = %q, want %q", got, tt.name)
+			}
+			fields := buildJSONStreamFields(info.Tracks[0], 0, 0, "Matroska")
+			var extra map[string]string
+			if err := json.Unmarshal([]byte(jsonFieldValue(fields, "extra")), &extra); err != nil {
+				t.Fatalf("track extra is invalid: %v", err)
+			}
+			if got := extra["WINDOW_TRACK"]; got != tt.name {
+				t.Fatalf("Track fallback tag = %q, want %q: %#v", got, tt.name, extra)
+			}
 		})
+	}
+}
+
+func TestParseMatroskaSeekHeadScopedTagSurvivesHeadFallback(t *testing.T) {
+	const tagPosition = 18 << 20
+	targets := buildMatroskaElement(mkvIDTagTargets, buildMatroskaElement(mkvIDTagTrackUID, encodeMatroskaUint(7)))
+	tag := append([]byte(nil), targets...)
+	tag = append(tag, buildMatroskaSimpleTag("SEEK_ONLY", "retained")...)
+	tags := buildMatroskaElement(mkvIDTags, buildMatroskaElement(mkvIDTag, tag))
+	segment := append(buildMatroskaInfo(), buildMatroskaAudioTracks(7)...)
+	segment = append(segment, buildMatroskaElement(mkvIDSeekHead, buildMatroskaSeekEntryForTest(mkvIDTags, tagPosition))...)
+	if len(segment) >= tagPosition {
+		t.Fatalf("metadata length %d exceeds tag position", len(segment))
+	}
+	segment = append(segment, make([]byte, tagPosition-len(segment))...)
+	segment = append(segment, tags...)
+	segment = append(segment, make([]byte, (20<<20)-len(segment))...)
+	file := append(buildMatroskaID(mkvIDSegment), 0xFF)
+	file = append(file, segment...)
+
+	info, ok := ParseMatroskaWithOptions(bytes.NewReader(file), int64(len(file)), defaultAnalyzeOptions())
+	if !ok || len(info.Tracks) != 1 {
+		t.Fatalf("parse failed: ok=%v tracks=%d", ok, len(info.Tracks))
+	}
+	fields := buildJSONStreamFields(info.Tracks[0], 0, 0, "Matroska")
+	var extra map[string]string
+	if err := json.Unmarshal([]byte(jsonFieldValue(fields, "extra")), &extra); err != nil {
+		t.Fatalf("track extra is invalid: %v", err)
+	}
+	if got := extra["SEEK_ONLY"]; got != "retained" {
+		t.Fatalf("SeekHead scoped tag = %q, want retained: %#v", got, extra)
 	}
 }
 

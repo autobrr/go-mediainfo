@@ -2270,6 +2270,7 @@ func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAud
 			extraFields = append(extraFields, jsonKV{Key: "dynrng_Count", Val: strconv.Itoa(count)})
 		}
 		if probe.format == "E-AC-3" && ac3HasJOCInfo(ac3) {
+			jocFields := make([]jsonKV, 0, 4)
 			complexity := -1
 			if ac3.hasJOCComplex {
 				complexity = ac3.jocComplexity
@@ -2283,19 +2284,20 @@ func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAud
 				}
 			}
 			if complexity >= 0 {
-				extraFields = append(extraFields, jsonKV{Key: "ComplexityIndex", Val: strconv.Itoa(complexity)})
+				jocFields = append(jocFields, jsonKV{Key: "ComplexityIndex", Val: strconv.Itoa(complexity)})
 			}
 			if ac3.hasJOCDyn {
-				extraFields = append(extraFields, jsonKV{Key: "NumberOfDynamicObjects", Val: strconv.Itoa(ac3.jocDynObjects)})
+				jocFields = append(jocFields, jsonKV{Key: "NumberOfDynamicObjects", Val: strconv.Itoa(ac3.jocDynObjects)})
 			}
 			if ac3.hasJOCBed {
 				if ac3.jocBedCount > 0 {
-					extraFields = append(extraFields, jsonKV{Key: "BedChannelCount", Val: strconv.FormatUint(ac3.jocBedCount, 10)})
+					jocFields = append(jocFields, jsonKV{Key: "BedChannelCount", Val: strconv.FormatUint(ac3.jocBedCount, 10)})
 				}
 				if ac3.jocBedLayout != "" {
-					extraFields = append(extraFields, jsonKV{Key: "BedChannelConfiguration", Val: ac3.jocBedLayout})
+					jocFields = append(jocFields, jsonKV{Key: "BedChannelConfiguration", Val: ac3.jocBedLayout})
 				}
 			}
+			extraFields = append(jocFields, extraFields...)
 		}
 		if len(extraFields) > 0 {
 			stream.JSONRaw["extra"] = appendJSONExtraObject(stream.JSONRaw["extra"], renderJSONObject(extraFields, false))

@@ -6,17 +6,17 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
-	"path/filepath"
 	"strconv"
 	"strings"
 )
 
-// matroskaAttachmentImageStream converts a JPEG or PNG attachment into the
-// Image stream fields emitted by MediaInfo for Matroska cover art.
+// matroskaAttachmentImageStream converts a content-detected attachment into
+// the Image stream fields emitted by MediaInfo for Matroska embedded images.
 func matroskaAttachmentImageStream(attachment matroskaAttachment) (Stream, bool) {
 	jsonFields := map[string]string{"MuxingMode": "Attachment"}
-	if isMatroskaCoverAttachment(attachment.name) {
-		jsonFields["Type"] = "Cover"
+	coverType := matroskaAttachmentCoverType(attachment)
+	if coverType != "" {
+		jsonFields["Type"] = coverType
 	}
 	stream := Stream{
 		Kind:                StreamImage,
@@ -25,13 +25,17 @@ func matroskaAttachmentImageStream(attachment matroskaAttachment) (Stream, bool)
 		JSONSkipStreamOrder: true,
 		JSONSkipComputed:    true,
 	}
-	stream.Fields = append(stream.Fields, Field{Name: "Title", Value: attachment.name})
+	title := firstNonEmpty(attachment.description, attachment.name)
+	stream.Fields = append(stream.Fields, Field{Name: "Title", Value: title})
 	data := attachment.data
 	size := attachment.size
 	if size == 0 {
 		size = int64(len(data))
 	}
-	if width, height, depth, subsampling, iccSpace, iccDescription, metadataBytes, ok := parseJPEGAttachment(data); ok {
+	detection, detected := detectEmbeddedImage(data)
+	switch {
+	case detected && detection.kind == embeddedImageJPEG:
+		width, height, depth, subsampling, iccSpace, iccDescription, metadataBytes, _ := parseJPEGAttachment(data)
 		stream.Fields = append(stream.Fields, Field{Name: "Format", Value: "JPEG"})
 		stream.JSON["Width"] = strconv.Itoa(width)
 		stream.JSON["Height"] = strconv.Itoa(height)
@@ -53,7 +57,8 @@ func matroskaAttachmentImageStream(attachment matroskaAttachment) (Stream, bool)
 			stream.JSONRaw["extra"] = renderJSONObject(extra, false)
 		}
 		size = subtractAttachmentMetadataSize(size, metadataBytes)
-	} else if width, height, depth, gamma, ok := parsePNGAttachment(data); ok {
+	case detected && detection.kind == embeddedImagePNG:
+		width, height, depth, gamma, _ := parsePNGAttachment(data)
 		stream.Fields = append(stream.Fields, Field{Name: "Format", Value: "PNG"})
 		stream.JSON["Format_Compression"] = "Deflate"
 		stream.JSON["Format_Settings_Packing"] = "Linear"
@@ -61,7 +66,7 @@ func matroskaAttachmentImageStream(attachment matroskaAttachment) (Stream, bool)
 		stream.JSON["Height"] = strconv.Itoa(height)
 		stream.JSON["PixelAspectRatio"] = "1.000"
 		stream.JSON["DisplayAspectRatio"] = formatJSONFloat(float64(width) / float64(height))
-		stream.JSON["ColorSpace"] = "RGB"
+		stream.JSON["ColorSpace"] = pngAttachmentColorSpace(data)
 		stream.JSON["BitDepth"] = strconv.Itoa(depth)
 		stream.JSON["Compression_Mode"] = "Lossless"
 		extra := []jsonKV{}
@@ -84,7 +89,19 @@ func matroskaAttachmentImageStream(attachment matroskaAttachment) (Stream, bool)
 			stream.JSONRaw["extra"] = renderJSONObject(extra, false)
 		}
 		size = subtractAttachmentMetadataSize(size, metadataBytes)
-	} else {
+	case detected && detection.kind == embeddedImageGIF:
+		width, height, profile, _ := parseGIFAttachment(data)
+		stream.Fields = append(stream.Fields, Field{Name: "Format", Value: "GIF"})
+		stream.JSON["Format_Profile"] = profile
+		stream.JSON["Width"] = strconv.Itoa(width)
+		stream.JSON["Height"] = strconv.Itoa(height)
+		stream.JSON["Compression_Mode"] = "Lossless"
+	default:
+		if coverType == "" {
+			return Stream{}, false
+		}
+	}
+	if size <= 0 {
 		return Stream{}, false
 	}
 	stream.JSON["StreamSize"] = strconv.FormatInt(size, 10)
@@ -104,20 +121,99 @@ func subtractAttachmentMetadataSize(size int64, metadataBytes int) int64 {
 // matroskaAttachmentImageMIME derives the MIME type from a recognized image
 // payload. Declared attachment metadata remains authoritative to callers.
 func matroskaAttachmentImageMIME(data []byte) string {
-	if _, _, _, _, _, _, _, ok := parseJPEGAttachment(data); ok {
-		return "image/jpeg"
-	}
-	if _, _, _, _, ok := parsePNGAttachment(data); ok {
-		return "image/png"
+	if detection, ok := detectEmbeddedImage(data); ok {
+		return detection.mime
 	}
 	return ""
 }
 
-// isMatroskaCoverAttachment recognizes the filename conventions MediaInfo uses
-// to promote an attached image to General cover metadata.
-func isMatroskaCoverAttachment(name string) bool {
-	stem := strings.ToLower(strings.TrimSuffix(filepath.Base(name), filepath.Ext(name)))
-	return stem == "cover" || strings.HasPrefix(stem, "cover_") || strings.HasPrefix(stem, "cover ") || strings.HasPrefix(stem, "small_cover")
+// matroskaAttachmentCoverType mirrors MediaInfo's description-aware cover
+// classifier while keeping declared non-image MIME types authoritative.
+func matroskaAttachmentCoverType(attachment matroskaAttachment) string {
+	if strings.EqualFold(strings.TrimSpace(attachment.name), "c2pa.thumbnail") {
+		return ""
+	}
+	explicitCover := matroskaCoverLabel(attachment.name) != ""
+	mime := strings.ToLower(strings.TrimSpace(attachment.mime))
+	if !explicitCover && mime != "" && !strings.HasPrefix(mime, "image/") {
+		return ""
+	}
+	label := firstNonEmpty(strings.TrimSpace(attachment.description), strings.TrimSpace(attachment.name))
+	return matroskaCoverLabel(label)
+}
+
+// matroskaCoverLabel applies MediaInfo's whole-word cover tokens and precedence
+// to one attachment label.
+func matroskaCoverLabel(value string) string {
+	lower := strings.ToLower(value)
+	coverType := ""
+	if !strings.Contains(lower, "c2pa.thumbnail") && matroskaContainsASCIIWord(lower, "thumbnail") {
+		coverType = "Thumbnail"
+	}
+	if matroskaContainsASCIIWord(lower, "cover") || matroskaContainsASCIIWord(lower, "front") || matroskaContainsASCIIWord(lower, "frontcover") {
+		coverType = "Cover"
+	}
+	if matroskaContainsASCIIWord(lower, "back") || matroskaContainsASCIIWord(lower, "backcover") {
+		coverType = "Cover_Back"
+	}
+	if matroskaContainsASCIIWord(lower, "cd") {
+		coverType = "Cover_Media"
+	}
+	return coverType
+}
+
+// matroskaContainsASCIIWord reports a token match bounded by non-ASCII-letter
+// bytes, preventing longer words such as "frontcovering" from matching.
+func matroskaContainsASCIIWord(value, word string) bool {
+	for start := 0; start+len(word) <= len(value); {
+		index := strings.Index(value[start:], word)
+		if index < 0 {
+			return false
+		}
+		index += start
+		beforeOK := index == 0 || !isASCIIAlpha(value[index-1])
+		after := index + len(word)
+		afterOK := after == len(value) || !isASCIIAlpha(value[after])
+		if beforeOK && afterOK {
+			return true
+		}
+		start = index + 1
+	}
+	return false
+}
+
+func isASCIIAlpha(value byte) bool {
+	return value >= 'a' && value <= 'z' || value >= 'A' && value <= 'Z'
+}
+
+// parseGIFAttachment validates a GIF87a or GIF89a header and extracts its
+// logical-screen dimensions and version profile.
+func parseGIFAttachment(data []byte) (width, height int, profile string, ok bool) {
+	if len(data) < 10 || string(data[:3]) != "GIF" || string(data[3:6]) != "87a" && string(data[3:6]) != "89a" {
+		return 0, 0, "", false
+	}
+	width = int(binary.LittleEndian.Uint16(data[6:8]))
+	height = int(binary.LittleEndian.Uint16(data[8:10]))
+	if width <= 0 || height <= 0 {
+		return 0, 0, "", false
+	}
+	return width, height, string(data[3:6]), true
+}
+
+// pngAttachmentColorSpace maps the IHDR color type to MediaInfo's abbreviated
+// color-space value, defaulting to RGB for incomplete or color PNG data.
+func pngAttachmentColorSpace(data []byte) string {
+	if len(data) < 26 {
+		return "RGB"
+	}
+	switch data[25] {
+	case 0:
+		return "Y"
+	case 4:
+		return "YA"
+	default:
+		return "RGB"
+	}
 }
 
 // parseJPEGAttachment reads dimensions, sample depth, chroma sampling, known

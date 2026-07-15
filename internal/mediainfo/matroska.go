@@ -9,7 +9,6 @@ import (
 	"maps"
 	"math"
 	"math/big"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -39,7 +38,9 @@ const (
 	mkvIDAttachedFile        = 0x61A7
 	mkvIDFileName            = 0x466E
 	mkvIDFileMimeType        = 0x4660
+	mkvIDFileDescription     = 0x467E
 	mkvIDFileData            = 0x465C
+	mkvIDFileUID             = 0x46AE
 	mkvIDTag                 = 0x7373
 	mkvIDTagTargets          = 0x63C0
 	mkvIDSimpleTag           = 0x67C8
@@ -47,6 +48,7 @@ const (
 	mkvIDTagString           = 0x4487
 	mkvIDTagLanguage         = 0x447A
 	mkvIDTagTrackUID         = 0x63C5
+	mkvIDTagBlockAddIDValue  = 0x63C7
 	mkvIDTagEditionUID       = 0x63C9
 	mkvIDTagChapterUID       = 0x63C4
 	mkvIDTagAttachmentUID    = 0x63C6
@@ -165,17 +167,20 @@ type MatroskaInfo struct {
 	durationPrec   int
 	tagStats       map[uint64]matroskaTagStats
 	generalTags    map[string]string
+	scopedTags     matroskaScopedTags
 	attachments    []string
 	attachmentInfo []matroskaAttachment
 }
 
-// matroskaAttachment holds attachment metadata and, for small image
-// attachments, the payload needed to derive an Image stream.
+// matroskaAttachment holds attachment metadata and a bounded payload prefix
+// when content probing identifies a supported embedded image.
 type matroskaAttachment struct {
-	name string
-	mime string
-	data []byte
-	size int64
+	name        string
+	description string
+	mime        string
+	uid         uint64
+	data        []byte
+	size        int64
 	// complete distinguishes a bounded payload prefix from the full FileData.
 	complete bool
 }
@@ -284,9 +289,7 @@ func ParseMatroskaWithOptions(r io.ReaderAt, size int64, opts AnalyzeOptions) (M
 					rescannedNames := make([]string, 0, len(attachments))
 					for _, attachment := range attachments {
 						rescannedNames = append(rescannedNames, attachment.name)
-						if len(attachment.data) > 0 {
-							info.attachmentInfo = appendMatroskaAttachmentUnique(info.attachmentInfo, attachment)
-						}
+						info.attachmentInfo = appendMatroskaAttachmentUnique(info.attachmentInfo, attachment)
 					}
 					info.attachments = mergeMatroskaAttachmentNames(info.attachments, rescannedNames)
 				}
@@ -316,6 +319,7 @@ func ParseMatroskaWithOptions(r io.ReaderAt, size int64, opts AnalyzeOptions) (M
 			var tagLangs map[uint64]string
 			var tagStats map[uint64]matroskaTagStats
 			var generalTags map[string]string
+			var scopedTags matroskaScopedTags
 			// Prefer SeekHead for a precise offset, but some files omit Tags entries.
 			tagsRead := false
 			if seekPos, ok := findMatroskaSeekPosition(buf, int(info.SegmentOffset), mkvIDTags); ok {
@@ -324,7 +328,7 @@ func ParseMatroskaWithOptions(r io.ReaderAt, size int64, opts AnalyzeOptions) (M
 					if tagsSize > 0 {
 						tagsBuf := make([]byte, tagsSize)
 						if n, err := r.ReadAt(tagsBuf, tagsOffset); n == len(tagsBuf) && (err == nil || err == io.EOF) {
-							tagEncoders, tagSettings, tagLangs, tagStats, generalTags = parseMatroskaTagsFromBuffer(tagsBuf, encodedDate)
+							tagEncoders, tagSettings, tagLangs, tagStats, generalTags, scopedTags = parseMatroskaTagsFromBuffer(tagsBuf, encodedDate)
 							tagsRead = matroskaTagsHaveData(tagEncoders, tagSettings, tagLangs, tagStats, generalTags)
 						}
 					}
@@ -343,7 +347,13 @@ func ParseMatroskaWithOptions(r io.ReaderAt, size int64, opts AnalyzeOptions) (M
 							head = buf
 						}
 					}
-					tagEncoders, tagSettings, tagLangs, tagStats, generalTags = parseMatroskaTagsFromBuffer(head, encodedDate)
+					headEncoders, headSettings, headLangs, headStats, headGeneralTags, headScopedTags := parseMatroskaTagsFromBuffer(head, encodedDate)
+					tagEncoders = headEncoders
+					tagSettings = headSettings
+					tagLangs = headLangs
+					tagStats = headStats
+					generalTags = headGeneralTags
+					mergeMatroskaScopedTags(&scopedTags, headScopedTags)
 				}
 			}
 			// Fallback: some muxers place Tags at EOF. Non-empty maps are not proof
@@ -357,7 +367,7 @@ func ParseMatroskaWithOptions(r io.ReaderAt, size int64, opts AnalyzeOptions) (M
 				if tailSize > 0 {
 					tail := make([]byte, tailSize)
 					if n, err := r.ReadAt(tail, size-tailSize); n == len(tail) && (err == nil || err == io.EOF) {
-						enc, settings, langs, tailStats, tailGeneralTags := parseMatroskaTagsFromBuffer(tail, encodedDate)
+						enc, settings, langs, tailStats, tailGeneralTags, tailScopedTags := parseMatroskaTagsFromBuffer(tail, encodedDate)
 						tagEncoders = mergeMatroskaTagEncoders(tagEncoders, enc)
 						tagSettings = mergeMatroskaTagValues(tagSettings, settings)
 						tagLangs = mergeMatroskaTagValues(tagLangs, langs)
@@ -386,6 +396,7 @@ func ParseMatroskaWithOptions(r io.ReaderAt, size int64, opts AnalyzeOptions) (M
 								generalTags[name] = value
 							}
 						}
+						mergeMatroskaScopedTags(&scopedTags, tailScopedTags)
 					}
 				}
 			}
@@ -414,6 +425,7 @@ func ParseMatroskaWithOptions(r io.ReaderAt, size int64, opts AnalyzeOptions) (M
 					info.generalTags[name] = value
 				}
 			}
+			mergeMatroskaScopedTags(&info.scopedTags, scopedTags)
 		}
 		tagStatsComplete := false
 		if len(info.tagStats) > 0 {
@@ -660,6 +672,7 @@ func ParseMatroskaWithOptions(r io.ReaderAt, size int64, opts AnalyzeOptions) (M
 		}
 	}
 	deriveCBRAudioStreamSizes(&info, size)
+	applyMatroskaTrackTags(&info)
 	return info, true
 }
 
@@ -950,7 +963,7 @@ func parseMatroskaSegmentWithBudget(buf []byte, assetBudget *embeddedAssetBudget
 		}
 		if id == mkvIDTags {
 			encodedDate := findField(info.General, "Encoded date")
-			tagEncoders, tagSettings, tagLangs, tagStats, generalTags := parseMatroskaTags(buf[dataStart:dataEnd], encodedDate)
+			tagEncoders, tagSettings, tagLangs, tagStats, generalTags, scopedTags := parseMatroskaTags(buf[dataStart:dataEnd], encodedDate)
 			for uid, enc := range tagEncoders {
 				if enc != "" {
 					encodersByTrackUID[uid] = enc
@@ -979,14 +992,13 @@ func parseMatroskaSegmentWithBudget(buf []byte, assetBudget *embeddedAssetBudget
 					info.generalTags[name] = value
 				}
 			}
+			mergeMatroskaScopedTags(&info.scopedTags, scopedTags)
 		}
 		if id == mkvIDAttachments && completeElement {
 			if attachments := parseMatroskaAttachmentsWithBudget(buf[dataStart:dataEnd], assetBudget); len(attachments) > 0 {
 				for _, attachment := range attachments {
 					info.attachments = append(info.attachments, attachment.name)
-					if len(attachment.data) > 0 {
-						info.attachmentInfo = appendMatroskaAttachmentUnique(info.attachmentInfo, attachment)
-					}
+					info.attachmentInfo = appendMatroskaAttachmentUnique(info.attachmentInfo, attachment)
 				}
 			}
 		}
@@ -3243,14 +3255,16 @@ func matroskaColorSource(value string, fallback string) string {
 	return fallback
 }
 
-// parseMatroskaTags extracts track-scoped metadata and untargeted General tags
-// from a Tags payload. encodedDate rejects stale Matroska statistics tags.
-func parseMatroskaTags(buf []byte, encodedDate string) (map[uint64]string, map[uint64]string, map[uint64]string, map[uint64]matroskaTagStats, map[string]string) {
+// parseMatroskaTags extracts legacy parser metadata, file-level fields, and
+// TrackUID-scoped fields from a Tags payload. encodedDate rejects stale
+// Matroska statistics tags.
+func parseMatroskaTags(buf []byte, encodedDate string) (map[uint64]string, map[uint64]string, map[uint64]string, map[uint64]matroskaTagStats, map[string]string, matroskaScopedTags) {
 	encodersByTrackUID := map[uint64]string{}
 	settingsByTrackUID := map[uint64]string{}
 	langsByTrackUID := map[uint64]string{}
 	statsByTrackUID := map[uint64]matroskaTagStats{}
 	generalTags := map[string]string{}
+	var scopedTags matroskaScopedTags
 	pos := 0
 	for pos < len(buf) {
 		id, idLen, ok := readVintID(buf, pos)
@@ -3267,24 +3281,17 @@ func parseMatroskaTags(buf []byte, encodedDate string) (map[uint64]string, map[u
 			dataEnd = len(buf)
 		}
 		if id == mkvIDTag {
-			target, tags, tagLanguage := parseMatroskaTag(buf[dataStart:dataEnd])
+			target, tags, fields, tagLanguage := parseMatroskaTag(buf[dataStart:dataEnd])
 			trackUID := target.trackUID
-			if target.general {
-				for _, name := range []string{
-					"DESCRIPTION", "DATE", "DATE_RELEASED", "DATE_RECORDED", "CREATION_TIME", "TITLE", "GENRE", "ENCODED_BY", "SOURCE", "Source",
-					"ARTIST", "ACTOR", "DIRECTOR", "PRODUCER", "PRODUCTION_STUDIO", "SCREENPLAY_BY", "WRITTEN_BY",
-					"COMMENT", "CONTENT_TYPE", "COPYRIGHT", "SYNOPSIS", "SUBTITLE", "SUMMARY", "SHOW",
-					"EPISODE_ID", "EPISODE_NUMBER", "SEASON_NUMBER", "Encoder",
-					"IMDB", "TMDB", "TVDB", "TVDB2", "MyAnimeList", "TVmaze", "Douban",
-					"INTERNAL", "WRITING_LIBRARY", "MYANIMELIST", "ORIGINAL_SOURCE_FORM", "ACTOR_CHARACTER",
-					"ART_DIRECTOR", "EDITED_BY", "EXECUTIVE_PRODUCER", "IMDB_ID", "PRODUCTION_DESIGNER", "TMDB_ID", "URL",
-				} {
-					if value := strings.TrimSpace(tags[name]); value != "" && generalTags[name] == "" {
+			scopedTags.set(target, fields)
+			if target.present && target.blockAddID == 0 && trackUID == 0 {
+				for name, value := range tags {
+					if value = strings.TrimSpace(value); value != "" {
 						generalTags[name] = value
 					}
 				}
 			}
-			if trackUID == 0 && !target.general {
+			if !target.present || target.blockAddID != 0 {
 				pos = dataEnd
 				continue
 			}
@@ -3368,17 +3375,18 @@ func parseMatroskaTags(buf []byte, encodedDate string) (map[uint64]string, map[u
 		}
 		pos = dataEnd
 	}
-	return encodersByTrackUID, settingsByTrackUID, langsByTrackUID, statsByTrackUID, generalTags
+	return encodersByTrackUID, settingsByTrackUID, langsByTrackUID, statsByTrackUID, generalTags, scopedTags
 }
 
 // parseMatroskaTagsFromBuffer finds complete Tags elements in buf and merges
-// their track metadata, statistics, and General tags.
-func parseMatroskaTagsFromBuffer(buf []byte, encodedDate string) (map[uint64]string, map[uint64]string, map[uint64]string, map[uint64]matroskaTagStats, map[string]string) {
+// their legacy metadata, statistics, General fields, and TrackUID-scoped fields.
+func parseMatroskaTagsFromBuffer(buf []byte, encodedDate string) (map[uint64]string, map[uint64]string, map[uint64]string, map[uint64]matroskaTagStats, map[string]string, matroskaScopedTags) {
 	encodersByTrackUID := map[uint64]string{}
 	settingsByTrackUID := map[uint64]string{}
 	langsByTrackUID := map[uint64]string{}
 	statsByTrackUID := map[uint64]matroskaTagStats{}
 	generalTags := map[string]string{}
+	var scopedTags matroskaScopedTags
 	pattern := []byte{0x12, 0x54, 0xC3, 0x67}
 	searchPos := 0
 	for searchPos+len(pattern) <= len(buf) {
@@ -3398,7 +3406,7 @@ func parseMatroskaTagsFromBuffer(buf []byte, encodedDate string) (map[uint64]str
 			searchPos = start + 1
 			continue
 		}
-		tagEncoders, tagSettings, tagLangs, tagStats, tagGeneral := parseMatroskaTags(buf[dataStart:dataEnd], encodedDate)
+		tagEncoders, tagSettings, tagLangs, tagStats, tagGeneral, tagScoped := parseMatroskaTags(buf[dataStart:dataEnd], encodedDate)
 		for uid, enc := range tagEncoders {
 			if enc == "" {
 				continue
@@ -3429,9 +3437,10 @@ func parseMatroskaTagsFromBuffer(buf []byte, encodedDate string) (map[uint64]str
 				generalTags[name] = value
 			}
 		}
+		mergeMatroskaScopedTags(&scopedTags, tagScoped)
 		searchPos = start + len(pattern)
 	}
-	return encodersByTrackUID, settingsByTrackUID, langsByTrackUID, statsByTrackUID, generalTags
+	return encodersByTrackUID, settingsByTrackUID, langsByTrackUID, statsByTrackUID, generalTags, scopedTags
 }
 
 func preferMatroskaEncoder(current string, candidate string) string {
@@ -3474,15 +3483,17 @@ func matroskaEncoderScore(value string) int {
 // matroskaTagTarget identifies the stream or file scope selected by a Tags
 // element's Target metadata.
 type matroskaTagTarget struct {
-	trackUID uint64
-	general  bool
+	trackUID   uint64
+	blockAddID uint64
+	present    bool
 }
 
-// parseMatroskaTag decodes one SimpleTag tree, returning its target scope,
-// normalized tag values, and the language associated with a LANGUAGE tag.
-func parseMatroskaTag(buf []byte) (matroskaTagTarget, map[string]string, string) {
-	target := matroskaTagTarget{general: true}
+// parseMatroskaTag decodes one Tag, returning its target, raw values,
+// normalized fields, and the language element associated with a LANGUAGE tag.
+func parseMatroskaTag(buf []byte) (matroskaTagTarget, map[string]string, []matroskaTagField, string) {
+	target := matroskaTagTarget{}
 	tags := map[string]string{}
+	var fields []matroskaTagField
 	var tagLanguage string
 	pos := 0
 	for pos < len(buf) {
@@ -3503,17 +3514,17 @@ func parseMatroskaTag(buf []byte) (matroskaTagTarget, map[string]string, string)
 		case mkvIDTagTargets:
 			target = parseMatroskaTagTargets(buf[dataStart:dataEnd])
 		case mkvIDSimpleTag:
-			parseMatroskaSimpleTagTree(buf[dataStart:dataEnd], tags, &tagLanguage)
+			parseMatroskaSimpleTagTree(buf[dataStart:dataEnd], nil, tags, &fields, &tagLanguage)
 		}
 		pos = dataEnd
 	}
-	return target, tags, tagLanguage
+	return target, tags, fields, tagLanguage
 }
 
-// parseMatroskaTagTargets decodes the track, edition, and chapter selectors
-// that determine whether a Matroska tag applies to a stream or the file.
+// parseMatroskaTagTargets decodes the selectors MediaInfo uses to distinguish
+// file-level tags, track tags, and block-addition tags.
 func parseMatroskaTagTargets(buf []byte) matroskaTagTarget {
-	target := matroskaTagTarget{general: true}
+	target := matroskaTagTarget{present: true}
 	pos := 0
 	for pos < len(buf) {
 		id, idLen, ok := readVintID(buf, pos)
@@ -3533,13 +3544,10 @@ func parseMatroskaTagTargets(buf []byte) matroskaTagTarget {
 		case mkvIDTagTrackUID:
 			if value, ok := readUnsigned(buf[dataStart:dataEnd]); ok {
 				target.trackUID = value
-				if value > 0 {
-					target.general = false
-				}
 			}
-		case mkvIDTagEditionUID, mkvIDTagChapterUID, mkvIDTagAttachmentUID:
-			if value, ok := readUnsigned(buf[dataStart:dataEnd]); ok && value > 0 {
-				target.general = false
+		case mkvIDTagBlockAddIDValue:
+			if value, ok := readUnsigned(buf[dataStart:dataEnd]); ok {
+				target.blockAddID = value
 			}
 		}
 		pos = dataEnd
@@ -3592,8 +3600,8 @@ func parseMatroskaAttachmentsWithBudget(buf []byte, assetBudget *embeddedAssetBu
 	return out
 }
 
-// parseMatroskaAttachedFile decodes attachment identity and size, retaining
-// payloads no larger than 4 MiB for image inspection.
+// parseMatroskaAttachedFile decodes attachment metadata and content-probes a
+// bounded payload prefix. Supported images retain at most the configured cap.
 func parseMatroskaAttachedFile(buf []byte, assetBudget *embeddedAssetBudget) matroskaAttachment {
 	attachment := matroskaAttachment{}
 	payloadStart := -1
@@ -3621,33 +3629,54 @@ func parseMatroskaAttachedFile(buf []byte, assetBudget *embeddedAssetBudget) mat
 			if assetBudget.reserveString(size, embeddedAssetMaxNameBytes) == embeddedAssetAccepted {
 				attachment.name = strings.TrimRight(string(buf[dataStart:dataEnd]), "\x00")
 			}
+		case mkvIDFileDescription:
+			if assetBudget.reserveString(size, embeddedAssetMaxDescription) == embeddedAssetAccepted {
+				attachment.description = strings.TrimRight(string(buf[dataStart:dataEnd]), "\x00")
+			}
 		case mkvIDFileMimeType:
 			if assetBudget.reserveString(size, embeddedAssetMaxMIMEBytes) == embeddedAssetAccepted {
 				attachment.mime = strings.TrimRight(string(buf[dataStart:dataEnd]), "\x00")
 			}
+		case mkvIDFileUID:
+			attachment.uid, _ = readUnsigned(buf[dataStart:dataEnd])
 		case mkvIDFileData:
 			attachment.size = int64(size)
-			attachment.complete = true
-			if attachment.size <= embeddedAssetMaxPayloadBytes {
-				payloadStart = dataStart
-				payloadEnd = dataEnd
-			}
+			payloadStart = dataStart
+			payloadEnd = dataEnd
 		}
 		pos = dataEnd
 	}
-	if payloadStart >= 0 && attachment.mime == "" {
-		attachment.mime = matroskaAttachmentImageMIME(buf[payloadStart:payloadEnd])
-	}
-	if payloadStart >= 0 && matroskaAttachmentIsImage(attachment) {
-		payloadSize := uint64(payloadEnd - payloadStart)
-		if assetBudget.reservePayload(payloadSize, embeddedAssetMaxPayloadBytes) == embeddedAssetAccepted {
-			attachment.data = append([]byte(nil), buf[payloadStart:payloadEnd]...)
-		}
-	}
-	if attachment.mime == "" {
-		attachment.mime = matroskaAttachmentImageMIME(attachment.data)
+	if payloadStart >= 0 {
+		retainMatroskaAttachmentPayload(&attachment, buf[payloadStart:payloadEnd], assetBudget)
 	}
 	return attachment
+}
+
+// retainMatroskaAttachmentPayload content-probes an attachment independently
+// of its MIME type or filename and retains only budgeted image bytes. It
+// reports detection even when the retained-byte budget rejects the payload.
+func retainMatroskaAttachmentPayload(attachment *matroskaAttachment, payload []byte, assetBudget *embeddedAssetBudget) bool {
+	if attachment == nil || assetBudget == nil || len(payload) == 0 {
+		return false
+	}
+	probeSize := min(int64(len(payload)), embeddedAssetMaxImageProbe)
+	detection, ok := detectEmbeddedImage(payload[:probeSize])
+	if !ok {
+		return false
+	}
+	if attachment.mime == "" {
+		attachment.mime = detection.mime
+	}
+	retainSize := probeSize
+	if attachment.size > 0 && attachment.size <= embeddedAssetMaxPayloadBytes && int64(len(payload)) >= attachment.size {
+		retainSize = attachment.size
+	}
+	if assetBudget.reservePayload(uint64(retainSize), embeddedAssetMaxPayloadBytes) != embeddedAssetAccepted {
+		return true
+	}
+	attachment.data = append([]byte(nil), payload[:retainSize]...)
+	attachment.complete = attachment.size > 0 && retainSize == attachment.size
+	return true
 }
 
 // scanMatroskaTracksFromFile reads a Tracks element resolved through SeekHead
@@ -3695,8 +3724,8 @@ func scanMatroskaTracksFromFile(r io.ReaderAt, offset int64, fileSize int64, seg
 }
 
 // scanMatroskaAttachmentsFromFile reads an Attachments element at offset while
-// proving every nested range before reading or seeking. It skips unsupported or
-// over-budget payloads and retains only bounded image data for inspection.
+// proving every nested range before reading or seeking. It content-probes each
+// payload and retains only bounded, budgeted image data.
 func scanMatroskaAttachmentsFromFile(r io.ReaderAt, offset int64, fileSize int64, assetBudget *embeddedAssetBudget) []matroskaAttachment {
 	if r == nil || offset <= 0 || fileSize <= offset {
 		return nil
@@ -3783,6 +3812,18 @@ outer:
 				} else {
 					break fields
 				}
+			case mkvIDFileDescription:
+				if assetBudget.reserveString(fsz, embeddedAssetMaxDescription) != embeddedAssetAccepted {
+					if err := er.skip(fieldSize); err != nil {
+						break outer
+					}
+					continue
+				}
+				if b, err := er.readN(fieldSize); err == nil {
+					attachment.description = strings.TrimRight(string(b), "\x00")
+				} else {
+					break fields
+				}
 			case mkvIDFileMimeType:
 				if assetBudget.reserveString(fsz, embeddedAssetMaxMIMEBytes) != embeddedAssetAccepted {
 					if err := er.skip(fieldSize); err != nil {
@@ -3792,6 +3833,12 @@ outer:
 				}
 				if b, err := er.readN(fieldSize); err == nil {
 					attachment.mime = strings.TrimRight(string(b), "\x00")
+				} else {
+					break fields
+				}
+			case mkvIDFileUID:
+				if b, err := er.readN(fieldSize); err == nil {
+					attachment.uid, _ = readUnsigned(b)
 				} else {
 					break fields
 				}
@@ -3809,14 +3856,30 @@ outer:
 				}
 			}
 		}
-		if hasPendingData && matroskaAttachmentIsImage(attachment) {
+		if hasPendingData {
 			absoluteStart, offsetReason := checkedEmbeddedOffset(offset, uint64(pendingDataStart), fileSize)
 			_, rangeReason := checkedEmbeddedRange(absoluteStart, uint64(pendingDataSize), fileSize)
-			if offsetReason == embeddedAssetAccepted && rangeReason == embeddedAssetAccepted && assetBudget.reservePayload(uint64(pendingDataSize), embeddedAssetMaxPayloadBytes) == embeddedAssetAccepted {
-				data := make([]byte, int(pendingDataSize))
-				if _, err := io.ReadFull(io.NewSectionReader(r, absoluteStart, pendingDataSize), data); err == nil {
-					attachment.data = data
-					attachment.complete = true
+			if offsetReason == embeddedAssetAccepted && rangeReason == embeddedAssetAccepted {
+				probeSize := min(pendingDataSize, embeddedAssetMaxImageProbe)
+				if assetBudget.allowAllocation(uint64(probeSize), embeddedAssetMaxImageProbe) == embeddedAssetAccepted {
+					probe := make([]byte, int(probeSize))
+					if _, err := io.ReadFull(io.NewSectionReader(r, absoluteStart, probeSize), probe); err == nil {
+						if detection, detected := detectEmbeddedImage(probe); detected {
+							if attachment.mime == "" {
+								attachment.mime = detection.mime
+							}
+							if pendingDataSize <= embeddedAssetMaxPayloadBytes && pendingDataSize > probeSize && assetBudget.reservePayload(uint64(pendingDataSize), embeddedAssetMaxPayloadBytes) == embeddedAssetAccepted {
+								data := make([]byte, int(pendingDataSize))
+								if _, err := io.ReadFull(io.NewSectionReader(r, absoluteStart, pendingDataSize), data); err == nil {
+									attachment.data = data
+									attachment.complete = true
+								}
+							} else if assetBudget.reservePayload(uint64(probeSize), embeddedAssetMaxImageProbe) == embeddedAssetAccepted {
+								attachment.data = probe
+								attachment.complete = pendingDataSize == probeSize
+							}
+						}
+					}
 				}
 			}
 		}
@@ -3853,14 +3916,6 @@ func scanMatroskaChaptersFromFile(r io.ReaderAt, offset int64, fileSize int64) [
 		return nil
 	}
 	return parseMatroskaChapterEditions(payload, 1000000)
-}
-
-// matroskaAttachmentIsImage recognizes images by MIME type or common filename
-// extension.
-func matroskaAttachmentIsImage(attachment matroskaAttachment) bool {
-	mime := strings.ToLower(attachment.mime)
-	ext := strings.ToLower(filepath.Ext(attachment.name))
-	return strings.HasPrefix(mime, "image/") || ext == ".jpg" || ext == ".jpeg" || ext == ".png"
 }
 
 // appendMatroskaAttachmentUnique deduplicates only identical payloads. A
@@ -3999,13 +4054,17 @@ func mergeMatroskaTagValues(dst, src map[uint64]string) map[uint64]string {
 	return dst
 }
 
-func parseMatroskaSimpleTagTree(buf []byte, tags map[string]string, tagLanguage *string) {
+// parseMatroskaSimpleTagTree walks nested SimpleTag elements, retaining their
+// slash-delimited raw paths and normalized projections. The first non-und
+// LANGUAGE element supplies tagLanguage.
+func parseMatroskaSimpleTagTree(buf []byte, parent []string, tags map[string]string, fields *[]matroskaTagField, tagLanguage *string) {
 	if tags == nil {
 		return
 	}
 	var name string
 	var value string
 	var language string
+	var children [][]byte
 	pos := 0
 	for pos < len(buf) {
 		id, idLen, ok := readVintID(buf, pos)
@@ -4023,7 +4082,7 @@ func parseMatroskaSimpleTagTree(buf []byte, tags map[string]string, tagLanguage 
 		}
 		payload := buf[dataStart:dataEnd]
 		if id == mkvIDSimpleTag {
-			parseMatroskaSimpleTagTree(payload, tags, tagLanguage)
+			children = append(children, payload)
 		}
 		if id == mkvIDTagName {
 			name = string(payload)
@@ -4039,22 +4098,29 @@ func parseMatroskaSimpleTagTree(buf []byte, tags map[string]string, tagLanguage 
 		}
 		pos = dataEnd
 	}
-	name = strings.TrimSpace(name)
+	name = strings.TrimSpace(strings.TrimRight(name, "\x00"))
+	value = strings.TrimRight(value, "\x00")
+	path := append(append([]string(nil), parent...), name)
 	if name != "" && value != "" {
-		if name == "ENCODER" {
-			if current := tags[name]; current == "" {
-				tags[name] = value
-			} else {
-				tags[name] = preferMatroskaEncoder(current, value)
-			}
-		} else if name == "ACTOR" || name == "GENRE" {
-			tags[name] = value
-		} else if _, exists := tags[name]; !exists {
-			tags[name] = value
+		rawName := strings.Join(path, "/")
+		if rawName == "ENCODER" {
+			tags[rawName] = preferMatroskaEncoder(tags[rawName], value)
+		} else {
+			tags[rawName] = value
 		}
 		if name == "LANGUAGE" && language != "" && tagLanguage != nil && *tagLanguage == "" {
 			*tagLanguage = language
 		}
+		if fields != nil {
+			*fields = append(*fields, normalizeMatroskaTag(path, value)...)
+		}
+	}
+	childParent := parent
+	if name != "" {
+		childParent = path
+	}
+	for _, child := range children {
+		parseMatroskaSimpleTagTree(child, childParent, tags, fields, tagLanguage)
 	}
 }
 

@@ -22,7 +22,7 @@ func buildJSONMedia(report Report) jsonMediaOut {
 	jsonReport.General = withMatroskaGoJSON(report.General)
 	tracks := make([]jsonTrackOut, 0, len(report.Streams)+1)
 	tracks = append(tracks, jsonTrackOut{Fields: buildJSONGeneralFields(jsonReport)})
-	containerFormat := findField(report.General.Fields, "Format")
+	containerFormat := firstNonEmpty(report.General.JSON["Format"], findField(report.General.Fields, "Format"))
 	sorted := orderTracks(report.Streams)
 	forEachStreamWithKindIndex(sorted, func(stream Stream, index, total, order int) {
 		stream = withMatroskaGoJSON(stream)
@@ -68,6 +68,8 @@ func withMatroskaGoJSON(stream Stream) Stream {
 	return stream
 }
 
+// buildJSONGeneralFields assembles General fields, merges parser-discovered
+// dynamic extras, and applies the active container's key order.
 func buildJSONGeneralFields(report Report) []jsonKV {
 	fields := []jsonKV{{Key: "@type", Val: string(StreamGeneral)}}
 	counts := countStreams(report.Streams)
@@ -105,10 +107,20 @@ func buildJSONGeneralFields(report Report) []jsonKV {
 		}
 	}
 	fields = append(fields, mapStreamFieldsToJSON(StreamGeneral, report.General.Fields)...)
-	fields = applyJSONExtras(fields, report.General.JSON, report.General.JSONRaw)
-	return sortJSONFields(StreamGeneral, fields)
+	containerFormat := firstNonEmpty(report.General.JSON["Format"], findField(report.General.Fields, "Format"))
+	rawExtras := withDynamicJSONExtras(report.General.JSONRaw, report.General.dynamicJSON)
+	switch containerFormat {
+	case "Matroska":
+		rawExtras = withMatroskaJSONExtraOrder(rawExtras)
+	case "AVI":
+		rawExtras = withAVIJSONExtraOrder(rawExtras)
+	}
+	fields = applyJSONExtras(fields, report.General.JSON, rawExtras)
+	return sortJSONFieldsForContainer(StreamGeneral, fields, containerFormat)
 }
 
+// buildJSONStreamFields assembles one non-General stream, merges dynamic extras,
+// derives allowed computed fields, and applies the container-specific key order.
 func buildJSONStreamFields(stream Stream, order int, typeOrder int, containerFormat string) []jsonKV {
 	fields := []jsonKV{{Key: "@type", Val: string(stream.Kind)}}
 	if typeOrder > 0 {
@@ -118,12 +130,19 @@ func buildJSONStreamFields(stream Stream, order int, typeOrder int, containerFor
 		fields = append(fields, jsonKV{Key: "StreamOrder", Val: strconv.Itoa(order)})
 	}
 	fields = append(fields, mapStreamFieldsToJSON(stream.Kind, stream.Fields)...)
-	fields = applyJSONExtras(fields, stream.JSON, stream.JSONRaw)
+	rawExtras := withDynamicJSONExtras(stream.JSONRaw, stream.dynamicJSON)
+	switch containerFormat {
+	case "Matroska":
+		rawExtras = withMatroskaJSONExtraOrder(rawExtras)
+	case "AVI":
+		rawExtras = withAVIJSONExtraOrder(rawExtras)
+	}
+	fields = applyJSONExtras(fields, stream.JSON, rawExtras)
 	fields = normalizeContainerComputedJSON(stream.Kind, fields, containerFormat, stream.JSONPreserveDisplayAR)
 	if !stream.JSONSkipComputed {
 		fields = append(fields, buildJSONComputedFields(stream.Kind, fields, containerFormat, stream.JSONSkipFrameRateRatio)...)
 	}
-	return sortJSONFields(stream.Kind, fields)
+	return sortJSONFieldsForContainer(stream.Kind, fields, containerFormat)
 }
 
 func normalizeContainerComputedJSON(kind StreamKind, fields []jsonKV, containerFormat string, preserveDisplayAspect ...bool) []jsonKV {

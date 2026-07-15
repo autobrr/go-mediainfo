@@ -2,6 +2,7 @@ package mediainfo
 
 const (
 	embeddedAssetMaxNameBytes     = int64(4 << 10)
+	embeddedAssetMaxDescription   = int64(4 << 10)
 	embeddedAssetMaxMIMEBytes     = int64(1 << 10)
 	embeddedAssetMaxStringBytes   = int64(1 << 20)
 	embeddedAssetMaxItems         = int64(256)

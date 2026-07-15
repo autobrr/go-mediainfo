@@ -523,37 +523,34 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			streams = append(streams, parsed.Tracks...)
 			coverNames := []string{}
 			coverMimes := []string{}
+			coverTypes := []string{}
 			for _, attachment := range parsed.attachmentInfo {
 				imageStream, ok := matroskaAttachmentImageStream(attachment)
 				if !ok {
 					continue
 				}
 				streams = append(streams, imageStream)
-				if !isMatroskaCoverAttachment(attachment.name) {
+				coverType := matroskaAttachmentCoverType(attachment)
+				if coverType == "" {
 					continue
 				}
-				coverNames = append(coverNames, attachment.name)
+				coverNames = append(coverNames, firstNonEmpty(attachment.description, attachment.name))
 				mime := attachment.mime
 				if mime == "" {
-					if strings.EqualFold(filepath.Ext(attachment.name), ".png") {
-						mime = "image/png"
-					} else {
-						mime = "image/jpeg"
-					}
+					mime = matroskaAttachmentImageMIME(attachment.data)
 				}
 				coverMimes = append(coverMimes, mime)
+				coverTypes = append(coverTypes, coverType)
 			}
 			if len(coverNames) > 0 {
 				values := make([]string, len(coverNames))
-				types := make([]string, len(coverNames))
 				for i := range coverNames {
 					values[i] = "Yes"
-					types[i] = "Cover"
 				}
 				general.JSON["Cover"] = strings.Join(values, " / ")
 				general.JSON["Cover_Description"] = strings.Join(coverNames, " / ")
 				general.JSON["Cover_Mime"] = strings.Join(coverMimes, " / ")
-				general.JSON["Cover_Type"] = strings.Join(types, " / ")
+				general.JSON["Cover_Type"] = strings.Join(coverTypes, " / ")
 			}
 			applyLegacyMatroskaFrameRateRatio(rawWritingApp, streams)
 			generalExtras := []jsonKV{}
@@ -563,72 +560,11 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			if len(parsed.attachments) > 0 {
 				generalExtras = append(generalExtras, jsonKV{Key: "Attachments", Val: strings.Join(parsed.attachments, " / ")})
 			}
-			for _, name := range []string{
-				"Encoder", "IMDB", "TMDB", "TVDB", "TVDB2", "MyAnimeList", "TVmaze", "Douban",
-				"ACTOR", "DIRECTOR", "PRODUCER", "PRODUCTION_STUDIO", "SCREENPLAY_BY", "WRITTEN_BY",
-				"EPISODE_ID", "EPISODE_NUMBER", "SEASON_NUMBER", "SUBTITLE", "SUMMARY", "SHOW",
-			} {
-				if value := parsed.generalTags[name]; value != "" {
-					generalExtras = append(generalExtras, jsonKV{Key: name, Val: value})
-				}
-			}
-			for _, tag := range []jsonKV{
-				{Key: "INTERNAL", Val: "Internal"}, {Key: "WRITING_LIBRARY", Val: "Writing_Library"}, {Key: "MYANIMELIST", Val: "MYANIMELIST"},
-				{Key: "ACTOR_CHARACTER", Val: "ACTOR_CHARACTER"}, {Key: "ART_DIRECTOR", Val: "ART_DIRECTOR"}, {Key: "EDITED_BY", Val: "EDITED_BY"},
-				{Key: "EXECUTIVE_PRODUCER", Val: "EXECUTIVE_PRODUCER"}, {Key: "IMDB_ID", Val: "IMDB_ID"},
-				{Key: "PRODUCTION_DESIGNER", Val: "PRODUCTION_DESIGNER"}, {Key: "TMDB_ID", Val: "TMDB_ID"}, {Key: "URL", Val: "Url"},
-			} {
-				if value := parsed.generalTags[tag.Key]; value != "" {
-					generalExtras = append(generalExtras, jsonKV{Key: tag.Val, Val: value})
-				}
-			}
-			if value := firstNonEmpty(parsed.generalTags["SOURCE"], parsed.generalTags["Source"]); value != "" {
-				generalExtras = append(generalExtras, jsonKV{Key: "Source", Val: value})
-			}
 			if len(generalExtras) > 0 {
 				if general.JSONRaw == nil {
 					general.JSONRaw = map[string]string{}
 				}
 				general.JSONRaw["extra"] = renderJSONObject(generalExtras, false)
-			}
-			if value := parsed.generalTags["DESCRIPTION"]; value != "" {
-				general.JSON["Description"] = value
-			}
-			if value := parsed.generalTags["ORIGINAL_SOURCE_FORM"]; value != "" {
-				general.JSON["OriginalSourceForm"] = value
-			}
-			if value := parsed.generalTags["ARTIST"]; value != "" {
-				general.JSON["Performer"] = value
-			}
-			if value := parsed.generalTags["COMMENT"]; value != "" {
-				general.JSON["Comment"] = value
-			}
-			if value := parsed.generalTags["CONTENT_TYPE"]; value != "" {
-				general.JSON["ContentType"] = value
-			}
-			if value := parsed.generalTags["COPYRIGHT"]; value != "" {
-				general.JSON["Copyright"] = value
-			}
-			if value := parsed.generalTags["SYNOPSIS"]; value != "" {
-				general.JSON["Synopsis"] = value
-			}
-			if value := parsed.generalTags["DATE_RELEASED"]; value != "" {
-				general.JSON["Released_Date"] = value
-			}
-			if value := parsed.generalTags["DATE_RECORDED"]; value != "" {
-				general.JSON["Recorded_Date"] = value
-			} else if value := parsed.generalTags["DATE"]; value != "" {
-				general.JSON["Recorded_Date"] = strings.Replace(value, "T", " ", 1)
-			}
-			if value := parsed.generalTags["GENRE"]; value != "" {
-				general.JSON["Genre"] = value
-			}
-			if value := parsed.generalTags["ENCODED_BY"]; value != "" {
-				general.JSON["EncodedBy"] = value
-			}
-			if value := parsed.generalTags["TITLE"]; value != "" && findField(general.Fields, "Title") == "" {
-				general.JSON["Title"] = value
-				general.JSON["Movie"] = value
 			}
 			if creationTime := formatMatroskaTagEncodedDate(parsed.generalTags["CREATION_TIME"]); creationTime != "" {
 				if encodedDate := findField(general.Fields, "Encoded date"); encodedDate != "" {
@@ -657,8 +593,10 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 					general.JSON["Encoded_Library_Version"] = version
 				}
 			}
-			// MediaInfo emits both Title and Movie for Matroska Segment/Info/Title.
-			if title := findField(general.Fields, "Title"); title != "" {
+			applyMatroskaGeneralTags(&general, parsed.scopedTags.general)
+			// MediaInfo emits the resolved Matroska title as both Title and Movie.
+			if title := firstNonEmpty(general.JSON["Title"], findField(general.Fields, "Title")); title != "" {
+				general.JSON["Title"] = title
 				general.JSON["Movie"] = title
 			}
 			if info.DurationSeconds > 0 {
@@ -2388,21 +2326,7 @@ func applyAdditionalMatroskaGeneralCompatibility(general *Stream) {
 	if general == nil || general.JSON == nil {
 		return
 	}
-	addExtra := func(key, value string) {
-		if general.JSONRaw == nil {
-			general.JSONRaw = map[string]string{}
-		}
-		general.JSONRaw["extra"] = appendJSONExtra(general.JSONRaw["extra"], key, value)
-	}
 	switch general.JSON["UniqueID"] {
-	case "256831988852141542374207303932639545548":
-		addExtra("Internal", "DarkPeers | OnlyEncodes")
-		addExtra("Writing_Library", "SVT-AV1-HDR v4.1.0-18-gc405fe45b (release)")
-	case "64292167393248443453306749547224767332":
-		addExtra("MYANIMELIST", "56975")
-	case "172270496950442870347246698332115951643":
-		general.JSON["OriginalSourceForm"] = "Shrek.Forever.After.2010.1080p.USA.BluRay.AVC.TrueHD.7.1-DiYHDHome"
-		addExtra("ACTOR_CHARACTER", "Dragon / Animals (voice) (uncredited)")
 	case "279432490384478975316367262664809380522":
 		general.JSON["StreamSize"] = "326474086"
 	case "250995523967597885859320780901778164451":
