@@ -31,7 +31,7 @@ func TestRenderCSVNeutralizesFormulasAndPreservesMeasurements(t *testing.T) {
 	}}}
 	output := RenderCSV([]Report{report})
 	for _, want := range []string{
-		"Title,'=HYPERLINK",
+		`Title,"'=HYPERLINK(""https://invalid.example"")"`,
 		`Comment,"'  @SUM(1,1)"`,
 		"Encoded by,'\uFEFF=1+1",
 		"Description,'-cmd",
@@ -47,12 +47,23 @@ func TestRenderCSVNeutralizesFormulasAndPreservesMeasurements(t *testing.T) {
 	if strings.Count(output, "\n") != 10 {
 		t.Fatalf("metadata forged CSV rows: %q", output)
 	}
+	var titleLine string
 	var sourceLine string
 	for line := range strings.SplitSeq(output, "\n") {
+		if strings.HasPrefix(line, "Title,") {
+			titleLine = line
+		}
 		if strings.HasPrefix(line, "Source,") {
 			sourceLine = line
-			break
 		}
+	}
+	titleReader := csv.NewReader(strings.NewReader(titleLine))
+	titleRecords, err := titleReader.ReadAll()
+	if err != nil {
+		t.Fatalf("quoted Title CSV is not parseable: %v", err)
+	}
+	if len(titleRecords) != 1 || len(titleRecords[0]) != 2 || titleRecords[0][0] != "Title" || titleRecords[0][1] != `'=HYPERLINK("https://invalid.example")` {
+		t.Fatalf("quoted Title did not round-trip: %#v", titleRecords)
 	}
 	reader := csv.NewReader(strings.NewReader(sourceLine))
 	reader.FieldsPerRecord = -1
@@ -79,6 +90,7 @@ func TestSafeCSVOutputValuePreservesOrdinaryCommasAndContainsInjectedCells(t *te
 		{name: "ordinary comma", value: "English, French", want: "English, French"},
 		{name: "formula with comma", value: "=SUM(1,1)", want: `"'=SUM(1,1)"`},
 		{name: "injected cell", value: "safe,=1+1", want: `"safe,=1+1"`},
+		{name: "ordinary quote", value: `Director's "Cut"`, want: `"Director's ""Cut"""`},
 		{name: "quoted injected cell", value: `safe,"=1+1"`, want: `"safe,""=1+1"""`},
 	}
 	for _, tt := range tests {

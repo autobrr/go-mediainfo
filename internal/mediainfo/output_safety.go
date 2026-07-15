@@ -69,15 +69,16 @@ func escapeOutputControls(value string) string {
 }
 
 // safeCSVOutputValue escapes record-breaking controls, neutralizes formula
-// prefixes, and quotes values that would inject another formula-bearing cell.
-// Ordinary delimiter-bearing values remain unchanged for CLI parity.
+// prefixes, and quotes values that contain quotes or would inject another
+// formula-bearing cell. Ordinary delimiter-bearing values remain unchanged for
+// CLI parity.
 func safeCSVOutputValue(value string) string {
 	escaped := escapeOutputControls(value)
 	formula := csvFormulaCandidate(value)
 	if formula {
 		escaped = "'" + escaped
 	}
-	if csvInjectedFormulaCandidate(value) || formula && strings.ContainsRune(value, ',') {
+	if strings.ContainsRune(value, '"') || csvInjectedFormulaCandidate(value) || formula && strings.ContainsRune(value, ',') {
 		return `"` + strings.ReplaceAll(escaped, `"`, `""`) + `"`
 	}
 	return escaped
