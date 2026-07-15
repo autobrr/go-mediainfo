@@ -101,13 +101,15 @@ type dtsInfo struct {
 	lbrPositions    string
 }
 
-// matroskaVideoProbe accumulates optional AVC or HEVC metadata across bounded
+// matroskaVideoProbe accumulates optional video metadata across bounded
 // Matroska frame samples.
 type matroskaVideoProbe struct {
 	codec         string
 	nalLengthSize int
 	hdrInfo       hevcHDRInfo
 	mpeg2         mpeg2VideoParser
+	mpeg4Visual   mpeg4VisualInfo
+	mpeg4Seen     bool
 	headerStrip   []byte
 	writingLib    string
 	encoding      string
@@ -1040,6 +1042,8 @@ func videoProbeNeedsSample(probe *matroskaVideoProbe) bool {
 		return true
 	case "MPEG Video":
 		return true
+	case "MPEG-4 Visual":
+		return !probe.mpeg4Seen
 	default:
 		return false
 	}
@@ -2641,6 +2645,9 @@ func applyMatroskaVideoProbes(info *MatroskaInfo, probes map[uint64]*matroskaVid
 				}
 			}
 		}
+		if probe.codec == "MPEG-4 Visual" && probe.mpeg4Seen {
+			applyMatroskaMPEG4VisualProbe(stream, probe.mpeg4Visual)
+		}
 		if probe.codec == "HEVC" && probe.hdrInfo.x265Library != "" {
 			// x265 SEI is stream-derived encoder metadata and is more specific than
 			// Matroska tag or muxer strings for HEVC video encoder fields, so it
@@ -3396,6 +3403,78 @@ func probeMatroskaVideo(probes map[uint64]*matroskaVideoProbe, track uint64, pay
 					end++
 				}
 				probe.writingLib = strings.TrimSpace(string(payload[index:end]))
+			}
+		}
+	}
+	if probe.codec == "MPEG-4 Visual" {
+		for _, start := range findMPEG4StartCodes(payload) {
+			if start.code == 0xB0 || start.code >= 0x20 && start.code <= 0x2F {
+				probe.mpeg4Visual = parseMPEG4Visual(payload)
+				probe.mpeg4Seen = true
+				break
+			}
+		}
+	}
+}
+
+// applyMatroskaMPEG4VisualProbe transfers MPEG-4 Visual headers carried in a
+// bounded Matroska frame sample into the track's text and raw JSON metadata.
+func applyMatroskaMPEG4VisualProbe(stream *Stream, parsed mpeg4VisualInfo) {
+	if stream == nil {
+		return
+	}
+	if stream.JSON == nil {
+		stream.JSON = map[string]string{}
+	}
+	stream.Fields = setFieldValue(stream.Fields, "Format", "MPEG-4 Visual")
+	stream.JSON["Format"] = "MPEG-4 Visual"
+	if parsed.Profile != "" {
+		stream.Fields = setFieldValue(stream.Fields, "Format profile", parsed.Profile)
+		profile, level, _ := strings.Cut(parsed.Profile, "@L")
+		stream.JSON["Format_Profile"] = profile
+		if level != "" {
+			stream.JSON["Format_Level"] = level
+		}
+	}
+	if parsed.BVOP != nil {
+		value := "No"
+		if *parsed.BVOP {
+			value = "1"
+		}
+		stream.Fields = setFieldValue(stream.Fields, "Format settings, BVOP", value)
+		stream.JSON["Format_Settings_BVOP"] = value
+	}
+	if parsed.QPel != nil {
+		value := formatYesNo(*parsed.QPel)
+		stream.Fields = setFieldValue(stream.Fields, "Format settings, QPel", value)
+		stream.JSON["Format_Settings_QPel"] = value
+	}
+	if parsed.GMC != "" {
+		stream.Fields = setFieldValue(stream.Fields, "Format settings, GMC", parsed.GMC)
+		stream.JSON["Format_Settings_GMC"] = strings.TrimSuffix(parsed.GMC, " warppoints")
+	}
+	if parsed.Matrix != "" {
+		stream.Fields = setFieldValue(stream.Fields, "Format settings, Matrix", parsed.Matrix)
+		stream.JSON["Format_Settings_Matrix"] = parsed.Matrix
+	}
+	for field, value := range map[string]string{
+		"Color space": parsed.ColorSpace, "Chroma subsampling": parsed.ChromaSubsampling,
+		"Bit depth": parsed.BitDepth, "Scan type": parsed.ScanType, "Scan order": parsed.ScanOrder,
+	} {
+		if value != "" {
+			stream.Fields = setFieldValue(stream.Fields, field, value)
+		}
+	}
+	stream.Fields = setFieldValue(stream.Fields, "Compression mode", "Lossy")
+	stream.JSON["Compression_Mode"] = "Lossy"
+	if parsed.WritingLibrary != "" {
+		stream.Fields = setFieldValue(stream.Fields, "Writing library", parsed.WritingLibrary)
+		stream.JSON["Encoded_Library"] = parsed.WritingLibrary
+		if version, date, ok := xvidLibraryVersionDate(parsed.WritingLibrary); ok {
+			stream.JSON["Encoded_Library_Name"] = "XviD"
+			stream.JSON["Encoded_Library_Version"] = version
+			if date != "" {
+				stream.JSON["Encoded_Library_Date"] = date
 			}
 		}
 	}

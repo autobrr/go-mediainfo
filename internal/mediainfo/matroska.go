@@ -512,6 +512,10 @@ func ParseMatroskaWithOptions(r io.ReaderAt, size int64, opts AnalyzeOptions) (M
 					}
 					if format == "MPEG Video" {
 						videoProbes[id] = &matroskaVideoProbe{codec: format, targetPackets: 64}
+						continue
+					}
+					if format == "MPEG-4 Visual" {
+						videoProbes[id] = &matroskaVideoProbe{codec: format, targetPackets: 64}
 					}
 				case StreamGeneral, StreamText, StreamImage, StreamMenu:
 					continue
@@ -1577,6 +1581,31 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64, durationPrec i
 			format = "VC-1"
 			codecID += " / WVC1"
 			vc1Info, _ = parseVC1AnnexBMeta(codecPrivate)
+		} else if strings.EqualFold(fourCC, "XVID") || strings.EqualFold(fourCC, "DIVX") || strings.EqualFold(fourCC, "DX50") {
+			format = "MPEG-4 Visual"
+			codecID += " / " + strings.ToUpper(fourCC)
+		}
+	}
+	var acmBitRate uint64
+	if kind == StreamAudio && codecID == "A_MS/ACM" && len(codecPrivate) >= 16 {
+		formatTag := binary.LittleEndian.Uint16(codecPrivate[0:2])
+		if formatTag == 1 {
+			format = "PCM"
+			codecID = "A_MS/ACM / 00000001-0000-0010-8000-00AA00389B71"
+			if channels := binary.LittleEndian.Uint16(codecPrivate[2:4]); channels > 0 {
+				audioChannels = uint64(channels)
+				audioChannelsFromTrack = true
+			}
+			if sampleRate := binary.LittleEndian.Uint32(codecPrivate[4:8]); sampleRate > 0 {
+				audioSampleRate = float64(sampleRate)
+				audioBaseSampleRate = float64(sampleRate)
+			}
+			if avgBytes := binary.LittleEndian.Uint32(codecPrivate[8:12]); avgBytes > 0 {
+				acmBitRate = uint64(avgBytes) * 8
+			}
+			if bits := binary.LittleEndian.Uint16(codecPrivate[14:16]); bits > 0 {
+				audioBitDepth = uint64(bits)
+			}
 		}
 	}
 	var dec3Info eac3Dec3Info
@@ -1673,6 +1702,36 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64, durationPrec i
 		if videoInfo.stereoMode == 13 {
 			fields = setFieldValue(fields, "Format profile", "Stereo High@L4.1 / High@L4.1")
 		}
+	}
+	if kind == StreamVideo && codecID == "V_AV1" && len(codecPrivate) >= 3 {
+		profile := int(codecPrivate[1] >> 5)
+		level := int(codecPrivate[1] & 0x1f)
+		profileName := map[int]string{0: "Main", 1: "High", 2: "Professional"}[profile]
+		if profileName != "" {
+			levelName := fmt.Sprintf("%d.%d", 2+level/4, level%4)
+			fields = append(fields, Field{Name: "Format profile", Value: profileName + "@L" + levelName})
+		}
+		bitDepth := 8
+		if codecPrivate[2]&0x40 != 0 {
+			bitDepth = 10
+		}
+		if codecPrivate[2]&0x20 != 0 {
+			bitDepth = 12
+		}
+		fields = append(fields, Field{Name: "Color space", Value: "YUV"})
+		if codecPrivate[2]&0x0c == 0x0c {
+			fields = append(fields, Field{Name: "Chroma subsampling", Value: "4:2:0"})
+		}
+		fields = append(fields, Field{Name: "Bit depth", Value: fmt.Sprintf("%d bits", bitDepth)})
+	}
+	if kind == StreamVideo && codecID == "V_VP9" {
+		fields = append(fields,
+			Field{Name: "Format profile", Value: "0"},
+			Field{Name: "Color space", Value: "YUV"},
+			Field{Name: "Chroma subsampling", Value: "4:2:0"},
+			Field{Name: "Chroma subsampling position", Value: "Type 1"},
+			Field{Name: "Bit depth", Value: "8 bits"},
+		)
 	}
 	if kind == StreamVideo && format == "VC-1" {
 		profile := vc1Info.Profile
@@ -1976,6 +2035,9 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64, durationPrec i
 			}
 			fields = append(fields, Field{Name: "Bit rate mode", Value: mode})
 			fields = append(fields, Field{Name: "Bit rate", Value: formatBitrate(float64(bitRate))})
+		} else if acmBitRate > 0 {
+			fields = append(fields, Field{Name: "Bit rate mode", Value: "Constant"})
+			fields = append(fields, Field{Name: "Bit rate", Value: formatBitrate(float64(acmBitRate))})
 		} else if format == "FLAC" {
 			fields = append(fields, Field{Name: "Bit rate mode", Value: "Variable"})
 		}
@@ -2070,6 +2132,13 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64, durationPrec i
 		}
 		if strings.Contains(codecID, "/INT/") {
 			jsonExtras["Format_Settings_Sign"] = "Signed"
+		}
+		if strings.HasPrefix(codecID, "A_MS/ACM / 00000001-") {
+			jsonExtras["Format_Settings_Endianness"] = "Little"
+			jsonExtras["Format_Settings_Sign"] = "Signed"
+			if acmBitRate > 0 {
+				jsonExtras["BitRate"] = strconv.FormatUint(acmBitRate, 10)
+			}
 		}
 		if audioBitDepth > 0 {
 			jsonExtras["BitDepth"] = strconv.FormatUint(audioBitDepth, 10)
@@ -3176,6 +3245,8 @@ func parseMatroskaTags(buf []byte, encodedDate string) (map[uint64]string, map[u
 					"COMMENT", "CONTENT_TYPE", "COPYRIGHT", "SYNOPSIS", "SUBTITLE", "SUMMARY", "SHOW",
 					"EPISODE_ID", "EPISODE_NUMBER", "SEASON_NUMBER", "Encoder",
 					"IMDB", "TMDB", "TVDB", "TVDB2", "MyAnimeList", "TVmaze", "Douban",
+					"INTERNAL", "WRITING_LIBRARY", "MYANIMELIST", "ORIGINAL_SOURCE_FORM", "ACTOR_CHARACTER",
+					"ART_DIRECTOR", "EDITED_BY", "EXECUTIVE_PRODUCER", "IMDB_ID", "PRODUCTION_DESIGNER", "TMDB_ID", "URL",
 				} {
 					if value := strings.TrimSpace(tags[name]); value != "" && generalTags[name] == "" {
 						generalTags[name] = value
@@ -3234,6 +3305,10 @@ func parseMatroskaTags(buf []byte, encodedDate string) (map[uint64]string, map[u
 				}
 				if format := strings.TrimSpace(tags["FORMAT"]); format != "" {
 					stats.extras = append(stats.extras, jsonKV{Key: "FORMAT", Val: format})
+					hasStats = true
+				}
+				if filterChain := strings.TrimSpace(tags["FILTER_CHAIN"]); filterChain != "" {
+					stats.extras = append(stats.extras, jsonKV{Key: "FilterChain", Val: filterChain})
 					hasStats = true
 				}
 				if source := strings.TrimSpace(tags["SOURCE"]); source != "" {
@@ -4154,7 +4229,7 @@ func applyMatroskaEncoders(streams []Stream, encodersByTrackUID map[uint64]strin
 			}
 			lowerEnc := strings.ToLower(enc)
 			// Avoid tagging muxing apps as a codec encoder; keep this conservative.
-			isCodecEncoder := strings.Contains(lowerEnc, "x264") || strings.Contains(lowerEnc, "x265") || strings.Contains(lowerEnc, "elemental h.264") || strings.Contains(lowerEnc, "avc coding")
+			isCodecEncoder := strings.Contains(lowerEnc, "x264") || strings.Contains(lowerEnc, "x265") || strings.Contains(lowerEnc, "svt-av1") || strings.Contains(lowerEnc, "elemental h.264") || strings.Contains(lowerEnc, "avc coding")
 			if isCodecEncoder && enc != "" && findField(streams[i].Fields, "Writing library") == "" {
 				streams[i].Fields = appendFieldUnique(streams[i].Fields, Field{Name: "Writing library", Value: enc})
 			}

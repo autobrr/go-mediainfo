@@ -6,6 +6,8 @@ func mapMatroskaCodecID(codecID string, trackType uint64) (StreamKind, string) {
 		return StreamVideo, "AVC"
 	case "V_MPEGH/ISO/HEVC":
 		return StreamVideo, "HEVC"
+	case "V_AV1":
+		return StreamVideo, "AV1"
 	case "V_VP9":
 		return StreamVideo, "VP9"
 	case "V_VP8":
@@ -40,6 +42,8 @@ func mapMatroskaCodecID(codecID string, trackType uint64) (StreamKind, string) {
 		return StreamAudio, "PCM"
 	case "A_PCM/FLOAT/IEEE":
 		return StreamAudio, "PCM"
+	case "A_MS/ACM":
+		return StreamAudio, "Audio"
 	case "S_TEXT/UTF8":
 		return StreamText, "UTF-8"
 	case "S_TEXT/ASS":
