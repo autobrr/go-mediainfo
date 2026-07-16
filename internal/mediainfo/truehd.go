@@ -3,6 +3,7 @@ package mediainfo
 import (
 	"bytes"
 	"encoding/binary"
+	"strings"
 )
 
 // trueHDInfo carries major-sync metadata needed to render MediaInfo-compatible
@@ -13,6 +14,85 @@ type trueHDInfo struct {
 	sampleRate      int
 	samplesPerFrame int
 	maxBitRate      int64
+	channelMap      uint16
+}
+
+// trueHDChannelCountPerBit maps each assignment-map bit to its channel count.
+var trueHDChannelCountPerBit = [...]int{2, 1, 1, 2, 2, 2, 2, 1, 1, 2, 2, 1, 1}
+
+// trueHDChannelLayoutPerBit maps each assignment-map bit to its layout token.
+var trueHDChannelLayoutPerBit = [...]string{
+	"L R", "C", "LFE", "Ls Rs", "Tfl Tfr", "Lsc Rsc", "Lb Rb", "Cb", "Tc", "Lsd Rsd", "Lw Rw", "Tfc", "LFE2",
+}
+
+// trueHDChannels returns the presentation channel count encoded by a TrueHD
+// 8-channel assignment map.
+func trueHDChannels(channelMap uint16) uint64 {
+	count := 0
+	for bit, contribution := range trueHDChannelCountPerBit {
+		if channelMap&(1<<bit) != 0 {
+			count += contribution
+		}
+	}
+	return uint64(count)
+}
+
+// trueHDChannelPositions renders MediaInfo's grouped presentation positions.
+func trueHDChannelPositions(channelMap uint16) string {
+	parts := make([]string, 0, 8)
+	switch channelMap & 0x0003 {
+	case 0x0003:
+		parts = append(parts, "Front: L C R")
+	case 0x0001:
+		parts = append(parts, "Front: C")
+	case 0x0002:
+		parts = append(parts, "Front: L, R")
+	}
+	if channelMap&0x0008 != 0 {
+		parts = append(parts, "Side: L R")
+	}
+	if channelMap&0x0080 != 0 {
+		parts = append(parts, "Back: C")
+	}
+	if channelMap&0x0010 != 0 {
+		parts = append(parts, "vh: L R")
+	}
+	if channelMap&0x0800 != 0 {
+		parts = append(parts, "vh: C")
+	}
+	if channelMap&0x0020 != 0 {
+		parts = append(parts, "c: L R")
+	}
+	if channelMap&0x0040 != 0 {
+		parts = append(parts, "Back: L R")
+	}
+	if channelMap&0x0100 != 0 {
+		parts = append(parts, "s: T")
+	}
+	if channelMap&0x0200 != 0 {
+		parts = append(parts, "sd: L R")
+	}
+	if channelMap&0x0400 != 0 {
+		parts = append(parts, "w: L R")
+	}
+	if channelMap&0x0004 != 0 {
+		parts = append(parts, "LFE")
+	}
+	if channelMap&0x1000 != 0 {
+		parts = append(parts, "LFE2")
+	}
+	return strings.Join(parts, ", ")
+}
+
+// trueHDChannelLayout renders MediaInfo's ordered presentation layout.
+func trueHDChannelLayout(channelMap uint16) string {
+	parts := make([]string, 0, len(trueHDChannelLayoutPerBit))
+	for bit, name := range trueHDChannelLayoutPerBit {
+		if channelMap&(1<<bit) != 0 {
+			parts = append(parts, name)
+		}
+	}
+	return strings.Join(parts, " ")
 }
 
 // trueHDAtmosPresentation contains the MediaInfo-facing 16-channel Atmos
@@ -76,9 +156,14 @@ func parseTrueHDFrame(payload []byte) (trueHDInfo, bool) {
 		return info, false
 	}
 	info.sampleRate = trueHDSampleRate(int(rateBits))
-	if !br.skipBits(4) || !br.skipBits(2) || !br.skipBits(2) || !br.skipBits(5) || !br.skipBits(2) || !br.skipBits(13) || !br.skipBits(48) {
+	if !br.skipBits(4) || !br.skipBits(2) || !br.skipBits(2) || !br.skipBits(5) || !br.skipBits(2) {
 		return info, false
 	}
+	channelMap, ok := br.readBits(13)
+	if !ok || !br.skipBits(48) {
+		return info, false
+	}
+	info.channelMap = uint16(channelMap)
 	if _, ok := br.readBits(1); !ok { // is_vbr
 		return info, false
 	}

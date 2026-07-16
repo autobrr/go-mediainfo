@@ -27,6 +27,18 @@ func TestParseTrueHDFrameAtmosMajorSync(t *testing.T) {
 	if info.maxBitRate != 8199000 {
 		t.Fatalf("maxBitRate=%d want 8199000", info.maxBitRate)
 	}
+	if info.channelMap != 0x4F {
+		t.Fatalf("channelMap=%#x want 0x4f", info.channelMap)
+	}
+	if got := trueHDChannels(info.channelMap); got != 8 {
+		t.Fatalf("channels=%d want 8", got)
+	}
+	if got := trueHDChannelPositions(info.channelMap); got != "Front: L C R, Side: L R, Back: L R, LFE" {
+		t.Fatalf("positions=%q", got)
+	}
+	if got := trueHDChannelLayout(info.channelMap); got != "L R C LFE Ls Rs Lb Rb" {
+		t.Fatalf("layout=%q", got)
+	}
 	if info.dynamicObjects != 11 {
 		t.Fatalf("dynamicObjects=%d want 11", info.dynamicObjects)
 	}

@@ -201,6 +201,63 @@ var structuredTextFieldOrder = map[string]int{
 	"Title": 26, "Language": 27, "Default": 28, "Forced": 29, "extra": 30,
 }
 
+// structuredBDAVGeneralFieldOrder mirrors MediaInfo's BDAV General key order.
+var structuredBDAVGeneralFieldOrder = makeStructuredFieldOrder(
+	"@type", "ID", "UniqueID", "VideoCount", "AudioCount", "TextCount", "ImageCount", "MenuCount",
+	"FileExtension", "CompleteName_Last", "Format", "Format_Settings", "Format_Version", "Format_Profile",
+	"CodecID", "CodecID_Compatible", "FileSize", "Duration", "OverallBitRate_Mode", "OverallBitRate", "OverallBitRate_Maximum",
+	"FrameRate", "FrameCount", "StreamSize", "HeaderSize", "DataSize", "FooterSize", "IsStreamable",
+	"File_Created_Date", "File_Created_Date_Local", "File_Modified_Date", "File_Modified_Date_Local",
+	"Encoded_Application", "Encoded_Application_Name", "Encoded_Application_Version",
+	"Encoded_Library", "Encoded_Library_Name", "Encoded_Library_Version", "Encoded_Library_Settings", "extra",
+)
+
+// structuredBDAVVideoFieldOrder mirrors MediaInfo's BDAV video key order while
+// retaining Go-specific extensions at their semantic positions.
+var structuredBDAVVideoFieldOrder = makeStructuredFieldOrder(
+	"@type", "@typeorder", "StreamOrder", "FirstPacketOrder", "ID", "MenuID", "UniqueID",
+	"Format", "Format_Version", "Format_Profile", "Format_Level", "Format_Tier",
+	"HDR_Format", "HDR_Format_Version", "HDR_Format_Profile", "HDR_Format_Level", "HDR_Format_Settings", "HDR_Format_Compression", "HDR_Format_Compatibility",
+	"Format_Settings_BVOP", "Format_Settings_CABAC", "Format_Settings_QPel", "Format_Settings_RefFrames", "Format_Settings_GMC",
+	"Format_Settings_Matrix", "Format_Settings_Matrix_Data", "Format_Settings_GOP", "Format_Settings_SliceCount", "Format_Settings_PictureStructure",
+	"MuxingMode", "CodecID", "Duration", "BitRate_Mode", "BitRate", "BitRate_Nominal", "BitRate_Maximum",
+	"Width", "Height", "Stored_Width", "Stored_Height", "Sampled_Width", "Sampled_Height", "PixelAspectRatio", "DisplayAspectRatio", "Rotation",
+	"FrameRate_Mode", "FrameRate_Mode_Original", "FrameRate", "FrameRate_Num", "FrameRate_Den", "FrameCount", "Standard",
+	"ColorSpace", "ChromaSubsampling", "ChromaSubsampling_Position", "BitDepth", "ScanType", "ScanOrder", "Compression_Mode",
+	"Delay", "Delay_Settings", "Delay_DropFrame", "Delay_Source", "Delay_Original", "Delay_Original_DropFrame", "Delay_Original_Source",
+	"TimeCode_FirstFrame", "TimeCode_Source", "Gop_OpenClosed", "Gop_OpenClosed_FirstFrame", "StreamSize",
+	"Encoded_Library", "Encoded_Library_Name", "Encoded_Library_Version", "Encoded_Library_Settings", "Default", "Forced", "BufferSize",
+	"colour_description_present", "colour_description_present_Source", "colour_range", "colour_range_Source",
+	"colour_primaries", "colour_primaries_Source", "transfer_characteristics", "transfer_characteristics_Source",
+	"matrix_coefficients", "matrix_coefficients_Source", "MasteringDisplay_ColorPrimaries", "MasteringDisplay_ColorPrimaries_Source",
+	"MasteringDisplay_Luminance", "MasteringDisplay_Luminance_Source", "MasteringDisplay_Luminance_Min", "MasteringDisplay_Luminance_Max",
+	"MaxCLL", "MaxCLL_Source", "MaxFALL", "MaxFALL_Source", "extra",
+)
+
+// structuredBDAVAudioFieldOrder mirrors MediaInfo's BDAV audio key order while
+// keeping encoded-rate and encoded-size extensions adjacent to their base keys.
+var structuredBDAVAudioFieldOrder = makeStructuredFieldOrder(
+	"@type", "@typeorder", "StreamOrder", "FirstPacketOrder", "ID", "MenuID", "UniqueID",
+	"Format", "Format_Commercial_IfAny", "Format_Version", "Format_Profile", "Format_Settings_Mode", "Format_Settings_Endianness",
+	"Format_Settings_Sign", "Format_AdditionalFeatures", "MuxingMode", "CodecID",
+	"Duration", "Source_Duration", "Source_Duration_LastFrame", "BitRate_Mode", "BitRate", "BitRate_Encoded", "BitRate_Minimum", "BitRate_Maximum",
+	"Channels", "ChannelPositions", "Channels_Original", "ChannelLayout", "ChannelPositions_Original", "ChannelLayout_Original",
+	"SamplesPerFrame", "SamplingRate", "SamplingCount", "FrameRate", "FrameRate_Num", "FrameRate_Den", "FrameCount", "Source_FrameCount",
+	"BitDepth", "BitDepth_Detected", "Compression_Mode", "Delay", "Delay_Source", "Video_Delay", "StreamSize", "StreamSize_Encoded", "Source_StreamSize",
+	"Alignment", "Interleave_VideoFrames", "Interleave_Duration", "Title", "Encoded_Library", "Encoded_Library_Name", "Encoded_Library_Version",
+	"Encoded_Library_Settings", "Language", "ServiceKind", "Default", "Forced", "AlternateGroup", "extra",
+)
+
+// structuredBDAVTextFieldOrder keeps Blu-ray subtitle identity fields before
+// Go-specific timing extensions.
+var structuredBDAVTextFieldOrder = makeStructuredFieldOrder(
+	"@type", "@typeorder", "StreamOrder", "FirstPacketOrder", "ID", "MenuID", "UniqueID",
+	"Format", "CodecID", "MuxingMode_MoreInfo", "Duration", "BitDepth", "Duration_Start2End", "Duration_Start_Command",
+	"Duration_Start", "Duration_End", "Duration_End_Command", "BitRate_Mode", "BitRate", "FrameRate", "FrameCount", "ElementCount",
+	"Delay", "Delay_Source", "Video_Delay", "StreamSize", "FirstDisplay_Delay_Frames", "FirstDisplay_Type",
+	"Title", "Language", "Default", "Forced", "extra",
+)
+
 // structuredAVIGeneralFieldOrder and its stream-specific companions mirror the key
 // order emitted by MediaInfo for AVI structured output.
 var structuredAVIGeneralFieldOrder = makeStructuredFieldOrder(
@@ -332,9 +389,28 @@ func structuredFieldOrderForContainer(kind StreamKind, containerFormat string) m
 		return structuredMatroskaFieldOrderPolicy(kind)
 	case "AVI":
 		return structuredAVIFieldOrderPolicy(kind)
+	case "BDAV":
+		return structuredBDAVFieldOrderPolicy(kind)
 	default:
 		return structuredFieldOrderPolicy(kind)
 	}
+}
+
+// structuredBDAVFieldOrderPolicy returns the BDAV key order for kind.
+func structuredBDAVFieldOrderPolicy(kind StreamKind) map[string]int {
+	switch kind {
+	case StreamGeneral:
+		return structuredBDAVGeneralFieldOrder
+	case StreamVideo, StreamImage:
+		return structuredBDAVVideoFieldOrder
+	case StreamAudio:
+		return structuredBDAVAudioFieldOrder
+	case StreamText:
+		return structuredBDAVTextFieldOrder
+	case StreamMenu:
+		return structuredMenuFieldOrder
+	}
+	panic("unreachable StreamKind")
 }
 
 // structuredAVIFieldOrderPolicy returns the AVI key order for kind.

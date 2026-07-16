@@ -161,7 +161,7 @@ func projectRawTextReport(report Report) rawTextReportProjection {
 			}
 			friendly := firstNonEmpty(entry.TextLabel, string(entry.Name))
 			label := rawTextLabel(friendly)
-			value := rawTextValue(stream.Kind, label, entry.Value.Text, structured)
+			value := rawTextValue(stream.Kind, label, entry.Value.Text, structured, totalFileSize)
 			fields = append(fields, rawTextFieldProjection{
 				Label: label, Value: value, Order: rawTextFieldOrder(stream.Kind, label),
 				Sequence: entry.Sequence, Extension: label == friendly,
@@ -250,6 +250,7 @@ func rawTextStructuredDerivations(kind StreamKind, structured map[string]string,
 	appendField("MuxingMode", structured["MuxingMode"])
 	appendField("Format_Version", formatRawTextFormatVersion(structured["Format_Version"]))
 	appendField("Format/Info", rawTextFormatInfo(kind, structured))
+	appendField("Format_Commercial_IfAny", structured["Format_Commercial_IfAny"])
 	appendField("Format_Profile", formatRawTextProfile(kind, structured, structured["Format_Profile"]))
 	appendField("Format_Settings", formatRawTextSettings(structured))
 	appendField("Format_Settings_Floor", structured["Format_Settings_Floor"])
@@ -261,6 +262,7 @@ func rawTextStructuredDerivations(kind StreamKind, structured map[string]string,
 	appendField("BitRate_Nominal/String", formatRawTextDerivedBitRate(structured["BitRate_Nominal"]))
 	appendField("BitRate_Maximum/String", formatRawTextDerivedBitRate(structured["BitRate_Maximum"]))
 	appendField("BitRate_Minimum/String", formatRawTextDerivedBitRate(structured["BitRate_Minimum"]))
+	appendField("OverallBitRate_Maximum/String", formatRawTextDerivedBitRate(structured["OverallBitRate_Maximum"]))
 	if duration, err := strconv.ParseFloat(structured["Duration"], 64); err == nil && kind != StreamGeneral {
 		appendField("Duration/String", formatRawTextDuration(duration))
 	}
@@ -332,6 +334,14 @@ func rawTextStructuredDerivations(kind StreamKind, structured map[string]string,
 	appendField("colour_primaries", structured["colour_primaries"])
 	appendField("transfer_characteristics", structured["transfer_characteristics"])
 	appendField("transfer_characteristics_Origina", structured["transfer_characteristics_Original"])
+	appendField("MasteringDisplay_ColorPrimaries", structured["MasteringDisplay_ColorPrimaries"])
+	appendField("MasteringDisplay_Luminance", structured["MasteringDisplay_Luminance"])
+	if value := structured["MaxCLL"]; value != "" {
+		appendField("MaxCLL/String", value+" cd/m2")
+	}
+	if value := structured["MaxFALL"]; value != "" {
+		appendField("MaxFALL/String", value+" cd/m2")
+	}
 	appendField("TimeCode_FirstFrame", structured["TimeCode_FirstFrame"])
 	appendField("TimeCode_Source", structured["TimeCode_Source"])
 	appendField("Format_Settings_GOP", structured["Format_Settings_GOP"])
@@ -412,6 +422,9 @@ func formatRawTextActiveFormatDescription(value string) string {
 func rawTextScanStoreMethod(structured map[string]string) string {
 	if value := structured["ScanType_StoreMethod"]; value != "" {
 		return value
+	}
+	if structured["ScanType"] == "MBAFF" {
+		return "InterleavedFields"
 	}
 	switch structured["UniqueID"] {
 	case "2714757033321985940", "15018893693280564553":
@@ -529,8 +542,11 @@ func formatRawTextSettings(structured map[string]string) string {
 			return "PNS / PNS"
 		}
 	}
-	if structured["Format_Settings_Endianness"] == "Little" && structured["Format_Settings_Sign"] != "" {
-		return "Little / " + structured["Format_Settings_Sign"]
+	if structured["Format_Settings_Endianness"] != "" && structured["Format_Settings_Sign"] != "" {
+		return structured["Format_Settings_Endianness"] + " / " + structured["Format_Settings_Sign"]
+	}
+	if value := structured["Format_Settings_Mode"]; value != "" && (structured["Format"] == "AC-3" || structured["Format"] == "AC-3 Dep" || structured["Format"] == "E-AC-3") {
+		return value
 	}
 	if matrix, bvop := structured["Format_Settings_Matrix"], structured["Format_Settings_BVOP"]; strings.HasPrefix(matrix, "Custom") && bvop != "" {
 		return "CustomMatrix / BVOP"
@@ -573,6 +589,9 @@ func formatRawTextDerivedBitRate(value string) string {
 	bitRate, err := strconv.ParseFloat(value, 64)
 	if err != nil || bitRate <= 0 {
 		return ""
+	}
+	if bitRate >= 100_000_000 {
+		return fmt.Sprintf("%.0f Mbps", bitRate/1_000_000)
 	}
 	if bitRate > 10_000_000 {
 		return fmt.Sprintf("%.1f Mbps", bitRate/1_000_000)
@@ -656,6 +675,10 @@ func formatRawTextServiceKind(value string) string {
 // otherwise structured-only extra value.
 func rawTextExtraValue(key, value string) string {
 	switch key {
+	case "BedChannelCount":
+		if value != "" && !strings.HasSuffix(value, " channel") {
+			return value + " channel"
+		}
 	case "dialnorm", "dialnorm_Average", "dialnorm_Minimum", "dialnorm_Maximum",
 		"compr", "dynrng", "cmixlev", "surmixlev", "ltrtcmixlev", "ltrtsurmixlev",
 		"lorocmixlev", "lorosurmixlev", "mixlevel":
@@ -790,10 +813,14 @@ func rawTextLabel(friendly string) string {
 }
 
 // rawTextValue applies raw-language presentation without changing canonical facts.
-func rawTextValue(kind StreamKind, label, display string, structured map[string]string) string {
+func rawTextValue(kind StreamKind, label, display string, structured map[string]string, totalFileSize int64) string {
 	switch label {
+	case "ID/String":
+		if kind == StreamGeneral && structured["Format"] == "BDAV" {
+			return "0 (0x0)"
+		}
 	case "Format/String":
-		if value := structured["Format"]; value != "" {
+		if value := firstNonEmpty(structured["Format"], display); value != "" {
 			if structured["CodecID"] == "A_EAC3" {
 				value = "E-AC-3"
 				if strings.Contains(structured["Format_AdditionalFeatures"], "JOC") {
@@ -801,10 +828,12 @@ func rawTextValue(kind StreamKind, label, display string, structured map[string]
 				}
 				return value
 			}
-			if value == "AC-3 Dep" {
+			features := structured["Format_AdditionalFeatures"]
+			if value == "AC-3 Dep" || value == "AC-3" && strings.Contains(features, "Dep") {
 				value = "E-AC-3"
+				features = strings.TrimSpace(strings.ReplaceAll(features, "Dep", ""))
 			}
-			if features := structured["Format_AdditionalFeatures"]; features != "" && !strings.Contains(value, features) {
+			if features != "" && !strings.Contains(value, features) {
 				value += " " + features
 			}
 			return value
@@ -906,8 +935,17 @@ func rawTextValue(kind StreamKind, label, display string, structured map[string]
 		if value := formatRawTextServiceKind(structured["ServiceKind"]); value != "" {
 			return value
 		}
-	case "FileSize/String", "StreamSize/String", "Source_StreamSize/String":
+	case "StreamSize/String":
+		if size, err := strconv.ParseInt(structured["StreamSize"], 10, 64); err == nil && size >= 0 {
+			return formatRawTextByteUnits(kind, formatStreamSize(size, totalFileSize), structured["ElementCount"])
+		}
 		return formatRawTextByteUnits(kind, display, structured["ElementCount"])
+	case "FileSize/String", "Source_StreamSize/String":
+		return formatRawTextByteUnits(kind, display, structured["ElementCount"])
+	case "BedChannelCount":
+		if value := structured["BedChannelCount"]; value != "" {
+			return value + " channel"
+		}
 	case "ChannelLayout":
 		if value := structured["ChannelLayout"]; value != "" {
 			if kind == StreamAudio && structured["Format"] == "Opus" && strings.HasPrefix(value, "C L R ") {
@@ -1195,6 +1233,9 @@ func formatRawTextEncodedLibrary(display string) string {
 // rawTextFormatInfo returns the few compound audio descriptions whose raw
 // value must be composed from canonical format facts.
 func rawTextFormatInfo(kind StreamKind, structured map[string]string) string {
+	if kind == StreamGeneral && structured["Format"] == "BDAV" {
+		return "Blu-ray Video"
+	}
 	if kind == StreamImage && structured["Format"] == "PNG" {
 		return "Portable Network Graphic"
 	}
@@ -1211,7 +1252,7 @@ func rawTextFormatInfo(kind StreamKind, structured map[string]string) string {
 	case structured["CodecID"] == "A_EAC3", format == "E-AC-3" || format == "AC-3 Dep":
 		return "Enhanced AC-3"
 	case format == "MLP FBA" || format == "TrueHD":
-		if features == "16-ch" {
+		if strings.Contains(features, "16-ch") {
 			return "Meridian Lossless Packing FBA with 16-channel presentation"
 		}
 		return "Meridian Lossless Packing FBA"
@@ -1250,7 +1291,7 @@ func rawTextFieldOrder(kind StreamKind, label string) int {
 var (
 	rawTextGeneralFieldOrder = makeStructuredFieldOrder(
 		"ID/String", "UniqueID/String", "CompleteName", "Format/String", "Format/Info", "Format_Version", "Format_Profile",
-		"Format_Settings", "CodecID", "FileSize/String", "Duration/String", "OverallBitRate_Mode/String", "OverallBitRate/String", "FrameRate/String",
+		"Format_Settings", "CodecID", "FileSize/String", "Duration/String", "OverallBitRate_Mode/String", "OverallBitRate/String", "OverallBitRate_Maximum/String", "FrameRate/String",
 		"Title", "Movie", "Performer", "EncodedBy", "Genre", "ContentType", "Synopsis", "Description", "Released_Date", "Recorded_Date", "Encoded_Date", "Tagged_Date",
 		"Encoded_Application/String", "Encoded_Library/String", "Copyright", "OriginalSourceForm", "Cover", "Cover_Description", "Cover_Type", "Cover_Mime",
 		"Comment", "ErrorDetectionType", "Attachments", "Episode_ID", "Season", "SeasonNumber", "Show", "EPISODE_ID", "EPISODE_NUMBER", "SEASON_NUMBER", "SHOW",

@@ -81,6 +81,8 @@ type mpeg2VideoInfo struct {
 	GOPVariable              bool
 	GOPM                     int
 	GOPN                     int
+	GOPMDominant             int
+	GOPNDominant             int
 	GOPLengthFirst           int
 	GOPOpenClosed            string
 	GOPFirstClosed           string
@@ -672,6 +674,12 @@ func (p *mpeg2VideoParser) finalize() mpeg2VideoInfo {
 
 func (p *mpeg2VideoParser) finalizeTS() mpeg2VideoInfo {
 	info := p.finalize()
+	if len(p.gopMCounts) > 0 {
+		info.GOPMDominant, _ = modeValue(p.gopMCounts)
+	}
+	if len(p.gopNCounts) > 0 {
+		info.GOPNDominant, _ = modeValue(p.gopNCounts)
+	}
 	// TS parity: keep the dominant GOP length when variation is sparse; use "Variable"
 	// only when no clear dominant mode emerges.
 	if len(p.gopLengthCounts) > 0 {

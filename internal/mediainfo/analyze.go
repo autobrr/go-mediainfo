@@ -1043,7 +1043,9 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			}
 			generalFacts.ApplyToStream(&general)
 			applyX264Info(file, streams, x264InfoOptions{
-				addNominalBitrate: true,
+				skipWritingLibIfExists: true,
+				skipEncodingIfExists:   true,
+				addNominalBitrate:      true,
 			})
 		}
 	case "BDAV":
@@ -1119,10 +1121,6 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 				node := overallBitRatePrecisionExtra(minRate, maxRate)
 				generalExtra = &node
 			}
-			applyX264Info(file, streams, x264InfoOptions{
-				addNominalBitrate: true,
-			})
-
 			// MediaInfo CLI continuous file names behavior (File_TestContinuousFileNames=1):
 			// Keep stream layout from the first file, but use the last file's duration and the
 			// aggregated FileSize for bitrate/stream size computations.
@@ -1257,12 +1255,8 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			var audioSum int64
 			audioCount := 0
 			audioSizedCount := 0
-			textCount := 0
 			for _, stream := range streams {
 				if stream.Kind != StreamAudio {
-					if stream.Kind == StreamText {
-						textCount++
-					}
 					continue
 				}
 				audioCount++
@@ -1289,7 +1283,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			// MediaInfo BDAV behavior: derive StreamSize (and sometimes BitRate) when audio StreamSize is
 			// available for all audio streams. UHD/HEVC BDAV often omits these fields (subtitles present,
 			// or unsized audio at default ParseSpeed).
-			applyBDAVSizing := primaryVideoFormat != "HEVC" || (textCount == 0 && audioCount > 0 && audioSizedCount == audioCount)
+			applyBDAVSizing := primaryVideoFormat != "HEVC" || (audioCount > 0 && audioSizedCount == audioCount)
 			if applyBDAVSizing {
 				// MediaInfo BDAV behavior: derive video bitrate/size from overall bitrate,
 				// subtracting audio + text overhead, then set General StreamSize as the remainder.
@@ -1383,8 +1377,17 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 								if streams[i].Kind != StreamVideo {
 									continue
 								}
+								reportedVideoBps := videoBps
+								if nominalValue, nominalFound := canonicalSeedValue(streams[i], "BitRate_Nominal"); nominalFound {
+									maximumValue, maximumFound := canonicalSeedValue(streams[i], "BitRate_Maximum")
+									nominal, nominalOK := parseInt(nominalValue)
+									maximum, maximumOK := parseInt(maximumValue)
+									if maximumFound && nominalOK && maximumOK && nominal > 0 && nominal == maximum {
+										reportedVideoBps = nominal
+									}
+								}
 								replaceCanonicalSeedLegacyFill(&streams[i], "StreamSize", strconv.FormatInt(videoSS, 10), "Stream size", findField(streams[i].Fields, "Stream size"))
-								replaceCanonicalSeedLegacyFill(&streams[i], "BitRate", strconv.FormatInt(videoBps, 10), "Bit rate", formatBitrate(float64(videoBps)))
+								replaceCanonicalSeedLegacyFill(&streams[i], "BitRate", strconv.FormatInt(reportedVideoBps, 10), "Bit rate", formatBitrate(float64(reportedVideoBps)))
 								break
 							}
 							generalSS := fileSize - videoSS - audioSum

@@ -43,6 +43,36 @@ func TestNormalizeTSStreamOrderTSKeepsDiscoveryOrder(t *testing.T) {
 	}
 }
 
+func TestStructuredBDAVFieldOrder(t *testing.T) {
+	tests := []struct {
+		kind   StreamKind
+		before string
+		after  string
+	}{
+		{kind: StreamGeneral, before: "OverallBitRate_Maximum", after: "FrameRate"},
+		{kind: StreamVideo, before: "Format_Settings_SliceCount", after: "CodecID"},
+		{kind: StreamAudio, before: "Format_Settings_Mode", after: "Format_Settings_Endianness"},
+		{kind: StreamAudio, before: "BitRate_Encoded", after: "BitRate_Maximum"},
+		{kind: StreamAudio, before: "StreamSize", after: "StreamSize_Encoded"},
+		{kind: StreamText, before: "MenuID", after: "Format"},
+	}
+	for _, tt := range tests {
+		order := structuredFieldOrderForContainer(tt.kind, "BDAV")
+		if order[tt.before] >= order[tt.after] {
+			t.Errorf("%s order=%d must precede %s order=%d", tt.before, order[tt.before], tt.after, order[tt.after])
+		}
+	}
+}
+
+func TestRecordH264SliceCountPreservesDominantValue(t *testing.T) {
+	entry := &tsStream{h264SliceCounts: map[int]int{1: 1, 4: 2}, h264SliceCount: 4}
+	// A payload without complete slice NAL units must preserve accumulated state.
+	recordH264SliceCount(entry, []byte{0, 0, 1, 9, 0xf0})
+	if entry.h264SliceCount != 4 {
+		t.Fatalf("h264SliceCount=%d want=4", entry.h264SliceCount)
+	}
+}
+
 func TestMergeTSStreamFromPMTPreservesLanguageOnEmptyUpdate(t *testing.T) {
 	existing := &tsStream{
 		pid:      4611,

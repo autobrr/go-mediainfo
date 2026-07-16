@@ -75,6 +75,104 @@ func TestRawTextCanonicalValueFormatting(t *testing.T) {
 	if got := rawTextCodecIDInfo("S_HDMV/PGS"); got != "Picture based subtitle format used on BDs/HD-DVDs" {
 		t.Fatalf("rawTextCodecIDInfo = %q", got)
 	}
+	if got := formatRawTextDerivedBitRate("109000000"); got != "109 Mbps" {
+		t.Fatalf("formatRawTextDerivedBitRate = %q", got)
+	}
+}
+
+func TestRawTextBDAVStructuredFormatting(t *testing.T) {
+	tests := []struct {
+		name       string
+		kind       StreamKind
+		structured map[string]string
+		wantInfo   string
+		wantSet    string
+	}{
+		{
+			name:       "general info",
+			kind:       StreamGeneral,
+			structured: map[string]string{"Format": "BDAV"},
+			wantInfo:   "Blu-ray Video",
+		},
+		{
+			name:       "truehd 16 channel info",
+			kind:       StreamAudio,
+			structured: map[string]string{"Format": "MLP FBA", "Format_AdditionalFeatures": "AC-3 16-ch"},
+			wantInfo:   "Meridian Lossless Packing FBA with 16-channel presentation",
+		},
+		{
+			name:       "big endian signed settings",
+			kind:       StreamAudio,
+			structured: map[string]string{"Format_Settings_Endianness": "Big", "Format_Settings_Sign": "Signed"},
+			wantSet:    "Big / Signed",
+		},
+		{
+			name:       "dolby surround ex settings",
+			kind:       StreamAudio,
+			structured: map[string]string{"Format": "E-AC-3", "Format_Settings_Mode": "Dolby Surround EX"},
+			wantInfo:   "Enhanced AC-3",
+			wantSet:    "Dolby Surround EX",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := rawTextFormatInfo(test.kind, test.structured); got != test.wantInfo {
+				t.Fatalf("rawTextFormatInfo = %q, want %q", got, test.wantInfo)
+			}
+			if got := formatRawTextSettings(test.structured); got != test.wantSet {
+				t.Fatalf("formatRawTextSettings = %q, want %q", got, test.wantSet)
+			}
+		})
+	}
+
+	if got := rawTextValue(StreamGeneral, "ID/String", "1 (0x1)", map[string]string{"Format": "BDAV"}, 0); got != "0 (0x0)" {
+		t.Fatalf("BDAV general ID/String = %q", got)
+	}
+	if got := rawTextScanStoreMethod(map[string]string{"ScanType": "MBAFF"}); got != "InterleavedFields" {
+		t.Fatalf("MBAFF scan store method = %q", got)
+	}
+	if got := rawTextValue(StreamAudio, "BedChannelCount", "1", map[string]string{"BedChannelCount": "1"}, 0); got != "1 channel" {
+		t.Fatalf("BedChannelCount = %q", got)
+	}
+	if got := rawTextExtraValue("BedChannelCount", "1"); got != "1 channel" {
+		t.Fatalf("extra BedChannelCount = %q", got)
+	}
+	if got := rawTextValue(StreamAudio, "Format/String", "AC-3 Dep", nil, 0); got != "E-AC-3" {
+		t.Fatalf("dependent AC-3 Format/String = %q", got)
+	}
+	if got := rawTextValue(StreamAudio, "Format/String", "AC-3", map[string]string{"Format": "AC-3", "Format_AdditionalFeatures": "Dep"}, 0); got != "E-AC-3" {
+		t.Fatalf("structured dependent AC-3 Format/String = %q", got)
+	}
+	if got := rawTextValue(StreamVideo, "StreamSize/String", "1.00 KiB (13%)", map[string]string{"StreamSize": "4096"}, 8192); got != "4.00 KiB (50%)" {
+		t.Fatalf("structured StreamSize/String = %q", got)
+	}
+}
+
+func TestRawTextBDAVStructuredDerivations(t *testing.T) {
+	structured := map[string]string{
+		"Format_Commercial_IfAny":         "Dolby Digital Plus",
+		"OverallBitRate_Maximum":          "48000000",
+		"MasteringDisplay_ColorPrimaries": "Display P3",
+		"MasteringDisplay_Luminance":      "min: 0.0050 cd/m2, max: 1000 cd/m2",
+		"MaxCLL":                          "1000",
+		"MaxFALL":                         "400",
+	}
+	got := make(map[string]string)
+	for _, field := range rawTextStructuredDerivations(StreamVideo, structured, 0) {
+		got[field.Label] = field.Value
+	}
+	for label, want := range map[string]string{
+		"Format_Commercial_IfAny":         "Dolby Digital Plus",
+		"OverallBitRate_Maximum/String":   "48.0 Mbps",
+		"MasteringDisplay_ColorPrimaries": "Display P3",
+		"MasteringDisplay_Luminance":      "min: 0.0050 cd/m2, max: 1000 cd/m2",
+		"MaxCLL/String":                   "1000 cd/m2",
+		"MaxFALL/String":                  "400 cd/m2",
+	} {
+		if got[label] != want {
+			t.Errorf("%s = %q, want %q", label, got[label], want)
+		}
+	}
 }
 
 func TestFormatRawTextHDRAppendsMasteringComponent(t *testing.T) {

@@ -1,6 +1,9 @@
 package mediainfo
 
-import "testing"
+import (
+	"math"
+	"testing"
+)
 
 func TestParsePCR27(t *testing.T) {
 	// Minimal TS packet with adaptation field containing a PCR.
@@ -29,5 +32,20 @@ func TestParsePCR27(t *testing.T) {
 	want := base*300 + ext
 	if got != want {
 		t.Fatalf("parsePCR27: got=%d want=%d", got, want)
+	}
+}
+
+func TestNormalizeBDAVContainerDuration(t *testing.T) {
+	const (
+		fallback = 5312.429928
+		size     = int64(19509374976)
+		bitrate  = 29379197.994762
+	)
+	want := float64(size*8) / bitrate
+	if got := normalizeBDAVContainerDuration(fallback, size, bitrate, true); math.Abs(got-want) > 1e-9 {
+		t.Fatalf("normalizeBDAVContainerDuration()=%0.12f want=%0.12f", got, want)
+	}
+	if got := normalizeBDAVContainerDuration(fallback, size, bitrate, false); got != fallback {
+		t.Fatalf("non-BDAV duration=%0.12f want=%0.12f", got, fallback)
 	}
 }

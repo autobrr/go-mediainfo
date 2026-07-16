@@ -1206,7 +1206,7 @@ func TestParseH264PicTimingTimeCode(t *testing.T) {
 	appendBits(0, 1)  // nuit_field_based_flag
 	appendBits(0, 5)  // counting_type
 	appendBits(1, 1)  // full_timestamp_flag
-	appendBits(0, 1)  // discontinuity_flag
+	appendBits(1, 1)  // discontinuity_flag; a discontinuous complete clock remains usable
 	appendBits(0, 1)  // cnt_dropped_flag
 	appendBits(12, 8) // n_frames
 	appendBits(5, 6)  // seconds

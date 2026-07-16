@@ -37,6 +37,53 @@ func findX264Info(data []byte) (string, string) {
 	return writingLib, encoding
 }
 
+// findX264InfoAnnexB extracts x264's unregistered SEI payload without mixing
+// adjacent encoded bytes into the null-terminated options string.
+func findX264InfoAnnexB(data []byte) (string, string) {
+	var writingLibrary, encoding string
+	scanAnnexBNALs(data, func(nal []byte) bool {
+		if len(nal) == 0 || nal[0]&0x1F != 6 {
+			return true
+		}
+		rbsp := nalToRBSP(nal)
+		for pos := 0; pos < len(rbsp); {
+			payloadType := 0
+			for pos < len(rbsp) && rbsp[pos] == 0xFF {
+				payloadType += 255
+				pos++
+			}
+			if pos >= len(rbsp) {
+				break
+			}
+			payloadType += int(rbsp[pos])
+			pos++
+
+			payloadSize := 0
+			for pos < len(rbsp) && rbsp[pos] == 0xFF {
+				payloadSize += 255
+				pos++
+			}
+			if pos >= len(rbsp) {
+				break
+			}
+			payloadSize += int(rbsp[pos])
+			pos++
+			if payloadSize > len(rbsp)-pos {
+				break
+			}
+			if payloadType == 5 && payloadSize > 16 {
+				writingLibrary, encoding = findX264Info(rbsp[pos+16 : pos+payloadSize])
+				if writingLibrary != "" {
+					return false
+				}
+			}
+			pos += payloadSize
+		}
+		return true
+	})
+	return writingLibrary, encoding
+}
+
 func findX264Bitrate(encoding string) (float64, bool) {
 	idx := strings.Index(encoding, "bitrate=")
 	if idx == -1 {

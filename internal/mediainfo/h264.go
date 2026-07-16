@@ -876,8 +876,7 @@ func parseH264PicTimingTimeCode(payload []byte, sps h264SPSInfo) (string, bool) 
 		if !ok {
 			return "", false
 		}
-		discontinuity, ok := read(1)
-		if !ok {
+		if _, ok := read(1); !ok { // discontinuity_flag
 			return "", false
 		}
 		cntDropped, ok := read(1)
@@ -935,9 +934,6 @@ func parseH264PicTimingTimeCode(payload []byte, sps h264SPSInfo) (string, bool) 
 			if _, ok := read(sps.TimeOffsetLength); !ok {
 				return "", false
 			}
-		}
-		if discontinuity == 1 {
-			return "", false
 		}
 		// MediaInfo only promotes pic_timing to a first-frame time code when the
 		// complete clock is present. Some Blu-ray streams carry minutes/seconds

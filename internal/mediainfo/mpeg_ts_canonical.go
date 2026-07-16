@@ -329,8 +329,12 @@ func fillCanonicalMPEGTSAudioFacts(facts *canonicalStructuredFacts, stream *tsSt
 		return
 	}
 	channels := stream.audioChannels
-	if isBDAV && (stream.hasTrueHD || stream.streamType == 0x83) && channels < 8 {
-		channels = 8
+	if isBDAV && (stream.hasTrueHD || stream.streamType == 0x83) {
+		if stream.hasTrueHDInfo && stream.trueHDInfo.channelMap != 0 {
+			channels = trueHDChannels(stream.trueHDInfo.channelMap)
+		} else if channels < 8 {
+			channels = 8
+		}
 	}
 	if isBDAV && stream.format == "DTS" && channels > 6 {
 		channels = 6
