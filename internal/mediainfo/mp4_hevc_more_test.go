@@ -182,7 +182,7 @@ func TestParseVisualSampleEntryDispatchesHEVC(t *testing.T) {
 func TestParseMP4HEVC10Bit(t *testing.T) {
 	rec := buildHVCCRecord(hevcSPS8bit, nil)
 	rec[17] = 0xF8 | 0x02 // bitDepthLumaMinus8 = 2 -> 10-bit
-	fields, _ := parseMP4HEVCSampleEntry(buildHEVCSampleEntry(rec), 320, 240, map[string]string{})
+	fields, _ := parseMP4HEVCSampleEntry(buildHEVCSampleEntry(rec), 320, 240, &mp4StructuredFacts{})
 	if v := hevcField(fields, "Bit depth"); v != "10 bits" {
 		t.Errorf("Bit depth = %q, want 10 bits", v)
 	}
@@ -193,19 +193,19 @@ func TestParseMP4HEVC10Bit(t *testing.T) {
 // "Container / Stream"), the most parity-sensitive HEVC-vs-AVC divergence.
 func TestParseMP4HEVCColourDescriptionStreamSource(t *testing.T) {
 	sps := buildHEVCSPS(hevcSPSOpts{picWidth: 320, picHeight: 240, vui: true, videoSignalType: true, colourDesc: true, primaries: 1, transfer: 1, matrix: 1, chromaLoc: -1})
-	extras := map[string]string{}
+	extras := &mp4StructuredFacts{}
 	parseMP4HEVCSampleEntry(buildHEVCSampleEntry(buildHVCCRecord(sps, nil)), 320, 240, extras)
 
-	if extras["colour_description_present"] != "Yes" || extras["colour_description_present_Source"] != "Stream" {
+	if extras.Get("colour_description_present") != "Yes" || extras.Get("colour_description_present_Source") != "Stream" {
 		t.Errorf("colour_description_present=%q Source=%q, want Yes/Stream",
-			extras["colour_description_present"], extras["colour_description_present_Source"])
+			extras.Get("colour_description_present"), extras.Get("colour_description_present_Source"))
 	}
 	for _, k := range []string{"colour_primaries", "transfer_characteristics", "matrix_coefficients"} {
-		if extras[k] == "" {
+		if extras.Get(fieldName(k)) == "" {
 			t.Errorf("%s is empty, want signaled value", k)
 		}
-		if extras[k+"_Source"] != "Stream" {
-			t.Errorf("%s_Source = %q, want Stream (not Container / Stream)", k, extras[k+"_Source"])
+		if extras.Get(fieldName(k+"_Source")) != "Stream" {
+			t.Errorf("%s_Source = %q, want Stream (not Container / Stream)", k, extras.Get(fieldName(k+"_Source")))
 		}
 	}
 }
@@ -218,13 +218,13 @@ func TestParseMP4HEVCStoredHeight1088(t *testing.T) {
 	if got := parseHEVCSPS(sps); got.CodedHeight != 1088 || got.Height != 1080 {
 		t.Fatalf("SPS coded/display height = %d/%d, want 1088/1080", got.CodedHeight, got.Height)
 	}
-	extras := map[string]string{}
+	extras := &mp4StructuredFacts{}
 	parseMP4HEVCSampleEntry(buildHEVCSampleEntry(buildHVCCRecord(sps, nil)), 1920, 1080, extras)
-	if extras["Stored_Height"] != "1088" {
-		t.Errorf("Stored_Height = %q, want 1088", extras["Stored_Height"])
+	if extras.Get("Stored_Height") != "1088" {
+		t.Errorf("Stored_Height = %q, want 1088", extras.Get("Stored_Height"))
 	}
-	if _, ok := extras["Stored_Width"]; ok {
-		t.Errorf("unexpected Stored_Width %q (width not cropped)", extras["Stored_Width"])
+	if extras.Get("Stored_Width") != "" {
+		t.Errorf("unexpected Stored_Width %q (width not cropped)", extras.Get("Stored_Width"))
 	}
 }
 
@@ -235,11 +235,11 @@ func TestParseMP4HEVCStoredWidthPositive(t *testing.T) {
 	if got := parseHEVCSPS(sps); got.CodedWidth != 320 {
 		t.Fatalf("coded width = %d, want 320", got.CodedWidth)
 	}
-	extras := map[string]string{}
+	extras := &mp4StructuredFacts{}
 	// Displayed width 318 differs from coded 320 -> Stored_Width must surface.
 	parseMP4HEVCSampleEntry(buildHEVCSampleEntry(buildHVCCRecord(sps, nil)), 318, 240, extras)
-	if extras["Stored_Width"] != "320" {
-		t.Errorf("Stored_Width = %q, want 320", extras["Stored_Width"])
+	if extras.Get("Stored_Width") != "320" {
+		t.Errorf("Stored_Width = %q, want 320", extras.Get("Stored_Width"))
 	}
 }
 
@@ -248,7 +248,7 @@ func TestParseMP4HEVCStoredWidthPositive(t *testing.T) {
 func TestParseMP4HEVCMalformed(t *testing.T) {
 	t.Run("no hvcC box", func(t *testing.T) {
 		entry := make([]byte, mp4VisualSampleEntryHeaderSize+16) // header + junk, no hvcC
-		fields, _ := parseMP4HEVCSampleEntry(entry, 320, 240, map[string]string{})
+		fields, _ := parseMP4HEVCSampleEntry(entry, 320, 240, &mp4StructuredFacts{})
 		if fields != nil {
 			t.Errorf("expected nil fields for missing hvcC, got %v", fields)
 		}
@@ -261,7 +261,7 @@ func TestParseMP4HEVCMalformed(t *testing.T) {
 				t.Fatalf("panicked on truncated hvcC: %v", r)
 			}
 		}()
-		fields, _ := parseMP4HEVCSampleEntry(short, 320, 240, map[string]string{})
+		fields, _ := parseMP4HEVCSampleEntry(short, 320, 240, &mp4StructuredFacts{})
 		if v := hevcField(fields, "Format profile"); v != "" {
 			t.Errorf("invented Format profile %q from truncated hvcC", v)
 		}
@@ -280,6 +280,6 @@ func TestParseMP4HEVCMalformed(t *testing.T) {
 				t.Fatalf("panicked on oversized SEI length: %v", r)
 			}
 		}()
-		parseMP4HEVCSampleEntry(buildHEVCSampleEntry(rec), 320, 240, map[string]string{})
+		parseMP4HEVCSampleEntry(buildHEVCSampleEntry(rec), 320, 240, &mp4StructuredFacts{})
 	})
 }

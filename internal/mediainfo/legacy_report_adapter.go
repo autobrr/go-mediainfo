@@ -24,9 +24,6 @@ type legacyStreamState struct {
 	JSONSkipComputed       bool
 	JSONSkipFrameRateRatio bool
 	JSONPreserveDisplayAR  bool
-	MatroskaGoJSON         map[string]string
-	MatroskaGoJSONRaw      map[string]string
-	DynamicJSON            []dynamicJSONField
 }
 
 // attachCanonicalStore snapshots report and attaches its canonical representation to General.
@@ -35,6 +32,10 @@ func attachCanonicalStore(report *Report) {
 		return
 	}
 	store := reportToFieldStore(*report, true)
+	publishCanonicalProjectionPolicy(&report.General)
+	for index := range report.Streams {
+		publishCanonicalProjectionPolicy(&report.Streams[index])
+	}
 	snapshot := captureLegacyReportState(*report, true)
 	store.legacySnapshot = &snapshot
 	report.General.reportStore = store
@@ -60,6 +61,7 @@ func legacyReportToFieldStore(report Report) *fieldStore {
 // reportToFieldStore builds a projection store, preferring direct parser seeds when requested.
 func reportToFieldStore(report Report, useCanonicalSeeds bool) *fieldStore {
 	legacyMedia := buildJSONMedia(report)
+	containerFormat := firstNonEmpty(report.General.JSON["Format"], findField(report.General.Fields, "Format"))
 	store := &fieldStore{ref: report.Ref}
 	generalRef := store.Prepare(StreamGeneral)
 	store.streams[generalRef].TextSequence = 0
@@ -70,6 +72,13 @@ func reportToFieldStore(report Report, useCanonicalSeeds bool) *fieldStore {
 	appendLegacyTextFields(store, generalRef, report.General.Fields)
 	if len(legacyMedia.Tracks) > 0 {
 		appendLegacyStructuredFields(store, generalRef, legacyMedia.Tracks[0].Fields, structuredProjectionJSON)
+	}
+	if useCanonicalSeeds && len(report.General.canonicalSeed) > 0 {
+		store.streams[generalRef].StructuredAlreadyOrdered = false
+		store.streams[generalRef].StructuredOrder = structuredFieldOrderForContainer(StreamGeneral, containerFormat)
+		appendCanonicalSeed(store, generalRef, report.General.canonicalSeed)
+		mergeStoredStructuredObjectProjection(&store.streams[generalRef], "extra", structuredProjectionJSON)
+		mergeStoredMarkedScalarProjections(&store.streams[generalRef], structuredProjectionJSON)
 	}
 
 	refs := make([]streamRef, len(report.Streams))
@@ -83,6 +92,9 @@ func reportToFieldStore(report Report, useCanonicalSeeds bool) *fieldStore {
 		stored.TextAlreadyOrdered = !useCanonicalSeeds || len(stream.canonicalSeed) == 0
 		if useCanonicalSeeds && len(stream.canonicalSeed) > 0 {
 			stored.DirectCanonical = true
+			stored.SkipStreamOrder = stream.canonicalPolicy.SkipStreamOrder || stream.JSONSkipStreamOrder
+			stored.HideTypeOrderXML = stream.canonicalPolicy.HideTypeOrderXML
+			stored.StructuredOrder = structuredFieldOrderForContainer(stream.Kind, containerFormat)
 			appendCanonicalSeed(store, ref, stream.canonicalSeed)
 		} else {
 			appendLegacyTextFields(store, ref, stream.Fields)
@@ -107,6 +119,10 @@ func reportToFieldStore(report Report, useCanonicalSeeds bool) *fieldStore {
 			stored.TypeOrder, _ = strconv.Atoi(typeOrder)
 		}
 		if useCanonicalSeeds && len(report.Streams[originalIndex].canonicalSeed) > 0 {
+			appendCanonicalGeneratedFields(store, refs[originalIndex], fields)
+			if stored.HideTypeOrderXML {
+				setStoredStructuredXMLVisibility(stored, "@typeorder", false)
+			}
 			continue
 		}
 		appendLegacyStructuredFields(store, refs[originalIndex], fields, structuredProjectionJSON)
@@ -138,6 +154,8 @@ func ensureLegacyXMLProjection(store *fieldStore) {
 		}
 		if len(store.streams) > 0 {
 			appendLegacyStructuredFields(store, 0, buildJSONGeneralFields(report), structuredProjectionXML)
+			mergeStoredStructuredObjectProjection(&store.streams[0], "extra", structuredProjectionXML)
+			mergeStoredMarkedScalarProjections(&store.streams[0], structuredProjectionXML)
 		}
 		indexes := make([]int, len(report.Streams))
 		for index := range report.Streams {
@@ -159,12 +177,143 @@ func ensureLegacyXMLProjection(store *fieldStore) {
 	})
 }
 
+// mergeStoredMarkedScalarProjections keeps the canonical copy of each
+// explicitly migrated compatibility scalar and hides its projected duplicate.
+func mergeStoredMarkedScalarProjections(stream *storedStream, target structuredProjectionTarget) {
+	if stream == nil {
+		return
+	}
+	keys := map[string]struct{}{}
+	for _, entry := range stream.Fields {
+		if entry.LegacyJSON && entry.Node == nil {
+			keys[firstNonEmpty(entry.StructuredKey, string(entry.Name))] = struct{}{}
+		}
+	}
+	for key := range keys {
+		mergeStoredStructuredScalarProjection(stream, key, target)
+	}
+}
+
+// mergeStoredStructuredScalarProjection removes repeated projected copies of
+// key while retaining the direct canonical scalar for target.
+func mergeStoredStructuredScalarProjection(stream *storedStream, key string, target structuredProjectionTarget) {
+	if stream == nil || key == "" {
+		return
+	}
+	canonicalIndex := -1
+	indexes := make([]int, 0, 2)
+	for index := range stream.Fields {
+		entry := &stream.Fields[index]
+		structuredKey := firstNonEmpty(entry.StructuredKey, string(entry.Name))
+		visible := target == structuredProjectionJSON && entry.Options.ShowStructured || target == structuredProjectionXML && entry.Options.ShowXML
+		if !visible || structuredKey != key || entry.Node != nil {
+			continue
+		}
+		indexes = append(indexes, index)
+		if !entry.Projected {
+			canonicalIndex = index
+		}
+	}
+	if canonicalIndex < 0 || len(indexes) < 2 {
+		return
+	}
+	for _, index := range indexes {
+		if index == canonicalIndex {
+			continue
+		}
+		if target == structuredProjectionJSON {
+			stream.Fields[index].Options.ShowStructured = false
+		} else {
+			stream.Fields[index].Options.ShowXML = false
+		}
+	}
+}
+
+// mergeStoredStructuredObjectProjection folds repeated object fields into the
+// projected legacy object while retaining canonical visibility for other targets.
+func mergeStoredStructuredObjectProjection(stream *storedStream, key string, target structuredProjectionTarget) {
+	if stream == nil || key == "" {
+		return
+	}
+	indexes := make([]int, 0, 2)
+	for index := range stream.Fields {
+		entry := &stream.Fields[index]
+		structuredKey := firstNonEmpty(entry.StructuredKey, string(entry.Name))
+		visible := target == structuredProjectionJSON && entry.Options.ShowStructured || target == structuredProjectionXML && entry.Options.ShowXML
+		if visible && structuredKey == key && entry.Node != nil && entry.Node.Kind == structuredObject {
+			indexes = append(indexes, index)
+		}
+	}
+	if len(indexes) < 2 {
+		return
+	}
+	baseIndex := indexes[0]
+	for _, index := range indexes {
+		if stream.Fields[index].Projected {
+			baseIndex = index
+			break
+		}
+	}
+	base := &stream.Fields[baseIndex]
+	positions := make(map[string]int, len(base.Node.Object))
+	for index, member := range base.Node.Object {
+		if _, exists := positions[member.Key]; !exists {
+			positions[member.Key] = index
+		}
+	}
+	for _, index := range indexes {
+		if index == baseIndex {
+			continue
+		}
+		entry := &stream.Fields[index]
+		for _, member := range entry.Node.Object {
+			if position, exists := positions[member.Key]; exists {
+				current := &base.Node.Object[position].Value
+				if current.Kind == structuredString && member.Value.Kind == structuredString && current.Text != member.Value.Text {
+					current.Text += " / " + member.Value.Text
+				}
+				continue
+			}
+			positions[member.Key] = len(base.Node.Object)
+			base.Node.Object = append(base.Node.Object, member)
+		}
+		if target == structuredProjectionJSON {
+			entry.Options.ShowStructured = false
+		} else {
+			entry.Options.ShowXML = false
+		}
+	}
+	base.Value.Text = structuredNodeText(*base.Node)
+}
+
 // appendCanonicalSeed copies parser-owned canonical entries into ref with new sequence values.
 func appendCanonicalSeed(store *fieldStore, ref streamRef, fields []fieldEntry) {
 	stream := store.stream(ref)
 	for _, field := range fields {
+		key := firstNonEmpty(field.StructuredKey, string(field.Name))
+		if field.Options.ShowStructured && (key == "@type" || key == "@typeorder" || key == "StreamOrder") {
+			continue
+		}
 		field.Sequence = 0
 		store.appendEntry(stream, field)
+	}
+}
+
+// appendCanonicalGeneratedFields imports report-level type and stream-order metadata.
+func appendCanonicalGeneratedFields(store *fieldStore, ref streamRef, fields []jsonKV) {
+	stream := store.stream(ref)
+	for _, field := range fields {
+		switch field.Key {
+		case "StreamOrder":
+			if stream != nil && stream.SkipStreamOrder {
+				continue
+			}
+			appendLegacyStructuredFields(store, ref, []jsonKV{field}, structuredProjectionJSON)
+			appendLegacyStructuredFields(store, ref, []jsonKV{field}, structuredProjectionXML)
+		case "@type", "@typeorder":
+			appendLegacyStructuredFields(store, ref, []jsonKV{field}, structuredProjectionJSON)
+			appendLegacyStructuredFields(store, ref, []jsonKV{field}, structuredProjectionXML)
+		}
 	}
 }
 
@@ -268,6 +417,49 @@ func captureLegacyReportState(report Report, clone bool) legacyReportState {
 	return state
 }
 
+// finalizeMatroskaLegacySnapshots publishes TrackEntry compatibility maps only
+// after statistics, probes, delays, and tags have finalized canonical values.
+func finalizeMatroskaLegacySnapshots(info *MatroskaInfo) {
+	if info == nil {
+		return
+	}
+	for index := range info.Tracks {
+		info.Tracks[index].matroskaLegacySnapshot.ApplyToStream(&info.Tracks[index])
+	}
+}
+
+// ApplyToStream attaches compatibility markers only to fields already owned by
+// the canonical seed, then materializes the legacy maps without changing text.
+func (facts *matroskaLegacySnapshotFacts) ApplyToStream(stream *Stream) {
+	if facts == nil || stream == nil {
+		return
+	}
+	streamOrder := ""
+	for _, fact := range facts.values {
+		if fact.name == "StreamOrder" {
+			streamOrder = fact.value
+			continue
+		}
+		if _, exists := canonicalSeedLegacyJSONValue(*stream, fact.name); !exists {
+			setCanonicalSeedLegacyValue(stream, fact.name, fact.value, false)
+		}
+	}
+	for _, name := range facts.rawNodes {
+		setCanonicalSeedLegacyObject(stream, name)
+	}
+	refreshCanonicalLegacyMaps(stream)
+	if stream.JSON == nil {
+		stream.JSON = map[string]string{}
+	}
+	if stream.JSONRaw == nil {
+		stream.JSONRaw = map[string]string{}
+	}
+	if streamOrder != "" {
+		stream.JSON["StreamOrder"] = streamOrder
+	}
+	stream.matroskaLegacySnapshot = nil
+}
+
 // captureLegacyStreamState records one stream's legacy render inputs, optionally deep-cloning them.
 func captureLegacyStreamState(stream Stream, clone bool) legacyStreamState {
 	state := legacyStreamState{
@@ -279,17 +471,11 @@ func captureLegacyStreamState(stream Stream, clone bool) legacyStreamState {
 		JSONSkipComputed:       stream.JSONSkipComputed,
 		JSONSkipFrameRateRatio: stream.JSONSkipFrameRateRatio,
 		JSONPreserveDisplayAR:  stream.JSONPreserveDisplayAR,
-		MatroskaGoJSON:         stream.mkvGoJSON,
-		MatroskaGoJSONRaw:      stream.mkvGoJSONRaw,
-		DynamicJSON:            stream.dynamicJSON,
 	}
 	if clone {
 		state.Fields = append([]Field(nil), state.Fields...)
 		state.JSON = maps.Clone(state.JSON)
 		state.JSONRaw = maps.Clone(state.JSONRaw)
-		state.MatroskaGoJSON = maps.Clone(state.MatroskaGoJSON)
-		state.MatroskaGoJSONRaw = maps.Clone(state.MatroskaGoJSONRaw)
-		state.DynamicJSON = append([]dynamicJSONField(nil), state.DynamicJSON...)
 	}
 	return state
 }
@@ -299,12 +485,21 @@ func cloneLegacyStream(stream Stream) Stream {
 	stream.reportStore = nil
 	stream.reportSnapshot = nil
 	stream.canonicalSeed = nil
+	stream.canonicalPolicy = canonicalStreamPolicy{}
+	stream.compatibilityDeletes = nil
 	stream.Fields = append([]Field(nil), stream.Fields...)
 	stream.JSON = maps.Clone(stream.JSON)
 	stream.JSONRaw = maps.Clone(stream.JSONRaw)
-	stream.mkvGoJSON = maps.Clone(stream.mkvGoJSON)
-	stream.mkvGoJSONRaw = maps.Clone(stream.mkvGoJSONRaw)
-	stream.dynamicJSON = append([]dynamicJSONField(nil), stream.dynamicJSON...)
 	stream.mkvHeaderStripBytes = append([]byte(nil), stream.mkvHeaderStripBytes...)
 	return stream
+}
+
+// publishCanonicalProjectionPolicy copies format-neutral parser policy into
+// the exported legacy flags after the canonical report store has been built.
+func publishCanonicalProjectionPolicy(stream *Stream) {
+	if stream == nil || len(stream.canonicalSeed) == 0 {
+		return
+	}
+	stream.JSONSkipStreamOrder = stream.canonicalPolicy.SkipStreamOrder
+	stream.JSONSkipComputed = stream.canonicalPolicy.SkipComputed
 }

@@ -165,7 +165,9 @@ func TestApplyMatroskaStats_AudioDurationAlsoSetsJSON(t *testing.T) {
 		},
 	}
 
+	seedMatroskaLegacyTestStream(&info.Tracks[0])
 	applyMatroskaStats(&info, stats, 0)
+	refreshCanonicalLegacySnapshot(&info.Tracks[0])
 
 	if got := findField(info.Tracks[0].Fields, "Duration"); got == "" {
 		t.Fatalf("expected Duration field set")
@@ -180,9 +182,10 @@ func TestApplyMatroskaAudioProbesEmitsAC3DynrngStats(t *testing.T) {
 	dynrngs[0] = 3
 	dynrngs[1] = 1
 	info := MatroskaInfo{Tracks: []Stream{{
-		Kind:   StreamAudio,
-		Fields: []Field{{Name: "ID", Value: "1"}, {Name: "Format", Value: "AC-3"}, {Name: "Bit rate mode", Value: "Constant"}},
-		JSON:   map[string]string{"BitRate": "767999"},
+		Kind:          StreamAudio,
+		Fields:        []Field{{Name: "ID", Value: "1"}, {Name: "Format", Value: "AC-3"}, {Name: "Bit rate mode", Value: "Constant"}},
+		JSON:          map[string]string{"BitRate": "767999"},
+		canonicalSeed: matroskaAC3CanonicalSeed(matroskaAC3CanonicalFacts{format: "AC-3", trackNumber: 1, bitRate: 767999}),
 	}}}
 	probes := map[uint64]*matroskaAudioProbe{1: {
 		format: "AC-3",
@@ -196,6 +199,7 @@ func TestApplyMatroskaAudioProbesEmitsAC3DynrngStats(t *testing.T) {
 	}}
 
 	applyMatroskaAudioProbes(&info, probes)
+	refreshCanonicalLegacySnapshot(&info.Tracks[0])
 	if got := info.Tracks[0].JSON["BitRate"]; got != "768000" {
 		t.Fatalf("BitRate = %q, want 768000", got)
 	}
@@ -463,18 +467,24 @@ func TestProbeMatroskaAudioDTSCoreExtensionOrdering(t *testing.T) {
 
 func TestApplyMatroskaAudioProbesScopesDTSCoreESParityByTrackIdentity(t *testing.T) {
 	makeTrack := func(uid uint64) Stream {
-		return Stream{Kind: StreamAudio, Fields: []Field{{Name: "ID", Value: "1"}, {Name: "Format", Value: "DTS"}}, JSON: map[string]string{"UniqueID": strconv.FormatUint(uid, 10)}}
+		return Stream{
+			Kind: StreamAudio, Fields: []Field{{Name: "ID", Value: "1"}, {Name: "Format", Value: "DTS"}},
+			JSON:          map[string]string{"UniqueID": strconv.FormatUint(uid, 10)},
+			canonicalSeed: matroskaDTSCanonicalSeed(matroskaDTSCanonicalFacts{trackNumber: 1, trackUID: uid}),
+		}
 	}
 	probe := &matroskaAudioProbe{format: "DTS", ok: true, dts: dtsInfo{bitRateBps: 768000, bitDepth: 24, sampleRate: 48000, samplesPerFrame: 512, channels: 6}}
 
 	compat := MatroskaInfo{Tracks: []Stream{makeTrack(matroskaDTSCoreESParityTrackUID)}}
 	applyMatroskaAudioProbes(&compat, map[uint64]*matroskaAudioProbe{1: probe})
+	refreshCanonicalLegacySnapshot(&compat.Tracks[0])
 	if got := compat.Tracks[0].JSON["Format_AdditionalFeatures"]; got != "ES" {
 		t.Fatalf("compatibility track features = %q, want ES", got)
 	}
 
 	ordinary := MatroskaInfo{Tracks: []Stream{makeTrack(matroskaDTSCoreESParityTrackUID + 1)}}
 	applyMatroskaAudioProbes(&ordinary, map[uint64]*matroskaAudioProbe{1: probe})
+	refreshCanonicalLegacySnapshot(&ordinary.Tracks[0])
 	if got := ordinary.Tracks[0].JSON["Format_AdditionalFeatures"]; got != "" {
 		t.Fatalf("ordinary core stream inherited ES feature %q", got)
 	}
@@ -512,7 +522,8 @@ func TestApplyMatroskaAudioProbesDTSPreservesAuthoritativeBitRate(t *testing.T) 
 			{Name: "Bit rate mode", Value: "Constant"},
 			{Name: "Bit rate", Value: "767 kb/s"},
 		},
-		JSON: map[string]string{"BitRate": "767000", "BitRate_Mode": "CBR"},
+		JSON:          map[string]string{"BitRate": "767000", "BitRate_Mode": "CBR"},
+		canonicalSeed: matroskaDTSCanonicalSeed(matroskaDTSCanonicalFacts{trackNumber: 1, bitRate: 767000}),
 	}}}
 	probes := map[uint64]*matroskaAudioProbe{1: {
 		format: "DTS",
@@ -521,6 +532,7 @@ func TestApplyMatroskaAudioProbesDTSPreservesAuthoritativeBitRate(t *testing.T) 
 	}}
 
 	applyMatroskaAudioProbes(&info, probes)
+	refreshCanonicalLegacySnapshot(&info.Tracks[0])
 
 	if got := findField(info.Tracks[0].Fields, "Bit rate"); got != "767 kb/s" {
 		t.Fatalf("text bit rate = %q, want authoritative 767 kb/s", got)
@@ -538,7 +550,8 @@ func TestApplyMatroskaAudioProbesDTSNormalizesEquivalentBitRate(t *testing.T) {
 			{Name: "Format", Value: "DTS"},
 			{Name: "Bit rate", Value: "768 kb/s"},
 		},
-		JSON: map[string]string{"BitRate": "767999"},
+		JSON:          map[string]string{"BitRate": "767999"},
+		canonicalSeed: matroskaDTSCanonicalSeed(matroskaDTSCanonicalFacts{trackNumber: 1, bitRate: 767999}),
 	}}}
 	probes := map[uint64]*matroskaAudioProbe{1: {
 		format: "DTS",
@@ -547,6 +560,7 @@ func TestApplyMatroskaAudioProbesDTSNormalizesEquivalentBitRate(t *testing.T) {
 	}}
 
 	applyMatroskaAudioProbes(&info, probes)
+	refreshCanonicalLegacySnapshot(&info.Tracks[0])
 
 	if got := info.Tracks[0].JSON["BitRate"]; got != "768000" {
 		t.Fatalf("JSON BitRate = %q, want equivalent core value 768000", got)
@@ -555,8 +569,9 @@ func TestApplyMatroskaAudioProbesDTSNormalizesEquivalentBitRate(t *testing.T) {
 
 func TestApplyMatroskaAudioProbesDTSUsesCoreBitRateWhenAbsent(t *testing.T) {
 	info := MatroskaInfo{Tracks: []Stream{{
-		Kind:   StreamAudio,
-		Fields: []Field{{Name: "ID", Value: "1"}, {Name: "Format", Value: "DTS"}},
+		Kind:          StreamAudio,
+		Fields:        []Field{{Name: "ID", Value: "1"}, {Name: "Format", Value: "DTS"}},
+		canonicalSeed: matroskaDTSCanonicalSeed(matroskaDTSCanonicalFacts{trackNumber: 1}),
 	}}}
 	probes := map[uint64]*matroskaAudioProbe{1: {
 		format: "DTS",
@@ -565,6 +580,7 @@ func TestApplyMatroskaAudioProbesDTSUsesCoreBitRateWhenAbsent(t *testing.T) {
 	}}
 
 	applyMatroskaAudioProbes(&info, probes)
+	refreshCanonicalLegacySnapshot(&info.Tracks[0])
 
 	if got := findField(info.Tracks[0].Fields, "Bit rate"); got != "768 kb/s" {
 		t.Fatalf("text bit rate = %q, want core-derived 768 kb/s", got)

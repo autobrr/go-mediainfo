@@ -68,7 +68,7 @@ func buildHEVCSampleEntry(config []byte) []byte {
 func TestParseMP4HEVCSampleEntry(t *testing.T) {
 	config := buildHVCCRecord(hevcSPS8bit, buildX265SEINAL())
 	entry := buildHEVCSampleEntry(config)
-	extras := map[string]string{}
+	extras := &mp4StructuredFacts{}
 	fields, spsInfo := parseMP4HEVCSampleEntry(entry, 320, 240, extras)
 
 	want := map[string]string{
@@ -92,15 +92,15 @@ func TestParseMP4HEVCSampleEntry(t *testing.T) {
 		t.Errorf("Chroma subsampling position = %q, want unset", got)
 	}
 	// MP4 HEVC colour info is bitstream-only -> Source "Stream".
-	if extras["colour_range"] != "Limited" || extras["colour_range_Source"] != "Stream" {
-		t.Errorf("colour_range=%q Source=%q, want Limited/Stream", extras["colour_range"], extras["colour_range_Source"])
+	if extras.Get("colour_range") != "Limited" || extras.Get("colour_range_Source") != "Stream" {
+		t.Errorf("colour_range=%q Source=%q, want Limited/Stream", extras.Get("colour_range"), extras.Get("colour_range_Source"))
 	}
 	// Unspecified primaries/transfer/matrix -> no colour_description_present.
-	if _, ok := extras["colour_description_present"]; ok {
+	if extras.Get("colour_description_present") != "" {
 		t.Errorf("unexpected colour_description_present for unspecified colour description")
 	}
 	// 240 lines are coded without padding, so no Stored_* is emitted.
-	if _, ok := extras["Stored_Height"]; ok {
+	if extras.Get("Stored_Height") != "" {
 		t.Errorf("unexpected Stored_Height for 16-aligned height")
 	}
 	if !spsInfo.HasColorRange {
@@ -111,7 +111,7 @@ func TestParseMP4HEVCSampleEntry(t *testing.T) {
 func TestParseMP4HEVCChromaLocSignaled(t *testing.T) {
 	config := buildHVCCRecord(hevcSPSChromaLoc2, nil)
 	entry := buildHEVCSampleEntry(config)
-	fields, _ := parseMP4HEVCSampleEntry(entry, 320, 240, map[string]string{})
+	fields, _ := parseMP4HEVCSampleEntry(entry, 320, 240, &mp4StructuredFacts{})
 	if got := findField(fields, "Chroma subsampling position"); got != "Type 2" {
 		t.Errorf("Chroma subsampling position = %q, want Type 2", got)
 	}
@@ -122,13 +122,13 @@ func TestParseMP4HEVCStoredDimensions(t *testing.T) {
 	// (coded) Stored_Height must surface and Stored_Width must not.
 	config := buildHVCCRecord(hevcSPS8bit, nil)
 	entry := buildHEVCSampleEntry(config)
-	extras := map[string]string{}
+	extras := &mp4StructuredFacts{}
 	parseMP4HEVCSampleEntry(entry, 320, 238, extras)
-	if extras["Stored_Height"] != "240" {
-		t.Errorf("Stored_Height = %q, want 240", extras["Stored_Height"])
+	if extras.Get("Stored_Height") != "240" {
+		t.Errorf("Stored_Height = %q, want 240", extras.Get("Stored_Height"))
 	}
-	if _, ok := extras["Stored_Width"]; ok {
-		t.Errorf("unexpected Stored_Width %q for matching width", extras["Stored_Width"])
+	if extras.Get("Stored_Width") != "" {
+		t.Errorf("unexpected Stored_Width %q for matching width", extras.Get("Stored_Width"))
 	}
 }
 

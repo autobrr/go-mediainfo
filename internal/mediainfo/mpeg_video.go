@@ -8,6 +8,8 @@ import (
 	"strconv"
 )
 
+// ParseMPEGVideo parses an MPEG elementary video stream into canonical
+// container and video facts.
 func ParseMPEGVideo(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, bool) {
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		return ContainerInfo{}, nil, false
@@ -23,88 +25,108 @@ func ParseMPEGVideo(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, bo
 		duration = float64(frames) / info.FrameRate
 	}
 
-	fields := []Field{{Name: "Format", Value: "MPEG Video"}}
+	builder := newCanonicalStreamBuilder(StreamVideo)
+	builder.Fill("Format", "MPEG Video", "Format", "MPEG Video")
 	if info.Version != "" {
-		fields = append(fields, Field{Name: "Format version", Value: info.Version})
+		builder.Fill("Format_Version", extractVersionNumber(info.Version), "Format version", info.Version)
 	}
 	if info.Profile != "" {
-		fields = append(fields, Field{Name: "Format profile", Value: info.Profile})
+		profile, level := splitProfileLevel(info.Profile)
+		builder.Fill("Format_Profile", profile, "Format profile", info.Profile)
+		builder.Structured("Format_Level", level)
 	}
 	if info.BVOP != nil {
-		fields = append(fields, Field{Name: "Format settings, BVOP", Value: formatYesNo(*info.BVOP)})
+		value := formatYesNo(*info.BVOP)
+		builder.Fill("Format_Settings_BVOP", value, "Format settings, BVOP", value)
 	}
 	if info.Matrix != "" {
-		fields = append(fields, Field{Name: "Format settings, Matrix", Value: info.Matrix})
+		builder.Fill("Format_Settings_Matrix", info.Matrix, "Format settings, Matrix", info.Matrix)
 	}
 	if info.GOPLength > 0 {
-		fields = append(fields, Field{Name: "Format settings, GOP", Value: formatGOPLength(info.GOPLength)})
+		value := formatGOPLength(info.GOPLength)
+		builder.Fill("Format_Settings_GOP", value, "Format settings, GOP", value)
 	}
+	structuredFacts := &canonicalStructuredFacts{}
 	if duration > 0 {
-		fields = addStreamDuration(fields, duration)
-		fields = append(fields, Field{Name: "Bit rate mode", Value: "Variable"})
-		bitrate := (float64(size) * 8) / duration
-		kbps := int64((bitrate / 1000.0) + 0.5)
+		durationMilliseconds := int64(math.Round(duration * 1000))
+		builder.Fill("Duration", strconv.FormatInt(durationMilliseconds, 10), "Duration", formatDuration(duration))
+		builder.Fill("BitRate_Mode", "Variable", "Bit rate mode", "Variable")
+		displayBitrate := (float64(size) * 8) / duration
+		jsonDuration := math.Round(duration*1000) / 1000
+		structuredBitrate := (float64(size) * 8) / jsonDuration
+		bitRateRaw := strconv.FormatInt(int64(math.Round(structuredBitrate)), 10)
+		kbps := int64((displayBitrate / 1000.0) + 0.5)
 		if value := formatBitrateKbps(kbps); value != "" {
-			fields = appendFieldUnique(fields, Field{Name: "Bit rate", Value: value})
+			builder.Fill("BitRate", bitRateRaw, "Bit rate", value)
+			structuredFacts.SetSame("BitRate", bitRateRaw)
 		}
 		if info.Width > 0 {
-			fields = append(fields, Field{Name: "Width", Value: formatPixels(info.Width)})
+			builder.Fill("Width", strconv.FormatUint(info.Width, 10), "Width", formatPixels(info.Width))
 		}
 		if info.Height > 0 {
-			fields = append(fields, Field{Name: "Height", Value: formatPixels(info.Height)})
+			builder.Fill("Height", strconv.FormatUint(info.Height, 10), "Height", formatPixels(info.Height))
 		}
 		if info.AspectRatio != "" {
-			fields = append(fields, Field{Name: "Display aspect ratio", Value: info.AspectRatio})
+			if value, ok := parseRatioFloat(info.AspectRatio); ok {
+				builder.Fill("DisplayAspectRatio", formatJSONFloat(value), "Display aspect ratio", info.AspectRatio)
+			}
 		}
 		if info.FrameRateNumer > 0 && info.FrameRateDenom > 0 {
-			fields = append(fields, Field{Name: "Frame rate", Value: formatFrameRateRatio(info.FrameRateNumer, info.FrameRateDenom)})
+			display := formatFrameRateRatio(info.FrameRateNumer, info.FrameRateDenom)
+			builder.Fill("FrameRate", formatJSONFloat(info.FrameRate), "Frame rate", display)
+			builder.Structured("FrameRate_Num", strconv.FormatUint(uint64(info.FrameRateNumer), 10))
+			builder.Structured("FrameRate_Den", strconv.FormatUint(uint64(info.FrameRateDenom), 10))
 		} else if info.FrameRate > 0 {
-			fields = append(fields, Field{Name: "Frame rate", Value: formatFrameRate(info.FrameRate)})
+			builder.Fill("FrameRate", formatJSONFloat(info.FrameRate), "Frame rate", formatFrameRate(info.FrameRate))
+		}
+		if frames > 0 {
+			frameCount := strconv.Itoa(frames)
+			builder.Structured("FrameCount", frameCount)
+			structuredFacts.SetSame("FrameCount", frameCount)
 		}
 		if info.ColorSpace != "" {
-			fields = append(fields, Field{Name: "Color space", Value: info.ColorSpace})
+			builder.Fill("ColorSpace", info.ColorSpace, "Color space", info.ColorSpace)
 		}
 		if info.ChromaSubsampling != "" {
-			fields = append(fields, Field{Name: "Chroma subsampling", Value: info.ChromaSubsampling})
+			builder.Fill("ChromaSubsampling", info.ChromaSubsampling, "Chroma subsampling", info.ChromaSubsampling)
 		}
 		if info.BitDepth != "" {
-			fields = append(fields, Field{Name: "Bit depth", Value: info.BitDepth})
+			builder.Fill("BitDepth", extractLeadingNumber(info.BitDepth), "Bit depth", info.BitDepth)
 		}
 		if info.ScanType != "" {
-			fields = append(fields, Field{Name: "Scan type", Value: info.ScanType})
+			builder.Fill("ScanType", info.ScanType, "Scan type", info.ScanType)
 		}
-		fields = append(fields, Field{Name: "Compression mode", Value: "Lossy"})
+		builder.Fill("Compression_Mode", "Lossy", "Compression mode", "Lossy")
 		if info.Width > 0 && info.Height > 0 {
-			if bits := formatBitsPerPixelFrame(bitrate, info.Width, info.Height, info.FrameRate); bits != "" {
-				fields = append(fields, Field{Name: "Bits/(Pixel*Frame)", Value: bits})
+			if bits := formatBitsPerPixelFrame(displayBitrate, info.Width, info.Height, info.FrameRate); bits != "" {
+				builder.Text("Bits/(Pixel*Frame)", bits)
 			}
 		}
 		if info.TimeCode != "" {
-			fields = append(fields, Field{Name: "Time code of first frame", Value: info.TimeCode})
+			builder.Fill("TimeCode_FirstFrame", info.TimeCode, "Time code of first frame", info.TimeCode)
 		}
 		if info.GOPOpenClosed != "" {
-			fields = append(fields, Field{Name: "GOP, Open/Closed", Value: info.GOPOpenClosed})
+			builder.Fill("Gop_OpenClosed", info.GOPOpenClosed, "GOP, Open/Closed", info.GOPOpenClosed)
 		}
 		if info.GOPFirstClosed != "" {
-			fields = append(fields, Field{Name: "GOP, Open/Closed of first frame", Value: info.GOPFirstClosed})
+			builder.Fill("Gop_OpenClosed_FirstFrame", info.GOPFirstClosed, "GOP, Open/Closed of first frame", info.GOPFirstClosed)
 		}
 		if streamSize := formatStreamSize(size, size); streamSize != "" {
-			fields = append(fields, Field{Name: "Stream size", Value: streamSize})
+			value := strconv.FormatInt(size, 10)
+			builder.Fill("StreamSize", value, "Stream size", streamSize)
+			structuredFacts.SetSame("StreamSize", value)
 		}
 	}
 
-	jsonExtras := map[string]string{}
-	if duration > 0 {
-		jsonDuration := math.Round(duration*1000) / 1000
-		if jsonDuration > 0 {
-			jsonExtras["BitRate"] = strconv.FormatInt(int64(math.Round((float64(size)*8)/jsonDuration)), 10)
-		}
-	}
-	if size > 0 {
-		jsonExtras["StreamSize"] = strconv.FormatInt(size, 10)
+	if size > 0 && structuredFacts.Legacy("StreamSize") == "" {
+		value := strconv.FormatInt(size, 10)
+		builder.Structured("StreamSize", value)
+		structuredFacts.SetSame("StreamSize", value)
 	}
 	if info.BufferSize > 0 {
-		jsonExtras["BufferSize"] = strconv.FormatInt(info.BufferSize, 10)
+		value := strconv.FormatInt(info.BufferSize, 10)
+		builder.Structured("BufferSize", value)
+		structuredFacts.SetSame("BufferSize", value)
 	}
 	if info.GOPDropFrame != nil && info.GOPClosed != nil && info.GOPBrokenLink != nil {
 		drop := 0
@@ -119,21 +141,23 @@ func ParseMPEGVideo(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, bo
 		if *info.GOPBrokenLink {
 			broken = 1
 		}
-		jsonExtras["Delay"] = "0.000"
-		jsonExtras["Delay_Settings"] = fmt.Sprintf("drop_frame_flag=%d / closed_gop=%d / broken_link=%d", drop, closed, broken)
+		structuredFacts.SetSame("Delay", "0.000")
+		structuredFacts.SetSame("Delay_Settings", fmt.Sprintf("drop_frame_flag=%d / closed_gop=%d / broken_link=%d", drop, closed, broken))
 		if drop == 1 {
-			jsonExtras["Delay_DropFrame"] = "Yes"
+			structuredFacts.SetSame("Delay_DropFrame", "Yes")
 		} else {
-			jsonExtras["Delay_DropFrame"] = "No"
+			structuredFacts.SetSame("Delay_DropFrame", "No")
 		}
-		jsonExtras["Delay_Source"] = "Stream"
+		structuredFacts.SetSame("Delay_Source", "Stream")
 	}
-	jsonRaw := map[string]string{}
+	structuredFacts.Apply(builder)
 	if info.IntraDCPrecision > 0 {
-		jsonRaw["extra"] = renderJSONObject([]jsonKV{{Key: "intra_dc_precision", Val: strconv.Itoa(info.IntraDCPrecision)}}, false)
+		node := structuredObjectFromKVs([]jsonKV{{Key: "intra_dc_precision", Val: strconv.Itoa(info.IntraDCPrecision)}})
+		builder.StructuredNode("extra", node)
+		builder.MarkLegacyJSONRaw("extra", structuredNodeText(node))
 	}
 
-	streams := []Stream{{Kind: StreamVideo, Fields: fields, JSON: jsonExtras, JSONRaw: jsonRaw}}
+	streams := []Stream{builder.Snapshot(canonicalStreamPolicy{SkipStreamOrder: true})}
 	container := ContainerInfo{}
 	if duration > 0 {
 		container.DurationSeconds = duration

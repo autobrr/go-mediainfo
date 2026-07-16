@@ -161,7 +161,7 @@ func FuzzParseFLACContainers(f *testing.F) {
 	f.Fuzz(func(t *testing.T, data []byte) {
 		data = fuzzLimit(data)
 		r := bytes.NewReader(data)
-		_, _, _, _, _ = ParseFLAC(r, int64(len(data)))
+		_, _, _, _, _ = parseFLAC(r, int64(len(data)))
 	})
 }
 
@@ -174,7 +174,7 @@ func FuzzParseMP3Containers(f *testing.F) {
 	f.Fuzz(func(t *testing.T, data []byte) {
 		data = fuzzLimit(data)
 		r := bytes.NewReader(data)
-		_, _, _, _, _ = ParseMP3(r, int64(len(data)))
+		_, _, _, _, _ = parseMP3(r, int64(len(data)))
 	})
 }
 

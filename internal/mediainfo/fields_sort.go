@@ -2,14 +2,13 @@ package mediainfo
 
 import "sort"
 
+// sortFields stably applies the registered display order, sorting unknown
+// labels lexically after known fields.
 func sortFields(kind StreamKind, fields []Field) {
 	if kind == StreamMenu {
 		return
 	}
-	order := streamFieldOrder
-	if kind == StreamGeneral {
-		order = generalFieldOrder
-	}
+	order := textFieldOrderPolicy(kind)
 
 	sort.SliceStable(fields, func(i, j int) bool {
 		ai, aok := order[fields[i].Name]

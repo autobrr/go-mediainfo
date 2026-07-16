@@ -7,6 +7,8 @@ import (
 	"strconv"
 )
 
+// appendTSCaptionStreams appends canonical EIA-608 and EIA-708 streams derived
+// from one transport-stream video PID.
 func appendTSCaptionStreams(out *[]Stream, video *tsStream) {
 	if out == nil || video == nil || video.kind != StreamVideo {
 		return
@@ -91,6 +93,8 @@ func appendTSCaptionStreams(out *[]Stream, video *tsStream) {
 	}
 }
 
+// shouldSuppressEarlyService2Only rejects the short-start service-2 outlier
+// emitted without a timed CC1 stream.
 func shouldSuppressEarlyService2Only(video *tsStream, delay, fps float64) bool {
 	if video == nil || shouldEmitTSCC1(video) || !video.ccEven.found {
 		return false
@@ -115,6 +119,8 @@ func shouldSuppressEarlyService2Only(video *tsStream, delay, fps float64) bool {
 	return start > 0 && start < 0.5
 }
 
+// shouldEmitTSCC3 reports whether field-two captions have command timing or a
+// supported no-DTVCC display fallback.
 func shouldEmitTSCC3(video *tsStream) bool {
 	if video == nil || !video.ccEven.found {
 		return false
@@ -129,6 +135,8 @@ func shouldEmitTSCC3(video *tsStream) bool {
 	return false
 }
 
+// shouldEmitTSCC1 reports whether field-one captions have command timing
+// sufficient for a canonical CC1 stream.
 func shouldEmitTSCC1(video *tsStream) bool {
 	if video == nil || !video.ccOdd.found {
 		return false
@@ -136,6 +144,8 @@ func shouldEmitTSCC1(video *tsStream) bool {
 	return video.ccOdd.firstCommandPTS != 0 || video.ccOdd.firstCommandFrame > 0
 }
 
+// buildTSCaptionStream constructs one canonical caption stream from its
+// service identity and measured timing.
 func buildTSCaptionStream(videoPID uint16, programNumber uint16, delaySeconds float64, duration float64, format string, service string, startCommandSeconds float64, emitLinesCount bool) Stream {
 	idLabel := fmt.Sprintf("%s-%s", formatID(uint64(videoPID)), service)
 	jsonID := fmt.Sprintf("%d-%s", videoPID, service)
@@ -156,31 +166,28 @@ func buildTSCaptionStream(videoPID uint16, programNumber uint16, delaySeconds fl
 		Field{Name: "Stream size", Value: "0.00 Byte (0%)"},
 	)
 
-	jsonExtras := map[string]string{
-		"ID":          jsonID,
-		"StreamOrder": "0-0",
-		"Duration":    formatJSONSeconds(duration),
-		"StreamSize":  "0",
-		"Video_Delay": "0.000",
-	}
+	streamFacts := &mpegTSStructuredFacts{}
+	streamFacts.Set("ID", jsonID)
+	streamFacts.Set("StreamOrder", "0-0")
+	streamFacts.Set("Duration", formatJSONSeconds(duration))
+	streamFacts.Set("StreamSize", "0")
+	streamFacts.Set("Video_Delay", "0.000")
 	if emitLinesCount && format == "EIA-608" {
-		jsonExtras["Lines_Count"] = "0"
+		streamFacts.Set("Lines_Count", "0")
 	}
 	if programNumber > 0 {
-		jsonExtras["MenuID"] = strconv.FormatUint(uint64(programNumber), 10)
+		streamFacts.Set("MenuID", strconv.FormatUint(uint64(programNumber), 10))
 	}
 	if delaySeconds > 0 {
-		jsonExtras["Delay"] = fmt.Sprintf("%.9f", delaySeconds)
-		jsonExtras["Delay_Source"] = "Container"
+		streamFacts.Set("Delay", fmt.Sprintf("%.9f", delaySeconds))
+		streamFacts.Set("Delay_Source", "Container")
 	}
 	if format == "EIA-608" && startCommandSeconds > 0 {
-		jsonExtras["Duration_Start_Command"] = formatJSONSeconds6(startCommandSeconds)
+		streamFacts.Set("Duration_Start_Command", formatJSONSeconds6(startCommandSeconds))
 	}
-	jsonRaw := map[string]string{
-		"extra": renderJSONObject([]jsonKV{
-			{Key: "CaptionServiceDescriptor_IsPresent", Val: "No"},
-			{Key: "CaptionServiceName", Val: service},
-		}, false),
-	}
-	return Stream{Kind: StreamText, Fields: fields, JSON: jsonExtras, JSONRaw: jsonRaw}
+	extra := structuredObjectFromKVs([]jsonKV{
+		{Key: "CaptionServiceDescriptor_IsPresent", Val: "No"},
+		{Key: "CaptionServiceName", Val: service},
+	})
+	return buildCanonicalMPEGTSStream(StreamText, nil, fields, streamFacts, &extra, false)
 }

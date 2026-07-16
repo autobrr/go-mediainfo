@@ -100,10 +100,21 @@ func projectStructuredReportFor(report Report, target structuredProjectionTarget
 		}
 		if !stream.StructuredAlreadyOrdered {
 			sort.SliceStable(fields, func(left, right int) bool {
-				leftSpec, _ := structuredFieldSpec(stream.Kind, firstNonEmpty(fields[left].StructuredKey, string(fields[left].Name)))
-				rightSpec, _ := structuredFieldSpec(stream.Kind, firstNonEmpty(fields[right].StructuredKey, string(fields[right].Name)))
-				if leftSpec.Order != rightSpec.Order {
-					return leftSpec.Order < rightSpec.Order
+				leftKey := firstNonEmpty(fields[left].StructuredKey, string(fields[left].Name))
+				rightKey := firstNonEmpty(fields[right].StructuredKey, string(fields[right].Name))
+				leftOrder, leftKnown := stream.StructuredOrder[leftKey]
+				rightOrder, rightKnown := stream.StructuredOrder[rightKey]
+				if stream.StructuredOrder == nil {
+					leftSpec, leftSpecKnown := structuredFieldSpec(stream.Kind, leftKey)
+					rightSpec, rightSpecKnown := structuredFieldSpec(stream.Kind, rightKey)
+					leftOrder, leftKnown = leftSpec.Order, leftSpecKnown
+					rightOrder, rightKnown = rightSpec.Order, rightSpecKnown
+				}
+				switch {
+				case leftKnown && rightKnown && leftOrder != rightOrder:
+					return leftOrder < rightOrder
+				case leftKnown != rightKnown:
+					return leftKnown
 				}
 				return fields[left].Sequence < fields[right].Sequence
 			})
@@ -133,6 +144,9 @@ func projectCanonicalStructuredValue(kind StreamKind, entry fieldEntry) string {
 	if spec.Measure == fieldMeasureMilliseconds {
 		milliseconds, err := strconv.ParseFloat(entry.Value.Text, 64)
 		if err == nil {
+			if entry.StructuredDecimals > 0 {
+				return fmt.Sprintf("%.*f", entry.StructuredDecimals, milliseconds/1000)
+			}
 			return formatJSONSeconds(milliseconds / 1000)
 		}
 	}

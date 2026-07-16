@@ -4,33 +4,67 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"math"
 	"strconv"
+	"strings"
 )
 
+// SampleInfo contains codec and sample-table facts collected from an MP4 stbl.
 type SampleInfo struct {
-	Format          string
-	Fields          []Field
-	JSON            map[string]string
-	SampleCount     uint64
-	SampleBytes     uint64
-	SampleSizeHead  []uint32
-	SampleSizeTail  []uint32
-	SampleDelta     uint32
-	LastSampleDelta uint32
-	VariableDeltas  bool
-	FirstChunkOff   uint64
-	Width           uint64
-	Height          uint64
-}
-
-type sampleEntryResult struct {
-	Fields []Field
+	// Format is the codec format inferred from stsd.
 	Format string
-	Width  uint64
-	Height uint64
-	JSON   map[string]string
+	// Fields contains sample-entry display metadata.
+	Fields []Field
+	// SampleCount is the number of samples described by timing tables.
+	SampleCount uint64
+	// SampleBytes is the total byte count described by sample sizes.
+	SampleBytes uint64
+	// SampleSizeHead retains bounded leading sample sizes.
+	SampleSizeHead []uint32
+	// SampleSizeTail retains bounded trailing sample sizes.
+	SampleSizeTail []uint32
+	// SampleDelta is the dominant stts delta.
+	SampleDelta uint32
+	// LastSampleDelta is the final stts delta.
+	LastSampleDelta uint32
+	// VariableDeltas reports whether stts contains differing deltas.
+	VariableDeltas bool
+	// FirstChunkOff is the first absolute media chunk offset.
+	FirstChunkOff uint64
+	// Width is the sample entry width in pixels.
+	Width uint64
+	// Height is the sample entry height in pixels.
+	Height        uint64
+	canonicalSeed []fieldEntry
 }
 
+// sampleEntryResult contains the canonical and compatibility metadata decoded
+// from one visual or audio sample entry.
+type sampleEntryResult struct {
+	Fields        []Field
+	Format        string
+	Width         uint64
+	Height        uint64
+	canonicalSeed []fieldEntry
+}
+
+// mp4VisualCanonicalFacts carries raw codec configuration values from the MP4
+// sample-entry parser to its canonical seed builder.
+type mp4VisualCanonicalFacts struct {
+	sampleType   string
+	width        uint64
+	height       uint64
+	hasAVC       bool
+	avc          avcConfigInfo
+	hasHEVC      bool
+	hevc         hevcConfigInfo
+	sps          h264SPSInfo
+	x265Library  string
+	x265Settings string
+}
+
+// parseStsdForSample parses the first supported stsd entry and returns its
+// codec metadata and canonical seed.
 func parseStsdForSample(buf []byte) (SampleInfo, bool) {
 	if len(buf) < 16 {
 		return SampleInfo{}, false
@@ -61,14 +95,7 @@ func parseStsdForSample(buf []byte) (SampleInfo, bool) {
 			if result.Height > 0 {
 				info.Height = result.Height
 			}
-			if len(result.JSON) > 0 {
-				if info.JSON == nil {
-					info.JSON = map[string]string{}
-				}
-				for k, v := range result.JSON {
-					info.JSON[k] = v
-				}
-			}
+			info.canonicalSeed = append(info.canonicalSeed, result.canonicalSeed...)
 		}
 		if isAudioSampleEntry(typ) {
 			result := parseAudioSampleEntry(entry, typ)
@@ -76,14 +103,7 @@ func parseStsdForSample(buf []byte) (SampleInfo, bool) {
 			if result.Format != "" {
 				info.Format = result.Format
 			}
-			if len(result.JSON) > 0 {
-				if info.JSON == nil {
-					info.JSON = map[string]string{}
-				}
-				for k, v := range result.JSON {
-					info.JSON[k] = v
-				}
-			}
+			info.canonicalSeed = append(info.canonicalSeed, result.canonicalSeed...)
 		}
 		if info.Format != "" || len(info.Fields) > 0 {
 			return info, true
@@ -93,6 +113,8 @@ func parseStsdForSample(buf []byte) (SampleInfo, bool) {
 	return SampleInfo{}, false
 }
 
+// mapMP4SampleEntry maps a supported MP4 sample-entry code to its display
+// codec format.
 func mapMP4SampleEntry(sample string) string {
 	switch sample {
 	case "avc1", "avc3":
@@ -124,6 +146,7 @@ func mapMP4SampleEntry(sample string) string {
 	}
 }
 
+// isVideoSampleEntry reports whether sample is a supported MP4 video entry.
 func isVideoSampleEntry(sample string) bool {
 	switch sample {
 	case "avc1", "avc3", "hvc1", "hev1", "mp4v":
@@ -133,6 +156,7 @@ func isVideoSampleEntry(sample string) bool {
 	}
 }
 
+// isAudioSampleEntry reports whether sample is a supported MP4 audio entry.
 func isAudioSampleEntry(sample string) bool {
 	switch sample {
 	case "mp4a", "ac-3", "ec-3", "alac", "flac", "opus":
@@ -142,16 +166,19 @@ func isAudioSampleEntry(sample string) bool {
 	}
 }
 
+// parseVisualSampleEntry decodes dimensions and codec-private metadata from
+// one visual sample entry.
 func parseVisualSampleEntry(entry []byte, sampleType string) sampleEntryResult {
 	if len(entry) < 36 {
 		return sampleEntryResult{}
 	}
 	width := binary.BigEndian.Uint16(entry[32:34])
 	height := binary.BigEndian.Uint16(entry[34:36])
+	canonicalFacts := mp4VisualCanonicalFacts{sampleType: sampleType, width: uint64(width), height: uint64(height)}
 	fields := []Field{
 		{Name: "Codec ID", Value: sampleType},
 	}
-	jsonExtras := map[string]string{}
+	structuredFacts := &mp4StructuredFacts{}
 	if formatInfo := mapVideoFormatInfo(sampleType); formatInfo != "" {
 		fields = append(fields, Field{Name: "Format/Info", Value: formatInfo})
 	}
@@ -169,8 +196,11 @@ func parseVisualSampleEntry(entry []byte, sampleType string) sampleEntryResult {
 	var spsInfo h264SPSInfo
 	if sampleType == "avc1" || sampleType == "avc3" {
 		if payload, ok := findMP4ChildBox(entry, mp4VisualSampleEntryHeaderSize, "avcC"); ok {
-			_, avcFields, parsedSPS := parseAVCConfig(payload)
+			_, avcFields, parsedSPS, avcInfo := parseAVCConfigDetails(payload)
 			spsInfo = parsedSPS
+			canonicalFacts.hasAVC = true
+			canonicalFacts.avc = avcInfo
+			canonicalFacts.sps = parsedSPS
 			fields = append(fields, avcFields...)
 			fields = append(fields, Field{Name: "Codec configuration box", Value: "avcC"})
 			// Stored dimensions: mediainfo reports a macroblock-aligned Stored_Height for AVC.
@@ -182,37 +212,40 @@ func parseVisualSampleEntry(entry []byte, sampleType string) sampleEntryResult {
 				}
 			}
 			if storedHeight > 0 && uint64(height) > 0 && storedHeight != uint64(height) {
-				jsonExtras["Stored_Height"] = strconv.FormatUint(storedHeight, 10)
+				structuredFacts.Set("Stored_Height", strconv.FormatUint(storedHeight, 10))
 			}
 			if spsInfo.HasColorRange || spsInfo.HasColorDescription {
 				colorSource := "Container / Stream"
-				jsonExtras["colour_description_present"] = "Yes"
-				jsonExtras["colour_description_present_Source"] = colorSource
+				structuredFacts.Set("colour_description_present", "Yes")
+				structuredFacts.Set("colour_description_present_Source", colorSource)
 				if spsInfo.ColorRange != "" {
-					jsonExtras["colour_range"] = spsInfo.ColorRange
-					jsonExtras["colour_range_Source"] = colorSource
+					structuredFacts.Set("colour_range", spsInfo.ColorRange)
+					structuredFacts.Set("colour_range_Source", colorSource)
 				}
 				if spsInfo.ColorPrimaries != "" {
-					jsonExtras["colour_primaries"] = spsInfo.ColorPrimaries
-					jsonExtras["colour_primaries_Source"] = colorSource
+					structuredFacts.Set("colour_primaries", spsInfo.ColorPrimaries)
+					structuredFacts.Set("colour_primaries_Source", colorSource)
 				}
 				if spsInfo.TransferCharacteristics != "" {
-					jsonExtras["transfer_characteristics"] = spsInfo.TransferCharacteristics
-					jsonExtras["transfer_characteristics_Source"] = colorSource
+					structuredFacts.Set("transfer_characteristics", spsInfo.TransferCharacteristics)
+					structuredFacts.Set("transfer_characteristics_Source", colorSource)
 				}
 				if spsInfo.MatrixCoefficients != "" {
-					jsonExtras["matrix_coefficients"] = spsInfo.MatrixCoefficients
-					jsonExtras["matrix_coefficients_Source"] = colorSource
+					structuredFacts.Set("matrix_coefficients", spsInfo.MatrixCoefficients)
+					structuredFacts.Set("matrix_coefficients_Source", colorSource)
 				}
 			}
 			if spsInfo.HasSAR && spsInfo.SARWidth > 0 && spsInfo.SARHeight > 0 && spsInfo.SARWidth != spsInfo.SARHeight && width > 0 && height > 0 {
 				par := float64(spsInfo.SARWidth) / float64(spsInfo.SARHeight)
-				jsonExtras["PixelAspectRatio"] = formatJSONFloat(par)
-				jsonExtras["DisplayAspectRatio_Original"] = formatJSONFloat((float64(width) / float64(height)) * par)
+				structuredFacts.Set("PixelAspectRatio", formatJSONFloat(par))
+				structuredFacts.Set("DisplayAspectRatio_Original", formatJSONFloat((float64(width)/float64(height))*par))
 			}
 		} else if payload, ok := findMP4BoxByName(entry, "avcC"); ok {
-			_, avcFields, parsedSPS := parseAVCConfig(payload)
+			_, avcFields, parsedSPS, avcInfo := parseAVCConfigDetails(payload)
 			spsInfo = parsedSPS
+			canonicalFacts.hasAVC = true
+			canonicalFacts.avc = avcInfo
+			canonicalFacts.sps = parsedSPS
 			fields = append(fields, avcFields...)
 			fields = append(fields, Field{Name: "Codec configuration box", Value: "avcC"})
 			storedHeight := spsInfo.CodedHeight
@@ -223,45 +256,52 @@ func parseVisualSampleEntry(entry []byte, sampleType string) sampleEntryResult {
 				}
 			}
 			if storedHeight > 0 && uint64(height) > 0 && storedHeight != uint64(height) {
-				jsonExtras["Stored_Height"] = strconv.FormatUint(storedHeight, 10)
+				structuredFacts.Set("Stored_Height", strconv.FormatUint(storedHeight, 10))
 			}
 			if spsInfo.HasColorRange || spsInfo.HasColorDescription {
 				colorSource := "Container / Stream"
-				jsonExtras["colour_description_present"] = "Yes"
-				jsonExtras["colour_description_present_Source"] = colorSource
+				structuredFacts.Set("colour_description_present", "Yes")
+				structuredFacts.Set("colour_description_present_Source", colorSource)
 				if spsInfo.ColorRange != "" {
-					jsonExtras["colour_range"] = spsInfo.ColorRange
-					jsonExtras["colour_range_Source"] = colorSource
+					structuredFacts.Set("colour_range", spsInfo.ColorRange)
+					structuredFacts.Set("colour_range_Source", colorSource)
 				}
 				if spsInfo.ColorPrimaries != "" {
-					jsonExtras["colour_primaries"] = spsInfo.ColorPrimaries
-					jsonExtras["colour_primaries_Source"] = colorSource
+					structuredFacts.Set("colour_primaries", spsInfo.ColorPrimaries)
+					structuredFacts.Set("colour_primaries_Source", colorSource)
 				}
 				if spsInfo.TransferCharacteristics != "" {
-					jsonExtras["transfer_characteristics"] = spsInfo.TransferCharacteristics
-					jsonExtras["transfer_characteristics_Source"] = colorSource
+					structuredFacts.Set("transfer_characteristics", spsInfo.TransferCharacteristics)
+					structuredFacts.Set("transfer_characteristics_Source", colorSource)
 				}
 				if spsInfo.MatrixCoefficients != "" {
-					jsonExtras["matrix_coefficients"] = spsInfo.MatrixCoefficients
-					jsonExtras["matrix_coefficients_Source"] = colorSource
+					structuredFacts.Set("matrix_coefficients", spsInfo.MatrixCoefficients)
+					structuredFacts.Set("matrix_coefficients_Source", colorSource)
 				}
 			}
 			if spsInfo.HasSAR && spsInfo.SARWidth > 0 && spsInfo.SARHeight > 0 && spsInfo.SARWidth != spsInfo.SARHeight && width > 0 && height > 0 {
 				par := float64(spsInfo.SARWidth) / float64(spsInfo.SARHeight)
-				jsonExtras["PixelAspectRatio"] = formatJSONFloat(par)
-				jsonExtras["DisplayAspectRatio_Original"] = formatJSONFloat((float64(width) / float64(height)) * par)
+				structuredFacts.Set("PixelAspectRatio", formatJSONFloat(par))
+				structuredFacts.Set("DisplayAspectRatio_Original", formatJSONFloat((float64(width)/float64(height))*par))
 			}
 		}
 		fields = appendFieldUnique(fields, Field{Name: "Color space", Value: "YUV"})
 	} else if sampleType == "hvc1" || sampleType == "hev1" {
 		var hevcFields []Field
-		hevcFields, spsInfo = parseMP4HEVCSampleEntry(entry, uint64(width), uint64(height), jsonExtras)
+		var hevcInfo hevcConfigInfo
+		var sei hevcHDRInfo
+		hevcFields, spsInfo, hevcInfo, sei = parseMP4HEVCSampleEntryDetails(entry, uint64(width), uint64(height), structuredFacts)
+		canonicalFacts.hasHEVC = true
+		canonicalFacts.hevc = hevcInfo
+		canonicalFacts.sps = spsInfo
+		canonicalFacts.x265Library = sei.x265Library
+		canonicalFacts.x265Settings = sei.x265Settings
 		fields = append(fields, hevcFields...)
 	}
 	// When AVC bitstream says "not fixed" but container timing is CFR, official MediaInfo keeps CFR
 	// and reports the bitstream hint as FrameRate_Mode_Original=VFR.
 	if spsInfo.HasFixedFrameRate && !spsInfo.FixedFrameRate {
-		jsonExtras["FrameRate_Mode_Original"] = "VFR"
+		structuredFacts.Set("FrameRate_Mode_Original", "VFR")
 	}
 	if _, maxRate, avgRate, ok := parseBtrt(entry, mp4VisualSampleEntryHeaderSize); ok {
 		bps := uint64(avgRate)
@@ -271,40 +311,49 @@ func parseVisualSampleEntry(entry []byte, sampleType string) sampleEntryResult {
 		if bps > 0 {
 			fields = appendFieldUnique(fields, Field{Name: "Bit rate", Value: formatBitrate(float64(bps))})
 			// Match official JSON: btrt bitrate is emitted with exact b/s (text is rounded).
-			jsonExtras["BitRate"] = strconv.FormatUint(bps, 10)
+			structuredFacts.Set("BitRate", strconv.FormatUint(bps, 10))
 		}
 		// Official MediaInfo omits BitRate_Maximum when it equals the average bitrate.
 		if avgRate > 0 && maxRate > avgRate {
 			fields = appendFieldUnique(fields, Field{Name: "Maximum bit rate", Value: formatBitrate(float64(maxRate))})
 			// Match official JSON: btrt max bitrate is emitted with exact b/s (text is rounded).
-			jsonExtras["BitRate_Maximum"] = strconv.FormatUint(uint64(maxRate), 10)
+			structuredFacts.Set("BitRate_Maximum", strconv.FormatUint(uint64(maxRate), 10))
 		}
 	}
 	if info := mapVideoCodecIDInfo(sampleType); info != "" {
 		fields = append(fields, Field{Name: "Codec ID/Info", Value: info})
 	}
-	if len(jsonExtras) == 0 {
-		jsonExtras = nil
+	return sampleEntryResult{
+		Fields:        fields,
+		Width:         uint64(width),
+		Height:        uint64(height),
+		canonicalSeed: canonicalMP4VisualSampleSeed(fields, structuredFacts, canonicalFacts),
 	}
-	return sampleEntryResult{Fields: fields, Width: uint64(width), Height: uint64(height), JSON: jsonExtras}
 }
 
 // parseMP4HEVCSampleEntry parses the hvcC configuration box of an HEVC (hvc1/hev1)
 // MP4 visual sample entry. It returns the stream fields (Format profile / tier,
 // chroma subsampling, bit depth, codec configuration box, scan type, colour space,
-// and the x265 writing library / encoding settings when present) plus the parsed SPS
-// info. Colour metadata is written into jsonExtras with a "Stream" source: unlike the
-// AVC path (which merges a container colr atom and reports "Container / Stream"), HEVC
-// MP4 streams here carry colour info only in the bitstream SPS VUI.
-func parseMP4HEVCSampleEntry(entry []byte, width, height uint64, jsonExtras map[string]string) ([]Field, h264SPSInfo) {
+// and the x265 writing library / encoding settings when present) plus the parsed
+// SPS. Colour facts use a "Stream" source: unlike the AVC path (which merges a
+// container colr atom and reports "Container / Stream"), HEVC MP4 streams here
+// carry colour info only in the bitstream SPS VUI.
+func parseMP4HEVCSampleEntry(entry []byte, width, height uint64, facts *mp4StructuredFacts) ([]Field, h264SPSInfo) {
+	fields, spsInfo, _, _ := parseMP4HEVCSampleEntryDetails(entry, width, height, facts)
+	return fields, spsInfo
+}
+
+// parseMP4HEVCSampleEntryDetails returns raw hvcC and SEI facts in addition to
+// the compatibility fields exposed by parseMP4HEVCSampleEntry.
+func parseMP4HEVCSampleEntryDetails(entry []byte, width, height uint64, facts *mp4StructuredFacts) ([]Field, h264SPSInfo, hevcConfigInfo, hevcHDRInfo) {
 	payload, ok := findMP4ChildBox(entry, mp4VisualSampleEntryHeaderSize, "hvcC")
 	if !ok {
 		payload, ok = findMP4BoxByName(entry, "hvcC")
 	}
 	if !ok {
-		return nil, h264SPSInfo{}
+		return nil, h264SPSInfo{}, hevcConfigInfo{}, hevcHDRInfo{}
 	}
-	_, hevcFields, _, spsInfo := parseHEVCConfig(payload)
+	_, hevcFields, configInfo, spsInfo := parseHEVCConfig(payload)
 	fields := append([]Field{}, hevcFields...)
 	fields = append(fields, Field{Name: "Codec configuration box", Value: "hvcC"})
 	// HEVC does not use field/interlaced coding in practice; MediaInfo reports Progressive.
@@ -314,30 +363,30 @@ func parseMP4HEVCSampleEntry(entry []byte, width, height uint64, jsonExtras map[
 	// Stored (coded, pre-conformance-crop) dimensions are reported when they differ from
 	// the displayed size, e.g. 1080-line HEVC is coded as 1088 luma samples.
 	if spsInfo.CodedWidth > 0 && width > 0 && spsInfo.CodedWidth != width {
-		jsonExtras["Stored_Width"] = strconv.FormatUint(spsInfo.CodedWidth, 10)
+		facts.Set("Stored_Width", strconv.FormatUint(spsInfo.CodedWidth, 10))
 	}
 	if spsInfo.CodedHeight > 0 && height > 0 && spsInfo.CodedHeight != height {
-		jsonExtras["Stored_Height"] = strconv.FormatUint(spsInfo.CodedHeight, 10)
+		facts.Set("Stored_Height", strconv.FormatUint(spsInfo.CodedHeight, 10))
 	}
 
 	if spsInfo.HasColorRange && spsInfo.ColorRange != "" {
-		jsonExtras["colour_range"] = spsInfo.ColorRange
-		jsonExtras["colour_range_Source"] = "Stream"
+		facts.Set("colour_range", spsInfo.ColorRange)
+		facts.Set("colour_range_Source", "Stream")
 	}
 	if spsInfo.HasColorDescription {
-		jsonExtras["colour_description_present"] = "Yes"
-		jsonExtras["colour_description_present_Source"] = "Stream"
+		facts.Set("colour_description_present", "Yes")
+		facts.Set("colour_description_present_Source", "Stream")
 		if spsInfo.ColorPrimaries != "" {
-			jsonExtras["colour_primaries"] = spsInfo.ColorPrimaries
-			jsonExtras["colour_primaries_Source"] = "Stream"
+			facts.Set("colour_primaries", spsInfo.ColorPrimaries)
+			facts.Set("colour_primaries_Source", "Stream")
 		}
 		if spsInfo.TransferCharacteristics != "" {
-			jsonExtras["transfer_characteristics"] = spsInfo.TransferCharacteristics
-			jsonExtras["transfer_characteristics_Source"] = "Stream"
+			facts.Set("transfer_characteristics", spsInfo.TransferCharacteristics)
+			facts.Set("transfer_characteristics_Source", "Stream")
 		}
 		if spsInfo.MatrixCoefficients != "" {
-			jsonExtras["matrix_coefficients"] = spsInfo.MatrixCoefficients
-			jsonExtras["matrix_coefficients_Source"] = "Stream"
+			facts.Set("matrix_coefficients", spsInfo.MatrixCoefficients)
+			facts.Set("matrix_coefficients_Source", "Stream")
 		}
 	}
 
@@ -351,9 +400,11 @@ func parseMP4HEVCSampleEntry(entry []byte, width, height uint64, jsonExtras map[
 			fields = append(fields, Field{Name: "Encoding settings", Value: sei.x265Settings})
 		}
 	}
-	return fields, spsInfo
+	return fields, spsInfo, configInfo, sei
 }
 
+// parseAudioSampleEntry decodes channel, sample-rate, codec, and bitrate facts
+// from one audio sample entry.
 func parseAudioSampleEntry(entry []byte, sampleType string) sampleEntryResult {
 	if len(entry) < 36 {
 		return sampleEntryResult{}
@@ -362,7 +413,8 @@ func parseAudioSampleEntry(entry []byte, sampleType string) sampleEntryResult {
 	sampleRate := binary.BigEndian.Uint32(entry[32:36])
 	codecID := sampleType
 	fields := []Field{}
-	jsonExtras := map[string]string{}
+	structuredFacts := &mp4StructuredFacts{}
+	canonicalBitRate := ""
 	fields = appendChannelFields(fields, uint64(channels))
 	if sampleRate > 0 {
 		rate := float64(sampleRate) / 65536
@@ -383,7 +435,7 @@ func parseAudioSampleEntry(entry []byte, sampleType string) sampleEntryResult {
 			}
 			format = "AAC " + profile
 			if sbrExplicitNo {
-				jsonExtras["Format_Settings_SBR"] = "No (Explicit)"
+				structuredFacts.Set("Format_Settings_SBR", "No (Explicit)")
 			}
 		} else if info := mapAudioFormatInfo(sampleType); info != "" {
 			fields = append(fields, Field{Name: "Format/Info", Value: info})
@@ -408,6 +460,7 @@ func parseAudioSampleEntry(entry []byte, sampleType string) sampleEntryResult {
 				bps = (bps / 1000) * 1000
 				fields = appendFieldUnique(fields, Field{Name: "Bit rate mode", Value: "Constant"})
 				fields = appendFieldUnique(fields, Field{Name: "Bit rate", Value: formatBitrate(float64(bps))})
+				canonicalBitRate = strconv.FormatUint(uint64(bps), 10)
 			}
 		}
 	}
@@ -424,20 +477,172 @@ func parseAudioSampleEntry(entry []byte, sampleType string) sampleEntryResult {
 				fields = appendFieldUnique(fields, Field{Name: "Bit rate mode", Value: "Constant"})
 				fields = appendFieldUnique(fields, Field{Name: "Bit rate", Value: formatBitrate(float64(bps))})
 				// Match official JSON: btrt bitrate is emitted with exact b/s (text is rounded).
-				jsonExtras["BitRate"] = strconv.FormatUint(bps, 10)
+				structuredFacts.Set("BitRate", strconv.FormatUint(bps, 10))
 			}
 			// Official MediaInfo omits BitRate_Maximum when it equals the average bitrate.
 			if avgRate > 0 && maxRate > avgRate {
 				fields = appendFieldUnique(fields, Field{Name: "Maximum bit rate", Value: formatBitrate(float64(maxRate))})
-				jsonExtras["BitRate_Maximum"] = strconv.FormatUint(uint64(maxRate), 10)
+				structuredFacts.Set("BitRate_Maximum", strconv.FormatUint(uint64(maxRate), 10))
 			}
 		}
 	}
 	fields = append(fields, Field{Name: "Codec ID", Value: codecID})
-	if len(jsonExtras) == 0 {
-		jsonExtras = nil
+	return sampleEntryResult{
+		Fields:        fields,
+		Format:        format,
+		canonicalSeed: canonicalMP4AudioSampleSeed(fields, structuredFacts, sampleType, codecID, canonicalBitRate, channels, sampleRate),
 	}
-	return sampleEntryResult{Fields: fields, Format: format, JSON: jsonExtras}
+}
+
+// canonicalMP4VisualSampleSeed converts MP4 sample-entry and shared AVC/HEVC
+// configuration facts to direct canonical entries.
+func canonicalMP4VisualSampleSeed(fields []Field, structuredFacts *mp4StructuredFacts, facts mp4VisualCanonicalFacts) []fieldEntry {
+	builder := newCanonicalStreamBuilder(StreamVideo)
+	appendMP4TextOnlyFields(builder, StreamVideo, fields)
+	builder.Fill("CodecID", facts.sampleType, "Codec ID", facts.sampleType)
+	if facts.width > 0 {
+		builder.Fill("Width", strconv.FormatUint(facts.width, 10), "Width", formatPixels(facts.width))
+	}
+	if facts.height > 0 {
+		builder.Fill("Height", strconv.FormatUint(facts.height, 10), "Height", formatPixels(facts.height))
+	}
+	if facts.width > 0 && facts.height > 0 {
+		if display := formatAspectRatio(facts.width, facts.height); display != "" {
+			if ratio, ok := parseRatioFloat(display); ok {
+				builder.Fill("DisplayAspectRatio", formatJSONFloat(ratio), "Display aspect ratio", display)
+			}
+		}
+	}
+	profile := ""
+	level := ""
+	chroma := ""
+	bitDepth := 0
+	if facts.hasAVC {
+		profile = facts.avc.profile
+		if profile == "High" && facts.sps.ConstraintFlags&0x08 != 0 {
+			profile = "Progressive High"
+		}
+		level = strings.TrimPrefix(facts.avc.level, "L")
+		chroma = facts.sps.ChromaFormat
+		bitDepth = facts.sps.BitDepth
+		if facts.sps.RefFrames > 0 {
+			display := findField(fields, "Format settings, Reference frames")
+			builder.Fill("Format_Settings_RefFrames", strconv.Itoa(facts.sps.RefFrames), "Format settings, Reference frames", display)
+		}
+		if facts.avc.cabac != nil {
+			value := formatYesNo(*facts.avc.cabac)
+			builder.Fill("Format_Settings_CABAC", value, "Format settings, CABAC", value)
+		}
+	} else if facts.hasHEVC {
+		profile = facts.hevc.profileName
+		level = facts.hevc.levelName
+		chroma = facts.hevc.chromaFormat
+		bitDepth = int(facts.hevc.bitDepth)
+		builder.Fill("Format_Tier", facts.hevc.tierName, "Format tier", facts.hevc.tierName)
+	}
+	if profile != "" {
+		builder.Fill("Format_Profile", profile, "Format profile", findField(fields, "Format profile"))
+		builder.Structured("Format_Level", level)
+	}
+	if colorSpace := findField(fields, "Color space"); colorSpace != "" {
+		builder.Fill("ColorSpace", colorSpace, "Color space", colorSpace)
+	}
+	if chroma != "" {
+		builder.Fill("ChromaSubsampling", chroma, "Chroma subsampling", findField(fields, "Chroma subsampling"))
+	}
+	if facts.sps.HasChromaLoc {
+		value := fmt.Sprintf("Type %d", facts.sps.ChromaSampleLoc)
+		builder.Fill("ChromaSubsampling_Position", value, "Chroma subsampling position", value)
+	}
+	if bitDepth > 0 {
+		builder.Fill("BitDepth", strconv.Itoa(bitDepth), "Bit depth", formatBitDepth(uint8(bitDepth)))
+	}
+	if scanType := findField(fields, "Scan type"); scanType != "" {
+		builder.Fill("ScanType", scanType, "Scan type", scanType)
+	}
+	if scanOrder := findField(fields, "Scan order"); scanOrder != "" {
+		builder.Fill("ScanOrder", scanOrder, "Scan order", scanOrder)
+	}
+	if standard := findField(fields, "Standard"); standard != "" {
+		builder.Fill("Standard", standard, "Standard", standard)
+	}
+	if bitRate := structuredFacts.Get("BitRate"); bitRate != "" {
+		builder.Fill("BitRate", bitRate, "Bit rate", findField(fields, "Bit rate"))
+	}
+	if maximum := structuredFacts.Get("BitRate_Maximum"); maximum != "" {
+		builder.Fill("BitRate_Maximum", maximum, "Maximum bit rate", findField(fields, "Maximum bit rate"))
+	}
+	if writingLibrary := firstNonEmpty(facts.x265Library, findField(fields, "Writing library")); writingLibrary != "" {
+		encoded := writingLibrary
+		if strings.HasPrefix(encoded, "x264 ") && !strings.HasPrefix(encoded, "x264 - ") {
+			encoded = "x264 - " + strings.TrimPrefix(encoded, "x264 ")
+		}
+		if strings.HasPrefix(encoded, "x265 ") && !strings.HasPrefix(encoded, "x265 - ") {
+			encoded = "x265 - " + strings.TrimPrefix(encoded, "x265 ")
+		}
+		builder.Fill("Encoded_Library", encoded, "Writing library", writingLibrary)
+		if name, version := splitEncodedLibrary(encoded); name != "" {
+			builder.Structured("Encoded_Library_Name", name)
+			builder.Structured("Encoded_Library_Version", version)
+		}
+	}
+	if settings := firstNonEmpty(facts.x265Settings, findField(fields, "Encoding settings")); settings != "" {
+		builder.Fill("Encoded_Library_Settings", settings, "Encoding settings", settings)
+	}
+	structuredFacts.Apply(builder)
+	if configuration := findField(fields, "Codec configuration box"); configuration != "" {
+		builder.Text("Codec configuration box", configuration)
+		node := structuredObjectFromKVs([]jsonKV{{Key: "CodecConfigurationBox", Val: configuration}})
+		builder.OverrideStructuredNode("extra", node)
+	}
+	return builder.Snapshot(canonicalStreamPolicy{}).canonicalSeed
+}
+
+// canonicalMP4AudioSampleSeed converts audio sample-entry header facts to
+// direct canonical entries while retaining text-only codec descriptions.
+func canonicalMP4AudioSampleSeed(fields []Field, structuredFacts *mp4StructuredFacts, sampleType, codecID, canonicalBitRate string, channels uint16, sampleRate uint32) []fieldEntry {
+	builder := newCanonicalStreamBuilder(StreamAudio)
+	appendMP4TextOnlyFields(builder, StreamAudio, fields)
+	if channels > 0 {
+		raw := strconv.FormatUint(uint64(channels), 10)
+		builder.Fill("Channels", raw, "Channel(s)", formatChannels(uint64(channels)))
+		if layout := channelLayout(uint64(channels)); layout != "" {
+			builder.Fill("ChannelLayout", layout, "Channel layout", layout)
+		}
+	}
+	rate := float64(sampleRate) / 65536
+	if rate > 0 {
+		builder.Fill("SamplingRate", strconv.FormatInt(int64(math.Round(rate)), 10), "Sampling rate", formatSampleRate(rate))
+		if sampleType == "mp4a" {
+			frameRate := rate / 1024
+			builder.Fill("FrameRate", formatJSONFloat(frameRate), "Frame rate", fmt.Sprintf("%.3f FPS (1024 SPF)", frameRate))
+		}
+	}
+	if mode := findField(fields, "Bit rate mode"); mode != "" {
+		builder.Fill("BitRate_Mode", mode, "Bit rate mode", mode)
+	}
+	if bitRate := firstNonEmpty(structuredFacts.Get("BitRate"), canonicalBitRate); bitRate != "" {
+		builder.Fill("BitRate", bitRate, "Bit rate", findField(fields, "Bit rate"))
+	}
+	if maximum := structuredFacts.Get("BitRate_Maximum"); maximum != "" {
+		builder.Fill("BitRate_Maximum", maximum, "Maximum bit rate", findField(fields, "Maximum bit rate"))
+	}
+	if compression := findField(fields, "Compression mode"); compression != "" {
+		builder.Fill("Compression_Mode", compression, "Compression mode", compression)
+	}
+	builder.Fill("CodecID", codecID, "Codec ID", codecID)
+	structuredFacts.Apply(builder)
+	return builder.Snapshot(canonicalStreamPolicy{}).canonicalSeed
+}
+
+// appendMP4TextOnlyFields preserves sample-entry descriptions that have no
+// structured schema representation.
+func appendMP4TextOnlyFields(builder *canonicalStreamBuilder, kind StreamKind, fields []Field) {
+	for _, field := range fields {
+		if len(mapStreamFieldsToJSON(kind, []Field{field})) == 0 {
+			builder.Text(field.Name, field.Value)
+		}
+	}
 }
 
 const (

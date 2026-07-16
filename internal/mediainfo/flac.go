@@ -29,12 +29,10 @@ type flacStreamInfo struct {
 	md5           string
 }
 
-// ParseFLAC parses FLAC metadata and returns container, stream, and JSON field
-// data. Oversized or malformed comments and pictures are skipped without
-// preventing valid audio parsing. It returns false when the reader cannot be
-// rewound/read or the input does not begin with a valid FLAC signature.
-// ParseFLAC reads FLAC container metadata and returns legacy-compatible streams and General JSON data.
-func ParseFLAC(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, map[string]string, map[string]string, bool) {
+// parseFLAC parses FLAC metadata into canonical stream and General facts.
+// Oversized or malformed comments and pictures are skipped without preventing
+// valid audio parsing. Invalid signatures and unreadable inputs return false.
+func parseFLAC(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, *canonicalStructuredFacts, *structuredNode, bool) {
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		return ContainerInfo{}, nil, nil, nil, false
 	}
@@ -190,17 +188,17 @@ func ParseFLAC(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, map[str
 		}
 	}
 
-	generalJSON, generalJSONRaw := flacTagsToGeneralJSON(tags, encoder)
-	if coverMIME != "" && generalJSON != nil {
-		generalJSON["Cover"] = "Yes"
-		generalJSON["Cover_Mime"] = coverMIME
+	generalFacts, generalExtra := flacTagsToGeneralFacts(tags, encoder)
+	if coverMIME != "" && (len(generalFacts.values) > 0 || generalExtra != nil) {
+		generalFacts.SetSame("Cover", "Yes")
+		generalFacts.SetSame("Cover_Mime", coverMIME)
 		if coverType != "" {
-			generalJSON["Cover_Type"] = coverType
+			generalFacts.SetSame("Cover_Type", coverType)
 		}
 	}
 
 	audioStream := canonicalFLACAudioStream(channels, sampleRate, bitsPerSample, totalSamples, duration, bitrate, rawBitrate, streamSize, encoder, encodedLibraryName, encodedLibraryVersion, encodedLibraryDate, md5Hex)
-	return info, []Stream{audioStream}, generalJSON, generalJSONRaw, true
+	return info, []Stream{audioStream}, generalFacts, generalExtra, true
 }
 
 // canonicalFLACAudioStream records FLAC audio facts in canonical units before creating a legacy snapshot.
@@ -272,11 +270,8 @@ func canonicalFLACAudioStream(channels uint8, sampleRate uint32, bitsPerSample u
 		store.MarkLegacyJSON(ref, name, override.Val, false)
 	}
 	if md5Hex != "" {
-		raw := renderJSONObject([]jsonKV{{Key: "MD5_Unencoded", Val: md5Hex}}, false)
-		node, err := parseStructuredNode(raw)
-		if err != nil {
-			node = structuredNode{Kind: structuredRaw, Text: raw}
-		}
+		node := structuredObjectFromKVs([]jsonKV{{Key: "MD5_Unencoded", Val: md5Hex}})
+		raw := structuredNodeText(node)
 		_, known := structuredFieldSpec(StreamAudio, "extra")
 		store.appendEntry(store.stream(ref), fieldEntry{
 			Name:          "extra",
@@ -560,19 +555,17 @@ func flacDerivedLayoutIsOmitted(vendor string) bool {
 	return major > 1 || major == 1 && (minor == 3 || version == "1.4.2" || minor >= 5)
 }
 
-func flacTagsToGeneralJSON(tags map[string]string, encoder string) (map[string]string, map[string]string) {
-	if len(tags) == 0 && encoder == "" {
-		return nil, nil
-	}
-	general := map[string]string{}
-	raw := map[string]string{}
+// flacTagsToGeneralFacts maps Vorbis comments to canonical General scalars and
+// retains unrecognized comments as one ordered extra object.
+func flacTagsToGeneralFacts(tags map[string]string, encoder string) (*canonicalStructuredFacts, *structuredNode) {
+	general := &canonicalStructuredFacts{}
 
 	mapped := map[string]bool{}
 	set := func(key, val string) {
 		if val == "" {
 			return
 		}
-		general[key] = val
+		general.SetSame(fieldName(key), val)
 	}
 
 	if strings.HasPrefix(encoder, "Lavf") {
@@ -646,7 +639,7 @@ func flacTagsToGeneralJSON(tags map[string]string, encoder string) (map[string]s
 		mapped["DATE"] = true
 	}
 	if v := tags["YEAR"]; v != "" {
-		if general["Recorded_Date"] == "" {
+		if general.Legacy("Recorded_Date") == "" {
 			set("Recorded_Date", v)
 		}
 		mapped["YEAR"] = true
@@ -660,16 +653,12 @@ func flacTagsToGeneralJSON(tags map[string]string, encoder string) (map[string]s
 		}
 		extraFields = append(extraFields, jsonKV{Key: k, Val: v})
 	}
+	var extra *structuredNode
 	if len(extraFields) > 0 {
-		raw["extra"] = renderJSONObject(extraFields, false)
+		node := structuredObjectFromKVs(extraFields)
+		extra = &node
 	}
-	if len(general) == 0 {
-		general = nil
-	}
-	if len(raw) == 0 {
-		raw = nil
-	}
-	return general, raw
+	return general, extra
 }
 
 func firstNonEmpty(values ...string) string {

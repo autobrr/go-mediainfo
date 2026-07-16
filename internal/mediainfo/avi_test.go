@@ -1,9 +1,17 @@
 package mediainfo
 
 import (
+	"bytes"
 	"encoding/binary"
 	"testing"
 )
+
+func TestParseAVIRejectsShortListChunk(t *testing.T) {
+	data := []byte("RIFF0000AVI LIST\x00\x00\x00\x00hdrl")
+	if _, _, _, ok := ParseAVI(bytes.NewReader(data), int64(len(data))); ok {
+		t.Fatal("short LIST chunk parsed as AVI")
+	}
+}
 
 func TestParseAVIIndex(t *testing.T) {
 	streams := []*aviStream{

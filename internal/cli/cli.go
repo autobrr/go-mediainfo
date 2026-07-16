@@ -108,7 +108,11 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	}
 
 	if output != "" {
-		fmt.Fprintln(stdout, output)
+		if isRawTextOutput(opts) {
+			fmt.Fprint(stdout, output)
+		} else {
+			fmt.Fprintln(stdout, output)
+		}
 	}
 
 	if opts.LogFile != "" {
@@ -123,6 +127,13 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	}
 
 	return exitError
+}
+
+// isRawTextOutput reports whether output already carries MediaInfo's exact
+// raw-text line endings and terminal blank lines.
+func isRawTextOutput(opts Options) bool {
+	return strings.EqualFold(strings.TrimSpace(opts.Language), "raw") &&
+		(opts.Output == "" || strings.EqualFold(strings.TrimSpace(opts.Output), string(mediainfo.OutputText)))
 }
 
 func helpTopic(normalized, program string, stdout io.Writer) int {
@@ -234,7 +245,7 @@ func runCore(opts Options, files []string) (string, int, error) {
 		return "", 0, err
 	}
 
-	output, err := mediainfo.Render(reports, outputFormat)
+	output, err := mediainfo.RenderWithOptions(reports, outputFormat, mediainfo.RenderOptions{Language: opts.Language})
 	if err != nil {
 		return "", 0, err
 	}

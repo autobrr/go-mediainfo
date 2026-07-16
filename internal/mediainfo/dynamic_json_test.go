@@ -6,12 +6,23 @@ import (
 	"testing"
 )
 
-func TestMergeDynamicJSONObjectEscapesOrdersAndJoins(t *testing.T) {
-	got := mergeDynamicJSONObject(`{"Existing":"first","Collision":"base"}`, []dynamicJSONField{
-		{JSONName: "Zeta", Value: "quote \" and\nnewline"},
-		{JSONName: "Collision", Value: "tag"},
-		{JSONName: "Alpha", Value: "value"},
+func TestMergeMatroskaDynamicCanonicalExtrasEscapesOrdersAndJoins(t *testing.T) {
+	builder := newCanonicalStreamBuilder(StreamAudio)
+	builder.StructuredNode("extra", structuredNode{Kind: structuredObject, Object: []structuredMember{
+		{Key: "Existing", Value: structuredNode{Kind: structuredString, Text: "first"}},
+		{Key: "Collision", Value: structuredNode{Kind: structuredString, Text: "base"}},
+	}})
+	stream := builder.Snapshot(canonicalStreamPolicy{})
+	mergeMatroskaDynamicCanonicalExtras(&stream, []structuredMember{
+		{Key: "Zeta", Value: structuredNode{Kind: structuredString, Text: "quote \" and\nnewline"}},
+		{Key: "Collision", Value: structuredNode{Kind: structuredString, Text: "tag"}},
+		{Key: "Alpha", Value: structuredNode{Kind: structuredString, Text: "value"}},
 	})
+	node := canonicalSeedStructuredNode(&stream, "extra")
+	if node == nil {
+		t.Fatal("canonical extra is missing")
+	}
+	got := structuredNodeText(*node)
 
 	var decoded map[string]string
 	if err := json.Unmarshal([]byte(got), &decoded); err != nil {

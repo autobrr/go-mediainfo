@@ -15,60 +15,6 @@ type orderedJSONMember struct {
 	value json.RawMessage
 }
 
-// withDynamicJSONExtras returns a shallow copy of rawExtras whose extra object
-// contains structured dynamic fields after pre-existing parser extras.
-func withDynamicJSONExtras(rawExtras map[string]string, fields []dynamicJSONField) map[string]string {
-	if len(fields) == 0 {
-		return rawExtras
-	}
-	out := maps.Clone(rawExtras)
-	if out == nil {
-		out = map[string]string{}
-	}
-	out["extra"] = mergeDynamicJSONObject(out["extra"], fields)
-	return out
-}
-
-// mergeDynamicJSONObject merges string fields without constructing unescaped
-// JSON in a container parser. Existing members keep their positions; new
-// members retain the supplied deterministic order. Malformed existing JSON is
-// discarded rather than copied into the rendered object.
-func mergeDynamicJSONObject(raw string, fields []dynamicJSONField) string {
-	members, err := parseOrderedJSONObject(raw)
-	if err != nil {
-		members = nil
-	}
-	positions := make(map[string]int, len(members))
-	for i, member := range members {
-		if _, exists := positions[member.key]; !exists {
-			positions[member.key] = i
-		}
-	}
-	for _, field := range fields {
-		name := field.JSONName
-		if name == "" {
-			name = field.Name
-		}
-		if name == "" || field.Value == "" {
-			continue
-		}
-		encoded, _ := json.Marshal(field.Value)
-		if pos, exists := positions[name]; exists {
-			var current string
-			if json.Unmarshal(members[pos].value, &current) == nil {
-				if current != field.Value {
-					encoded, _ = json.Marshal(current + " / " + field.Value)
-				}
-				members[pos].value = encoded
-			}
-			continue
-		}
-		positions[name] = len(members)
-		members = append(members, orderedJSONMember{key: name, value: encoded})
-	}
-	return renderOrderedJSONObject(members)
-}
-
 // parseOrderedJSONObject decodes one JSON object without losing member order or
 // the original representation of each value. Empty input represents no members.
 func parseOrderedJSONObject(raw string) ([]orderedJSONMember, error) {
@@ -124,7 +70,7 @@ func renderOrderedJSONObject(members []orderedJSONMember) string {
 
 // matroskaJSONExtraFieldOrder defines the relative order of schema-backed
 // Matroska extra members without constraining dynamic tag placement.
-var matroskaJSONExtraFieldOrder = makeJSONFieldOrder(
+var matroskaJSONExtraFieldOrder = makeStructuredFieldOrder(
 	"SOURCE", "SOURCE_ID", "OriginalSourceMedium", "Source", "Statistics_Tags_Issue",
 	"FromStats_BitRate", "FromStats_Duration", "FromStats_FrameCount", "FromStats_StreamSize",
 	"ComplexityIndex", "NumberOfDynamicObjects", "BedChannelCount", "BedChannelConfiguration",
@@ -136,7 +82,7 @@ var matroskaJSONExtraFieldOrder = makeJSONFieldOrder(
 )
 
 // aviJSONExtraFieldOrder defines MediaInfo's ordering for known AVI extras.
-var aviJSONExtraFieldOrder = makeJSONFieldOrder("IsTruncated", "ConformanceErrors")
+var aviJSONExtraFieldOrder = makeStructuredFieldOrder("IsTruncated", "ConformanceErrors")
 
 // orderMatroskaJSONExtra orders known Matroska extras around untouched dynamic
 // members and returns malformed input unchanged.

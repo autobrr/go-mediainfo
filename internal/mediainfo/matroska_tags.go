@@ -274,11 +274,11 @@ func mediaInfoJSONName(name string) string {
 	return out
 }
 
-// matroskaTagFieldsForJSON splits schema-backed fields from dynamic extra
-// fields while preserving arbitrary non-internal Matroska tags.
-func matroskaTagFieldsForJSON(set matroskaTagSet, kind StreamKind, skip map[string]struct{}) (map[string]string, []dynamicJSONField) {
+// matroskaTagFieldsForJSON splits schema-backed fields from ordered canonical
+// extra members while preserving arbitrary non-internal Matroska tags.
+func matroskaTagFieldsForJSON(set matroskaTagSet, kind StreamKind, skip map[string]struct{}) (map[string]string, []structuredMember) {
 	known := map[string]string{}
-	dynamic := make([]dynamicJSONField, 0, len(set.values))
+	dynamic := make([]structuredMember, 0, len(set.values))
 	for _, field := range set.sorted() {
 		if _, skipped := skip[field.name]; skipped || matroskaTagIsInternal(field.rawName, kind) {
 			continue
@@ -295,14 +295,11 @@ func matroskaTagFieldsForJSON(set matroskaTagSet, kind StreamKind, skip map[stri
 			}
 		}
 		name := mediaInfoJSONName(fieldName)
-		if isKnownJSONField(kind, name) || kind == StreamGeneral && isMatroskaGeneralTagJSONField(name) {
+		if isKnownStructuredField(kind, name) || kind == StreamGeneral && isMatroskaGeneralTagJSONField(name) {
 			known[name] = field.value
 			continue
 		}
-		dynamic = append(dynamic, dynamicJSONField{
-			RawName: field.rawName, Name: fieldName, JSONName: name, Value: field.value,
-			Scope: dynamicFieldTrack, Source: dynamicFieldSourceMatroskaTag, Order: field.order,
-		})
+		dynamic = append(dynamic, structuredMember{Key: name, Value: structuredNode{Kind: structuredString, Text: field.value}})
 	}
 	return known, dynamic
 }
@@ -350,30 +347,22 @@ func applyMatroskaTrackTags(info *MatroskaInfo) {
 			continue
 		}
 		known, dynamic := matroskaTagFieldsForJSON(*set, stream.Kind, nil)
-		if stream.JSON == nil && len(known) > 0 {
-			stream.JSON = map[string]string{}
-		}
 		for name, value := range known {
-			if !streamHasJSONField(*stream, name) {
-				stream.JSON[name] = value
+			if !streamHasCanonicalStructuredField(*stream, name) {
+				replaceCanonicalSeedLegacyFill(stream, fieldName(name), value, "", "")
 			}
 		}
-		stream.dynamicJSON = append(stream.dynamicJSON, dynamic...)
+		mergeMatroskaDynamicCanonicalExtras(stream, dynamic)
 	}
 }
 
-// streamHasJSONField reports whether a stream already supplies a JSON key via
-// explicit, raw, or text-derived fields.
-func streamHasJSONField(stream Stream, name string) bool {
-	if stream.JSON[name] != "" || stream.JSONRaw[name] != "" {
+// streamHasCanonicalStructuredField reports whether a stream already owns a
+// canonical scalar or compound node for the structured field name.
+func streamHasCanonicalStructuredField(stream Stream, name string) bool {
+	if _, found := canonicalSeedValue(stream, fieldName(name)); found {
 		return true
 	}
-	for _, field := range mapStreamFieldsToJSON(stream.Kind, stream.Fields) {
-		if field.Key == name {
-			return true
-		}
-	}
-	return false
+	return canonicalSeedStructuredNode(&stream, fieldName(name)) != nil
 }
 
 // applyMatroskaGeneralTags projects file-level tags into schema fields or
@@ -383,30 +372,27 @@ func applyMatroskaGeneralTags(general *Stream, set matroskaTagSet) {
 		return
 	}
 	known, dynamic := matroskaTagFieldsForJSON(set, StreamGeneral, nil)
-	if general.JSON == nil && len(known) > 0 {
-		general.JSON = map[string]string{}
-	}
 	if tagTitle := known["Title"]; tagTitle != "" {
-		title := mergeMatroskaTitle(firstNonEmpty(general.JSON["Title"], findField(general.Fields, "Title")), tagTitle)
-		general.JSON["Title"] = title
-		general.JSON["Movie"] = title
+		canonicalTitle, _ := canonicalSeedValue(*general, "Title")
+		title := mergeMatroskaTitle(canonicalTitle, tagTitle)
+		replaceCanonicalSeedLegacyFill(general, "Title", title, "", "")
+		replaceCanonicalSeedLegacyFill(general, "Movie", title, "", "")
 		delete(known, "Title")
 	}
 	for name, value := range known {
-		if !streamHasJSONField(*general, name) {
-			general.JSON[name] = value
+		if !streamHasCanonicalStructuredField(*general, name) {
+			replaceCanonicalSeedLegacyFill(general, fieldName(name), value, "", "")
 		}
 	}
-	if title := general.JSON["Title"]; title != "" && general.JSON["Movie"] == "" {
-		general.JSON["Movie"] = title
+	title, _ := canonicalSeedValue(*general, "Title")
+	if movie, _ := canonicalSeedValue(*general, "Movie"); title != "" && movie == "" {
+		replaceCanonicalSeedLegacyFill(general, "Movie", title, "", "")
 	}
-	if titleMore := general.JSON["Title_More"]; titleMore != "" && general.JSON["Movie_More"] == "" {
-		general.JSON["Movie_More"] = titleMore
+	titleMore, _ := canonicalSeedValue(*general, "Title_More")
+	if movieMore, _ := canonicalSeedValue(*general, "Movie_More"); titleMore != "" && movieMore == "" {
+		replaceCanonicalSeedLegacyFill(general, "Movie_More", titleMore, "", "")
 	}
-	for i := range dynamic {
-		dynamic[i].Scope = dynamicFieldGeneral
-	}
-	general.dynamicJSON = append(general.dynamicJSON, dynamic...)
+	mergeMatroskaDynamicCanonicalExtras(general, dynamic)
 }
 
 // mergeMatroskaTitle mirrors MediaInfo's repeated-value handling: retain the

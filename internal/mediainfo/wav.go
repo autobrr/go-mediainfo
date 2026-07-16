@@ -8,8 +8,8 @@ import (
 	"strings"
 )
 
-// ParseWAV reads RIFF/WAVE metadata and returns legacy-compatible audio and General fields.
-func ParseWAV(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, []Field, map[string]string, bool) {
+// parseWAV reads RIFF/WAVE metadata into canonical audio and General facts.
+func parseWAV(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, []Field, *canonicalStructuredFacts, bool) {
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		return ContainerInfo{}, nil, nil, nil, false
 	}
@@ -151,9 +151,9 @@ func ParseWAV(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, []Field,
 	if encodedApp != "" {
 		generalFields = append(generalFields, Field{Name: "Writing application", Value: encodedApp})
 	}
-	generalJSON := map[string]string{}
+	generalFacts := &canonicalStructuredFacts{}
 	if info.StreamOverheadBytes > 0 {
-		generalJSON["StreamSize"] = strconv.FormatInt(info.StreamOverheadBytes, 10)
+		generalFacts.SetSame("StreamSize", strconv.FormatInt(info.StreamOverheadBytes, 10))
 	}
 
 	audioStream := canonicalWAVAudioStream(
@@ -169,7 +169,7 @@ func ParseWAV(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, []Field,
 		blockAlign,
 	)
 	streams := []Stream{audioStream}
-	return info, streams, generalFields, generalJSON, true
+	return info, streams, generalFields, generalFacts, true
 }
 
 // canonicalWAVAudioStream records PCM stream facts in canonical units before creating a legacy snapshot.

@@ -145,42 +145,35 @@ func TestApplyMatroskaVideoProbesX265OutranksGenericEncoder(t *testing.T) {
 	parseHEVCUserDataUnregistered(x265Payload, &hdr)
 	hdr.timeCode = "01:02:03:04"
 
-	info := MatroskaInfo{Tracks: []Stream{{
-		Kind: StreamVideo,
-		Fields: []Field{
-			{Name: "ID", Value: "1"},
-			{Name: "Writing library", Value: "container encoder"},
-			{Name: "Encoding settings", Value: "container settings"},
-		},
-		JSON: map[string]string{
-			"Encoded_Library":          "container encoder",
-			"Encoded_Library_Name":     "container",
-			"Encoded_Library_Version":  "1",
-			"Encoded_Library_Settings": "container settings",
-		},
-	}}}
+	stream := Stream{Kind: StreamVideo}
+	replaceCanonicalSeedLegacyFill(&stream, "ID", "1", "ID", "1")
+	replaceCanonicalSeedLegacyFill(&stream, "Encoded_Library", "container encoder", "Writing library", "container encoder")
+	replaceCanonicalSeedLegacyFill(&stream, "Encoded_Library_Name", "container", "", "")
+	replaceCanonicalSeedLegacyFill(&stream, "Encoded_Library_Version", "1", "", "")
+	replaceCanonicalSeedLegacyFill(&stream, "Encoded_Library_Settings", "container settings", "Encoding settings", "container settings")
+	info := MatroskaInfo{Tracks: []Stream{stream}}
 	applyMatroskaVideoProbes(&info, map[uint64]*matroskaVideoProbe{1: {codec: "HEVC", hdrInfo: hdr}})
 
-	stream := info.Tracks[0]
-	if got := findField(stream.Fields, "Writing library"); got != x265WantLibrary {
+	stream = info.Tracks[0]
+	if got := matroskaStreamDisplay(stream, "Writing library"); got != x265WantLibrary {
 		t.Fatalf("Writing library = %q, want %q", got, x265WantLibrary)
 	}
-	if got := findField(stream.Fields, "Encoding settings"); got != x265WantSettings {
+	if got := matroskaStreamDisplay(stream, "Encoding settings"); got != x265WantSettings {
 		t.Fatalf("Encoding settings = %q, want %q", got, x265WantSettings)
 	}
-	if got := stream.JSON["Encoded_Library"]; got != "x265 - "+strings.TrimPrefix(x265WantLibrary, "x265 ") {
+	if got, _ := canonicalSeedValue(stream, "Encoded_Library"); got != "x265 - "+strings.TrimPrefix(x265WantLibrary, "x265 ") {
 		t.Fatalf("Encoded_Library = %q", got)
 	}
-	if got := stream.JSON["Encoded_Library_Name"]; got != "x265" {
+	if got, _ := canonicalSeedValue(stream, "Encoded_Library_Name"); got != "x265" {
 		t.Fatalf("Encoded_Library_Name = %q, want x265", got)
 	}
-	if got := stream.JSON["Encoded_Library_Version"]; got != "4.2+1-e444744:[Mac OS X][clang 21.0.0][64 bit] 8bit+10bit+12bit" {
+	if got, _ := canonicalSeedValue(stream, "Encoded_Library_Version"); got != "4.2+1-e444744:[Mac OS X][clang 21.0.0][64 bit] 8bit+10bit+12bit" {
 		t.Fatalf("Encoded_Library_Version = %q, stale container version survived", got)
 	}
-	if got := stream.JSON["Encoded_Library_Settings"]; got != x265WantSettings {
+	if got, _ := canonicalSeedValue(stream, "Encoded_Library_Settings"); got != x265WantSettings {
 		t.Fatalf("Encoded_Library_Settings = %q, want %q", got, x265WantSettings)
 	}
-	if got := stream.JSON["TimeCode_FirstFrame"]; got != "01:02:03:04" {
+	if got, _ := canonicalSeedValue(stream, "TimeCode_FirstFrame"); got != "01:02:03:04" {
 		t.Fatalf("TimeCode_FirstFrame = %q, want independent HEVC time code", got)
 	}
 }
@@ -192,21 +185,20 @@ func TestApplyMatroskaVideoProbesGenericEncoderWithoutX265(t *testing.T) {
 		encoderVersion: "3.7.3",
 		timeCode:       "01:02:03:04",
 	}
-	info := MatroskaInfo{Tracks: []Stream{{
-		Kind:   StreamVideo,
-		Fields: []Field{{Name: "ID", Value: "1"}},
-	}}}
+	stream := Stream{Kind: StreamVideo}
+	replaceCanonicalSeedLegacyFill(&stream, "ID", "1", "ID", "1")
+	info := MatroskaInfo{Tracks: []Stream{stream}}
 
 	applyMatroskaVideoProbes(&info, map[uint64]*matroskaVideoProbe{1: {codec: "HEVC", hdrInfo: hdr}})
 
-	stream := info.Tracks[0]
-	if got := findField(stream.Fields, "Writing library"); got != hdr.encoderLibrary {
+	stream = info.Tracks[0]
+	if got := matroskaStreamDisplay(stream, "Writing library"); got != hdr.encoderLibrary {
 		t.Fatalf("Writing library = %q, want generic %q", got, hdr.encoderLibrary)
 	}
-	if got := stream.JSON["Encoded_Library"]; got != hdr.encoderLibrary {
+	if got, _ := canonicalSeedValue(stream, "Encoded_Library"); got != hdr.encoderLibrary {
 		t.Fatalf("Encoded_Library = %q, want generic %q", got, hdr.encoderLibrary)
 	}
-	if got := stream.JSON["TimeCode_FirstFrame"]; got != hdr.timeCode {
+	if got, _ := canonicalSeedValue(stream, "TimeCode_FirstFrame"); got != hdr.timeCode {
 		t.Fatalf("TimeCode_FirstFrame = %q, want %q", got, hdr.timeCode)
 	}
 }

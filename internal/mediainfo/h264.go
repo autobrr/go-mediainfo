@@ -71,9 +71,25 @@ type h264HRDInfo struct {
 	timeOffsetLength      int
 }
 
+// avcConfigInfo contains AVCDecoderConfigurationRecord profile and PPS facts
+// needed by direct canonical stream builders.
+type avcConfigInfo struct {
+	profile string
+	level   string
+	cabac   *bool
+}
+
+// parseAVCConfig preserves the legacy field-oriented codec helper contract.
 func parseAVCConfig(payload []byte) (string, []Field, h264SPSInfo) {
+	profile, fields, spsInfo, _ := parseAVCConfigDetails(payload)
+	return profile, fields, spsInfo
+}
+
+// parseAVCConfigDetails returns the raw AVC configuration facts needed by
+// direct canonical consumers in addition to the legacy compatibility fields.
+func parseAVCConfigDetails(payload []byte) (string, []Field, h264SPSInfo, avcConfigInfo) {
 	if len(payload) < 7 {
-		return "", nil, h264SPSInfo{}
+		return "", nil, h264SPSInfo{}, avcConfigInfo{}
 	}
 	profileID := payload[1]
 	levelID := payload[3]
@@ -114,7 +130,7 @@ func parseAVCConfig(payload []byte) (string, []Field, h264SPSInfo) {
 		includeColorDescription: true,
 	})
 
-	return profile, fields, spsInfo
+	return profile, fields, spsInfo, avcConfigInfo{profile: profile, level: level, cabac: ppsCABAC}
 }
 
 type h264FieldOptions struct {
@@ -616,6 +632,7 @@ func parseH264HRD(br *bitReader) (h264HRDInfo, bool) {
 	}, true
 }
 
+// parseH264PPSCabac returns the entropy_coding_mode_flag from one PPS NAL.
 func parseH264PPSCabac(nal []byte) (bool, bool) {
 	rbsp := nalToRBSP(nal)
 	br := newBitReader(rbsp)
@@ -625,7 +642,15 @@ func parseH264PPSCabac(nal []byte) (bool, bool) {
 	return flag == 1, true
 }
 
+// parseH264AnnexB decodes SPS/PPS metadata from Annex B payload data and
+// reports false unless a supported AVC configuration is present.
 func parseH264AnnexB(payload []byte) ([]Field, h264SPSInfo, bool) {
+	fields, spsInfo, _, ok := parseH264AnnexBDetails(payload)
+	return fields, spsInfo, ok
+}
+
+// parseH264AnnexBDetails returns display fields plus raw AVC configuration facts.
+func parseH264AnnexBDetails(payload []byte) ([]Field, h264SPSInfo, avcConfigInfo, bool) {
 	var spsInfo h264SPSInfo
 	var hasSPS bool
 	var ppsCABAC *bool
@@ -654,25 +679,25 @@ func parseH264AnnexB(payload []byte) ([]Field, h264SPSInfo, bool) {
 	})
 
 	if !hasSPS || ppsCABAC == nil || !hasSlice {
-		return nil, h264SPSInfo{}, false
+		return nil, h264SPSInfo{}, avcConfigInfo{}, false
 	}
 
 	profile := mapAVCProfile(spsInfo.ProfileID)
 	if profile == "" || spsInfo.Width == 0 || spsInfo.Height == 0 {
-		return nil, h264SPSInfo{}, false
+		return nil, h264SPSInfo{}, avcConfigInfo{}, false
 	}
 	if !isValidAVCLevel(spsInfo.LevelID) {
-		return nil, h264SPSInfo{}, false
+		return nil, h264SPSInfo{}, avcConfigInfo{}, false
 	}
 	if (profile == "Baseline" || profile == "Extended") && *ppsCABAC {
-		return nil, h264SPSInfo{}, false
+		return nil, h264SPSInfo{}, avcConfigInfo{}, false
 	}
 
 	level := formatAVCLevel(spsInfo.LevelID)
 	fields := buildH264Fields(profile, level, spsInfo, ppsCABAC, h264FieldOptions{
 		scanTypeFirst: true,
 	})
-	return fields, spsInfo, true
+	return fields, spsInfo, avcConfigInfo{profile: profile, level: level, cabac: ppsCABAC}, true
 }
 
 // h264SliceCountAnnexB returns the dominant number of slices per picture in an

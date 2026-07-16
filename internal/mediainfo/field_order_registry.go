@@ -1,8 +1,153 @@
 package mediainfo
 
-import "sort"
+// textGeneralFieldOrder is the registered display order for General fields.
+var textGeneralFieldOrder = map[string]int{
+	"ID":                    -2,
+	"Unique ID":             -1,
+	"Complete name":         0,
+	"CompleteName_Last":     0,
+	"Format":                1,
+	"Format/Info":           2,
+	"Format settings":       3,
+	"Format profile":        4,
+	"Format version":        5,
+	"Codec ID":              6,
+	"File size":             7,
+	"Duration":              8,
+	"Overall bit rate mode": 9,
+	"Overall bit rate":      10,
+	"Frame rate":            11,
+	"Writing application":   12,
+	"Writing library":       13,
+	"Encoded date":          14,
+	"Tagged date":           15,
+	"FileExtension_Invalid": 16,
+	"Conformance warnings":  17,
+	" General compliance":   18,
+}
 
-var jsonGeneralFieldOrder = map[string]int{
+// textStreamFieldOrder is the registered display order shared by media fields.
+var textStreamFieldOrder = map[string]int{
+	"ID":                                0,
+	"Menu ID":                           1,
+	"Format":                            2,
+	"Format/Info":                       3,
+	"Commercial name":                   4,
+	"Format version":                    4,
+	"Format profile":                    5,
+	"Muxing mode":                       6,
+	"HDR format":                        6,
+	"Format tier":                       6,
+	"Format settings":                   7,
+	"Format settings, BVOP":             8,
+	"Format settings, QPel":             9,
+	"Format settings, GMC":              10,
+	"Format settings, Matrix":           11,
+	"Format settings, GOP":              12,
+	"Format settings, CABAC":            13,
+	"Format settings, Reference frames": 14,
+	"Format settings, Slice count":      14,
+	"Codec ID":                          15,
+	"Codec ID/Info":                     16,
+	"Duration":                          17,
+	"Source duration":                   18,
+	"Source_Duration_LastFrame":         19,
+	"Bit rate mode":                     20,
+	"Bit rate":                          21,
+	"Nominal bit rate":                  22,
+	"Maximum bit rate":                  23,
+	"Width":                             24,
+	"Height":                            25,
+	"Display aspect ratio":              26,
+	"Channel(s)":                        27,
+	"Channel layout":                    28,
+	"Sampling rate":                     29,
+	"Frame rate mode":                   30,
+	"Frame rate":                        31,
+	"Standard":                          32,
+	"Color space":                       32,
+	"Chroma subsampling":                33,
+	"Chroma subsampling position":       33,
+	"Bit depth":                         34,
+	"Scan type":                         35,
+	"Scan order":                        35,
+	"Compression mode":                  36,
+	"Bits/(Pixel*Frame)":                37,
+	"Time code of first frame":          38,
+	"Time code source":                  39,
+	"GOP, Open/Closed":                  40,
+	"GOP, Open/Closed of first frame":   41,
+	"Delay relative to video":           42,
+	"Count of elements":                 42,
+	"Stream size":                       43,
+	"Source stream size":                43,
+	"Title":                             44,
+	"Language":                          44,
+	"Service kind":                      45,
+	"Writing library":                   46,
+	"Encoding settings":                 47,
+	"Encoded date":                      48,
+	"Tagged date":                       49,
+	"Default":                           48,
+	"Forced":                            49,
+	"Complexity index":                  50,
+	"Number of dynamic objects":         50,
+	"Bed channel count":                 50,
+	"Bed channel configuration":         50,
+	"Dialog Normalization":              50,
+	"bsid":                              50,
+	"dsurmod":                           50,
+	"acmod":                             50,
+	"lfeon":                             50,
+	"compr":                             50,
+	"dynrng":                            50,
+	"cmixlev":                           50,
+	"surmixlev":                         50,
+	"dmixmod":                           50,
+	"ltrtcmixlev":                       50,
+	"ltrtsurmixlev":                     50,
+	"lorocmixlev":                       50,
+	"lorosurmixlev":                     50,
+	"mixlevel":                          50,
+	"roomtyp":                           50,
+	"dialnorm_Average":                  50,
+	"dialnorm_Minimum":                  50,
+	"dialnorm_Maximum":                  50,
+	"dialnorm_Count":                    50,
+	"compr_Average":                     50,
+	"compr_Minimum":                     50,
+	"compr_Maximum":                     50,
+	"compr_Count":                       50,
+	"dynrng_Average":                    50,
+	"dynrng_Minimum":                    50,
+	"dynrng_Maximum":                    50,
+	"dynrng_Count":                      50,
+	"Color range":                       51,
+	"Color primaries":                   52,
+	"Transfer characteristics":          53,
+	"Matrix coefficients":               54,
+	"Mastering display color primaries": 54,
+	"Mastering display luminance":       54,
+	"Maximum Content Light Level":       54,
+	"Maximum Frame-Average Light Level": 54,
+	"Alternate group":                   55,
+	"Codec configuration box":           56,
+	"List":                              57,
+	"Service name":                      58,
+	"Service provider":                  59,
+	"Service type":                      60,
+}
+
+// textFieldOrderPolicy returns the registered display order for kind.
+func textFieldOrderPolicy(kind StreamKind) map[string]int {
+	if kind == StreamGeneral {
+		return textGeneralFieldOrder
+	}
+	return textStreamFieldOrder
+}
+
+// structuredGeneralFieldOrder is the shared structured order for General keys.
+var structuredGeneralFieldOrder = map[string]int{
 	"@type": 0, "ID": 1, "UniqueID": 1, "VideoCount": 2, "AudioCount": 3, "TextCount": 4, "ImageCount": 5, "MenuCount": 6,
 	"FileExtension": 7, "CompleteName_Last": 7, "Format": 8, "Format_Settings": 9, "Format_Version": 10, "Format_Profile": 11,
 	"CodecID": 12, "CodecID_Compatible": 13, "FileSize": 14, "Duration": 15, "OverallBitRate_Mode": 16, "OverallBitRate": 17,
@@ -12,7 +157,8 @@ var jsonGeneralFieldOrder = map[string]int{
 	"Encoded_Library": 32, "Encoded_Library_Name": 33, "Encoded_Library_Version": 34, "Encoded_Library_Settings": 35, "extra": 36,
 }
 
-var jsonVideoFieldOrder = map[string]int{
+// structuredVideoFieldOrder is the shared structured order for video and image keys.
+var structuredVideoFieldOrder = map[string]int{
 	"@type": 0, "@typeorder": 1, "StreamOrder": 2, "FirstPacketOrder": 3, "ID": 4, "MenuID": 5, "UniqueID": 6,
 	"Format": 7, "Format_Version": 8, "Format_Profile": 9, "Format_Level": 10, "Format_Tier": 11,
 	"Format_Settings_CABAC": 12, "Format_Settings_RefFrames": 13, "Format_Settings_BVOP": 14, "Format_Settings_QPel": 14, "Format_Settings_GMC": 14,
@@ -32,7 +178,8 @@ var jsonVideoFieldOrder = map[string]int{
 	"List_StreamKind": 75, "List_StreamPos": 76, "ServiceName": 77, "ServiceProvider": 78, "ServiceType": 79, "extra": 80,
 }
 
-var jsonAudioFieldOrder = map[string]int{
+// structuredAudioFieldOrder is the shared structured order for audio keys.
+var structuredAudioFieldOrder = map[string]int{
 	"@type": 0, "@typeorder": 1, "StreamOrder": 2, "FirstPacketOrder": 3, "ID": 4, "MenuID": 5, "UniqueID": 6,
 	"Format": 7, "Format_Commercial_IfAny": 8, "Format_Settings_Endianness": 9, "Format_Version": 10,
 	"Format_Settings_SBR": 11, "Format_AdditionalFeatures": 12, "MuxingMode": 13, "CodecID": 14, "Duration": 15,
@@ -44,7 +191,8 @@ var jsonAudioFieldOrder = map[string]int{
 	"AlternateGroup": 42, "extra": 43,
 }
 
-var jsonTextFieldOrder = map[string]int{
+// structuredTextFieldOrder is the shared structured order for text keys.
+var structuredTextFieldOrder = map[string]int{
 	"@type": 0, "@typeorder": 1, "StreamOrder": 2, "FirstPacketOrder": 3, "ID": 4, "UniqueID": 5,
 	"Format": 6, "CodecID": 7, "MuxingMode_MoreInfo": 8, "Duration": 9, "BitDepth": 10,
 	"Duration_Start2End": 11, "Duration_Start_Command": 12, "Duration_Start": 13, "Duration_End": 14, "Duration_End_Command": 15,
@@ -53,16 +201,17 @@ var jsonTextFieldOrder = map[string]int{
 	"Title": 26, "Language": 27, "Default": 28, "Forced": 29, "extra": 30,
 }
 
-// jsonAVIGeneralFieldOrder and its stream-specific companions mirror the key
-// order emitted by MediaInfo for AVI JSON.
-var jsonAVIGeneralFieldOrder = makeJSONFieldOrder(
+// structuredAVIGeneralFieldOrder and its stream-specific companions mirror the key
+// order emitted by MediaInfo for AVI structured output.
+var structuredAVIGeneralFieldOrder = makeStructuredFieldOrder(
 	"@type", "ID", "UniqueID", "VideoCount", "AudioCount", "TextCount", "ImageCount", "MenuCount", "FileExtension",
 	"Format", "Format_Settings", "Interleaved", "FileSize", "Duration", "OverallBitRate_Mode", "OverallBitRate", "FrameRate", "FrameCount", "StreamSize",
 	"File_Created_Date", "File_Created_Date_Local", "File_Modified_Date", "File_Modified_Date_Local",
 	"Encoded_Application", "Encoded_Application_Name", "Encoded_Application_Version", "Encoded_Library", "extra",
 )
 
-var jsonAVIVideoFieldOrder = makeJSONFieldOrder(
+// structuredAVIVideoFieldOrder is the evidenced AVI override for video keys.
+var structuredAVIVideoFieldOrder = makeStructuredFieldOrder(
 	"@type", "@typeorder", "StreamOrder", "ID", "UniqueID", "Format", "Format_Version", "Format_Profile", "Format_Level",
 	"Format_Settings_BVOP", "Format_Settings_QPel", "Format_Settings_GMC", "Format_Settings_Matrix", "MuxingMode", "CodecID",
 	"Duration", "BitRate_Mode", "BitRate", "BitRate_Nominal", "BitRate_Maximum", "Width", "Height", "Sampled_Width", "Sampled_Height",
@@ -71,16 +220,17 @@ var jsonAVIVideoFieldOrder = makeJSONFieldOrder(
 	"Encoded_Library", "Encoded_Library_Name", "Encoded_Library_Version", "Encoded_Library_Date", "BufferSize", "extra",
 )
 
-var jsonAVIAudioFieldOrder = makeJSONFieldOrder(
+// structuredAVIAudioFieldOrder is the evidenced AVI override for audio keys.
+var structuredAVIAudioFieldOrder = makeStructuredFieldOrder(
 	"@type", "@typeorder", "StreamOrder", "ID", "UniqueID", "Format", "Format_Version", "Format_Profile", "CodecID",
 	"Duration", "BitRate_Mode", "BitRate", "Channels", "SamplingRate", "SamplingCount", "Compression_Mode", "Delay", "Delay_Source", "Video_Delay", "StreamSize",
 	"Alignment", "Interleave_VideoFrames", "Interleave_Duration", "Interleave_Preload", "Title",
 	"Encoded_Library", "Encoded_Library_Name", "Encoded_Library_Version", "Encoded_Library_Date", "Language", "extra",
 )
 
-// jsonMatroskaGeneralFieldOrder and its stream-specific companions mirror the
-// key order emitted by MediaInfo for Matroska JSON.
-var jsonMatroskaGeneralFieldOrder = makeJSONFieldOrder(
+// structuredMatroskaGeneralFieldOrder and its stream-specific companions mirror the
+// key order emitted by MediaInfo for Matroska structured output.
+var structuredMatroskaGeneralFieldOrder = makeStructuredFieldOrder(
 	"@type", "ID", "UniqueID", "VideoCount", "AudioCount", "TextCount", "ImageCount", "MenuCount",
 	"FileExtension", "CompleteName_Last", "Format", "Format_Version", "Format_Profile", "Format_Settings", "Interleaved", "CodecID", "CodecID_Compatible",
 	"FileSize", "Duration", "OverallBitRate_Mode", "OverallBitRate", "FrameRate", "FrameCount", "StreamSize", "HeaderSize", "DataSize", "FooterSize", "IsStreamable",
@@ -92,7 +242,8 @@ var jsonMatroskaGeneralFieldOrder = makeJSONFieldOrder(
 	"Copyright", "OriginalSourceForm", "BarCode", "TermsOfUse", "Cover", "Cover_Description", "Cover_Type", "Cover_Mime", "Comment", "extra",
 )
 
-var jsonMatroskaVideoFieldOrder = makeJSONFieldOrder(
+// structuredMatroskaVideoFieldOrder is the evidenced Matroska override for video keys.
+var structuredMatroskaVideoFieldOrder = makeStructuredFieldOrder(
 	"@type", "@typeorder", "StreamOrder", "FirstPacketOrder", "ID", "MenuID", "OriginalSourceMedium_ID", "UniqueID",
 	"Format", "Format_Version", "Format_Profile", "MultiView_Count", "Format_Level", "Format_Tier",
 	"HDR_Format", "HDR_Format_Version", "HDR_Format_Profile", "HDR_Format_Level", "HDR_Format_Settings", "HDR_Format_Compression", "HDR_Format_Compatibility",
@@ -114,13 +265,15 @@ var jsonMatroskaVideoFieldOrder = makeJSONFieldOrder(
 	"List_StreamKind", "List_StreamPos", "ServiceName", "ServiceProvider", "ServiceType", "extra",
 )
 
-var jsonMatroskaImageFieldOrder = makeJSONFieldOrder(
+// structuredMatroskaImageFieldOrder is the evidenced Matroska override for image keys.
+var structuredMatroskaImageFieldOrder = makeStructuredFieldOrder(
 	"@type", "@typeorder", "StreamOrder", "Type", "Title", "Format", "Format_Profile", "Format_Compression", "Format_Settings_Packing", "MuxingMode",
 	"Width", "Height", "PixelAspectRatio", "DisplayAspectRatio", "ColorSpace", "ChromaSubsampling", "BitDepth", "Compression_Mode", "StreamSize",
 	"colour_description_present", "colour_range", "colour_primaries", "transfer_characteristics", "matrix_coefficients", "extra",
 )
 
-var jsonMatroskaAudioFieldOrder = makeJSONFieldOrder(
+// structuredMatroskaAudioFieldOrder is the evidenced Matroska override for audio keys.
+var structuredMatroskaAudioFieldOrder = makeStructuredFieldOrder(
 	"@type", "@typeorder", "StreamOrder", "FirstPacketOrder", "ID", "MenuID", "OriginalSourceMedium_ID", "UniqueID",
 	"Format", "Format_Commercial_IfAny", "Format_Version", "Format_Settings_Floor", "Format_Profile", "Format_Settings_Mode", "Format_Settings_SBR", "Format_Settings_Endianness",
 	"MuxingMode", "Format_Settings_Sign", "Format_Settings_ModeExtension", "Format_Settings_PS", "Format_AdditionalFeatures", "CodecID",
@@ -132,14 +285,16 @@ var jsonMatroskaAudioFieldOrder = makeJSONFieldOrder(
 	"Encoded_Library_Settings", "Encoded_Library_Date", "Language", "ServiceKind", "Default", "Forced", "AlternateGroup", "Encoded_Date", "extra",
 )
 
-var jsonMatroskaTextFieldOrder = makeJSONFieldOrder(
+// structuredMatroskaTextFieldOrder is the evidenced Matroska override for text keys.
+var structuredMatroskaTextFieldOrder = makeStructuredFieldOrder(
 	"@type", "@typeorder", "StreamOrder", "FirstPacketOrder", "ID", "MenuID", "OriginalSourceMedium_ID", "UniqueID", "Format", "MuxingMode", "CodecID", "MuxingMode_MoreInfo",
 	"Duration", "BitDepth", "Duration_Start2End", "Duration_Start_Command", "Duration_Start", "Duration_End", "Duration_End_Command",
 	"BitRate_Mode", "BitRate", "FrameRate", "FrameRate_Num", "FrameRate_Den", "FrameCount", "ElementCount", "Compression_Mode", "Delay", "Video_Delay", "StreamSize",
 	"FirstDisplay_Delay_Frames", "FirstDisplay_Type", "Title", "Encoded_Library", "Language", "ServiceKind", "Default", "Forced", "extra",
 )
 
-var jsonMenuFieldOrder = map[string]int{
+// structuredMenuFieldOrder is the shared structured order for menu keys.
+var structuredMenuFieldOrder = map[string]int{
 	"@type":            0,
 	"@typeorder":       1,
 	"StreamOrder":      2,
@@ -161,8 +316,8 @@ var jsonMenuFieldOrder = map[string]int{
 	"extra":            18,
 }
 
-// makeJSONFieldOrder converts an ordered key list into sortable positions.
-func makeJSONFieldOrder(names ...string) map[string]int {
+// makeStructuredFieldOrder converts an ordered key list into sortable positions.
+func makeStructuredFieldOrder(names ...string) map[string]int {
 	order := make(map[string]int, len(names))
 	for index, name := range names {
 		order[name] = index
@@ -170,106 +325,77 @@ func makeJSONFieldOrder(names ...string) map[string]int {
 	return order
 }
 
-func sortJSONFields(kind StreamKind, fields []jsonKV) []jsonKV {
-	return sortJSONFieldsWithOrder(fields, jsonFieldOrder(kind))
-}
-
-// sortJSONFieldsForContainer reorders fields in place using a container-specific
-// schema when one exists and the shared stream schema otherwise.
-func sortJSONFieldsForContainer(kind StreamKind, fields []jsonKV, containerFormat string) []jsonKV {
-	order := jsonFieldOrder(kind)
+// structuredFieldOrderForContainer returns the active structured order policy.
+func structuredFieldOrderForContainer(kind StreamKind, containerFormat string) map[string]int {
 	switch containerFormat {
 	case "Matroska":
-		order = jsonMatroskaFieldOrder(kind)
+		return structuredMatroskaFieldOrderPolicy(kind)
 	case "AVI":
-		order = jsonAVIFieldOrder(kind)
+		return structuredAVIFieldOrderPolicy(kind)
+	default:
+		return structuredFieldOrderPolicy(kind)
 	}
-	return sortJSONFieldsWithOrder(fields, order)
 }
 
-// jsonAVIFieldOrder returns the AVI key order for kind.
-func jsonAVIFieldOrder(kind StreamKind) map[string]int {
+// structuredAVIFieldOrderPolicy returns the AVI key order for kind.
+func structuredAVIFieldOrderPolicy(kind StreamKind) map[string]int {
 	switch kind {
 	case StreamGeneral:
-		return jsonAVIGeneralFieldOrder
+		return structuredAVIGeneralFieldOrder
 	case StreamVideo:
-		return jsonAVIVideoFieldOrder
+		return structuredAVIVideoFieldOrder
 	case StreamAudio:
-		return jsonAVIAudioFieldOrder
+		return structuredAVIAudioFieldOrder
 	case StreamText, StreamImage, StreamMenu:
-		return jsonFieldOrder(kind)
+		return structuredFieldOrderPolicy(kind)
 	}
 	panic("unreachable StreamKind")
 }
 
-// sortJSONFieldsWithOrder stably moves registered keys into schema order while
-// retaining the relative order of unregistered dynamic keys.
-func sortJSONFieldsWithOrder(fields []jsonKV, order map[string]int) []jsonKV {
-	positions := map[string]int{}
-	for i, field := range fields {
-		positions[field.Key] = i
-	}
-	sort.SliceStable(fields, func(i, j int) bool {
-		ai, aok := order[fields[i].Key]
-		aj, bok := order[fields[j].Key]
-		switch {
-		case aok && bok:
-			return ai < aj
-		case aok:
-			return true
-		case bok:
-			return false
-		default:
-			return positions[fields[i].Key] < positions[fields[j].Key]
-		}
-	})
-	return fields
-}
-
-// jsonFieldOrder returns the shared JSON key order for kind.
-func jsonFieldOrder(kind StreamKind) map[string]int {
+// structuredFieldOrderPolicy returns the shared structured key order for kind.
+func structuredFieldOrderPolicy(kind StreamKind) map[string]int {
 	switch kind {
 	case StreamGeneral:
-		return jsonGeneralFieldOrder
+		return structuredGeneralFieldOrder
 	case StreamAudio:
-		return jsonAudioFieldOrder
+		return structuredAudioFieldOrder
 	case StreamText:
-		return jsonTextFieldOrder
+		return structuredTextFieldOrder
 	case StreamMenu:
-		return jsonMenuFieldOrder
+		return structuredMenuFieldOrder
 	case StreamImage:
-		return jsonVideoFieldOrder
+		return structuredVideoFieldOrder
 	case StreamVideo:
-		return jsonVideoFieldOrder
+		return structuredVideoFieldOrder
 	}
-	return jsonVideoFieldOrder
+	return structuredVideoFieldOrder
 }
 
-// jsonMatroskaFieldOrder returns the Matroska key order for kind.
-func jsonMatroskaFieldOrder(kind StreamKind) map[string]int {
+// structuredMatroskaFieldOrderPolicy returns the Matroska key order for kind.
+func structuredMatroskaFieldOrderPolicy(kind StreamKind) map[string]int {
 	switch kind {
 	case StreamGeneral:
-		return jsonMatroskaGeneralFieldOrder
+		return structuredMatroskaGeneralFieldOrder
 	case StreamAudio:
-		return jsonMatroskaAudioFieldOrder
+		return structuredMatroskaAudioFieldOrder
 	case StreamText:
-		return jsonMatroskaTextFieldOrder
+		return structuredMatroskaTextFieldOrder
 	case StreamImage:
-		return jsonMatroskaImageFieldOrder
+		return structuredMatroskaImageFieldOrder
 	case StreamVideo:
-		return jsonMatroskaVideoFieldOrder
+		return structuredMatroskaVideoFieldOrder
 	case StreamMenu:
-		return jsonMenuFieldOrder
+		return structuredMenuFieldOrder
 	}
-	return jsonMatroskaVideoFieldOrder
+	return structuredMatroskaVideoFieldOrder
 }
 
-// isKnownJSONField reports whether name has a schema-backed position for kind.
+// isKnownStructuredField reports whether name has a schema-backed position for kind.
 // Structural object keys and the dynamic extra object are not data fields.
-func isKnownJSONField(kind StreamKind, name string) bool {
-	_, ok := jsonFieldOrder(kind)[name]
+func isKnownStructuredField(kind StreamKind, name string) bool {
+	_, ok := structuredFieldOrderPolicy(kind)[name]
 	if !ok {
-		_, ok = jsonMatroskaFieldOrder(kind)[name]
+		_, ok = structuredMatroskaFieldOrderPolicy(kind)[name]
 	}
 	return ok && name != "extra" && name != "@type" && name != "@typeorder"
 }

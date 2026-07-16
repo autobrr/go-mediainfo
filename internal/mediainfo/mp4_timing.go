@@ -2,6 +2,8 @@ package mediainfo
 
 import "encoding/binary"
 
+// mergeSampleInfo combines independently parsed sample-table facts, preferring
+// non-zero scalar values and appending bounded sample-size windows.
 func mergeSampleInfo(a, b SampleInfo) SampleInfo {
 	info := a
 	if b.Format != "" {
@@ -10,13 +12,8 @@ func mergeSampleInfo(a, b SampleInfo) SampleInfo {
 	if len(b.Fields) > 0 {
 		info.Fields = append(info.Fields, b.Fields...)
 	}
-	if len(b.JSON) > 0 {
-		if info.JSON == nil {
-			info.JSON = map[string]string{}
-		}
-		for k, v := range b.JSON {
-			info.JSON[k] = v
-		}
+	if len(b.canonicalSeed) > 0 {
+		info.canonicalSeed = append(info.canonicalSeed, b.canonicalSeed...)
 	}
 	if b.SampleCount > 0 {
 		info.SampleCount = b.SampleCount

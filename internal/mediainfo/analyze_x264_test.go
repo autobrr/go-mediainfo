@@ -62,10 +62,10 @@ func TestMatroskaVideoHasX264Settings(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			stream := Stream{Kind: StreamVideo}
 			if tc.writingLib != "" {
-				stream.Fields = append(stream.Fields, Field{Name: "Writing library", Value: tc.writingLib})
+				replaceCanonicalSeedLegacyFill(&stream, "Encoded_Library", tc.writingLib, "Writing library", tc.writingLib)
 			}
 			if tc.settings != "" {
-				stream.Fields = append(stream.Fields, Field{Name: "Encoding settings", Value: tc.settings})
+				replaceCanonicalSeedLegacyFill(&stream, "Encoded_Library_Settings", tc.settings, "Encoding settings", tc.settings)
 			}
 			if got := matroskaVideoHasX264Settings(stream); got != tc.want {
 				t.Fatalf("matroskaVideoHasX264Settings() = %v, want %v", got, tc.want)

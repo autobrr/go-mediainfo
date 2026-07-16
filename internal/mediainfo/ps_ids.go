@@ -1,5 +1,7 @@
 package mediainfo
 
+// psStream accumulates one MPEG-PS elementary stream's identifiers, timing,
+// codec probes, byte counts, and canonical source facts.
 type psStream struct {
 	id                   byte
 	subID                byte
@@ -38,6 +40,8 @@ type psStream struct {
 	videoLastStartPos    int64
 	videoNoPTSPackets    uint64
 	videoFields          []Field
+	videoAVC             avcConfigInfo
+	videoSPS             h264SPSInfo
 	hasVideoFields       bool
 	videoWidth           uint64
 	videoHeight          uint64

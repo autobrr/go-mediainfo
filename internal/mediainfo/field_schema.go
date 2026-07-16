@@ -66,6 +66,7 @@ var canonicalFieldDefinitions = map[fieldName]fieldSpec{
 	"Format_Settings_Sign":       canonicalField("Format_Settings_Sign", "Format settings, Sign", fieldMeasureNone, fieldValueString),
 	"Duration":                   measuredField("Duration", "Duration", fieldMeasureMilliseconds, fieldValueDecimal),
 	"Source_Duration":            measuredField("Source_Duration", "Source duration", fieldMeasureMilliseconds, fieldValueDecimal),
+	"Source_Duration_LastFrame":  measuredField("Source_Duration_LastFrame", "Source_Duration_LastFrame", fieldMeasureMilliseconds, fieldValueDecimal),
 	"BitRate":                    measuredField("BitRate", "Bit rate", fieldMeasureBitsPerSecond, fieldValueInteger),
 	"BitRate_Nominal":            measuredField("BitRate_Nominal", "Nominal bit rate", fieldMeasureBitsPerSecond, fieldValueInteger),
 	"BitRate_Maximum":            measuredField("BitRate_Maximum", "Maximum bit rate", fieldMeasureBitsPerSecond, fieldValueInteger),
@@ -169,7 +170,7 @@ func structuredFieldSpec(kind StreamKind, key string) (fieldSpec, bool) {
 	if spec, ok := lookupFieldSpec(kind, fieldName(key)); ok {
 		return spec, true
 	}
-	_, knownOrder := jsonFieldOrder(kind)[key]
+	_, knownOrder := structuredFieldOrderPolicy(kind)[key]
 	return fieldSpec{
 		Name:          fieldName(key),
 		Options:       fieldOptions{ShowStructured: true, ShowXML: true, ValueType: fieldValueString},
@@ -180,19 +181,17 @@ func structuredFieldSpec(kind StreamKind, key string) (fieldSpec, bool) {
 
 // textFieldOrder returns the established display order, after all known fields for unknown labels.
 func textFieldOrder(kind StreamKind, label string) int {
-	order := streamFieldOrder
-	if kind == StreamGeneral {
-		order = generalFieldOrder
-	}
+	order := textFieldOrderPolicy(kind)
 	if value, ok := order[label]; ok {
 		return value
 	}
 	return 1 << 20
 }
 
-// structuredFieldOrder returns the established JSON/XML order, after known keys when unknown.
+// structuredFieldOrder returns the established structured order, after known
+// keys when unknown.
 func structuredFieldOrder(kind StreamKind, key string) int {
-	if value, ok := jsonFieldOrder(kind)[key]; ok {
+	if value, ok := structuredFieldOrderPolicy(kind)[key]; ok {
 		return value
 	}
 	return 1 << 20

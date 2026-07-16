@@ -73,7 +73,7 @@ func TestGoldenOutputs(t *testing.T) {
 					want := tc.norm(string(wantBytes))
 
 					if got != want {
-						t.Fatalf("golden mismatch: %s (run: go test ./... -update)", goldenPath)
+						t.Fatalf("golden mismatch: %s (run: go test ./... -update)\nwant=%s\ngot=%s", goldenPath, want, got)
 					}
 				})
 			}

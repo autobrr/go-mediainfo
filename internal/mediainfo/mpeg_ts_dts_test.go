@@ -147,7 +147,8 @@ func TestApplyMatroskaAudioProbes_DTSHDXLLIMAX(t *testing.T) {
 			{Name: "Channel(s)", Value: "8 channels"},
 			{Name: "Default", Value: "Yes"},
 		},
-		JSON: map[string]string{"BitRate": "6242280"},
+		JSON:          map[string]string{"BitRate": "6242280"},
+		canonicalSeed: matroskaDTSCanonicalSeed(matroskaDTSCanonicalFacts{trackNumber: 2, audioChannels: 8, bitRate: 6242280}),
 	}}}
 	probes := map[uint64]*matroskaAudioProbe{
 		2: {
@@ -170,6 +171,7 @@ func TestApplyMatroskaAudioProbes_DTSHDXLLIMAX(t *testing.T) {
 	}
 
 	applyMatroskaAudioProbes(info, probes)
+	refreshCanonicalLegacySnapshot(&info.Tracks[0])
 	stream := info.Tracks[0]
 	if got := findField(stream.Fields, "Format"); got != "DTS XLL X IMAX" {
 		t.Fatalf("Format=%q want DTS XLL X IMAX", got)
@@ -213,7 +215,8 @@ func TestApplyMatroskaAudioProbes_DTSHDXLLPlainKeepsExistingBehavior(t *testing.
 			{Name: "Bit rate", Value: "3 000 kb/s"},
 			{Name: "Channel(s)", Value: "6 channels"},
 		},
-		JSON: map[string]string{"BitRate": "3000000"},
+		JSON:          map[string]string{"BitRate": "3000000"},
+		canonicalSeed: matroskaDTSCanonicalSeed(matroskaDTSCanonicalFacts{trackNumber: 2, audioChannels: 6, bitRate: 3000000}),
 	}}}
 	probes := map[uint64]*matroskaAudioProbe{
 		2: {
@@ -231,6 +234,7 @@ func TestApplyMatroskaAudioProbes_DTSHDXLLPlainKeepsExistingBehavior(t *testing.
 	}
 
 	applyMatroskaAudioProbes(info, probes)
+	refreshCanonicalLegacySnapshot(&info.Tracks[0])
 	stream := info.Tracks[0]
 	if got := findField(stream.Fields, "Format"); got != "DTS XLL" {
 		t.Fatalf("Format=%q want DTS XLL", got)

@@ -6,8 +6,24 @@ import (
 	"strings"
 )
 
+// TextRenderOptions configures text-specific projection behavior.
+type TextRenderOptions struct {
+	// Language selects MediaInfo raw labels and values for "raw". The zero value
+	// and other languages select the friendly text projection.
+	Language string
+}
+
 // RenderText renders reports in MediaInfo-style aligned text from text projections.
 func RenderText(reports []Report) string {
+	return RenderTextWithOptions(reports, TextRenderOptions{})
+}
+
+// RenderTextWithOptions renders reports through the projection selected by
+// options. Raw matching is case-insensitive and ignores surrounding spaces.
+func RenderTextWithOptions(reports []Report, options TextRenderOptions) string {
+	if strings.EqualFold(strings.TrimSpace(options.Language), "raw") {
+		return renderRawText(reports)
+	}
 	var buf bytes.Buffer
 	for i, report := range reports {
 		if i > 0 {

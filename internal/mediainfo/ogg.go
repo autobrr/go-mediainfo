@@ -9,8 +9,8 @@ import (
 	"strings"
 )
 
-// ParseOgg reads Vorbis or Opus stream metadata and returns legacy-compatible audio and General fields.
-func ParseOgg(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, []Field, map[string]string, bool) {
+// parseOgg reads Vorbis or Opus metadata into canonical audio and General facts.
+func parseOgg(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, []Field, *canonicalStructuredFacts, bool) {
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		return ContainerInfo{}, nil, nil, nil, false
 	}
@@ -115,11 +115,11 @@ func ParseOgg(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, []Field,
 		// Match official: General Encoded_Application comes from OpusTags ENCODER (Lavc... libopus).
 		generalFields = append(generalFields, Field{Name: "Writing application", Value: strings.TrimSpace(tagEncoder)})
 	}
-	generalJSON := map[string]string{}
+	generalFacts := &canonicalStructuredFacts{}
 
 	audioStream := canonicalOggAudioStream(format, serial, channels, sampleRate, duration, tagVendor)
 	streams := []Stream{audioStream}
-	return info, streams, generalFields, generalJSON, true
+	return info, streams, generalFields, generalFacts, true
 }
 
 // canonicalOggAudioStream records Ogg audio facts in canonical units before creating a legacy snapshot.

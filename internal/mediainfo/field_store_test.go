@@ -63,8 +63,8 @@ func TestAnalyzedSampleCanonicalStoresValidate(t *testing.T) {
 	}
 }
 
-func TestSmallAudioParsersSeedCanonicalFields(t *testing.T) {
-	for _, name := range []string{"sample.mp3", "sample.flac", "sample.wav", "sample.ogg"} {
+func TestDirectParsersSeedCanonicalFields(t *testing.T) {
+	for _, name := range []string{"sample.mp3", "sample.flac", "sample.wav", "sample.ogg", "sample.mp4", "sample.mpg", "sample.avi", "sample.vob", "sample_ac3.vob", "sample.ts"} {
 		t.Run(name, func(t *testing.T) {
 			report, err := AnalyzeFile(filepath.Join("samples", name))
 			if err != nil {
@@ -77,12 +77,50 @@ func TestSmallAudioParsersSeedCanonicalFields(t *testing.T) {
 			if store == nil || len(store.streams) < 2 {
 				t.Fatal("analysis did not attach the canonical store")
 			}
-			for _, entry := range store.streams[1].Fields {
-				if entry.Projected {
-					t.Fatalf("field %q came from the legacy projection", entry.Name)
+			for _, stored := range store.streams[1:] {
+				for _, entry := range stored.Fields {
+					key := firstNonEmpty(entry.StructuredKey, string(entry.Name))
+					if key == "@type" || key == "@typeorder" || key == "StreamOrder" {
+						continue
+					}
+					if entry.Projected {
+						t.Fatalf("field %q came from the legacy projection", entry.Name)
+					}
 				}
 			}
 		})
+	}
+}
+
+func TestMP4ContainerFactsUseDirectCanonicalFill(t *testing.T) {
+	report, err := AnalyzeFile(filepath.Join("samples", "sample.mp4"))
+	if err != nil {
+		t.Fatalf("AnalyzeFile: %v", err)
+	}
+	if len(report.Streams) == 0 {
+		t.Fatal("analysis returned no streams")
+	}
+	for index, stream := range report.Streams {
+		if len(stream.canonicalSeed) == 0 {
+			t.Fatalf("stream %d did not retain a canonical seed", index)
+		}
+		keys := []string{"ID", "Format", "Duration", "StreamSize", "FrameCount"}
+		if stream.Kind == StreamVideo {
+			keys = append(keys, "FrameRate")
+		}
+		for _, key := range keys {
+			foundDirect := false
+			for _, entry := range stream.canonicalSeed {
+				structuredKey := firstNonEmpty(entry.StructuredKey, string(entry.Name))
+				if structuredKey == key && entry.Options.ShowStructured && !entry.Projected {
+					foundDirect = true
+					break
+				}
+			}
+			if !foundDirect {
+				t.Fatalf("stream %d field %q did not use direct canonical fill", index, key)
+			}
+		}
 	}
 }
 
@@ -155,5 +193,113 @@ func TestCanonicalSnapshotFallsBackAfterLegacyMutation(t *testing.T) {
 	report.General.Fields[0].Value = "AVI"
 	if output := RenderJSON([]Report{report}); !strings.Contains(output, `"Format":"AVI"`) || strings.Contains(output, `"Format":"Matroska"`) {
 		t.Fatalf("mutated JSON = %s", output)
+	}
+}
+
+// TestReplaceCanonicalSeedFillRestoresXMLVisibility verifies a later display
+// fill promotes an earlier JSON-only scalar into the shared XML projection.
+func TestReplaceCanonicalSeedFillRestoresXMLVisibility(t *testing.T) {
+	builder := newCanonicalStreamBuilder(StreamVideo)
+	builder.StructuredJSONOnly("BitRate_Nominal", "1000000")
+	stream := builder.Snapshot(canonicalStreamPolicy{})
+	replaceCanonicalSeedFill(&stream, "BitRate_Nominal", "1000000", "Nominal bit rate", "1 000 kb/s")
+
+	report := Report{
+		Ref:     "canonical-xml-visibility.mkv",
+		General: Stream{Kind: StreamGeneral, Fields: []Field{{Name: "Format", Value: "Matroska"}}, JSON: map[string]string{"Format": "Matroska"}},
+		Streams: []Stream{stream},
+	}
+	attachCanonicalStore(&report)
+	if output := RenderXML([]Report{report}); !strings.Contains(output, "<BitRate_Nominal>1000000</BitRate_Nominal>") {
+		t.Fatalf("XML omitted promoted direct scalar: %s", output)
+	}
+}
+
+// TestCanonicalLegacyMarkerOverridesStaleSnapshot verifies migrated parser
+// values remain authoritative over compatibility maps captured before probing.
+func TestCanonicalLegacyMarkerOverridesStaleSnapshot(t *testing.T) {
+	builder := newCanonicalStreamBuilder(StreamAudio)
+	builder.Fill("Format", "TrueHD", "Format", "TrueHD")
+	stream := builder.Snapshot(canonicalStreamPolicy{})
+	stream.JSON = map[string]string{"Format": "TrueHD"}
+
+	replaceCanonicalSeedLegacyFill(&stream, "Format", "MLP FBA", "Format", "MLP FBA")
+	refreshCanonicalLegacySnapshot(&stream)
+
+	if got := stream.JSON["Format"]; got != "MLP FBA" {
+		t.Fatalf("compatibility Format = %q, want MLP FBA", got)
+	}
+}
+
+// TestCanonicalLegacyRawMarkerTracksObjectMutation verifies later canonical
+// object updates also update the exported raw compatibility snapshot.
+func TestCanonicalLegacyRawMarkerTracksObjectMutation(t *testing.T) {
+	builder := newCanonicalStreamBuilder(StreamAudio)
+	builder.StructuredNode("extra", structuredNode{Kind: structuredObject, Object: []structuredMember{{
+		Key: "First", Value: structuredNode{Kind: structuredString, Text: "one"},
+	}}})
+	stream := builder.Snapshot(canonicalStreamPolicy{})
+	stream.JSONRaw = map[string]string{"extra": `{"First":"stale"}`}
+	setCanonicalSeedLegacyValue(&stream, "extra", `{"First":"one"}`, true)
+	appendCanonicalSeedObjectMembers(&stream, "extra", []structuredMember{{
+		Key: "Second", Value: structuredNode{Kind: structuredString, Text: "two"},
+	}})
+
+	refreshCanonicalLegacySnapshot(&stream)
+
+	if got := stream.JSONRaw["extra"]; got != `{"First":"one","Second":"two"}` {
+		t.Fatalf("compatibility extra = %s", got)
+	}
+}
+
+func TestPartialGeneralCanonicalSeedReplacesLegacyScalarProjection(t *testing.T) {
+	general := Stream{
+		Kind:   StreamGeneral,
+		Fields: []Field{{Name: "Title", Value: "Canonical title"}},
+		JSON:   map[string]string{"Title": "Canonical title"},
+	}
+	replaceCanonicalSeedLegacyFill(&general, "Title", "Canonical title", "", "")
+	report := Report{Ref: "partial-general.mkv", General: general}
+	attachCanonicalStore(&report)
+
+	if output := RenderJSON([]Report{report}); strings.Count(output, `"Title":`) != 1 {
+		t.Fatalf("JSON Title count = %d: %s", strings.Count(output, `"Title":`), output)
+	}
+	if output := RenderXML([]Report{report}); strings.Count(output, "<Title>") != 1 {
+		t.Fatalf("XML Title count = %d: %s", strings.Count(output, "<Title>"), output)
+	}
+}
+
+func TestRefreshCanonicalLegacyMapsAppliesDeletionTombstone(t *testing.T) {
+	stream := Stream{
+		Kind: StreamGeneral,
+		JSON: map[string]string{"FrameCount": "100", "Format": "Matroska"},
+	}
+	markCanonicalCompatibilityDeletion(&stream, "FrameCount")
+
+	refreshCanonicalLegacyMaps(&stream)
+
+	if _, exists := stream.JSON["FrameCount"]; exists {
+		t.Fatalf("FrameCount survived canonical deletion: %#v", stream.JSON)
+	}
+	if got := stream.JSON["Format"]; got != "Matroska" {
+		t.Fatalf("unrelated compatibility value = %q, want Matroska", got)
+	}
+}
+
+func TestCanonicalProjectionPolicySuppressesStreamOrder(t *testing.T) {
+	builder := newCanonicalStreamBuilder(StreamVideo)
+	builder.Fill("Format", "AVC", "Format", "AVC")
+	stream := builder.Snapshot(canonicalStreamPolicy{})
+	omitCanonicalStreamOrder(&stream)
+	report := Report{Ref: "policy.mkv", General: Stream{Kind: StreamGeneral}, Streams: []Stream{stream}}
+
+	attachCanonicalStore(&report)
+
+	if output := RenderJSON([]Report{report}); strings.Contains(output, `"StreamOrder"`) {
+		t.Fatalf("canonical policy emitted StreamOrder: %s", output)
+	}
+	if !report.Streams[0].JSONSkipStreamOrder {
+		t.Fatal("legacy StreamOrder flag was not published")
 	}
 }

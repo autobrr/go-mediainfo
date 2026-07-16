@@ -171,6 +171,10 @@ func TestApplyMatroskaAudioProbes_EAC3JOCTextMetadata(t *testing.T) {
 					{Name: "Forced", Value: "No"},
 				},
 				JSON: map[string]string{"BitRate": "1536000"},
+				canonicalSeed: matroskaAC3CanonicalSeed(matroskaAC3CanonicalFacts{
+					format: "E-AC-3", codecID: "A_EAC3", trackNumber: 2,
+					bitRate: 1536000, defaultValue: true,
+				}),
 			},
 		},
 	}
@@ -211,6 +215,7 @@ func TestApplyMatroskaAudioProbes_EAC3JOCTextMetadata(t *testing.T) {
 	}
 
 	applyMatroskaAudioProbes(info, probes)
+	refreshCanonicalLegacySnapshot(&info.Tracks[0])
 
 	stream := info.Tracks[0]
 	checks := map[string]string{
@@ -263,7 +268,8 @@ func TestApplyMatroskaAudioProbes_EAC3TypeAOnlyOmitsAtmosFields(t *testing.T) {
 			{Name: "Format", Value: "E-AC-3"},
 			{Name: "Codec ID", Value: "A_EAC3"},
 		},
-		JSON: map[string]string{},
+		JSON:          map[string]string{},
+		canonicalSeed: matroskaAC3CanonicalSeed(matroskaAC3CanonicalFacts{format: "E-AC-3", codecID: "A_EAC3", trackNumber: 2}),
 	}}}
 	probes := map[uint64]*matroskaAudioProbe{2: {
 		format: "E-AC-3",
@@ -276,6 +282,7 @@ func TestApplyMatroskaAudioProbes_EAC3TypeAOnlyOmitsAtmosFields(t *testing.T) {
 	}}
 
 	applyMatroskaAudioProbes(info, probes)
+	refreshCanonicalLegacySnapshot(&info.Tracks[0])
 
 	stream := info.Tracks[0]
 	if got := findField(stream.Fields, "Commercial name"); got != "Dolby Digital Plus" {

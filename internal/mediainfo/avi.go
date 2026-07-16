@@ -12,6 +12,7 @@ import (
 const aviMaxVisualScan = 1 << 20
 const aviMaxVOPScan = 32 << 20
 
+// aviMainHeader stores timing, frame-count, and geometry facts from avih.
 type aviMainHeader struct {
 	microSecPerFrame uint32
 	maxBytesPerSec   uint32
@@ -22,6 +23,8 @@ type aviMainHeader struct {
 	height           uint32
 }
 
+// aviStream stores decoded AVI stream-header, format, timing, and codec facts
+// before canonical projection.
 type aviStream struct {
 	index        int
 	kind         StreamKind
@@ -57,11 +60,15 @@ type aviStream struct {
 	hasVideoInfo bool
 }
 
+// vopScanner incrementally counts MPEG-4 Visual picture coding types across
+// payload chunk boundaries.
 type vopScanner struct {
 	carry []byte
 	bvop  *bool
 }
 
+// feed scans one payload chunk for MPEG-4 VOP start codes while retaining the
+// boundary bytes needed by the next chunk.
 func (s *vopScanner) feed(data []byte) {
 	if s.bvop != nil && *s.bvop {
 		return
@@ -96,11 +103,15 @@ func (s *vopScanner) feed(data []byte) {
 	}
 }
 
+// ParseAVI parses RIFF/AVI metadata and bounded payload data with default
+// analysis options.
 func ParseAVI(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, []Field, bool) {
 	info, streams, fields, _, ok := ParseAVIWithOptions(file, size, defaultAnalyzeOptions())
 	return info, streams, fields, ok
 }
 
+// ParseAVIWithOptions parses RIFF/AVI metadata and bounded stream payloads. It
+// returns the writing application separately and reports false for invalid AVI.
 func ParseAVIWithOptions(file io.ReadSeeker, size int64, opts AnalyzeOptions) (ContainerInfo, []Stream, []Field, string, bool) {
 	opts = normalizeAnalyzeOptions(opts)
 	if size < 12 {
@@ -145,6 +156,10 @@ func ParseAVIWithOptions(file io.ReadSeeker, size int64, opts AnalyzeOptions) (C
 			break
 		}
 		if chunkID == "LIST" {
+			if chunkSize < 4 {
+				offset = dataEnd + chunkSize%2
+				continue
+			}
 			var listTypeBytes [4]byte
 			if _, err := readAt(file, dataStart, listTypeBytes[:]); err != nil {
 				break
@@ -281,268 +296,13 @@ func ParseAVIWithOptions(file io.ReadSeeker, size int64, opts AnalyzeOptions) (C
 	}
 
 	for _, st := range streams {
-		fields := []Field{}
-		if st.kind == StreamVideo {
-			var jsonExtras map[string]string
-			fields = append(fields, Field{Name: "ID", Value: strconv.Itoa(st.index)})
-			if format := mapAVICompression(st); format != "" {
-				fields = append(fields, Field{Name: "Format", Value: format})
-			}
-			if st.profile != "" {
-				fields = append(fields, Field{Name: "Format profile", Value: st.profile})
-			}
-			if st.bvop != nil {
-				value := formatYesNo(*st.bvop)
-				// MediaInfo uses "1" for MPEG-4 Visual when BVOP is enabled.
-				if mapAVICompression(st) == "MPEG-4 Visual" && *st.bvop {
-					value = "1"
-				} else if mapAVICompression(st) == "MPEG-4 Visual" && !*st.bvop {
-					value = "No"
-				}
-				fields = append(fields, Field{Name: "Format settings, BVOP", Value: value})
-			}
-			if st.qpel != nil {
-				fields = append(fields, Field{Name: "Format settings, QPel", Value: formatYesNo(*st.qpel)})
-			}
-			if st.gmc != "" {
-				fields = append(fields, Field{Name: "Format settings, GMC", Value: st.gmc})
-			}
-			if st.matrix != "" {
-				fields = append(fields, Field{Name: "Format settings, Matrix", Value: st.matrix})
-			}
-			if codec := func() string {
-				if st.compression != "" {
-					return st.compression
-				}
-				return st.handler
-			}(); codec != "" {
-				fields = append(fields, Field{Name: "Codec ID", Value: codec})
-			}
-			duration := aviStreamDuration(st, main)
-			if duration > 0 {
-				fields = addStreamDuration(fields, duration)
-				if jsonExtras == nil {
-					jsonExtras = map[string]string{}
-				}
-				// Preserve ms precision in JSON (text Duration drops ms for long runtimes).
-				jsonExtras["Duration"] = formatJSONSeconds(duration)
-			}
-			if st.bytes > 0 && duration > 0 {
-				_, _, reportFR := aviReportedFrameRateRatio(st, duration)
-				durationForBitrate := duration
-				if st.length > 0 {
-					if reportFR > 0 {
-						frRounded := math.Round(reportFR*1000) / 1000
-						if frRounded > 0 {
-							durationForBitrate = float64(st.length) / frRounded
-						}
-					}
-				}
-				bitrate := (float64(st.bytes) * 8) / durationForBitrate
-				fields = addStreamBitrate(fields, bitrate)
-				if jsonExtras == nil {
-					jsonExtras = map[string]string{}
-				}
-				jsonExtras["BitRate"] = strconv.FormatInt(int64(math.Round(bitrate)), 10)
-				if st.width > 0 && st.height > 0 {
-					if reportFR > 0 {
-						if bits := formatBitsPerPixelFrame(bitrate, uint64(st.width), uint64(st.height), reportFR); bits != "" {
-							fields = append(fields, Field{Name: "Bits/(Pixel*Frame)", Value: bits})
-						}
-					}
-				}
-			}
-			if st.width > 0 {
-				fields = append(fields, Field{Name: "Width", Value: formatPixels(uint64(st.width))})
-			}
-			if st.height > 0 {
-				fields = append(fields, Field{Name: "Height", Value: formatPixels(uint64(st.height))})
-			}
-			if st.width > 0 && st.height > 0 {
-				if ar := formatAspectRatio(uint64(st.width), uint64(st.height)); ar != "" {
-					fields = append(fields, Field{Name: "Display aspect ratio", Value: ar})
-				}
-			}
-			if frNum, frDen, frameRate := aviReportedFrameRateRatio(st, duration); frameRate > 0 {
-				fields = append(fields, Field{Name: "Frame rate", Value: formatFrameRateRatio(frNum, frDen)})
-				if st.length > 0 {
-					if jsonExtras == nil {
-						jsonExtras = map[string]string{}
-					}
-					jsonExtras["FrameCount"] = strconv.FormatUint(uint64(st.length), 10)
-				}
-			}
-			if st.colorSpace != "" {
-				fields = append(fields, Field{Name: "Color space", Value: st.colorSpace})
-			}
-			if st.chroma != "" {
-				fields = append(fields, Field{Name: "Chroma subsampling", Value: st.chroma})
-			}
-			if st.bitDepth != "" {
-				fields = append(fields, Field{Name: "Bit depth", Value: st.bitDepth})
-			}
-			if st.scanType != "" {
-				fields = append(fields, Field{Name: "Scan type", Value: st.scanType})
-			}
-			if st.scanOrder != "" {
-				fields = append(fields, Field{Name: "Scan order", Value: st.scanOrder})
-			}
-			fields = append(fields, Field{Name: "Compression mode", Value: "Lossy"})
-			fields = append(fields, Field{Name: "Delay", Value: "0.000"})
-			if st.bytes > 0 {
-				if streamSize := formatStreamSize(int64(st.bytes), size); streamSize != "" {
-					fields = append(fields, Field{Name: "Stream size", Value: streamSize})
-				}
-				if jsonExtras == nil {
-					jsonExtras = map[string]string{}
-				}
-				jsonExtras["StreamSize"] = strconv.FormatUint(st.bytes, 10)
-			}
-			if jsonExtras == nil {
-				jsonExtras = map[string]string{}
-			}
-			jsonExtras["Delay"] = "0.000"
-			if st.matrixData != "" {
-				jsonExtras["Format_Settings_Matrix_Data"] = st.matrixData
-			}
-			if st.writingLib != "" && strings.HasPrefix(st.writingLib, "XviD") && !strings.Contains(st.writingLib, "build=") {
-				if version, date, ok := xvidLibraryVersionDate(st.writingLib); ok {
-					jsonExtras["Encoded_Library_Name"] = "XviD"
-					if version != "" {
-						jsonExtras["Encoded_Library_Version"] = version
-					}
-					if date != "" {
-						jsonExtras["Encoded_Library_Date"] = date
-					}
-				}
-			}
-			if st.writingLib != "" && strings.HasPrefix(st.writingLib, "DivX") {
-				// Match MediaInfo JSON: keep raw Encoded_Library in fields, and also emit parsed name/version/date.
-				jsonExtras["Encoded_Library_Name"] = "DivX"
-				if st.writingLib == "DivX503b2207" {
-					jsonExtras["Encoded_Library_Version"] = "6.5.1"
-					jsonExtras["Encoded_Library_Date"] = "2007-03"
-					jsonExtras["BitRate_Nominal"] = "4854000"
-					jsonExtras["BufferSize"] = "1610612736"
-				}
-			}
-			if st.writingLib != "" {
-				fields = append(fields, Field{Name: "Writing library", Value: st.writingLib})
-			}
-			streamsOut = append(streamsOut, Stream{Kind: StreamVideo, Fields: fields, JSON: jsonExtras})
-		} else if st.kind == StreamAudio {
-			fields = append(fields, Field{Name: "ID", Value: strconv.Itoa(st.index)})
-			jsonExtras := map[string]string{}
-
-			format := "Unknown"
-			if st.audioTag == 0x55 {
-				format = "MPEG Audio"
-				jsonExtras["Format_Profile"] = "Layer 3"
-				jsonExtras["Format_Version"] = "1"
-				jsonExtras["Compression_Mode"] = "Lossy"
-				jsonExtras["BitRate_Mode"] = "CBR"
-			}
-			if format != "Unknown" {
-				fields = append(fields, Field{Name: "Format", Value: format})
-			}
-			if isDivX {
-				fields = append(fields, Field{Name: "Title", Value: "Audio"})
-			}
-			if st.audioTag != 0 {
-				// Match official JSON: CodecID is rendered as hex without 0x (e.g., 0x55 -> "55").
-				codec := fmt.Sprintf("%X", st.audioTag)
-				fields = append(fields, Field{Name: "Codec ID", Value: codec})
-				jsonExtras["CodecID"] = codec
-			}
-			if st.audioChans > 0 {
-				fields = append(fields, Field{Name: "Channel(s)", Value: formatChannels(uint64(st.audioChans))})
-				jsonExtras["Channels"] = strconv.FormatUint(uint64(st.audioChans), 10)
-			}
-			if st.audioRate > 0 {
-				fields = append(fields, Field{Name: "Sampling rate", Value: formatSampleRate(float64(st.audioRate))})
-				jsonExtras["SamplingRate"] = strconv.FormatUint(uint64(st.audioRate), 10)
-			}
-			if st.audioAvgBps > 0 {
-				bps := uint64(st.audioAvgBps) * 8
-				fields = append(fields, Field{Name: "Bit rate", Value: formatBitrate(float64(bps))})
-				jsonExtras["BitRate"] = strconv.FormatUint(bps, 10)
-				if st.audioTag == 0x55 {
-					if isMP3CBRBitrate(int64(bps)) {
-						jsonExtras["BitRate_Mode"] = "CBR"
-					} else {
-						jsonExtras["BitRate_Mode"] = "VBR"
-					}
-				}
-			}
-
-			if st.bytes > 0 {
-				jsonExtras["StreamSize"] = strconv.FormatUint(st.bytes, 10)
-				if streamSize := formatStreamSize(int64(st.bytes), size); streamSize != "" {
-					fields = append(fields, Field{Name: "Stream size", Value: streamSize})
-				}
-			}
-			duration := aviAudioDurationSeconds(st)
-			// Some AVIs may be missing a usable byte count (no index + low ParseSpeed).
-			// In that case, fall back to packet count for MP3 duration estimation.
-			if duration == 0 && st.audioTag == 0x55 && st.packetCount > 0 && st.audioRate > 0 {
-				samples := int64(st.packetCount) * 1152
-				duration = float64(samples) / float64(st.audioRate)
-			}
-			if duration > 0 {
-				fields = addStreamDuration(fields, duration)
-				jsonExtras["Duration"] = formatJSONSeconds(duration)
-				if st.audioRate > 0 {
-					// Match official precision: SamplingCount aligns to the 3-decimal Duration in JSON.
-					rounded := math.Round(duration*1000.0) / 1000.0
-					samples := int64(math.Round(rounded * float64(st.audioRate)))
-					if samples > 0 {
-						jsonExtras["SamplingCount"] = strconv.FormatInt(samples, 10)
-					}
-				}
-			}
-
-			if st.audioTag == 0x55 && st.packetCount > 0 {
-				if hdr, ok := findFirstMP3Header(audioData); ok && hdr.channels == 2 && hdr.channelMode == 0x01 {
-					jsonExtras["Format_Settings_Mode"] = "Joint stereo"
-					if (hdr.modeExt & 0x02) != 0 {
-						jsonExtras["Format_Settings_ModeExtension"] = "MS Stereo"
-					} else if (hdr.modeExt & 0x01) != 0 {
-						jsonExtras["Format_Settings_ModeExtension"] = "Intensity Stereo"
-					}
-				}
-				if videoFrameRate > 0 {
-					// MediaInfo: Interleave_VideoFrames = video_packets / audio_packets.
-					videoPackets := float64(0)
-					for _, vst := range streams {
-						if vst.kind == StreamVideo && vst.packetCount > 0 {
-							videoPackets = float64(vst.packetCount)
-							break
-						}
-					}
-					if videoPackets > 0 {
-						ratio := videoPackets / float64(st.packetCount)
-						jsonExtras["Interleave_VideoFrames"] = fmt.Sprintf("%.2f", math.Round(ratio*100)/100)
-						jsonExtras["Interleave_Duration"] = formatJSONFloat(ratio / videoFrameRate)
-						if audioFirstBytes > 0 && st.audioAvgBps > 0 {
-							preload := float64(audioFirstBytes) / float64(st.audioAvgBps)
-							jsonExtras["Interleave_Preload"] = formatJSONFloat(preload)
-						}
-					}
-				}
-			}
-
-			if st.audioAlign == 1 {
-				jsonExtras["Alignment"] = "Split"
-			} else {
-				jsonExtras["Alignment"] = "Aligned"
-			}
-			jsonExtras["Delay"] = "0.000"
-			jsonExtras["Delay_Source"] = "Stream"
-			jsonExtras["Video_Delay"] = "0.000"
-			if enc := findLAMELibrary(audioData); enc != "" {
-				jsonExtras["Encoded_Library"] = enc
-			}
-			streamsOut = append(streamsOut, Stream{Kind: StreamAudio, Fields: fields, JSON: jsonExtras, JSONSkipComputed: true})
+		switch st.kind {
+		case StreamVideo:
+			streamsOut = append(streamsOut, canonicalAVIVideoStream(st, main, size))
+		case StreamAudio:
+			streamsOut = append(streamsOut, canonicalAVIAudioStream(st, streams, size, videoFrameRate, audioFirstBytes, audioData, isDivX))
+		case StreamGeneral, StreamText, StreamImage, StreamMenu:
+			continue
 		}
 	}
 
@@ -577,6 +337,261 @@ func ParseAVIWithOptions(file io.ReadSeeker, size int64, opts AnalyzeOptions) (C
 	}
 
 	return info, streamsOut, generalFields, interleaved, true
+}
+
+// canonicalAVIVideoStream converts parsed RIFF video facts directly into the field store.
+func canonicalAVIVideoStream(st *aviStream, main aviMainHeader, size int64) Stream {
+	builder := newCanonicalStreamBuilder(StreamVideo)
+	builder.Fill("ID", strconv.Itoa(st.index), "ID", strconv.Itoa(st.index))
+	format := mapAVICompression(st)
+	if format != "" {
+		builder.Fill("Format", format, "Format", format)
+	}
+	if st.profile != "" {
+		profile, level := splitProfileLevel(st.profile)
+		builder.Fill("Format_Profile", profile, "Format profile", st.profile)
+		builder.Structured("Format_Level", level)
+	}
+	if st.bvop != nil {
+		value := formatYesNo(*st.bvop)
+		if format == "MPEG-4 Visual" && *st.bvop {
+			value = "1"
+		}
+		builder.Fill("Format_Settings_BVOP", value, "Format settings, BVOP", value)
+	}
+	if st.qpel != nil {
+		value := formatYesNo(*st.qpel)
+		builder.Fill("Format_Settings_QPel", value, "Format settings, QPel", value)
+	}
+	if st.gmc != "" {
+		raw := extractLeadingNumber(st.gmc)
+		if strings.HasPrefix(st.gmc, "No") {
+			raw = "0"
+		}
+		builder.Fill("Format_Settings_GMC", raw, "Format settings, GMC", st.gmc)
+	}
+	if st.matrix != "" {
+		builder.Fill("Format_Settings_Matrix", st.matrix, "Format settings, Matrix", st.matrix)
+	}
+	codec := st.compression
+	if codec == "" {
+		codec = st.handler
+	}
+	if codec != "" {
+		codecID, _ := splitCodecID(codec)
+		builder.Fill("CodecID", codecID, "Codec ID", codec)
+	}
+
+	structuredFacts := &canonicalStructuredFacts{}
+	duration := aviStreamDuration(st, main)
+	if duration > 0 {
+		builder.Fill("Duration", strconv.FormatInt(int64(math.Round(duration*1000)), 10), "Duration", formatDuration(duration))
+		structuredFacts.Set("Duration", strconv.FormatInt(int64(math.Round(duration*1000)), 10), formatJSONSeconds(duration))
+	}
+	if st.bytes > 0 && duration > 0 {
+		_, _, reportFrameRate := aviReportedFrameRateRatio(st, duration)
+		durationForBitrate := duration
+		if st.length > 0 && reportFrameRate > 0 {
+			if rounded := math.Round(reportFrameRate*1000) / 1000; rounded > 0 {
+				durationForBitrate = float64(st.length) / rounded
+			}
+		}
+		bitrate := float64(st.bytes) * 8 / durationForBitrate
+		raw := strconv.FormatInt(int64(math.Round(bitrate)), 10)
+		builder.Fill("BitRate", raw, "Bit rate", formatBitrate(bitrate))
+		structuredFacts.SetSame("BitRate", raw)
+		if st.width > 0 && st.height > 0 && reportFrameRate > 0 {
+			builder.Text("Bits/(Pixel*Frame)", formatBitsPerPixelFrame(bitrate, uint64(st.width), uint64(st.height), reportFrameRate))
+		}
+	}
+	if st.width > 0 {
+		builder.Fill("Width", strconv.FormatUint(uint64(st.width), 10), "Width", formatPixels(uint64(st.width)))
+	}
+	if st.height > 0 {
+		builder.Fill("Height", strconv.FormatUint(uint64(st.height), 10), "Height", formatPixels(uint64(st.height)))
+	}
+	if st.width > 0 && st.height > 0 {
+		if display := formatAspectRatio(uint64(st.width), uint64(st.height)); display != "" {
+			if ratio, ok := parseRatioFloat(display); ok {
+				builder.Fill("DisplayAspectRatio", formatJSONFloat(ratio), "Display aspect ratio", display)
+			}
+		}
+	}
+	if numerator, denominator, frameRate := aviReportedFrameRateRatio(st, duration); frameRate > 0 {
+		builder.Fill("FrameRate", formatJSONFloat(frameRate), "Frame rate", formatFrameRateRatio(numerator, denominator))
+		builder.Structured("FrameRate_Num", strconv.FormatUint(uint64(numerator), 10))
+		builder.Structured("FrameRate_Den", strconv.FormatUint(uint64(denominator), 10))
+		if st.length > 0 {
+			frameCount := strconv.FormatUint(uint64(st.length), 10)
+			structuredFacts.SetSame("FrameCount", frameCount)
+			builder.Structured("FrameCount", frameCount)
+		}
+	}
+	for _, value := range []struct {
+		name  fieldName
+		label string
+		value string
+	}{
+		{"ColorSpace", "Color space", st.colorSpace},
+		{"ChromaSubsampling", "Chroma subsampling", st.chroma},
+		{"BitDepth", "Bit depth", st.bitDepth},
+		{"ScanType", "Scan type", st.scanType},
+		{"ScanOrder", "Scan order", st.scanOrder},
+	} {
+		raw := value.value
+		if value.name == "BitDepth" {
+			raw = extractLeadingNumber(raw)
+		}
+		builder.Fill(value.name, raw, value.label, value.value)
+	}
+	builder.Fill("Compression_Mode", "Lossy", "Compression mode", "Lossy")
+	builder.Fill("Delay", "0.000", "Delay", "0.000")
+	structuredFacts.SetSame("Delay", "0.000")
+	if st.bytes > 0 {
+		raw := strconv.FormatUint(st.bytes, 10)
+		builder.Fill("StreamSize", raw, "Stream size", formatStreamSize(int64(st.bytes), size))
+		structuredFacts.SetSame("StreamSize", raw)
+	}
+	if st.matrixData != "" {
+		structuredFacts.SetSame("Format_Settings_Matrix_Data", st.matrixData)
+		builder.Structured("Format_Settings_Matrix_Data", st.matrixData)
+	}
+	if st.writingLib != "" {
+		encoded := st.writingLib
+		if strings.HasPrefix(encoded, "x264 ") && !strings.HasPrefix(encoded, "x264 - ") {
+			encoded = "x264 - " + strings.TrimPrefix(encoded, "x264 ")
+		}
+		if strings.HasPrefix(encoded, "x265 ") && !strings.HasPrefix(encoded, "x265 - ") {
+			encoded = "x265 - " + strings.TrimPrefix(encoded, "x265 ")
+		}
+		builder.Fill("Encoded_Library", encoded, "Writing library", st.writingLib)
+		if name, version := splitEncodedLibrary(encoded); name != "" {
+			builder.Structured("Encoded_Library_Name", name)
+			builder.Structured("Encoded_Library_Version", version)
+		}
+	}
+	if strings.HasPrefix(st.writingLib, "XviD") && !strings.Contains(st.writingLib, "build=") {
+		if version, date, ok := xvidLibraryVersionDate(st.writingLib); ok {
+			structuredFacts.SetSame("Encoded_Library_Name", "XviD")
+			structuredFacts.SetSame("Encoded_Library_Version", version)
+			structuredFacts.SetSame("Encoded_Library_Date", date)
+		}
+	}
+	if strings.HasPrefix(st.writingLib, "DivX") {
+		structuredFacts.SetSame("Encoded_Library_Name", "DivX")
+		if st.writingLib == "DivX503b2207" {
+			structuredFacts.SetSame("Encoded_Library_Version", "6.5.1")
+			structuredFacts.SetSame("Encoded_Library_Date", "2007-03")
+			structuredFacts.SetSame("BitRate_Nominal", "4854000")
+			structuredFacts.SetSame("BufferSize", "1610612736")
+		}
+	}
+	structuredFacts.Apply(builder)
+	return builder.Snapshot(canonicalStreamPolicy{})
+}
+
+// canonicalAVIAudioStream converts parsed RIFF audio facts directly into the field store.
+func canonicalAVIAudioStream(st *aviStream, streams []*aviStream, size int64, videoFrameRate float64, audioFirstBytes uint64, audioData []byte, isDivX bool) Stream {
+	builder := newCanonicalStreamBuilder(StreamAudio)
+	builder.Fill("ID", strconv.Itoa(st.index), "ID", strconv.Itoa(st.index))
+	structuredFacts := &canonicalStructuredFacts{}
+	if st.audioTag == 0x55 {
+		builder.Fill("Format", "MPEG Audio", "Format", "MPEG Audio")
+		structuredFacts.SetSame("Format_Profile", "Layer 3")
+		structuredFacts.SetSame("Format_Version", "1")
+		structuredFacts.SetSame("Compression_Mode", "Lossy")
+		structuredFacts.SetSame("BitRate_Mode", "CBR")
+	}
+	if isDivX {
+		builder.Fill("Title", "Audio", "Title", "Audio")
+	}
+	if st.audioTag != 0 {
+		codec := fmt.Sprintf("%X", st.audioTag)
+		builder.Fill("CodecID", codec, "Codec ID", codec)
+		structuredFacts.SetSame("CodecID", codec)
+	}
+	if st.audioChans > 0 {
+		raw := strconv.FormatUint(uint64(st.audioChans), 10)
+		builder.Fill("Channels", raw, "Channel(s)", formatChannels(uint64(st.audioChans)))
+		structuredFacts.SetSame("Channels", raw)
+	}
+	if st.audioRate > 0 {
+		raw := strconv.FormatUint(uint64(st.audioRate), 10)
+		builder.Fill("SamplingRate", raw, "Sampling rate", formatSampleRate(float64(st.audioRate)))
+		structuredFacts.SetSame("SamplingRate", raw)
+	}
+	if st.audioAvgBps > 0 {
+		bps := uint64(st.audioAvgBps) * 8
+		raw := strconv.FormatUint(bps, 10)
+		builder.Fill("BitRate", raw, "Bit rate", formatBitrate(float64(bps)))
+		structuredFacts.SetSame("BitRate", raw)
+		if st.audioTag == 0x55 {
+			if isMP3CBRBitrate(int64(bps)) {
+				structuredFacts.SetSame("BitRate_Mode", "CBR")
+			} else {
+				structuredFacts.SetSame("BitRate_Mode", "VBR")
+			}
+		}
+	}
+	if st.bytes > 0 {
+		raw := strconv.FormatUint(st.bytes, 10)
+		builder.Fill("StreamSize", raw, "Stream size", formatStreamSize(int64(st.bytes), size))
+		structuredFacts.SetSame("StreamSize", raw)
+	}
+	duration := aviAudioDurationSeconds(st)
+	if duration == 0 && st.audioTag == 0x55 && st.packetCount > 0 && st.audioRate > 0 {
+		duration = float64(int64(st.packetCount)*1152) / float64(st.audioRate)
+	}
+	if duration > 0 {
+		builder.Fill("Duration", strconv.FormatInt(int64(math.Round(duration*1000)), 10), "Duration", formatDuration(duration))
+		structuredFacts.Set("Duration", strconv.FormatInt(int64(math.Round(duration*1000)), 10), formatJSONSeconds(duration))
+		if st.audioRate > 0 {
+			rounded := math.Round(duration*1000) / 1000
+			if samples := int64(math.Round(rounded * float64(st.audioRate))); samples > 0 {
+				structuredFacts.SetSame("SamplingCount", strconv.FormatInt(samples, 10))
+			}
+		}
+	}
+	if st.audioTag == 0x55 && st.packetCount > 0 {
+		if header, ok := findFirstMP3Header(audioData); ok && header.channels == 2 && header.channelMode == 0x01 {
+			structuredFacts.SetSame("Format_Settings_Mode", "Joint stereo")
+			if header.modeExt&0x02 != 0 {
+				structuredFacts.SetSame("Format_Settings_ModeExtension", "MS Stereo")
+			} else if header.modeExt&0x01 != 0 {
+				structuredFacts.SetSame("Format_Settings_ModeExtension", "Intensity Stereo")
+			}
+		}
+		if videoFrameRate > 0 {
+			videoPackets := float64(0)
+			for _, video := range streams {
+				if video.kind == StreamVideo && video.packetCount > 0 {
+					videoPackets = float64(video.packetCount)
+					break
+				}
+			}
+			if videoPackets > 0 {
+				ratio := videoPackets / float64(st.packetCount)
+				structuredFacts.SetSame("Interleave_VideoFrames", fmt.Sprintf("%.2f", math.Round(ratio*100)/100))
+				structuredFacts.SetSame("Interleave_Duration", formatJSONFloat(ratio/videoFrameRate))
+				if audioFirstBytes > 0 && st.audioAvgBps > 0 {
+					structuredFacts.SetSame("Interleave_Preload", formatJSONFloat(float64(audioFirstBytes)/float64(st.audioAvgBps)))
+				}
+			}
+		}
+	}
+	if st.audioAlign == 1 {
+		structuredFacts.SetSame("Alignment", "Split")
+	} else {
+		structuredFacts.SetSame("Alignment", "Aligned")
+	}
+	structuredFacts.SetSame("Delay", "0.000")
+	structuredFacts.SetSame("Delay_Source", "Stream")
+	structuredFacts.SetSame("Video_Delay", "0.000")
+	if library := findLAMELibrary(audioData); library != "" {
+		structuredFacts.SetSame("Encoded_Library", library)
+	}
+	structuredFacts.Apply(builder)
+	return builder.Snapshot(canonicalStreamPolicy{SkipComputed: true})
 }
 
 func parseAVIHDRL(data []byte, main *aviMainHeader, streams *[]*aviStream) {

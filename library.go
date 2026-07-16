@@ -7,6 +7,7 @@ import (
 	core "github.com/autobrr/go-mediainfo/internal/mediainfo"
 )
 
+// StreamKind identifies a MediaInfo stream category.
 type StreamKind = core.StreamKind
 
 const (
@@ -71,6 +72,14 @@ func AnalyzeFilesWithCount(paths []string, options ...AnalyzeOption) ([]Report, 
 // OutputFormat is a renderer output type.
 type OutputFormat string
 
+// RenderOptions configures representation-specific rendering behavior.
+type RenderOptions struct {
+	// Language selects the text projection. "raw" enables MediaInfo raw labels
+	// and values; the zero value and other languages retain friendly text.
+	// Non-text renderers ignore Language.
+	Language string
+}
+
 const (
 	// OutputText renders text output.
 	OutputText OutputFormat = "TEXT"
@@ -100,9 +109,16 @@ const (
 
 // Render renders reports with the selected format.
 func Render(reports []Report, format OutputFormat) (string, error) {
+	return RenderWithOptions(reports, format, RenderOptions{})
+}
+
+// RenderWithOptions renders reports with the selected format and options.
+// It returns an error when format is unsupported. Language affects text output
+// only; other formats remain unchanged.
+func RenderWithOptions(reports []Report, format OutputFormat, options RenderOptions) (string, error) {
 	switch normalizeOutputFormat(format) {
 	case "", OutputText:
-		return core.RenderText(reports), nil
+		return core.RenderTextWithOptions(reports, core.TextRenderOptions{Language: options.Language}), nil
 	case OutputJSON:
 		return core.RenderJSON(reports), nil
 	case OutputXML, OutputOldXML:

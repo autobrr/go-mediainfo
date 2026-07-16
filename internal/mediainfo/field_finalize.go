@@ -108,11 +108,29 @@ func finalizeGeneratedReportFields(store *fieldStore) {
 		if counts[stream.Kind] > 1 {
 			stream.TypeOrder = kindIndexes[stream.Kind]
 			fillGeneratedStructured(store, streamRef(index), "@typeorder", strconv.Itoa(stream.TypeOrder))
+			if stream.HideTypeOrderXML {
+				setStoredStructuredXMLVisibility(stream, "@typeorder", false)
+			}
 		}
 		if !stream.SkipStreamOrder {
 			fillGeneratedStructured(store, streamRef(index), "StreamOrder", strconv.Itoa(order))
 		}
 		finalizeComputedStreamFacts(store, streamRef(index))
+	}
+}
+
+// setStoredStructuredXMLVisibility changes XML visibility for one generated or
+// parser-owned structured field without affecting its JSON projection.
+func setStoredStructuredXMLVisibility(stream *storedStream, name fieldName, visible bool) {
+	if stream == nil || name == "" {
+		return
+	}
+	for index := range stream.Fields {
+		entry := &stream.Fields[index]
+		key := firstNonEmpty(entry.StructuredKey, string(entry.Name))
+		if key == string(name) {
+			entry.Options.ShowXML = visible
+		}
 	}
 }
 
@@ -132,23 +150,46 @@ func fillGeneratedStructured(store *fieldStore, ref streamRef, name fieldName, v
 	})
 }
 
-// finalizeComputedStreamFacts derives video frame count when duration and frame rate are known.
+// finalizeComputedStreamFacts derives shared video counts, sampled dimensions, and pixel ratio.
 func finalizeComputedStreamFacts(store *fieldStore, ref streamRef) {
 	stream := store.stream(ref)
-	if stream == nil || stream.Kind != StreamVideo || hasStoredField(stream, "FrameCount") {
+	if stream == nil || stream.Kind != StreamVideo {
 		return
 	}
-	durationMilliseconds, durationOK := store.Get(ref, "Duration")
-	frameRateText, frameRateOK := store.Get(ref, "FrameRate")
-	if !durationOK || !frameRateOK {
+	if !hasStoredField(stream, "FrameCount") {
+		durationMilliseconds, durationOK := store.Get(ref, "Duration")
+		frameRateText, frameRateOK := store.Get(ref, "FrameRate")
+		if durationOK && frameRateOK {
+			duration, durationErr := strconv.ParseFloat(durationMilliseconds, 64)
+			frameRate, frameRateErr := strconv.ParseFloat(frameRateText, 64)
+			if durationErr == nil && frameRateErr == nil && duration > 0 && frameRate > 0 {
+				fillGeneratedStructured(store, ref, "FrameCount", strconv.FormatInt(int64(math.Round(duration/1000*frameRate)), 10))
+			}
+		}
+	}
+	widthText, widthOK := store.Get(ref, "Width")
+	heightText, heightOK := store.Get(ref, "Height")
+	if !widthOK || !heightOK {
 		return
 	}
-	duration, durationErr := strconv.ParseFloat(durationMilliseconds, 64)
-	frameRate, frameRateErr := strconv.ParseFloat(frameRateText, 64)
-	if durationErr != nil || frameRateErr != nil || duration <= 0 || frameRate <= 0 {
+	width, widthErr := strconv.ParseFloat(widthText, 64)
+	height, heightErr := strconv.ParseFloat(heightText, 64)
+	if widthErr != nil || heightErr != nil || width <= 0 || height <= 0 {
 		return
 	}
-	fillGeneratedStructured(store, ref, "FrameCount", strconv.FormatInt(int64(math.Round(duration/1000*frameRate)), 10))
+	fillGeneratedStructured(store, ref, "Sampled_Width", trimFloat(width))
+	fillGeneratedStructured(store, ref, "Sampled_Height", trimFloat(height))
+	if hasStoredField(stream, "PixelAspectRatio") {
+		return
+	}
+	displayAspectText, ok := store.Get(ref, "DisplayAspectRatio")
+	if !ok {
+		return
+	}
+	displayAspect, err := strconv.ParseFloat(displayAspectText, 64)
+	if err == nil && displayAspect > 0 {
+		fillGeneratedStructured(store, ref, "PixelAspectRatio", formatJSONFloat(displayAspect/(width/height)))
+	}
 }
 
 // hasStoredField reports whether stream contains name.
