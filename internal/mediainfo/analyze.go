@@ -1797,6 +1797,9 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			var rawWritingApp string
 			var rawWritingLib string
 			for _, field := range generalFields {
+				if field.Name == "Format profile" {
+					generalFacts.SetSame("Format_Profile", field.Value)
+				}
 				if field.Name == "Writing application" {
 					rawWritingApp = field.Value
 				}
@@ -1806,28 +1809,6 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 				general.Fields = appendFieldUnique(general.Fields, field)
 			}
 			streams = parsedStreams
-			isDivX := false
-			for _, stream := range streams {
-				if stream.Kind != StreamVideo {
-					continue
-				}
-				for _, field := range stream.Fields {
-					if field.Name == "Codec ID" && field.Value == "DX50" {
-						isDivX = true
-						break
-					}
-				}
-				if isDivX {
-					break
-				}
-			}
-			if isDivX {
-				// MediaInfo labels DX50-in-AVI as DivX and reports an expected extension of .divx.
-				general.Fields = setFieldValue(general.Fields, "Format", "DivX")
-				general.Fields = appendFieldUnique(general.Fields, Field{Name: "FileExtension_Invalid", Value: "divx"})
-				node := structuredObjectFromKVs([]jsonKV{{Key: "FileExtension_Invalid", Val: "divx"}})
-				generalExtra = &node
-			}
 			if interleaved != "" {
 				generalFacts.SetSame("Interleaved", interleaved)
 			}

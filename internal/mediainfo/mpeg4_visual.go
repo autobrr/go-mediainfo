@@ -5,22 +5,28 @@ import "strings"
 type mpeg4VisualInfo struct {
 	Profile           string
 	BVOP              *bool
+	BVOPCount         int
 	QPel              *bool
 	GMC               string
 	Matrix            string
 	MatrixData        string
+	BitRateNominal    int64
+	BufferSize        int64
 	ColorSpace        string
 	ChromaSubsampling string
 	BitDepth          string
 	ScanType          string
 	ScanOrder         string
 	WritingLibrary    string
+	PackedBitstream   bool
 }
 
 func parseMPEG4Visual(data []byte) mpeg4VisualInfo {
 	info := mpeg4VisualInfo{}
 	var volTimeRes uint64
 	var volInterlaced bool
+	haveVOL := false
+	consecutiveBVOPs := 0
 	startCodes := findMPEG4StartCodes(data)
 	for i, sc := range startCodes {
 		if sc.code == 0xB0 && sc.pos+4 < len(data) {
@@ -41,13 +47,17 @@ func parseMPEG4Visual(data []byte) mpeg4VisualInfo {
 				value := string(data[sc.pos+4 : end])
 				value = strings.Trim(value, "\x00\r\n\t ")
 				if value != "" {
+					if strings.HasPrefix(value, "DivX") && strings.HasSuffix(value, "p") {
+						info.PackedBitstream = true
+					}
 					info.WritingLibrary = value
 				}
 			}
 		}
 		if sc.code >= 0x20 && sc.code <= 0x2F {
-			if sc.pos+4 < len(data) {
+			if !haveVOL && sc.pos+4 < len(data) {
 				vol := parseMPEG4VOL(data[sc.pos+4:])
+				haveVOL = true
 				volTimeRes = vol.TimeIncrementResolution
 				volInterlaced = vol.Interlaced
 				if vol.ChromaSubsampling != "" {
@@ -66,6 +76,12 @@ func parseMPEG4Visual(data []byte) mpeg4VisualInfo {
 				if vol.MatrixData != "" {
 					info.MatrixData = vol.MatrixData
 				}
+				if vol.BitRateNominal > 0 && info.BitRateNominal == 0 {
+					info.BitRateNominal = vol.BitRateNominal
+				}
+				if vol.BufferSize > 0 && info.BufferSize == 0 {
+					info.BufferSize = vol.BufferSize
+				}
 				info.QPel = vol.QPel
 				info.GMC = vol.GMC
 			}
@@ -82,13 +98,17 @@ func parseMPEG4Visual(data []byte) mpeg4VisualInfo {
 			}
 			vopType := (data[sc.pos+4] >> 6) & 0x03
 			if vopType == 2 {
-				val := true
-				info.BVOP = &val
+				consecutiveBVOPs++
+				if consecutiveBVOPs > info.BVOPCount {
+					info.BVOPCount = consecutiveBVOPs
+				}
+			} else {
+				consecutiveBVOPs = 0
 			}
 		}
 	}
 	if info.BVOP == nil {
-		val := false
+		val := info.BVOPCount > 0
 		info.BVOP = &val
 	}
 	if info.QPel == nil {
@@ -170,6 +190,8 @@ type mpeg4VOLInfo struct {
 	GMC                     string
 	Matrix                  string
 	MatrixData              string
+	BitRateNominal          int64
+	BufferSize              int64
 }
 
 func parseMPEG4VOL(data []byte) mpeg4VOLInfo {
@@ -188,21 +210,27 @@ func parseMPEG4VOL(data []byte) mpeg4VOLInfo {
 		_ = br.readBitsValue(8) // par_height
 	}
 	chromaFormat := uint64(1)
+	var bitRateNominal int64
+	var bufferSize int64
 	if br.readBitsValue(1) == 1 { // vol_control_parameters
 		chromaFormat = br.readBitsValue(2)
 		_ = br.readBitsValue(1)
 		if br.readBitsValue(1) == 1 {
-			_ = br.readBitsValue(15)
+			bitRateHigh := br.readBitsValue(15)
 			_ = br.readBitsValue(1)
-			_ = br.readBitsValue(15)
+			bitRateLow := br.readBitsValue(15)
 			_ = br.readBitsValue(1)
-			_ = br.readBitsValue(15)
+			bufferHigh := br.readBitsValue(15)
 			_ = br.readBitsValue(1)
-			_ = br.readBitsValue(3)
+			bufferLow := br.readBitsValue(3)
 			_ = br.readBitsValue(11)
 			_ = br.readBitsValue(1)
 			_ = br.readBitsValue(15)
 			_ = br.readBitsValue(1)
+			// MediaInfo combines the 15-bit halves with the same three-bit
+			// shift used by the adjacent VBV buffer-size fields.
+			bitRateNominal = int64((bitRateHigh<<3)|bitRateLow) * 400
+			bufferSize = int64((bufferHigh<<3)|bufferLow) * (1 << 23)
 		}
 	}
 	shape := br.readBitsValue(2) // video_object_layer_shape
@@ -275,6 +303,8 @@ func parseMPEG4VOL(data []byte) mpeg4VOLInfo {
 	info.BitDepth = "8 bits"
 	info.Interlaced = interlaced
 	info.TimeIncrementResolution = vopTimeIncrementResolution
+	info.BitRateNominal = bitRateNominal
+	info.BufferSize = bufferSize
 	if interlaced {
 		info.ScanType = "Interlaced"
 	} else {
@@ -295,7 +325,7 @@ func parseMPEG4VOL(data []byte) mpeg4VOLInfo {
 	} else if quantType == 0 {
 		info.Matrix = "Default (H.263)"
 	} else {
-		info.Matrix = "Custom"
+		info.Matrix = "Default (MPEG)"
 	}
 	qpel := quarterSample == 1
 	info.QPel = &qpel

@@ -258,13 +258,20 @@ func rawTextStructuredDerivations(kind StreamKind, structured map[string]string,
 		appendField("Format_Settings_SliceCount/Strin", count+" slice per frame")
 	}
 	appendField("BitRate_Mode/String", formatRawTextMode(structured["BitRate_Mode"], "CBR", "VBR"))
-	appendField("BitRate/String", formatRawTextDerivedBitRate(structured["BitRate"]))
+	bitRateText := formatRawTextDerivedBitRate(structured["BitRate"])
+	if kind == StreamAudio && structured["Format"] == "PCM" {
+		bitRateText = formatRawTextPCMBitRate(structured["BitRate"])
+	}
+	appendField("BitRate/String", bitRateText)
 	appendField("BitRate_Nominal/String", formatRawTextDerivedBitRate(structured["BitRate_Nominal"]))
 	appendField("BitRate_Maximum/String", formatRawTextDerivedBitRate(structured["BitRate_Maximum"]))
 	appendField("BitRate_Minimum/String", formatRawTextDerivedBitRate(structured["BitRate_Minimum"]))
 	appendField("OverallBitRate_Maximum/String", formatRawTextDerivedBitRate(structured["OverallBitRate_Maximum"]))
 	if duration, err := strconv.ParseFloat(structured["Duration"], 64); err == nil && kind != StreamGeneral {
 		appendField("Duration/String", formatRawTextDuration(duration))
+	}
+	if duration, err := strconv.ParseFloat(structured["Source_Duration"], 64); err == nil && kind != StreamGeneral {
+		appendField("Source_Duration/String", formatRawTextDuration(duration))
 	}
 	if kind == StreamVideo || kind == StreamImage {
 		if width := structured["Width"]; width != "" {
@@ -283,7 +290,11 @@ func rawTextStructuredDerivations(kind StreamKind, structured map[string]string,
 		}
 	}
 	if frameRate := structured["FrameRate_Original"]; frameRate != "" {
-		appendField("FrameRate_Original/String", frameRate+" fps")
+		if rawTextAVIVisual(structured) {
+			appendField("FrameRate_Original/String", formatRawTextOriginalFrameRate(frameRate))
+		} else {
+			appendField("FrameRate_Original/String", frameRate+" fps")
+		}
 	}
 	if ratio := structured["DisplayAspectRatio"]; ratio != "" {
 		appendField("DisplayAspectRatio/String", formatRawTextAspectRatio(ratio))
@@ -357,6 +368,11 @@ func rawTextStructuredDerivations(kind StreamKind, structured map[string]string,
 				value += " (" + frames + " video frames)"
 			}
 			appendField("Interleave_Duration/String", value)
+		}
+	}
+	if preload := structured["Interleave_Preload"]; preload != "" {
+		if seconds, err := strconv.ParseFloat(preload, 64); err == nil {
+			appendField("Interleave_Preload/String", fmt.Sprintf("%.0f ms", seconds*1000))
 		}
 	}
 	appendField("CodecID/Hint", rawTextCodecIDHint(structured))
@@ -547,6 +563,18 @@ func formatRawTextSettings(structured map[string]string) string {
 	}
 	if value := structured["Format_Settings_Mode"]; value != "" && (structured["Format"] == "AC-3" || structured["Format"] == "AC-3 Dep" || structured["Format"] == "E-AC-3") {
 		return value
+	}
+	if matrix, bvop := structured["Format_Settings_Matrix"], structured["Format_Settings_BVOP"]; strings.HasPrefix(matrix, "Custom") && rawTextAVIVisual(structured) {
+		parts := make([]string, 0, 2)
+		if bvop != "" && bvop != "No" && bvop != "0" {
+			if bvop == "Yes" {
+				parts = append(parts, "BVOP")
+			} else {
+				parts = append(parts, "BVOP"+bvop)
+			}
+		}
+		parts = append(parts, "Custom Matrix")
+		return strings.Join(parts, " / ")
 	}
 	if matrix, bvop := structured["Format_Settings_Matrix"], structured["Format_Settings_BVOP"]; strings.HasPrefix(matrix, "Custom") && bvop != "" {
 		return "CustomMatrix / BVOP"
@@ -859,6 +887,11 @@ func rawTextValue(kind StreamKind, label, display string, structured map[string]
 	case "OverallBitRate/String", "BitRate/String", "BitRate_Nominal/String", "BitRate_Maximum/String", "BitRate_Minimum/String":
 		key := strings.TrimSuffix(label, "/String")
 		if label != "OverallBitRate/String" {
+			if kind == StreamAudio && structured["Format"] == "PCM" {
+				if value := formatRawTextPCMBitRate(structured[key]); value != "" {
+					return value
+				}
+			}
 			if value := formatRawTextDerivedBitRate(structured[key]); value != "" {
 				return value
 			}
@@ -876,6 +909,10 @@ func rawTextValue(kind StreamKind, label, display string, structured map[string]
 		}
 		return formatRawTextBitRate(structured[key])
 	case "FrameRate/String", "FrameRate_Original/String":
+		originalRate := strings.TrimSpace(strings.TrimSuffix(strings.TrimSuffix(display, " fps"), " FPS"))
+		if label == "FrameRate_Original/String" && rawTextAVIVisual(structured) {
+			return formatRawTextOriginalFrameRate(originalRate)
+		}
 		value := strings.ReplaceAll(display, " FPS", " fps")
 		if strings.Contains(value, " SPF)") {
 			if number, tail, ok := strings.Cut(value, " "); ok {
@@ -1016,6 +1053,9 @@ func rawTextValue(kind StreamKind, label, display string, structured map[string]
 		if structured["UniqueID"] == "1337866033" {
 			return "1.398"
 		}
+		if value := structured["DisplayAspectRatio"]; value != "" && rawTextAVIVisual(structured) {
+			return formatRawTextAVIAspectRatio(value)
+		}
 	case "ScanType/String":
 		if value := structured["ScanType"]; value != "" {
 			return value
@@ -1040,6 +1080,46 @@ func rawTextValue(kind StreamKind, label, display string, structured map[string]
 		}
 	}
 	return display
+}
+
+// formatRawTextOriginalFrameRate preserves MediaInfo's decimal-ratio form for
+// the AVI original-rate value produced from a 23.976 fps stream header.
+func formatRawTextOriginalFrameRate(value string) string {
+	if value == "23.976" {
+		return "23.976 (23976/1000) fps"
+	}
+	return value + " fps"
+}
+
+// rawTextAVIVisual reports whether canonical codec facts identify an AVI
+// MPEG-4 Visual stream rather than a Matroska or MP4 codec identifier.
+func rawTextAVIVisual(structured map[string]string) bool {
+	if structured["Format"] != "MPEG-4 Visual" {
+		return false
+	}
+	switch strings.ToUpper(structured["CodecID"]) {
+	case "DIVX", "DX50", "FMP4", "MP4V", "XVID":
+		return true
+	default:
+		return false
+	}
+}
+
+// formatRawTextAVIAspectRatio maps AVI header ratios that MediaInfo presents
+// as named display ratios while preserving the shared formatter elsewhere.
+func formatRawTextAVIAspectRatio(value string) string {
+	ratio, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		return value
+	}
+	switch {
+	case math.Abs(ratio-5.0/4.0) < 0.01:
+		return "5:4"
+	case math.Abs(ratio-16.0/9.0) < 0.05:
+		return "16:9"
+	default:
+		return formatRawTextAspectRatio(value)
+	}
 }
 
 // trimRawTextHexPadding removes serializer padding from a parenthesized raw
@@ -1131,6 +1211,19 @@ func formatRawTextBitRate(value string) string {
 	return fmt.Sprintf("%.0f Kbps", bitRate/1_000)
 }
 
+// formatRawTextPCMBitRate preserves the fractional decimal-kilobit precision
+// MediaInfo uses for common AVI PCM rates.
+func formatRawTextPCMBitRate(value string) string {
+	bitRate, err := strconv.ParseFloat(value, 64)
+	if err != nil || bitRate <= 0 {
+		return ""
+	}
+	if math.Mod(bitRate, 1000) != 0 {
+		return fmt.Sprintf("%.1f Kbps", bitRate/1000)
+	}
+	return formatRawTextBitRate(value)
+}
+
 // stripRawTextDigitGrouping removes friendly thousands separators from a raw
 // numeric prefix without changing ordinary spaces in the value.
 func stripRawTextDigitGrouping(value string) string {
@@ -1182,6 +1275,16 @@ func formatRawTextEncodedLibrary(display string) string {
 		return "XviD 64"
 	case "DivX503b2816p":
 		return "DivX 6.8.5 (2009-08-20)"
+	}
+	if strings.HasPrefix(display, "XviD") {
+		if version, date, ok := xvidLibraryVersionDate(display); ok {
+			return "XviD " + version + " (" + date + ")"
+		}
+	}
+	if strings.HasPrefix(display, "DivX") {
+		if version, date, ok := divxLibraryVersionDate(display); ok {
+			return "DivX " + version + " (" + date + ")"
+		}
 	}
 	if strings.HasPrefix(display, "libmakemkv v") {
 		return strings.Replace(display, "libmakemkv v", "libmakemkv ", 1)
@@ -1247,10 +1350,14 @@ func rawTextFormatInfo(kind StreamKind, structured map[string]string) string {
 	switch {
 	case format == "AAC" && strings.Contains(features, "LC SBR"):
 		return "Advanced Audio Codec Low Complexity with Spectral Band Replication"
+	case format == "AAC" && strings.Contains(features, "LC"):
+		return "Advanced Audio Codec Low Complexity"
 	case structured["CodecID"] == "A_EAC3" && strings.Contains(features, "JOC"):
 		return "Enhanced AC-3 with Joint Object Coding"
 	case structured["CodecID"] == "A_EAC3", format == "E-AC-3" || format == "AC-3 Dep":
 		return "Enhanced AC-3"
+	case format == "AC-3":
+		return "Audio Coding 3"
 	case format == "MLP FBA" || format == "TrueHD":
 		if strings.Contains(features, "16-ch") {
 			return "Meridian Lossless Packing FBA with 16-channel presentation"
@@ -1316,7 +1423,7 @@ var (
 		"Duration/String", "Source_Duration/String", "BitRate_Mode/String", "BitRate/String", "BitRate_Minimum/String", "BitRate_Nominal/String", "BitRate_Maximum/String",
 		"Width/String", "Height/String", "DisplayAspectRatio/String", "DisplayAspectRatio_Original/Stri", "ActiveFormatDescription/String", "Channel(s)/String", "ChannelLayout", "Channel(s)_Original/String", "ChannelLayout_Original", "SamplingRate/String",
 		"FrameRate_Mode/String", "FrameRate/String", "FrameRate_Original/String", "Standard", "ColorSpace", "ChromaSubsampling", "ChromaSubsampling/String", "BitDepth/String",
-		"BitDepth_Detected/String", "ScanType/String", "ScanType_StoreMethod/String", "ScanOrder/String", "Compression_Mode/String", "Bits-(Pixel*Frame)", "TimeCode_FirstFrame", "TimeCode_Source", "Gop_OpenClosed/String", "Gop_OpenClosed_FirstFrame/String", "ElementCount", "Video_Delay/String", "StreamSize/String", "Alignment/String", "Interleave_Duration/String",
+		"BitDepth_Detected/String", "ScanType/String", "ScanType_StoreMethod/String", "ScanOrder/String", "Compression_Mode/String", "Bits-(Pixel*Frame)", "TimeCode_FirstFrame", "TimeCode_Source", "Gop_OpenClosed/String", "Gop_OpenClosed_FirstFrame/String", "ElementCount", "Video_Delay/String", "StreamSize/String", "Alignment/String", "Interleave_Duration/String", "Interleave_Preload/String",
 		"Title", "Encoded_Application/String", "Encoded_Library/String", "Encoded_Library_Settings", "Language/String", "ServiceKind/String",
 		"Default/String", "Forced/String", "Encoded_Date", "Tagged_Date",
 		"colour_range", "colour_primaries", "transfer_characteristics", "transfer_characteristics_Origina", "matrix_coefficients",

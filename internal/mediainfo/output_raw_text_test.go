@@ -78,6 +78,49 @@ func TestRawTextCanonicalValueFormatting(t *testing.T) {
 	if got := formatRawTextDerivedBitRate("109000000"); got != "109 Mbps" {
 		t.Fatalf("formatRawTextDerivedBitRate = %q", got)
 	}
+	if got := formatRawTextPCMBitRate("1411200"); got != "1411.2 Kbps" {
+		t.Fatalf("formatRawTextPCMBitRate = %q", got)
+	}
+	if got := formatRawTextAVIAspectRatio("1.818"); got != "16:9" {
+		t.Fatalf("formatRawTextAVIAspectRatio(1.818) = %q", got)
+	}
+	if got := formatRawTextAVIAspectRatio("1.250"); got != "5:4" {
+		t.Fatalf("formatRawTextAVIAspectRatio(1.250) = %q", got)
+	}
+	if got := formatRawTextEncodedLibrary("DivX503b1025p"); got != "DivX 5.1.1 Beta2 (2003-11)" {
+		t.Fatalf("formatRawTextEncodedLibrary(DivX) = %q", got)
+	}
+	if got := formatRawTextEncodedLibrary("XviD0041"); got != "XviD 1.1.0 (2005-11-22)" {
+		t.Fatalf("formatRawTextEncodedLibrary(XviD) = %q", got)
+	}
+	if got := rawTextValue(StreamVideo, "FrameRate_Original/String", "23.976 fps", map[string]string{"Format": "MPEG-4 Visual", "CodecID": "XVID"}, 0); got != "23.976 (23976/1000) fps" {
+		t.Fatalf("original frame rate = %q", got)
+	}
+}
+
+func TestRawTextAVISettingsAndFormatInfo(t *testing.T) {
+	if got := formatRawTextSettings(map[string]string{
+		"Format":                 "MPEG-4 Visual",
+		"CodecID":                "XVID",
+		"Format_Settings_BVOP":   "1",
+		"Format_Settings_Matrix": "Custom",
+	}); got != "BVOP1 / Custom Matrix" {
+		t.Fatalf("custom MPEG-4 Visual settings = %q", got)
+	}
+	if got := formatRawTextSettings(map[string]string{
+		"Format":                 "MPEG-4 Visual",
+		"CodecID":                "XVID",
+		"Format_Settings_BVOP":   "No",
+		"Format_Settings_Matrix": "Custom",
+	}); got != "Custom Matrix" {
+		t.Fatalf("MPEG-4 Visual settings without BVOP = %q", got)
+	}
+	if got := rawTextFormatInfo(StreamAudio, map[string]string{"Format": "AC-3"}); got != "Audio Coding 3" {
+		t.Fatalf("AC-3 format info = %q", got)
+	}
+	if got := rawTextFormatInfo(StreamAudio, map[string]string{"Format": "AAC", "Format_AdditionalFeatures": "LC"}); got != "Advanced Audio Codec Low Complexity" {
+		t.Fatalf("AAC LC format info = %q", got)
+	}
 }
 
 func TestRawTextBDAVStructuredFormatting(t *testing.T) {

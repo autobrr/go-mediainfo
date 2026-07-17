@@ -262,7 +262,7 @@ var structuredBDAVTextFieldOrder = makeStructuredFieldOrder(
 // order emitted by MediaInfo for AVI structured output.
 var structuredAVIGeneralFieldOrder = makeStructuredFieldOrder(
 	"@type", "ID", "UniqueID", "VideoCount", "AudioCount", "TextCount", "ImageCount", "MenuCount", "FileExtension",
-	"Format", "Format_Settings", "Interleaved", "FileSize", "Duration", "OverallBitRate_Mode", "OverallBitRate", "FrameRate", "FrameCount", "StreamSize",
+	"Format", "Format_Profile", "Format_Settings", "Interleaved", "FileSize", "Duration", "OverallBitRate_Mode", "OverallBitRate", "FrameRate", "FrameCount", "StreamSize",
 	"File_Created_Date", "File_Created_Date_Local", "File_Modified_Date", "File_Modified_Date_Local",
 	"Encoded_Application", "Encoded_Application_Name", "Encoded_Application_Version", "Encoded_Library", "extra",
 )
@@ -270,19 +270,21 @@ var structuredAVIGeneralFieldOrder = makeStructuredFieldOrder(
 // structuredAVIVideoFieldOrder is the evidenced AVI override for video keys.
 var structuredAVIVideoFieldOrder = makeStructuredFieldOrder(
 	"@type", "@typeorder", "StreamOrder", "ID", "UniqueID", "Format", "Format_Version", "Format_Profile", "Format_Level",
-	"Format_Settings_BVOP", "Format_Settings_QPel", "Format_Settings_GMC", "Format_Settings_Matrix", "MuxingMode", "CodecID",
+	"Format_Settings_BVOP", "Format_Settings_QPel", "Format_Settings_GMC", "Format_Settings_Matrix", "Format_Settings_Matrix_Data", "MuxingMode", "CodecID",
 	"Duration", "BitRate_Mode", "BitRate", "BitRate_Nominal", "BitRate_Maximum", "Width", "Height", "Sampled_Width", "Sampled_Height",
-	"PixelAspectRatio", "DisplayAspectRatio", "FrameRate_Mode", "FrameRate", "FrameRate_Num", "FrameRate_Den", "FrameCount",
+	"PixelAspectRatio", "DisplayAspectRatio", "FrameRate_Mode", "FrameRate", "FrameRate_Num", "FrameRate_Den", "FrameRate_Original", "FrameCount",
 	"ColorSpace", "ChromaSubsampling", "BitDepth", "ScanType", "Compression_Mode", "Delay", "StreamSize",
 	"Encoded_Library", "Encoded_Library_Name", "Encoded_Library_Version", "Encoded_Library_Date", "BufferSize", "extra",
 )
 
 // structuredAVIAudioFieldOrder is the evidenced AVI override for audio keys.
 var structuredAVIAudioFieldOrder = makeStructuredFieldOrder(
-	"@type", "@typeorder", "StreamOrder", "ID", "UniqueID", "Format", "Format_Version", "Format_Profile", "CodecID",
-	"Duration", "BitRate_Mode", "BitRate", "Channels", "SamplingRate", "SamplingCount", "Compression_Mode", "Delay", "Delay_Source", "Video_Delay", "StreamSize",
+	"@type", "@typeorder", "StreamOrder", "ID", "UniqueID", "Format", "Format_Commercial_IfAny", "Format_Version", "Format_Profile",
+	"Format_Settings_Mode", "Format_Settings_Endianness", "Format_Settings_Sign", "Format_Settings_ModeExtension", "Format_AdditionalFeatures", "CodecID",
+	"Duration", "Source_Duration", "BitRate_Mode", "BitRate", "BitRate_Nominal", "Channels", "ChannelPositions", "ChannelLayout",
+	"SamplesPerFrame", "SamplingRate", "SamplingCount", "FrameRate", "FrameCount", "BitDepth", "Compression_Mode", "Delay", "Delay_Source", "Video_Delay", "StreamSize",
 	"Alignment", "Interleave_VideoFrames", "Interleave_Duration", "Interleave_Preload", "Title",
-	"Encoded_Library", "Encoded_Library_Name", "Encoded_Library_Version", "Encoded_Library_Date", "Language", "extra",
+	"Encoded_Library", "Encoded_Library_Name", "Encoded_Library_Version", "Encoded_Library_Settings", "Encoded_Library_Date", "Language", "ServiceKind", "extra",
 )
 
 // structuredMatroskaGeneralFieldOrder and its stream-specific companions mirror the
