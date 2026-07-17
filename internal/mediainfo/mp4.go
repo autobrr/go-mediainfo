@@ -18,6 +18,8 @@ type MP4Track struct {
 	Format string
 	// HandlerName is the optional mdia handler name.
 	HandlerName string
+	// HandlerType is the four-character mdia handler code.
+	HandlerType string
 	// LanguageCode is the normalized language code from mdhd metadata.
 	LanguageCode string
 	// CreationTime is the raw MP4 epoch creation timestamp.
@@ -40,6 +42,10 @@ type MP4Track struct {
 	LastSampleDelta uint32
 	// VariableDeltas reports whether decode-time deltas vary.
 	VariableDeltas bool
+	// MinimumSampleDelta is the shortest decode-time delta in track timescale units.
+	MinimumSampleDelta uint32
+	// MaximumSampleDelta is the longest decode-time delta in track timescale units.
+	MaximumSampleDelta uint32
 	// FirstChunkOff is the first media chunk's absolute file offset.
 	FirstChunkOff uint64
 	// DurationSeconds is the media duration before edit-list presentation changes.
@@ -57,8 +63,31 @@ type MP4Track struct {
 	// Width is the parsed display width in pixels.
 	Width uint64
 	// Height is the parsed display height in pixels.
-	Height        uint64
-	canonicalSeed []fieldEntry
+	Height                 uint64
+	canonicalSeed          []fieldEntry
+	sampleEntryType        string
+	nonEmptySampleCount    uint64
+	chunkOffsetsHead       []uint64
+	sampleToChunk          []mp4SampleToChunkEntry
+	hevcNALLengthSize      int
+	avcNALLengthSize       int
+	avcSPS                 h264SPSInfo
+	avcParameterSets       []byte
+	hevcSEI                hevcHDRInfo
+	dolbyVision            dolbyVisionConfig
+	hasDolbyVision         bool
+	hevcContainerMastering bool
+	hevcContainerCLL       bool
+	chapterTrackRefs       []uint32
+	menuForTrackID         uint32
+	sampleStartsHead       []uint64
+	trackTitle             string
+}
+
+// mp4SampleToChunkEntry describes one stsc run for bounded sample reads.
+type mp4SampleToChunkEntry struct {
+	firstChunk      uint32
+	samplesPerChunk uint32
 }
 
 // MP4Info contains parsed movie-level metadata and tracks.
@@ -76,7 +105,8 @@ type MP4Info struct {
 	// MovieModified is the raw MP4 epoch modification timestamp.
 	MovieModified uint64
 	// Chapters contains decoded chapter starts and titles.
-	Chapters []mp4Chapter
+	Chapters     []mp4Chapter
+	generalExtra []jsonKV
 }
 
 // mp4Chapter stores one decoded chapter start and title.
@@ -183,6 +213,13 @@ func parseMoov(buf []byte) (MP4Info, bool) {
 		}
 		if boxType == "udta" {
 			payload := sliceBox(buf, dataOffset, boxSize-headerSize)
+			info.General = append(info.General, parseMP4UserMetadata(payload)...)
+			if extras := parseMP4UnknownUserMetadata(payload); len(extras) > 0 {
+				info.generalExtra = append(info.generalExtra, extras...)
+				for _, extra := range extras {
+					info.General = append(info.General, Field{Name: extra.Key, Value: extra.Val})
+				}
+			}
 			if app := parseMP4WritingApp(payload); app != "" {
 				info.General = append(info.General, Field{Name: "Writing application", Value: app})
 			}
@@ -201,6 +238,7 @@ func parseMoov(buf []byte) (MP4Info, bool) {
 		}
 		offset += boxSize
 	}
+	markMP4ChapterTracks(info.Tracks)
 	if info.Container.HasDuration() || len(info.Tracks) > 0 {
 		return info, true
 	}
@@ -261,6 +299,10 @@ func parseTrak(buf []byte, movieTimescale uint32) (MP4Track, bool) {
 	var hasTkhd bool
 	var editDuration float64
 	var editMediaTime int64
+	var chapterTrackRefs []uint32
+	var trackTitle string
+	var mediaTrack MP4Track
+	var hasMediaTrack bool
 	for offset+8 <= int64(len(buf)) {
 		boxSize, boxType, headerSize := readMP4BoxHeaderFrom(buf, offset)
 		if boxSize <= 0 {
@@ -281,28 +323,42 @@ func parseTrak(buf []byte, movieTimescale uint32) (MP4Track, bool) {
 				editMediaTime = mediaTime
 			}
 		}
+		if boxType == "tref" {
+			payload := sliceBox(buf, dataOffset, boxSize-headerSize)
+			chapterTrackRefs = parseMP4ChapterTrackRefs(payload)
+		}
+		if boxType == "udta" {
+			payload := sliceBox(buf, dataOffset, boxSize-headerSize)
+			trackTitle = parseMP4TrackName(payload)
+		}
 		if boxType == "mdia" {
 			payload := sliceBox(buf, dataOffset, boxSize-headerSize)
 			if track, ok := parseMdia(payload); ok {
-				if hasTkhd && tkhdInfo.ID > 0 {
-					track.ID = tkhdInfo.ID
-				}
-				if editDuration > 0 {
-					track.EditDuration = editDuration
-					track.EditMediaTime = editMediaTime
-				}
-				if hasTkhd {
-					track.Default = tkhdInfo.Default
-					track.AlternateGroup = tkhdInfo.AlternateGroup
-					track.CreationTime = tkhdInfo.CreationTime
-					track.ModificationTime = tkhdInfo.ModifiedTime
-				}
-				return track, true
+				mediaTrack = track
+				hasMediaTrack = true
 			}
 		}
 		offset += boxSize
 	}
-	return MP4Track{}, false
+	if !hasMediaTrack {
+		return MP4Track{}, false
+	}
+	if hasTkhd && tkhdInfo.ID > 0 {
+		mediaTrack.ID = tkhdInfo.ID
+	}
+	if editDuration > 0 {
+		mediaTrack.EditDuration = editDuration
+		mediaTrack.EditMediaTime = editMediaTime
+	}
+	if hasTkhd {
+		mediaTrack.Default = tkhdInfo.Default
+		mediaTrack.AlternateGroup = tkhdInfo.AlternateGroup
+		mediaTrack.CreationTime = tkhdInfo.CreationTime
+		mediaTrack.ModificationTime = tkhdInfo.ModifiedTime
+	}
+	mediaTrack.chapterTrackRefs = append([]uint32(nil), chapterTrackRefs...)
+	mediaTrack.trackTitle = trackTitle
+	return mediaTrack, true
 }
 
 // parseMdia parses one mdia box into track handler, timing, language, and
@@ -353,24 +409,41 @@ func parseMdia(buf []byte) (MP4Track, bool) {
 		format = sampleInfo.Format
 	}
 	return MP4Track{
-		Kind:            kind,
-		Format:          format,
-		HandlerName:     handlerName,
-		LanguageCode:    language,
-		Fields:          sampleInfo.Fields,
-		SampleCount:     sampleInfo.SampleCount,
-		SampleBytes:     sampleInfo.SampleBytes,
-		SampleSizeHead:  sampleInfo.SampleSizeHead,
-		SampleSizeTail:  sampleInfo.SampleSizeTail,
-		SampleDelta:     sampleInfo.SampleDelta,
-		LastSampleDelta: sampleInfo.LastSampleDelta,
-		VariableDeltas:  sampleInfo.VariableDeltas,
-		FirstChunkOff:   sampleInfo.FirstChunkOff,
-		DurationSeconds: trackDuration,
-		Timescale:       trackTimescale,
-		Width:           sampleInfo.Width,
-		Height:          sampleInfo.Height,
-		canonicalSeed:   append([]fieldEntry(nil), sampleInfo.canonicalSeed...),
+		Kind:                   kind,
+		Format:                 format,
+		HandlerName:            handlerName,
+		HandlerType:            handler,
+		LanguageCode:           language,
+		Fields:                 sampleInfo.Fields,
+		SampleCount:            sampleInfo.SampleCount,
+		SampleBytes:            sampleInfo.SampleBytes,
+		SampleSizeHead:         sampleInfo.SampleSizeHead,
+		SampleSizeTail:         sampleInfo.SampleSizeTail,
+		SampleDelta:            sampleInfo.SampleDelta,
+		LastSampleDelta:        sampleInfo.LastSampleDelta,
+		VariableDeltas:         sampleInfo.VariableDeltas,
+		MinimumSampleDelta:     sampleInfo.MinimumSampleDelta,
+		MaximumSampleDelta:     sampleInfo.MaximumSampleDelta,
+		FirstChunkOff:          sampleInfo.FirstChunkOff,
+		DurationSeconds:        trackDuration,
+		Timescale:              trackTimescale,
+		Width:                  sampleInfo.Width,
+		Height:                 sampleInfo.Height,
+		canonicalSeed:          append([]fieldEntry(nil), sampleInfo.canonicalSeed...),
+		sampleEntryType:        sampleInfo.SampleEntryType,
+		nonEmptySampleCount:    sampleInfo.NonEmptySampleCount,
+		chunkOffsetsHead:       append([]uint64(nil), sampleInfo.chunkOffsetsHead...),
+		sampleToChunk:          append([]mp4SampleToChunkEntry(nil), sampleInfo.sampleToChunk...),
+		hevcNALLengthSize:      sampleInfo.hevcNALLengthSize,
+		avcNALLengthSize:       sampleInfo.avcNALLengthSize,
+		avcSPS:                 sampleInfo.avcSPS,
+		avcParameterSets:       append([]byte(nil), sampleInfo.avcParameterSets...),
+		hevcSEI:                sampleInfo.hevcSEI,
+		dolbyVision:            sampleInfo.dolbyVision,
+		hasDolbyVision:         sampleInfo.hasDolbyVision,
+		hevcContainerMastering: sampleInfo.hevcContainerMastering,
+		hevcContainerCLL:       sampleInfo.hevcContainerCLL,
+		sampleStartsHead:       append([]uint64(nil), sampleInfo.sampleStartsHead...),
 	}, true
 }
 
@@ -562,6 +635,8 @@ func parseStbl(buf []byte) (SampleInfo, bool) {
 				info.SampleDelta = sampleDelta
 				info.LastSampleDelta = lastDelta
 				info.VariableDeltas = variable
+				info.MinimumSampleDelta, info.MaximumSampleDelta = parseSttsDeltaRange(payload)
+				info.sampleStartsHead = parseSttsSampleStarts(payload, mp4SampleSizeHeadMax)
 			}
 		}
 		if boxType == "stsz" {
@@ -570,18 +645,25 @@ func parseStbl(buf []byte) (SampleInfo, bool) {
 				info.SampleBytes = total
 				info.SampleSizeHead = head
 				info.SampleSizeTail = tail
+				info.NonEmptySampleCount = countMP4NonEmptySamples(payload)
 			}
+		}
+		if boxType == "stsc" {
+			payload := sliceBox(buf, dataOffset, boxSize-headerSize)
+			info.sampleToChunk = parseStsc(payload)
 		}
 		if boxType == "stco" {
 			payload := sliceBox(buf, dataOffset, boxSize-headerSize)
-			if off, ok := parseStcoFirst(payload); ok {
-				info.FirstChunkOff = off
+			if offsets := parseStcoHead(payload, mp4ChunkOffsetHeadMax); len(offsets) > 0 {
+				info.FirstChunkOff = offsets[0]
+				info.chunkOffsetsHead = offsets
 			}
 		}
 		if boxType == "co64" {
 			payload := sliceBox(buf, dataOffset, boxSize-headerSize)
-			if off, ok := parseCo64First(payload); ok {
-				info.FirstChunkOff = off
+			if offsets := parseCo64Head(payload, mp4ChunkOffsetHeadMax); len(offsets) > 0 {
+				info.FirstChunkOff = offsets[0]
+				info.chunkOffsetsHead = offsets
 			}
 		}
 		offset += boxSize
@@ -590,6 +672,36 @@ func parseStbl(buf []byte) (SampleInfo, bool) {
 		return info, true
 	}
 	return SampleInfo{}, false
+}
+
+// parseMP4ChapterTrackRefs returns chapter-track IDs from a tref/chap box.
+func parseMP4ChapterTrackRefs(payload []byte) []uint32 {
+	chap, ok := findMP4Box(payload, "chap")
+	if !ok || len(chap) < 4 {
+		return nil
+	}
+	result := make([]uint32, 0, len(chap)/4)
+	for offset := 0; offset+4 <= len(chap); offset += 4 {
+		id := binary.BigEndian.Uint32(chap[offset : offset+4])
+		if id > 0 {
+			result = append(result, id)
+		}
+	}
+	return result
+}
+
+// markMP4ChapterTracks reclassifies tracks referenced by tref/chap as menus.
+func markMP4ChapterTracks(tracks []MP4Track) {
+	for _, source := range tracks {
+		for _, targetID := range source.chapterTrackRefs {
+			for index := range tracks {
+				if tracks[index].ID == targetID {
+					tracks[index].Kind = StreamMenu
+					tracks[index].menuForTrackID = source.ID
+				}
+			}
+		}
+	}
 }
 
 func parseStcoFirst(payload []byte) (uint64, bool) {
@@ -612,4 +724,62 @@ func parseCo64First(payload []byte) (uint64, bool) {
 		return 0, false
 	}
 	return binary.BigEndian.Uint64(payload[8:16]), true
+}
+
+const mp4ChunkOffsetHeadMax = 128
+
+// parseStcoHead returns a bounded prefix of 32-bit chunk offsets.
+func parseStcoHead(payload []byte, limit int) []uint64 {
+	if len(payload) < 8 || limit <= 0 {
+		return nil
+	}
+	count := int(binary.BigEndian.Uint32(payload[4:8]))
+	count = min(count, limit)
+	if count <= 0 || len(payload) < 8+count*4 {
+		return nil
+	}
+	result := make([]uint64, count)
+	for index := range result {
+		result[index] = uint64(binary.BigEndian.Uint32(payload[8+index*4 : 12+index*4]))
+	}
+	return result
+}
+
+// parseCo64Head returns a bounded prefix of 64-bit chunk offsets.
+func parseCo64Head(payload []byte, limit int) []uint64 {
+	if len(payload) < 8 || limit <= 0 {
+		return nil
+	}
+	count := int(binary.BigEndian.Uint32(payload[4:8]))
+	count = min(count, limit)
+	if count <= 0 || len(payload) < 8+count*8 {
+		return nil
+	}
+	result := make([]uint64, count)
+	for index := range result {
+		result[index] = binary.BigEndian.Uint64(payload[8+index*8 : 16+index*8])
+	}
+	return result
+}
+
+// parseStsc decodes sample-to-chunk runs used by bounded codec probes.
+func parseStsc(payload []byte) []mp4SampleToChunkEntry {
+	if len(payload) < 8 {
+		return nil
+	}
+	count := int(binary.BigEndian.Uint32(payload[4:8]))
+	if count <= 0 || len(payload) < 8+count*12 {
+		return nil
+	}
+	result := make([]mp4SampleToChunkEntry, 0, count)
+	for index := range count {
+		pos := 8 + index*12
+		firstChunk := binary.BigEndian.Uint32(payload[pos : pos+4])
+		samplesPerChunk := binary.BigEndian.Uint32(payload[pos+4 : pos+8])
+		if firstChunk == 0 || samplesPerChunk == 0 {
+			continue
+		}
+		result = append(result, mp4SampleToChunkEntry{firstChunk: firstChunk, samplesPerChunk: samplesPerChunk})
+	}
+	return result
 }

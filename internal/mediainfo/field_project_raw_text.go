@@ -61,6 +61,7 @@ var friendlyTextRawLabels = map[string]string{
 	"Format settings, Picture structure": "Format_Settings_PictureStructure",
 	"Format compression":                 "Format_Compression",
 	"Codec ID":                           "CodecID",
+	"Codec configuration box":            "CodecConfigurationBox",
 	"Codec ID/Info":                      "CodecID/Info",
 	"Duration":                           "Duration/String",
 	"Source duration":                    "Source_Duration/String",
@@ -89,6 +90,7 @@ var friendlyTextRawLabels = map[string]string{
 	"Active format description":          "ActiveFormatDescription/String",
 	"Compression mode":                   "Compression_Mode/String",
 	"Bits/(Pixel*Frame)":                 "Bits-(Pixel*Frame)",
+	"Time code of first frame":           "TimeCode_FirstFrame",
 	"Channel(s)":                         "Channel(s)/String",
 	"Channel layout":                     "ChannelLayout",
 	"Sampling rate":                      "SamplingRate/String",
@@ -102,6 +104,7 @@ var friendlyTextRawLabels = map[string]string{
 	"Tagged date":                        "Tagged_Date",
 	"Default":                            "Default/String",
 	"Forced":                             "Forced/String",
+	"Alternate group":                    "AlternateGroup/String",
 	"Color range":                        "colour_range",
 	"Color primaries":                    "colour_primaries",
 	"Transfer characteristics":           "transfer_characteristics",
@@ -161,6 +164,9 @@ func projectRawTextReport(report Report) rawTextReportProjection {
 			}
 			friendly := firstNonEmpty(entry.TextLabel, string(entry.Name))
 			label := rawTextLabel(friendly)
+			if stream.Kind == StreamGeneral && friendly == "Codec ID" {
+				label = "CodecID/String"
+			}
 			value := rawTextValue(stream.Kind, label, entry.Value.Text, structured, totalFileSize)
 			fields = append(fields, rawTextFieldProjection{
 				Label: label, Value: value, Order: rawTextFieldOrder(stream.Kind, label),
@@ -1398,8 +1404,8 @@ func rawTextFieldOrder(kind StreamKind, label string) int {
 var (
 	rawTextGeneralFieldOrder = makeStructuredFieldOrder(
 		"ID/String", "UniqueID/String", "CompleteName", "Format/String", "Format/Info", "Format_Version", "Format_Profile",
-		"Format_Settings", "CodecID", "FileSize/String", "Duration/String", "OverallBitRate_Mode/String", "OverallBitRate/String", "OverallBitRate_Maximum/String", "FrameRate/String",
-		"Title", "Movie", "Performer", "EncodedBy", "Genre", "ContentType", "Synopsis", "Description", "Released_Date", "Recorded_Date", "Encoded_Date", "Tagged_Date",
+		"Format_Settings", "CodecID", "CodecID/String", "FileSize/String", "Duration/String", "OverallBitRate_Mode/String", "OverallBitRate/String", "OverallBitRate_Maximum/String", "FrameRate/String",
+		"Title", "Movie", "Album", "Performer", "EncodedBy", "Genre", "ContentType", "Synopsis", "Description", "Released_Date", "Recorded_Date", "Encoded_Date", "Tagged_Date",
 		"Encoded_Application/String", "Encoded_Library/String", "Copyright", "OriginalSourceForm", "Cover", "Cover_Description", "Cover_Type", "Cover_Mime",
 		"Comment", "ErrorDetectionType", "Attachments", "Episode_ID", "Season", "SeasonNumber", "Show", "EPISODE_ID", "EPISODE_NUMBER", "SEASON_NUMBER", "SHOW",
 	)
@@ -1410,9 +1416,9 @@ var (
 	)
 	rawTextTextFieldOrder = makeStructuredFieldOrder(
 		"ID/String", "MenuID/String", "UniqueID/String", "OriginalSourceMedium_ID/String", "Format/String", "Format/Info", "MuxingMode",
-		"CodecID", "CodecID/Info", "CodecID/Hint", "Duration/String", "BitRate_Mode/String", "BitRate/String", "FrameRate/String",
+		"CodecID", "CodecID/Info", "CodecID/Hint", "Duration/String", "Duration_FirstFrame/String", "Duration_LastFrame/String", "BitRate_Mode/String", "BitRate/String", "FrameRate/String",
 		"ElementCount", "Compression_Mode/String", "Video_Delay/String", "StreamSize/String", "Title", "Encoded_Application/String",
-		"Encoded_Library/String", "Encoded_Library_Settings", "Language/String", "ServiceKind/String", "Default/String", "Forced/String",
+		"Encoded_Library/String", "Encoded_Library_Settings", "Language/String", "ServiceKind/String", "Default/String", "Forced/String", "AlternateGroup/String", "Encoded_Date", "Tagged_Date", "Events_Total",
 		"  Issue", "FromStats_BitRate", "FromStats_Duration", "FromStats_FrameCount", "FromStats_StreamSize", "Source", "Source_ID", "MD5_Unencoded",
 	)
 	rawTextStreamFieldOrder = makeStructuredFieldOrder(
@@ -1420,14 +1426,14 @@ var (
 		"Format_Commercial_IfAny", "Format_Version", "Format_Profile", "MultiView_Count", "MultiView_Layout", "HDR_Format/String", "Format_Settings", "Format_Settings_Floor",
 		"Format_Settings_BVOP/String", "Format_Settings_QPel/String", "Format_Settings_GMC/String", "Format_Settings_Matrix/String",
 		"Format_Settings_CABAC/String", "Format_Settings_RefFrames/String", "Format_Settings_GOP", "Format_Settings_PictureStructure", "Format_Settings_SliceCount/Strin", "MuxingMode", "CodecID", "CodecID/Info", "CodecID/Hint",
-		"Duration/String", "Source_Duration/String", "BitRate_Mode/String", "BitRate/String", "BitRate_Minimum/String", "BitRate_Nominal/String", "BitRate_Maximum/String",
+		"Duration/String", "Source_Duration/String", "Duration_FirstFrame/String", "Duration_LastFrame/String", "BitRate_Mode/String", "BitRate/String", "BitRate_Minimum/String", "BitRate_Nominal/String", "BitRate_Maximum/String",
 		"Width/String", "Height/String", "DisplayAspectRatio/String", "DisplayAspectRatio_Original/Stri", "ActiveFormatDescription/String", "Channel(s)/String", "ChannelLayout", "Channel(s)_Original/String", "ChannelLayout_Original", "SamplingRate/String",
-		"FrameRate_Mode/String", "FrameRate/String", "FrameRate_Original/String", "Standard", "ColorSpace", "ChromaSubsampling", "ChromaSubsampling/String", "BitDepth/String",
+		"FrameRate_Mode/String", "FrameRate/String", "FrameRate_Minimum/String", "FrameRate_Maximum/String", "FrameRate_Original/String", "Standard", "ColorSpace", "ChromaSubsampling", "ChromaSubsampling/String", "BitDepth/String",
 		"BitDepth_Detected/String", "ScanType/String", "ScanType_StoreMethod/String", "ScanOrder/String", "Compression_Mode/String", "Bits-(Pixel*Frame)", "TimeCode_FirstFrame", "TimeCode_Source", "Gop_OpenClosed/String", "Gop_OpenClosed_FirstFrame/String", "ElementCount", "Video_Delay/String", "StreamSize/String", "Alignment/String", "Interleave_Duration/String", "Interleave_Preload/String",
 		"Title", "Encoded_Application/String", "Encoded_Library/String", "Encoded_Library_Settings", "Language/String", "ServiceKind/String",
-		"Default/String", "Forced/String", "Encoded_Date", "Tagged_Date",
-		"colour_range", "colour_primaries", "transfer_characteristics", "transfer_characteristics_Origina", "matrix_coefficients",
-		"MasteringDisplay_ColorPrimaries", "MasteringDisplay_Luminance", "MaxCLL/String", "MaxFALL/String",
+		"Default/String", "Forced/String", "AlternateGroup/String", "Encoded_Date", "Tagged_Date",
+		"colour_range", "colour_primaries", "colour_primaries_Original", "transfer_characteristics", "transfer_characteristics_Origina", "matrix_coefficients", "matrix_coefficients_Original",
+		"MasteringDisplay_ColorPrimaries", "MasteringDisplay_Luminance", "MaxCLL/String", "MaxFALL/String", "mdhd_Duration", "Menus", "CodecConfigurationBox", "Events_Total",
 		"OriginalSourceMedium", "  Issue", "FromStats_BitRate", "FromStats_Duration", "FromStats_FrameCount", "FromStats_StreamSize",
 		"Comment", "COMMENT", "Source", "Source_ID", "SOURCE", "SOURCE_ID", "MD5_Unencoded", "EncodedBy",
 		"ComplexityIndex", "NumberOfDynamicObjects", "BedChannelCount", "BedChannelConfiguration",

@@ -201,6 +201,51 @@ var structuredTextFieldOrder = map[string]int{
 	"Title": 26, "Language": 27, "Default": 28, "Forced": 29, "extra": 30,
 }
 
+// MP4 structured orders mirror MediaInfo's ISO Base Media projection while
+// keeping retained Go extensions adjacent to their source fields.
+var structuredMP4GeneralFieldOrder = makeStructuredFieldOrder(
+	"@type", "@typeorder", "ID", "UniqueID", "VideoCount", "AudioCount", "TextCount", "ImageCount", "MenuCount",
+	"FileExtension", "CompleteName_Last", "Format", "Format_Settings", "Format_Version", "Format_Profile",
+	"CodecID", "CodecID_Compatible", "FileSize", "Duration", "OverallBitRate_Mode", "OverallBitRate", "FrameRate", "FrameCount",
+	"StreamSize", "HeaderSize", "DataSize", "FooterSize", "IsStreamable", "Title", "Movie", "Album", "Encoded_Date", "Tagged_Date",
+	"File_Created_Date", "File_Created_Date_Local", "File_Modified_Date", "File_Modified_Date_Local", "Comment",
+	"Encoded_Application", "Encoded_Application_Name", "Encoded_Application_Version", "extra",
+)
+
+var structuredMP4VideoFieldOrder = makeStructuredFieldOrder(
+	"@type", "@typeorder", "StreamOrder", "FirstPacketOrder", "ID", "MenuID", "UniqueID", "Format", "Format_Version", "Format_Profile", "Format_Level", "Format_Tier",
+	"HDR_Format", "HDR_Format_Version", "HDR_Format_Profile", "HDR_Format_Level", "HDR_Format_Settings", "HDR_Format_Compression", "HDR_Format_Compatibility",
+	"Format_Settings_BVOP", "Format_Settings_CABAC", "Format_Settings_QPel", "Format_Settings_RefFrames", "Format_Settings_GMC", "Format_Settings_Matrix", "Format_Settings_Matrix_Data", "Format_Settings_GOP",
+	"MuxingMode", "CodecID", "Duration", "Source_Duration", "Source_Duration_LastFrame", "BitRate_Mode", "BitRate", "BitRate_Nominal", "BitRate_Maximum",
+	"Width", "Height", "Stored_Width", "Stored_Height", "Sampled_Width", "Sampled_Height", "PixelAspectRatio", "DisplayAspectRatio", "Rotation",
+	"FrameRate_Mode", "FrameRate_Mode_Original", "FrameRate", "FrameRate_Num", "FrameRate_Den", "FrameRate_Minimum", "FrameRate_Maximum", "FrameCount",
+	"ColorSpace", "ChromaSubsampling", "ChromaSubsampling_Position", "BitDepth", "ScanType", "ScanOrder", "Compression_Mode",
+	"TimeCode_FirstFrame", "TimeCode_Source", "StreamSize", "Source_StreamSize", "Title", "Encoded_Library", "Encoded_Library_Name", "Encoded_Library_Version", "Encoded_Library_Settings",
+	"Language", "Default", "Forced", "Encoded_Date", "Tagged_Date", "BufferSize", "colour_description_present", "colour_description_present_Source",
+	"colour_range", "colour_range_Source", "colour_primaries", "colour_primaries_Source", "colour_primaries_Original", "colour_primaries_Original_Source",
+	"transfer_characteristics", "transfer_characteristics_Source", "transfer_characteristics_Original", "transfer_characteristics_Original_Source",
+	"matrix_coefficients", "matrix_coefficients_Source", "matrix_coefficients_Original", "matrix_coefficients_Original_Source",
+	"MasteringDisplay_ColorPrimaries", "MasteringDisplay_ColorPrimaries_Source", "MasteringDisplay_Luminance", "MasteringDisplay_Luminance_Source",
+	"MasteringDisplay_Luminance_Min", "MasteringDisplay_Luminance_Max", "MaxCLL", "MaxCLL_Source", "MaxFALL", "MaxFALL_Source", "extra",
+)
+
+var structuredMP4AudioFieldOrder = makeStructuredFieldOrder(
+	"@type", "@typeorder", "StreamOrder", "FirstPacketOrder", "ID", "MenuID", "UniqueID", "Format", "Format_Commercial_IfAny", "Format_Version", "Format_Profile",
+	"Format_Settings_SBR", "Format_Settings_Endianness", "Format_AdditionalFeatures", "MuxingMode", "CodecID", "Duration", "Duration_LastFrame", "Source_Duration", "Source_Duration_LastFrame",
+	"Duration_FirstFrame", "BitRate_Mode", "BitRate", "BitRate_Nominal", "BitRate_Maximum", "Channels", "ChannelPositions", "ChannelLayout", "SamplesPerFrame",
+	"SamplingRate", "SamplingCount", "FrameRate", "FrameCount", "Source_FrameCount", "BitDepth", "Compression_Mode", "Delay", "Delay_Source", "Video_Delay",
+	"StreamSize", "Source_StreamSize", "Title", "Language", "ServiceKind", "Default", "Forced", "AlternateGroup", "Encoded_Date", "Tagged_Date", "extra",
+)
+
+var structuredMP4TextFieldOrder = makeStructuredFieldOrder(
+	"@type", "@typeorder", "StreamOrder", "FirstPacketOrder", "ID", "UniqueID", "Format", "MuxingMode", "CodecID", "Duration", "BitRate_Mode", "BitRate",
+	"FrameRate", "FrameCount", "StreamSize", "Title", "Language", "Default", "Forced", "AlternateGroup", "Encoded_Date", "Tagged_Date", "Events_Total", "extra",
+)
+
+var structuredMP4MenuFieldOrder = makeStructuredFieldOrder(
+	"@type", "@typeorder", "StreamOrder", "FirstPacketOrder", "ID", "MenuID", "Format", "CodecID", "Duration", "extra",
+)
+
 // structuredBDAVGeneralFieldOrder mirrors MediaInfo's BDAV General key order.
 var structuredBDAVGeneralFieldOrder = makeStructuredFieldOrder(
 	"@type", "ID", "UniqueID", "VideoCount", "AudioCount", "TextCount", "ImageCount", "MenuCount",
@@ -387,6 +432,8 @@ func makeStructuredFieldOrder(names ...string) map[string]int {
 // structuredFieldOrderForContainer returns the active structured order policy.
 func structuredFieldOrderForContainer(kind StreamKind, containerFormat string) map[string]int {
 	switch containerFormat {
+	case "MPEG-4", "QuickTime":
+		return structuredMP4FieldOrderPolicy(kind)
 	case "Matroska":
 		return structuredMatroskaFieldOrderPolicy(kind)
 	case "AVI":
@@ -396,6 +443,23 @@ func structuredFieldOrderForContainer(kind StreamKind, containerFormat string) m
 	default:
 		return structuredFieldOrderPolicy(kind)
 	}
+}
+
+// structuredMP4FieldOrderPolicy returns ISO Base Media key order for kind.
+func structuredMP4FieldOrderPolicy(kind StreamKind) map[string]int {
+	switch kind {
+	case StreamGeneral:
+		return structuredMP4GeneralFieldOrder
+	case StreamVideo, StreamImage:
+		return structuredMP4VideoFieldOrder
+	case StreamAudio:
+		return structuredMP4AudioFieldOrder
+	case StreamText:
+		return structuredMP4TextFieldOrder
+	case StreamMenu:
+		return structuredMP4MenuFieldOrder
+	}
+	panic("unreachable StreamKind")
 }
 
 // structuredBDAVFieldOrderPolicy returns the BDAV key order for kind.

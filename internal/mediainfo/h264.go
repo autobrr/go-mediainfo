@@ -74,9 +74,11 @@ type h264HRDInfo struct {
 // avcConfigInfo contains AVCDecoderConfigurationRecord profile and PPS facts
 // needed by direct canonical stream builders.
 type avcConfigInfo struct {
-	profile string
-	level   string
-	cabac   *bool
+	profile       string
+	level         string
+	cabac         *bool
+	nalLengthSize int
+	parameterSets []byte
 }
 
 // parseAVCConfig preserves the legacy field-oriented codec helper contract.
@@ -100,6 +102,7 @@ func parseAVCConfigDetails(payload []byte) (string, []Field, h264SPSInfo, avcCon
 	offset := 6
 	var spsInfo h264SPSInfo
 	var ppsCABAC *bool
+	var parameterSets []byte
 
 	if spsCount > 0 && offset+2 <= len(payload) {
 		spsLen := int(payload[offset])<<8 | int(payload[offset+1])
@@ -107,6 +110,8 @@ func parseAVCConfigDetails(payload []byte) (string, []Field, h264SPSInfo, avcCon
 		if offset+spsLen <= len(payload) && spsLen > 0 {
 			sps := payload[offset : offset+spsLen]
 			spsInfo = parseH264SPS(sps)
+			parameterSets = append(parameterSets, 0, 0, 0, 1)
+			parameterSets = append(parameterSets, sps...)
 		}
 		offset += spsLen
 	}
@@ -119,6 +124,8 @@ func parseAVCConfigDetails(payload []byte) (string, []Field, h264SPSInfo, avcCon
 			offset += 2
 			if offset+ppsLen <= len(payload) && ppsLen > 0 {
 				pps := payload[offset : offset+ppsLen]
+				parameterSets = append(parameterSets, 0, 0, 0, 1)
+				parameterSets = append(parameterSets, pps...)
 				if cabac, ok := parseH264PPSCabac(pps); ok {
 					ppsCABAC = &cabac
 				}
@@ -126,11 +133,20 @@ func parseAVCConfigDetails(payload []byte) (string, []Field, h264SPSInfo, avcCon
 		}
 	}
 
+	if profile == "Baseline" && spsInfo.ConstraintFlags&0x40 != 0 {
+		profile = "Constrained Baseline"
+	}
 	fields := buildH264Fields(profile, level, spsInfo, ppsCABAC, h264FieldOptions{
 		includeColorDescription: true,
 	})
 
-	return profile, fields, spsInfo, avcConfigInfo{profile: profile, level: level, cabac: ppsCABAC}
+	return profile, fields, spsInfo, avcConfigInfo{
+		profile:       profile,
+		level:         level,
+		cabac:         ppsCABAC,
+		nalLengthSize: int(payload[4]&0x03) + 1,
+		parameterSets: parameterSets,
+	}
 }
 
 type h264FieldOptions struct {

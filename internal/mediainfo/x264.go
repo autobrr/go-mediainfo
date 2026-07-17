@@ -84,6 +84,16 @@ func findX264InfoAnnexB(data []byte) (string, string) {
 	return writingLibrary, encoding
 }
 
+// findLastX264Info returns the final x264 user-data payload in a bounded sample.
+// Some encoders place multiple parameter snapshots in one keyframe.
+func findLastX264Info(data []byte) (string, string) {
+	index := strings.LastIndex(string(data), "x264 - core")
+	if index < 0 {
+		return "", ""
+	}
+	return findX264Info(data[index:])
+}
+
 func findX264Bitrate(encoding string) (float64, bool) {
 	idx := strings.Index(encoding, "bitrate=")
 	if idx == -1 {

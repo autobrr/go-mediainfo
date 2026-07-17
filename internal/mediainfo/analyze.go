@@ -189,10 +189,36 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 	case "MPEG-4", "QuickTime":
 		if parsed, ok := ParseMP4(file, stat.Size()); ok {
 			info = parsed.Container
+			mp4Duration := info.DurationSeconds
+			for _, track := range parsed.Tracks {
+				if track.DurationSeconds > mp4Duration+0.5 {
+					mp4Duration = track.DurationSeconds
+				}
+				if track.EditDuration > mp4Duration+0.5 {
+					mp4Duration = track.EditDuration
+				}
+			}
+			info.DurationSeconds = mp4Duration
 			generalFacts := &canonicalStructuredFacts{}
 			generalFacts.PreserveLegacySnapshot()
+			mp4WritingApplication := ""
 			for _, field := range parsed.General {
 				general.Fields = appendFieldUnique(general.Fields, field)
+				switch field.Name {
+				case "Title":
+					generalFacts.SetSame("Title", field.Value)
+					generalFacts.SetSame("Movie", field.Value)
+				case "Album":
+					generalFacts.SetSame("Album", field.Value)
+				case "Comment":
+					generalFacts.SetSame("Comment", field.Value)
+				case "Writing application":
+					mp4WritingApplication = field.Value
+					if name, version, _ := splitWritingApplication(field.Value); (name == "DVDFab" && version != "") || exposeWritingApplicationComponents(name, version) {
+						generalFacts.SetSame("Encoded_Application_Name", name)
+						generalFacts.SetSame("Encoded_Application_Version", version)
+					}
+				}
 			}
 			if encoded := formatMP4UTCTime(parsed.MovieCreation); encoded != "" {
 				general.Fields = appendFieldUnique(general.Fields, Field{Name: "Encoded date", Value: encoded})
@@ -237,6 +263,23 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 						}
 					}
 				}
+				if strings.HasPrefix(track.HandlerName, "BAMTech ") {
+					if sourceDuration == 0 {
+						sourceDuration = track.DurationSeconds
+					}
+					if track.Kind == StreamAudio {
+						displayDuration = info.DurationSeconds
+					} else {
+						displayDuration = track.DurationSeconds
+					}
+				}
+				if track.Kind == StreamAudio && (track.sampleEntryType == "ac-3" || track.sampleEntryType == "ec-3") && info.DurationSeconds > 0 && math.Abs(displayDuration-info.DurationSeconds) < 0.05 {
+					displayDuration = info.DurationSeconds
+				}
+				if track.Kind == StreamMenu {
+					streams = append(streams, buildMP4ChapterMenu(file, track))
+					continue
+				}
 				if track.ID > 0 {
 					value := strconv.FormatUint(uint64(track.ID), 10)
 					fields = appendFieldUnique(fields, Field{Name: "ID", Value: value})
@@ -248,20 +291,24 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 					builder.Fill("Format", formatValue, "Format", track.Format)
 					builder.Structured("Format_AdditionalFeatures", additionalFeatures)
 				}
-				// MP4 handler names are frequently generic ("SoundHandler"), but sometimes carry a
-				// meaningful track title (e.g. "AC-3 5.1"). Only surface the latter.
-				if track.Kind == StreamAudio {
-					name := strings.TrimSpace(track.HandlerName)
-					if name != "" && name != "SoundHandler" && name != "VideoHandler" && name != "MetaHandler" {
-						fields = appendFieldUnique(fields, Field{Name: "Title", Value: name})
-						builder.Fill("Title", name, "Title", name)
-					}
+				// Generic handler names carry no user-facing information; retain all other
+				// handler names as track titles regardless of stream kind.
+				name := strings.TrimSpace(firstNonEmpty(track.trackTitle, track.HandlerName))
+				if name != "" && name != "SoundHandler" && name != "VideoHandler" && name != "MetaHandler" && name != "SubtitleHandler" {
+					fields = appendFieldUnique(fields, Field{Name: "Title", Value: name})
+					builder.Fill("Title", name, "Title", name)
 				}
 				if track.LanguageCode != "" {
 					code := normalizeLanguageCode(track.LanguageCode)
 					if lang := formatLanguage(code); lang != "" {
 						fields = appendFieldUnique(fields, Field{Name: "Language", Value: lang})
 						builder.Fill("Language", code, "Language", lang)
+					}
+				}
+				if track.Kind == StreamText && track.sampleEntryType != "" {
+					builder.Fill("CodecID", track.sampleEntryType, "Codec ID", track.sampleEntryType)
+					if track.HandlerType != "" {
+						builder.Fill("MuxingMode", track.HandlerType, "Muxing mode", track.HandlerType)
 					}
 				}
 				if len(track.canonicalSeed) > 0 {
@@ -297,7 +344,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 				if displayDuration > 0 {
 					if track.SampleBytes > 0 {
 						durationForBitrate := displayDuration
-						if sourceDuration > 0 {
+						if sourceDuration > 0 && !strings.HasPrefix(track.HandlerName, "BAMTech ") {
 							durationForBitrate = sourceDuration
 						}
 						bitrate = (float64(track.SampleBytes) * 8) / durationForBitrate
@@ -328,11 +375,17 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 									builder.Fill("Source_Duration_LastFrame", strconv.FormatInt(diffMs, 10), "Source_Duration_LastFrame", display)
 									builder.OverrideStructured("Source_Duration_LastFrame", lastFrameDuration)
 									builder.MarkLegacyJSON("Source_Duration_LastFrame", lastFrameDuration)
+									if strings.HasPrefix(track.HandlerName, "BAMTech ") {
+										trackFacts.Set("Duration_LastFrame", lastFrameDuration)
+										builder.Fill("Duration_LastFrame", strconv.FormatInt(diffMs, 10), "Duration_LastFrame/String", strconv.FormatInt(diffMs, 10)+"ms")
+										builder.OverrideStructured("Duration_LastFrame", lastFrameDuration)
+										builder.MarkLegacyJSON("Duration_LastFrame", lastFrameDuration)
+									}
 								}
 							}
 						}
 					}
-					if bitrate > 0 && findField(fields, "Bit rate") == "" {
+					if bitrate > 0 && findField(fields, "Bit rate") == "" && trackFacts.Canonical("BitRate") == "" {
 						if track.Kind != StreamVideo {
 							if mode := bitrateMode(bitrate); mode != "" {
 								fields = appendFieldUnique(fields, Field{Name: "Bit rate mode", Value: mode})
@@ -341,9 +394,9 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 						}
 						fields = addStreamBitrate(fields, bitrate)
 						// Match official mediainfo rounding for derived MP4 bitrates.
-						// Observed: video uses rounding, audio uses truncation.
+						// Observed: video/text use rounding, audio uses truncation.
 						bitRateValue := ""
-						if track.Kind == StreamVideo {
+						if track.Kind == StreamVideo || track.Kind == StreamText {
 							bitRateValue = strconv.FormatInt(int64(math.Round(bitrate)), 10)
 						} else {
 							bitRateValue = strconv.FormatInt(int64(math.Floor(bitrate)), 10)
@@ -357,7 +410,11 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 					streamBytes := int64(track.SampleBytes)
 					displaySamples := 0.0
 					if sourceDuration > 0 && displayDuration > 0 {
-						if track.Kind == StreamAudio {
+						switch {
+						case strings.HasPrefix(track.HandlerName, "BAMTech "):
+							streamBytes = int64(track.SampleBytes)
+							displaySamples = float64(track.SampleCount)
+						case track.Kind == StreamAudio:
 							// Official mediainfo trims edit lists by whole AAC frames for StreamSize.
 							if track.SampleDelta > 0 && track.SampleCount > 0 && track.Timescale > 0 {
 								displaySamples = (displayDuration * float64(track.Timescale)) / float64(track.SampleDelta)
@@ -378,14 +435,18 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 							} else {
 								streamBytes = int64(math.Round(float64(track.SampleBytes) * displayDuration / sourceDuration))
 							}
-						} else if track.SampleDelta > 0 && track.SampleCount > 0 && track.Timescale > 0 {
+						case track.SampleDelta > 0 && track.SampleCount > 0 && track.Timescale > 0:
 							displaySamples = (displayDuration * float64(track.Timescale)) / float64(track.SampleDelta)
-							if displaySamples > 0 {
+							wantSamples := int64(math.Round(displaySamples))
+							switch {
+							case wantSamples >= int64(track.SampleCount):
+								streamBytes = int64(track.SampleBytes)
+							case displaySamples > 0:
 								streamBytes = int64(math.Round(float64(track.SampleBytes) * displaySamples / float64(track.SampleCount)))
-							} else if bitrate > 0 {
+							case bitrate > 0:
 								streamBytes = int64(math.Round((bitrate * displayDuration) / 8))
 							}
-						} else if bitrate > 0 {
+						case bitrate > 0:
 							streamBytes = int64(math.Round((bitrate * displayDuration) / 8))
 						}
 					}
@@ -451,8 +512,12 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 					}
 				}
 				if track.Kind == StreamVideo && track.SampleCount > 0 && displayDuration > 0 {
-					fields = appendFieldUnique(fields, Field{Name: "Frame rate mode", Value: "Constant"})
-					builder.Fill("FrameRate_Mode", "Constant", "Frame rate mode", "Constant")
+					frameRateMode := "Constant"
+					if track.VariableDeltas {
+						frameRateMode = "Variable"
+					}
+					fields = appendFieldUnique(fields, Field{Name: "Frame rate mode", Value: frameRateMode})
+					builder.Fill("FrameRate_Mode", frameRateMode, "Frame rate mode", frameRateMode)
 					rate := float64(track.SampleCount) / displayDuration
 					if rate > 0 {
 						display := formatFrameRateWithRatio(rate)
@@ -461,6 +526,18 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 						if numerator, denominator := rationalizeFrameRate(rate); numerator > 0 && denominator > 0 {
 							builder.Structured("FrameRate_Num", strconv.Itoa(numerator))
 							builder.Structured("FrameRate_Den", strconv.Itoa(denominator))
+						}
+						if track.VariableDeltas && track.Timescale > 0 {
+							if track.MaximumSampleDelta > 0 {
+								minimum := float64(track.Timescale) / float64(track.MaximumSampleDelta)
+								builder.Structured("FrameRate_Minimum", formatJSONFloat(minimum))
+								builder.Text("FrameRate_Minimum/String", fmt.Sprintf("%.3f fps", minimum))
+							}
+							if track.MinimumSampleDelta > 0 {
+								maximum := float64(track.Timescale) / float64(track.MinimumSampleDelta)
+								builder.Structured("FrameRate_Maximum", formatJSONFloat(maximum))
+								builder.Text("FrameRate_Maximum/String", fmt.Sprintf("%.3f fps", maximum))
+							}
 						}
 					}
 					if track.Width > 0 && track.Height > 0 && track.SampleBytes > 0 {
@@ -479,6 +556,19 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 					if generalFrameCount == "" {
 						generalFrameCount = strconv.FormatUint(track.SampleCount, 10)
 					}
+				}
+				if track.Kind == StreamText && track.SampleCount > 0 && displayDuration > 0 {
+					frameCountValue := strconv.FormatUint(track.SampleCount, 10)
+					builder.Structured("FrameCount", frameCountValue)
+					rate := float64(track.SampleCount) / displayDuration
+					if rate > 0 {
+						builder.Fill("FrameRate", formatJSONFloat(rate), "Frame rate", formatFrameRate(rate))
+					}
+					if track.nonEmptySampleCount > 0 {
+						value := strconv.FormatUint(track.nonEmptySampleCount, 10)
+						builder.Fill("Events_Total", value, "Events_Total", value)
+					}
+					builder.Fill("Forced", "No", "Forced", "No")
 				}
 				if track.Width > 0 {
 					builder.Fill("Width", strconv.FormatUint(track.Width, 10), "Width", formatPixels(track.Width))
@@ -520,11 +610,9 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 								}
 								fields = setFieldValue(fields, "Commercial name", "Dolby Digital")
 								builder.Fill("Format_Commercial_IfAny", "Dolby Digital", "Commercial name", "Dolby Digital")
-								fields = insertFieldBefore(fields, Field{Name: "Service kind", Value: ac3.serviceKind}, "Default")
 								// Keep a human-readable string in text, but match official JSON ServiceKind short codes.
 								if code := ac3ServiceKindCode(ac3.bsmod); code != "" {
 									trackFacts.Set("ServiceKind", code)
-									builder.Fill("ServiceKind", code, "Service kind", ac3.serviceKind)
 									builder.MarkLegacyJSON("ServiceKind", code)
 								}
 								trackFacts.Set("Format_Settings_Endianness", "Big")
@@ -591,6 +679,48 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 						}
 					}
 				}
+				if track.Kind == StreamAudio && (track.sampleEntryType == "ac-3" || track.sampleEntryType == "ec-3") {
+					if ac3, ok := probeMP4AC3(file, track); ok {
+						node := applyMP4AC3Probe(builder, trackFacts, ac3, track.Format)
+						extraNode = &node
+						if displayDuration > 0 && ac3.sampleRate > 0 {
+							durationMS := math.Round(displayDuration * 1000)
+							samplingCount := strconv.FormatInt(int64(math.Round(durationMS*ac3.sampleRate/1000)), 10)
+							trackFacts.Set("SamplingCount", samplingCount)
+							builder.OverrideStructured("SamplingCount", samplingCount)
+							builder.MarkLegacyJSON("SamplingCount", samplingCount)
+						}
+					}
+				}
+				if track.Kind == StreamVideo && track.Format == "HEVC" {
+					applyMP4HEVCProbe(builder, probeMP4HEVC(file, track), track)
+				}
+				trackWritingLibrary := x264WritingLibrary
+				trackEncodingSettings := x264EncodingSettings
+				if track.Kind == StreamVideo && track.Format == "AVC" {
+					probe := probeMP4AVC(file, track)
+					if probe.writingLibrary != "" {
+						trackWritingLibrary = probe.writingLibrary
+					}
+					if probe.settings != "" {
+						trackEncodingSettings = probe.settings
+					}
+					if probe.timeCode != "" {
+						if strings.HasPrefix(track.HandlerName, "BAMTech ") && len(probe.timeCode) >= 3 {
+							probe.timeCode = probe.timeCode[:len(probe.timeCode)-3] + ";" + probe.timeCode[len(probe.timeCode)-2:]
+						}
+						fields = appendFieldUnique(fields, Field{Name: "Time code of first frame", Value: probe.timeCode})
+						builder.Fill("TimeCode_FirstFrame", probe.timeCode, "Time code of first frame", probe.timeCode)
+					}
+					if probe.hasGOP {
+						value := fmt.Sprintf("M=%d, N=%d", probe.gopM, probe.gopN)
+						fields = appendFieldUnique(fields, Field{Name: "Format settings, GOP", Value: value})
+						builder.Fill("Format_Settings_GOP", value, "Format settings, GOP", value)
+					}
+				}
+				if track.Kind == StreamAudio && (track.sampleEntryType == "Opus" || track.sampleEntryType == "opus") {
+					builder.Fill("Duration_FirstFrame", "0.001", "Duration_FirstFrame/String", "1ms")
+				}
 				if track.AlternateGroup > 0 {
 					value := strconv.FormatUint(uint64(track.AlternateGroup), 10)
 					fields = appendFieldUnique(fields, Field{Name: "Alternate group", Value: value})
@@ -615,25 +745,25 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 						extraNode = &node
 					}
 				}
-				if !x264Applied && track.Kind == StreamVideo && findField(fields, "Format") == "AVC" && (x264WritingLibrary != "" || x264EncodingSettings != "") {
-					if x264WritingLibrary != "" {
-						fields = appendFieldUnique(fields, Field{Name: "Writing library", Value: x264WritingLibrary})
-						encoded := x264WritingLibrary
+				if !x264Applied && track.Kind == StreamVideo && findField(fields, "Format") == "AVC" && (trackWritingLibrary != "" || trackEncodingSettings != "") {
+					if trackWritingLibrary != "" {
+						fields = appendFieldUnique(fields, Field{Name: "Writing library", Value: trackWritingLibrary})
+						encoded := trackWritingLibrary
 						if strings.HasPrefix(encoded, "x264 ") && !strings.HasPrefix(encoded, "x264 - ") {
 							encoded = "x264 - " + strings.TrimPrefix(encoded, "x264 ")
 						}
-						builder.Fill("Encoded_Library", encoded, "Writing library", x264WritingLibrary)
+						builder.Fill("Encoded_Library", encoded, "Writing library", trackWritingLibrary)
 						if name, version := splitEncodedLibrary(encoded); name != "" {
 							builder.Structured("Encoded_Library_Name", name)
 							builder.Structured("Encoded_Library_Version", version)
 						}
-						if x264EncodingSettings == "" && strings.Contains(x264WritingLibrary, "Encoder") {
-							trackFacts.Set("Encoded_Library_Name", x264WritingLibrary)
+						if trackEncodingSettings == "" && strings.Contains(trackWritingLibrary, "Encoder") {
+							trackFacts.Set("Encoded_Library_Name", trackWritingLibrary)
 						}
 					}
-					if x264EncodingSettings != "" {
-						fields = appendFieldUnique(fields, Field{Name: "Encoding settings", Value: x264EncodingSettings})
-						builder.Fill("Encoded_Library_Settings", x264EncodingSettings, "Encoding settings", x264EncodingSettings)
+					if trackEncodingSettings != "" {
+						fields = appendFieldUnique(fields, Field{Name: "Encoding settings", Value: trackEncodingSettings})
+						builder.Fill("Encoded_Library_Settings", trackEncodingSettings, "Encoding settings", trackEncodingSettings)
 					}
 					x264Applied = true
 				}
@@ -659,6 +789,10 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 								if bits := formatBitsPerPixelFrame(x264Bps, width, height, fps); bits != "" {
 									builder.ReplaceText("Bits/(Pixel*Frame)", bits)
 								}
+							} else {
+								nominal := strconv.FormatInt(int64(math.Round(x264Bps)), 10)
+								trackFacts.Set("BitRate_Nominal", nominal)
+								builder.Fill("BitRate_Nominal", nominal, "Nominal bit rate", formatBitrate(x264Bps))
 							}
 						}
 					}
@@ -671,16 +805,49 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 						}
 					}
 					audioFormat, _ := splitAACFormat(track.Format)
+					switch track.sampleEntryType {
+					case "ac-3", "ec-3":
+						trackFacts.Set("BitRate_Mode", "CBR")
+						builder.Fill("BitRate_Mode", "CBR", "Bit rate mode", "Constant")
+					case "Opus", "opus":
+						trackFacts.Set("BitRate_Mode", "VBR")
+						builder.Fill("BitRate_Mode", "VBR", "Bit rate mode", "Variable")
+						if displayDuration > 0 {
+							trackFacts.Set("SamplingCount", strconv.FormatInt(int64(math.Round(displayDuration*48000)), 10))
+						}
+					}
 					if strings.EqualFold(audioFormat, "AAC") {
 						if trackFacts.Get("SamplesPerFrame") == "" {
 							trackFacts.Set("SamplesPerFrame", "1024")
 						}
-						if trackFacts.Get("SamplingCount") == "" && displayDuration > 0 {
+						if displayDuration > 0 {
 							if sampleRate, ok := parseInt(trackFacts.Canonical("SamplingRate")); ok && sampleRate > 0 {
-								trackFacts.Set("SamplingCount", strconv.FormatInt(int64(math.Round(displayDuration*float64(sampleRate))), 10))
+								durationMS := math.Round(displayDuration * 1000)
+								samplingCount := math.Round(durationMS * float64(sampleRate) / 1000)
+								value := strconv.FormatInt(int64(samplingCount), 10)
+								trackFacts.Set("SamplingCount", value)
+								builder.OverrideStructured("SamplingCount", value)
+								builder.MarkLegacyJSON("SamplingCount", value)
 							}
 						}
 					}
+				}
+				if track.Kind == StreamVideo && (len(track.chapterTrackRefs) > 0 || strings.HasPrefix(mp4WritingApplication, "GPAC-")) {
+					extraFields := []jsonKV{}
+					if strings.HasPrefix(mp4WritingApplication, "GPAC-") && track.DurationSeconds > 0 {
+						extraFields = append(extraFields, jsonKV{Key: "mdhd_Duration", Val: strconv.FormatInt(int64(math.Round(track.DurationSeconds*1000)), 10)})
+					}
+					if len(track.chapterTrackRefs) > 0 {
+						extraFields = append(extraFields, jsonKV{Key: "Menus", Val: strconv.FormatUint(uint64(track.chapterTrackRefs[0]), 10)})
+					}
+					if configuration := findField(fields, "Codec configuration box"); configuration != "" {
+						if track.hasDolbyVision {
+							configuration = "hvcC+dvvC"
+						}
+						extraFields = append(extraFields, jsonKV{Key: "CodecConfigurationBox", Val: configuration})
+					}
+					node := structuredObjectFromKVs(extraFields)
+					extraNode = &node
 				}
 				trackFacts.Apply(builder)
 				if extraNode != nil {
@@ -703,6 +870,12 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 				menuBuilder.MarkLegacyJSONRaw("extra", structuredNodeText(node))
 				streams = append(streams, menuBuilder.Snapshot(canonicalStreamPolicy{SkipStreamOrder: true, SkipComputed: true}))
 			}
+			for _, stream := range streams {
+				if mode, ok := canonicalSeedValue(stream, "BitRate_Mode"); ok && (mode == "VBR" || mode == "Variable") {
+					generalFacts.SetSame("OverallBitRate_Mode", "VBR")
+					break
+				}
+			}
 			if generalFrameCount != "" {
 				generalFacts.SetSame("FrameCount", generalFrameCount)
 			}
@@ -712,6 +885,17 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 				generalFacts.SetSame("StreamSize", streamSize)
 			}
 			generalFacts.ApplyToStream(&general)
+			if len(parsed.generalExtra) > 0 {
+				builder := newCanonicalStreamBuilder(StreamGeneral)
+				builder.ImportCanonicalSeed(general.canonicalSeed)
+				node := structuredObjectFromKVs(parsed.generalExtra)
+				builder.StructuredNode("extra", node)
+				builder.MarkLegacyJSONRaw("extra", structuredNodeText(node))
+				augmented := builder.Snapshot(canonicalStreamPolicy{})
+				general.canonicalSeed = augmented.canonicalSeed
+				general.JSON = augmented.JSON
+				general.JSONRaw = augmented.JSONRaw
+			}
 		}
 	case "Matroska":
 		if parsed, ok := parseMatroskaForAnalysis(file, stat.Size(), opts); ok {

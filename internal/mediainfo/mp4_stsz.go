@@ -2,7 +2,7 @@ package mediainfo
 
 import "encoding/binary"
 
-const mp4SampleSizeHeadMax = 16
+const mp4SampleSizeHeadMax = 128
 const mp4SampleSizeTailMax = 16
 
 func parseStszWithHead(payload []byte, headN int) (uint64, []uint32, []uint32, bool) {
@@ -99,4 +99,27 @@ func parseStszWithHead(payload []byte, headN int) (uint64, []uint32, []uint32, b
 func parseStsz(payload []byte) (uint64, bool) {
 	total, _, _, ok := parseStszWithHead(payload, 0)
 	return total, ok
+}
+
+// countMP4NonEmptySamples counts sample payloads larger than an empty tx3g
+// record. For fixed-size tables, every sample is either empty or non-empty.
+func countMP4NonEmptySamples(payload []byte) uint64 {
+	if len(payload) < 12 {
+		return 0
+	}
+	sampleSize := binary.BigEndian.Uint32(payload[4:8])
+	sampleCount := binary.BigEndian.Uint32(payload[8:12])
+	if sampleSize > 2 {
+		return uint64(sampleCount)
+	}
+	if sampleSize != 0 {
+		return 0
+	}
+	var count uint64
+	for index, offset := 0, 12; index < int(sampleCount) && offset+4 <= len(payload); index, offset = index+1, offset+4 {
+		if binary.BigEndian.Uint32(payload[offset:offset+4]) > 2 {
+			count++
+		}
+	}
+	return count
 }

@@ -102,6 +102,10 @@ func parseHdlrName(payload []byte) string {
 		return ""
 	}
 	name := payload[24:]
+	// QuickTime-style handlers prefix the name with an 8-bit Pascal length.
+	if len(name) > 1 && int(name[0]) <= len(name)-1 && name[0] < 0x20 {
+		name = name[1 : 1+int(name[0])]
+	}
 	if idx := bytesIndexByte(name, 0); idx >= 0 {
 		name = name[:idx]
 	}
