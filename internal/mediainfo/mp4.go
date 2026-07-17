@@ -64,6 +64,10 @@ type MP4Track struct {
 	Width uint64
 	// Height is the parsed display height in pixels.
 	Height                 uint64
+	mediaDurationTicks     uint64
+	sampleDurationTicks    uint64
+	trackDurationTicks     uint64
+	movieTimescale         uint32
 	canonicalSeed          []fieldEntry
 	sampleEntryType        string
 	nonEmptySampleCount    uint64
@@ -355,6 +359,8 @@ func parseTrak(buf []byte, movieTimescale uint32) (MP4Track, bool) {
 		mediaTrack.AlternateGroup = tkhdInfo.AlternateGroup
 		mediaTrack.CreationTime = tkhdInfo.CreationTime
 		mediaTrack.ModificationTime = tkhdInfo.ModifiedTime
+		mediaTrack.trackDurationTicks = tkhdInfo.DurationTicks
+		mediaTrack.movieTimescale = movieTimescale
 	}
 	mediaTrack.chapterTrackRefs = append([]uint32(nil), chapterTrackRefs...)
 	mediaTrack.trackTitle = trackTitle
@@ -369,6 +375,7 @@ func parseMdia(buf []byte) (MP4Track, bool) {
 	var handlerName string
 	var sampleInfo SampleInfo
 	var trackDuration float64
+	var mediaDurationTicks uint64
 	var trackTimescale uint32
 	var language string
 	for offset+8 <= int64(len(buf)) {
@@ -384,8 +391,9 @@ func parseMdia(buf []byte) (MP4Track, bool) {
 		}
 		if boxType == "mdhd" {
 			payload := sliceBox(buf, dataOffset, boxSize-headerSize)
-			if duration, timescale, lang, ok := parseMdhdMeta(payload); ok {
+			if duration, durationTicks, timescale, lang, ok := parseMdhdMeta(payload); ok {
 				trackDuration = duration
+				mediaDurationTicks = durationTicks
 				trackTimescale = timescale
 				language = lang
 			}
@@ -426,6 +434,8 @@ func parseMdia(buf []byte) (MP4Track, bool) {
 		MaximumSampleDelta:     sampleInfo.MaximumSampleDelta,
 		FirstChunkOff:          sampleInfo.FirstChunkOff,
 		DurationSeconds:        trackDuration,
+		mediaDurationTicks:     mediaDurationTicks,
+		sampleDurationTicks:    sampleInfo.sampleDurationTicks,
 		Timescale:              trackTimescale,
 		Width:                  sampleInfo.Width,
 		Height:                 sampleInfo.Height,
@@ -460,6 +470,7 @@ type tkhdInfo struct {
 	AlternateGroup uint16
 	CreationTime   uint64
 	ModifiedTime   uint64
+	DurationTicks  uint64
 }
 
 func parseTkhd(payload []byte) (tkhdInfo, bool) {
@@ -475,6 +486,10 @@ func parseTkhd(payload []byte) (tkhdInfo, bool) {
 		creation := uint64(binary.BigEndian.Uint32(payload[4:8]))
 		modified := uint64(binary.BigEndian.Uint32(payload[8:12]))
 		id := binary.BigEndian.Uint32(payload[12:16])
+		duration := uint64(binary.BigEndian.Uint32(payload[20:24]))
+		if duration == uint64(^uint32(0)) {
+			duration = 0
+		}
 		alternateGroup := binary.BigEndian.Uint16(payload[34:36])
 		return tkhdInfo{
 			ID:             id,
@@ -482,6 +497,7 @@ func parseTkhd(payload []byte) (tkhdInfo, bool) {
 			AlternateGroup: alternateGroup,
 			CreationTime:   creation,
 			ModifiedTime:   modified,
+			DurationTicks:  duration,
 		}, true
 	}
 	if version == 1 {
@@ -491,6 +507,10 @@ func parseTkhd(payload []byte) (tkhdInfo, bool) {
 		creation := binary.BigEndian.Uint64(payload[4:12])
 		modified := binary.BigEndian.Uint64(payload[12:20])
 		id := binary.BigEndian.Uint32(payload[20:24])
+		duration := binary.BigEndian.Uint64(payload[28:36])
+		if duration == ^uint64(0) {
+			duration = 0
+		}
 		alternateGroup := binary.BigEndian.Uint16(payload[46:48])
 		return tkhdInfo{
 			ID:             id,
@@ -498,6 +518,7 @@ func parseTkhd(payload []byte) (tkhdInfo, bool) {
 			AlternateGroup: alternateGroup,
 			CreationTime:   creation,
 			ModifiedTime:   modified,
+			DurationTicks:  duration,
 		}, true
 	}
 	return tkhdInfo{}, false
@@ -630,8 +651,9 @@ func parseStbl(buf []byte) (SampleInfo, bool) {
 		}
 		if boxType == "stts" {
 			payload := sliceBox(buf, dataOffset, boxSize-headerSize)
-			if count, sampleDelta, lastDelta, ok, variable := parseStts(payload); ok {
+			if count, durationTicks, sampleDelta, lastDelta, ok, variable := parseStts(payload); ok {
 				info.SampleCount = count
+				info.sampleDurationTicks = durationTicks
 				info.SampleDelta = sampleDelta
 				info.LastSampleDelta = lastDelta
 				info.VariableDeltas = variable

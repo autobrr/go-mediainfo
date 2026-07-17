@@ -1130,6 +1130,11 @@ func rawTextValue(kind StreamKind, label, display string, structured map[string]
 		if value := structured["DisplayAspectRatio"]; value != "" && rawTextAVIVisual(structured) {
 			return formatRawTextAVIAspectRatio(value)
 		}
+		if value := structured["DisplayAspectRatio"]; value != "" && rawTextMP4Visual(structured) {
+			if formatted := formatRawTextAspectRatio(value); formatted != value {
+				return formatted
+			}
+		}
 	case "ScanType/String":
 		if value := structured["ScanType"]; value != "" {
 			return value
@@ -1173,6 +1178,17 @@ func rawTextAVIVisual(structured map[string]string) bool {
 	}
 	switch strings.ToUpper(structured["CodecID"]) {
 	case "DIVX", "DX50", "FMP4", "MP4V", "XVID":
+		return true
+	default:
+		return false
+	}
+}
+
+// rawTextMP4Visual reports whether canonical codec facts identify an MP4
+// visual sample entry whose raw aspect ratio uses named common ratios.
+func rawTextMP4Visual(structured map[string]string) bool {
+	switch strings.ToLower(structured["CodecID"]) {
+	case "avc1", "avc3", "hvc1", "hev1", "mp4v", "vp09":
 		return true
 	default:
 		return false
@@ -1502,7 +1518,7 @@ var (
 		"Duration/String", "Source_Duration/String", "Duration_FirstFrame/String", "Duration_LastFrame/String", "BitRate_Mode/String", "BitRate/String", "BitRate_Minimum/String", "BitRate_Nominal/String", "BitRate_Maximum/String",
 		"Width/String", "Height/String", "DisplayAspectRatio/String", "DisplayAspectRatio_Original/Stri", "ActiveFormatDescription/String", "Channel(s)/String", "ChannelLayout", "Channel(s)_Original/String", "ChannelLayout_Original", "SamplingRate/String",
 		"FrameRate_Mode/String", "FrameRate/String", "FrameRate_Minimum/String", "FrameRate_Maximum/String", "FrameRate_Original/String", "Standard", "ColorSpace", "ChromaSubsampling", "ChromaSubsampling/String", "BitDepth/String",
-		"BitDepth_Detected/String", "ScanType/String", "ScanType_StoreMethod/String", "ScanOrder/String", "Compression_Mode/String", "Bits-(Pixel*Frame)", "TimeCode_FirstFrame", "TimeCode_Source", "Gop_OpenClosed/String", "Gop_OpenClosed_FirstFrame/String", "ElementCount", "Video_Delay/String", "StreamSize/String", "Alignment/String", "Interleave_Duration/String", "Interleave_Preload/String",
+		"BitDepth_Detected/String", "ScanType/String", "ScanType_StoreMethod/String", "ScanOrder/String", "Compression_Mode/String", "Bits-(Pixel*Frame)", "TimeCode_FirstFrame", "TimeCode_Source", "Gop_OpenClosed/String", "Gop_OpenClosed_FirstFrame/String", "ElementCount", "Video_Delay/String", "StreamSize/String", "Source_StreamSize/String", "Alignment/String", "Interleave_Duration/String", "Interleave_Preload/String",
 		"List/String", "Title", "Encoded_Application/String", "Encoded_Library/String", "Encoded_Library_Settings", "Language/String", "LawRating", "ServiceKind/String",
 		"Default/String", "Forced/String", "AlternateGroup/String", "Encoded_Date", "Tagged_Date",
 		"colour_range", "colour_primaries", "colour_primaries_Original", "transfer_characteristics", "transfer_characteristics_Origina", "matrix_coefficients", "matrix_coefficients_Original",

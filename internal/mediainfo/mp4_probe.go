@@ -188,6 +188,12 @@ func applyMP4HEVCProbe(builder *canonicalStreamBuilder, hdr hevcHDRInfo, track M
 			compatibility = append(compatibility, "HDR10")
 		}
 		builder.Fill("HDR_Format", strings.Join(formats, " / "), "HDR format", strings.Join(formats, " / "))
+		displayFormats := []string{formatDolbyVisionHDR(cfg)}
+		for range len(formats) - 1 {
+			displayFormats = append(displayFormats, "SMPTE ST 2086, Version HDR10, HDR10 compatible")
+		}
+		builder.ReplaceText("HDR format", strings.Join(displayFormats, " / "))
+		builder.ReplaceText("Codec configuration box", "hvcC+dvvC")
 		builder.Structured("HDR_Format_Version", fmt.Sprintf("%d.%d / ", cfg.versionMajor, cfg.versionMinor))
 		builder.Structured("HDR_Format_Profile", fmt.Sprintf("%s.%02d / ", dolbyVisionProfilePrefix(cfg.profile), cfg.profile))
 		builder.Structured("HDR_Format_Level", fmt.Sprintf("%02d / ", cfg.level))

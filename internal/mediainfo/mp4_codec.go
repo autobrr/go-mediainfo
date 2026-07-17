@@ -24,7 +24,8 @@ type SampleInfo struct {
 	// SampleSizeTail retains bounded trailing sample sizes.
 	SampleSizeTail []uint32
 	// SampleDelta is the dominant stts delta.
-	SampleDelta uint32
+	SampleDelta         uint32
+	sampleDurationTicks uint64
 	// LastSampleDelta is the final stts delta.
 	LastSampleDelta uint32
 	// VariableDeltas reports whether stts contains differing deltas.
@@ -826,7 +827,13 @@ func canonicalMP4VisualSampleSeed(fields []Field, structuredFacts *mp4Structured
 	if facts.height > 0 {
 		builder.Fill("Height", strconv.FormatUint(facts.height, 10), "Height", formatPixels(facts.height))
 	}
-	if facts.width > 0 && facts.height > 0 {
+	if ratio := structuredFacts.Get("DisplayAspectRatio"); ratio != "" {
+		display := findField(fields, "Display aspect ratio")
+		if display == "" {
+			display = formatRawTextAspectRatio(ratio)
+		}
+		builder.Fill("DisplayAspectRatio", ratio, "Display aspect ratio", display)
+	} else if facts.width > 0 && facts.height > 0 {
 		if display := formatAspectRatio(facts.width, facts.height); display != "" {
 			if ratio, ok := parseRatioFloat(display); ok {
 				builder.Fill("DisplayAspectRatio", formatJSONFloat(ratio), "Display aspect ratio", display)

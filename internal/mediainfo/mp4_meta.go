@@ -52,36 +52,36 @@ func parseMvhdMeta(payload []byte) (float64, uint32, uint64, uint64, bool) {
 	}
 }
 
-func parseMdhdMeta(payload []byte) (float64, uint32, string, bool) {
+func parseMdhdMeta(payload []byte) (float64, uint64, uint32, string, bool) {
 	if len(payload) < 24 {
-		return 0, 0, "", false
+		return 0, 0, 0, "", false
 	}
 	version := payload[0]
 	switch version {
 	case 0:
 		if len(payload) < 24 {
-			return 0, 0, "", false
+			return 0, 0, 0, "", false
 		}
 		timescale := binary.BigEndian.Uint32(payload[12:16])
 		duration := binary.BigEndian.Uint32(payload[16:20])
 		lang := decodeMP4Language(binary.BigEndian.Uint16(payload[20:22]))
 		if timescale == 0 {
-			return 0, 0, "", false
+			return 0, 0, 0, "", false
 		}
-		return float64(duration) / float64(timescale), timescale, lang, true
+		return float64(duration) / float64(timescale), uint64(duration), timescale, lang, true
 	case 1:
 		if len(payload) < 36 {
-			return 0, 0, "", false
+			return 0, 0, 0, "", false
 		}
 		timescale := binary.BigEndian.Uint32(payload[20:24])
 		duration := binary.BigEndian.Uint64(payload[24:32])
 		lang := decodeMP4Language(binary.BigEndian.Uint16(payload[32:34]))
 		if timescale == 0 {
-			return 0, 0, "", false
+			return 0, 0, 0, "", false
 		}
-		return float64(duration) / float64(timescale), timescale, lang, true
+		return float64(duration) / float64(timescale), duration, timescale, lang, true
 	default:
-		return 0, 0, "", false
+		return 0, 0, 0, "", false
 	}
 }
 
