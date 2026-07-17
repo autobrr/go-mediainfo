@@ -157,14 +157,30 @@ func (p *psStreamParser) parseReader(r io.Reader) bool {
 		streamID := buf[pos+3]
 		switch streamID {
 		case 0xBA:
-			if pos+14 > len(buf) {
+			if pos+5 > len(buf) {
 				if !readMore() {
 					return found
 				}
 				continue
 			}
-			stuffing := int(buf[pos+13] & 0x07)
-			needed := pos + 14 + stuffing
+			needed := 0
+			switch {
+			case (buf[pos+4] & 0xC0) == 0x40:
+				// MPEG-2 pack headers are 14 bytes plus the declared stuffing.
+				if pos+14 > len(buf) {
+					if !readMore() {
+						return found
+					}
+					continue
+				}
+				needed = pos + 14 + int(buf[pos+13]&0x07)
+			case (buf[pos+4] & 0xF0) == 0x20:
+				// MPEG-1 pack headers have a fixed 12-byte size.
+				needed = pos + 12
+			default:
+				pos++
+				continue
+			}
 			if needed > len(buf) {
 				if !readMore() {
 					return found
@@ -225,30 +241,110 @@ func (p *psStreamParser) parseReader(r io.Reader) bool {
 			continue
 		}
 
-		if pos+9 > len(buf) {
+		if pos+7 > len(buf) {
 			if !readMore() {
 				return found
 			}
 			continue
 		}
 		pesLen := int(binary.BigEndian.Uint16(buf[pos+4 : pos+6]))
-		if (buf[pos+6] & 0xC0) != 0x80 {
-			pos++
-			continue
+		flags := byte(0)
+		payloadStart := 0
+		ptsStart := -1
+		headerBytes := 0
+		if (buf[pos+6] & 0xC0) == 0x80 {
+			// MPEG-2 PES optional headers carry flags and an explicit header length.
+			if pos+9 > len(buf) {
+				if !readMore() {
+					return found
+				}
+				continue
+			}
+			flags = buf[pos+7]
+			headerLen := int(buf[pos+8])
+			headerBytes = 3 + headerLen
+			payloadStart = pos + 9 + headerLen
+			if flags&0x80 != 0 {
+				ptsStart = pos + 9
+			}
+		} else {
+			// MPEG-1 PES optional headers use stuffing and marker bits instead of
+			// the MPEG-2 flags/header-length pair.
+			header := pos + 6
+			for {
+				if header >= len(buf) {
+					if !readMore() {
+						return found
+					}
+					continue
+				}
+				if buf[header] != 0xFF {
+					break
+				}
+				header++
+			}
+			if header >= len(buf) {
+				continue
+			}
+			if buf[header]&0xC0 == 0x40 {
+				if header+2 > len(buf) {
+					if !readMore() {
+						return found
+					}
+					continue
+				}
+				header += 2
+			}
+			if header >= len(buf) {
+				continue
+			}
+			switch buf[header] & 0xF0 {
+			case 0x20:
+				ptsStart = header
+				flags = 0x80
+				header += 5
+			case 0x30:
+				ptsStart = header
+				flags = 0x80
+				header += 10
+			case 0x00:
+				if buf[header] != 0x0F {
+					pos++
+					continue
+				}
+				header++
+			default:
+				pos++
+				continue
+			}
+			headerBytes = header - (pos + 6)
+			payloadStart = header
 		}
-		flags := buf[pos+7]
-		headerLen := int(buf[pos+8])
-		payloadStart := pos + 9 + headerLen
 		if payloadStart > len(buf) {
 			if !readMore() {
 				return found
 			}
 			continue
 		}
+		if pesLen > 0 && headerBytes > pesLen {
+			pos++
+			continue
+		}
+		var currentPTS uint64
+		var hasPTS bool
+		if ptsStart >= 0 {
+			if ptsStart+5 > len(buf) {
+				if !readMore() {
+					return found
+				}
+				continue
+			}
+			currentPTS, hasPTS = parsePTS(buf[ptsStart:])
+		}
 
 		payloadLen := 0
 		if pesLen > 0 {
-			payloadLen = max(pesLen-3-headerLen, 0)
+			payloadLen = max(pesLen-headerBytes, 0)
 			payloadEnd := payloadStart + payloadLen
 			if payloadEnd > len(buf) {
 				if !readMore() {
@@ -276,17 +372,11 @@ func (p *psStreamParser) parseReader(r io.Reader) bool {
 					entry.firstPacketOrder = p.packetOrder
 					p.packetOrder++
 				}
-				var currentPTS uint64
-				var hasPTS bool
-				if (flags&0x80) != 0 && pos+9+headerLen <= len(buf) {
-					if pts, ok := parsePTS(buf[pos+9:]); ok {
-						currentPTS = pts
-						hasPTS = true
-						p.anyPTS.add(pts)
-						entry.pts.add(pts)
-						if entry.kind == StreamVideo {
-							p.videoPTS.add(pts)
-						}
+				if hasPTS {
+					p.anyPTS.add(currentPTS)
+					entry.pts.add(currentPTS)
+					if entry.kind == StreamVideo {
+						p.videoPTS.add(currentPTS)
 					}
 				}
 				if payloadOffset < len(payload) {
@@ -327,25 +417,19 @@ func (p *psStreamParser) parseReader(r io.Reader) bool {
 			entry.firstPacketOrder = p.packetOrder
 			p.packetOrder++
 		}
-		var streamPTS uint64
-		var streamHasPTS bool
-		if (flags&0x80) != 0 && pos+9+headerLen <= len(buf) {
-			if pts, ok := parsePTS(buf[pos+9:]); ok {
-				streamPTS = pts
-				streamHasPTS = true
-				p.anyPTS.add(pts)
-				entry.pts.add(pts)
-				if entry.kind == StreamVideo {
-					p.videoPTS.add(pts)
-				}
+		if hasPTS {
+			p.anyPTS.add(currentPTS)
+			entry.pts.add(currentPTS)
+			if entry.kind == StreamVideo {
+				p.videoPTS.add(currentPTS)
 			}
 		}
 		pending = &psPending{
 			entry:      entry,
 			key:        psStreamKey(streamID, subID),
 			flags:      flags,
-			pts:        streamPTS,
-			hasPTS:     streamHasPTS,
+			pts:        currentPTS,
+			hasPTS:     hasPTS,
 			payloadPos: payloadStart,
 			skip:       payloadOffset,
 		}

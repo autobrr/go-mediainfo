@@ -154,6 +154,23 @@ func FuzzParseMPEGPSContainers(f *testing.F) {
 	})
 }
 
+func FuzzParseOggContainers(f *testing.F) {
+	seed := make([]byte, 28, 47)
+	copy(seed, "OggS")
+	seed[5] = 0x02
+	binary.LittleEndian.PutUint32(seed[14:18], 1)
+	seed[26] = 1
+	seed[27] = 19
+	seed = append(seed, []byte("OpusHead\x01\x01\x00\x00\x80\xBB\x00\x00\x00\x00\x00")...)
+	f.Add(seed)
+
+	f.Fuzz(func(_ *testing.T, data []byte) {
+		data = fuzzLimit(data)
+		r := bytes.NewReader(data)
+		_, _, _, _, _, _ = parseOgg(r, int64(len(data)))
+	})
+}
+
 func FuzzParseFLACContainers(f *testing.F) {
 	f.Add([]byte{'f', 'L', 'a', 'C'})
 	f.Add([]byte{'f', 'L', 'a', 'C', 0x00, 0x00, 0x00, 0x22})

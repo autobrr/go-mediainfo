@@ -153,7 +153,7 @@ func fillGeneratedStructured(store *fieldStore, ref streamRef, name fieldName, v
 // finalizeComputedStreamFacts derives shared video counts, sampled dimensions, and pixel ratio.
 func finalizeComputedStreamFacts(store *fieldStore, ref streamRef) {
 	stream := store.stream(ref)
-	if stream == nil || stream.Kind != StreamVideo {
+	if stream == nil || stream.Kind != StreamVideo || stream.SkipComputed {
 		return
 	}
 	if !hasStoredField(stream, "FrameCount") {

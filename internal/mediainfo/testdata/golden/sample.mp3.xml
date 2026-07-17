@@ -24,6 +24,7 @@
 <track type="Audio">
 <Format>MPEG Audio</Format>
 <Format_Version>1</Format_Version>
+<Format_Profile>Layer 3</Format_Profile>
 <Duration>4.032</Duration>
 <BitRate_Mode>CBR</BitRate_Mode>
 <BitRate>128000</BitRate>
@@ -36,7 +37,6 @@
 <Compression_Mode>Lossy</Compression_Mode>
 <Encoded_Library>LAME3.100</Encoded_Library>
 <StreamSize>64512</StreamSize>
-<Format_Profile>Layer 3</Format_Profile>
 </track>
 </media>
 </MediaInfo>

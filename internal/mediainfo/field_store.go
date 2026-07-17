@@ -72,6 +72,7 @@ func canonicalStreamSnapshot(store *fieldStore, ref streamRef, policy canonicalS
 		return Stream{}
 	}
 	store.streams[ref].SkipStreamOrder = policy.SkipStreamOrder
+	store.streams[ref].SkipComputed = policy.SkipComputed
 	store.streams[ref].HideTypeOrderXML = policy.HideTypeOrderXML
 	finalizeFieldStore(store)
 	projection := projectTextStore(store, "")
@@ -279,6 +280,7 @@ type storedStream struct {
 	StructuredOrder          map[string]int
 	TextAlreadyOrdered       bool
 	SkipStreamOrder          bool
+	SkipComputed             bool
 	HideTypeOrderXML         bool
 	DirectCanonical          bool
 }

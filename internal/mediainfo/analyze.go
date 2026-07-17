@@ -1704,6 +1704,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			audioBitRateSum := float64(0)
 			textBitRateSum := float64(0)
 			bitratesOK := true
+			generalWritingLibrary := ""
 			short := info.DurationSeconds > 0 && info.DurationSeconds < 1
 			for i := range streams {
 				if short {
@@ -1721,6 +1722,9 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 					}
 					if value, found := canonicalSeedValue(streams[i], "FrameCount"); found {
 						frameCount = value
+					}
+					if value, found := canonicalSeedValue(streams[i], "Encoded_Library"); found && generalWritingLibrary == "" {
+						generalWritingLibrary = strings.TrimPrefix(value, "encoded by ")
 					}
 				}
 				switch streams[i].Kind {
@@ -1751,6 +1755,10 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			}
 			if frameCount != "" {
 				generalFacts.SetSame("FrameCount", frameCount)
+			}
+			if generalWritingLibrary != "" {
+				general.Fields = appendFieldUnique(general.Fields, Field{Name: "Writing library", Value: generalWritingLibrary})
+				generalFacts.SetSame("Encoded_Library", generalWritingLibrary)
 			}
 
 			// Mirror MediaInfoLib's Streams_Finish_InterStreams video bitrate/stream size heuristic:
@@ -1925,7 +1933,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			generalFacts.ApplyToStream(&general)
 		}
 	case "Ogg":
-		if parsedInfo, parsedStreams, generalFields, generalFacts, ok := parseOgg(file, stat.Size()); ok {
+		if parsedInfo, parsedStreams, generalFields, generalFacts, generalExtra, ok := parseOgg(file, stat.Size()); ok {
 			info = parsedInfo
 			streams = parsedStreams
 			generalFacts.PreserveLegacySnapshot()
@@ -1937,6 +1945,24 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			// Match official mediainfo JSON: OverallBitRate uses full file size (not rounded kb/s from text).
 			if overallBitRate, ok := overallBitRateValue(stat.Size(), info.DurationSeconds); ok {
 				generalFacts.SetSame("OverallBitRate", overallBitRate)
+			}
+			if info.DurationSeconds > 0 {
+				generalFacts.Set("Duration", strconv.FormatInt(int64(math.Round(info.DurationSeconds*1000)), 10), formatJSONSeconds(info.DurationSeconds))
+			}
+			for i := range streams {
+				if streams[i].Kind != StreamVideo {
+					continue
+				}
+				if frameCount, found := canonicalSeedValue(streams[i], "FrameCount"); found {
+					generalFacts.SetSame("FrameCount", frameCount)
+				}
+				break
+			}
+			if info.StreamOverheadBytes > 0 {
+				generalFacts.SetSame("StreamSize", strconv.FormatInt(info.StreamOverheadBytes, 10))
+			}
+			if generalExtra != nil && generalExtra.Kind == structuredObject {
+				appendCanonicalSeedLegacyObjectMembers(&general, "extra", generalExtra.Object)
 			}
 			generalFacts.ApplyToStream(&general)
 		}

@@ -93,6 +93,7 @@ func reportToFieldStore(report Report, useCanonicalSeeds bool) *fieldStore {
 		if useCanonicalSeeds && len(stream.canonicalSeed) > 0 {
 			stored.DirectCanonical = true
 			stored.SkipStreamOrder = stream.canonicalPolicy.SkipStreamOrder || stream.JSONSkipStreamOrder
+			stored.SkipComputed = stream.canonicalPolicy.SkipComputed || stream.JSONSkipComputed
 			stored.HideTypeOrderXML = stream.canonicalPolicy.HideTypeOrderXML
 			stored.StructuredOrder = structuredFieldOrderForContainer(stream.Kind, containerFormat)
 			appendCanonicalSeed(store, ref, stream.canonicalSeed)

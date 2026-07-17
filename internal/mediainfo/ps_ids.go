@@ -50,6 +50,7 @@ type psStream struct {
 	videoSliceProbed     bool
 	videoIsH264          bool
 	videoIsMPEG2         bool
+	videoBitRateMode     string
 	videoBuffer          []byte
 	videoCCCarry         []byte
 	videoFrameCount      int

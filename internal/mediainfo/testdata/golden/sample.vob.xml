@@ -76,6 +76,7 @@
 <ID>192</ID>
 <Format>MPEG Audio</Format>
 <Format_Version>1</Format_Version>
+<Format_Profile>Layer 2</Format_Profile>
 <Duration>4.008</Duration>
 <BitRate_Mode>CBR</BitRate_Mode>
 <BitRate>192000</BitRate>
@@ -90,7 +91,6 @@
 <Delay_Source>Container</Delay_Source>
 <Video_Delay>-0.010</Video_Delay>
 <StreamSize>96192</StreamSize>
-<Format_Profile>Layer 2</Format_Profile>
 </track>
 </media>
 </MediaInfo>

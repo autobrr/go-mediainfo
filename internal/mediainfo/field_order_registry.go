@@ -182,14 +182,32 @@ var structuredVideoFieldOrder = map[string]int{
 var structuredAudioFieldOrder = map[string]int{
 	"@type": 0, "@typeorder": 1, "StreamOrder": 2, "FirstPacketOrder": 3, "ID": 4, "MenuID": 5, "UniqueID": 6,
 	"Format": 7, "Format_Commercial_IfAny": 8, "Format_Settings_Endianness": 9, "Format_Version": 10,
-	"Format_Settings_SBR": 11, "Format_AdditionalFeatures": 12, "MuxingMode": 13, "CodecID": 14, "Duration": 15,
-	"Source_Duration": 16, "Source_Duration_LastFrame": 17, "BitRate_Mode": 18, "BitRate": 19, "BitRate_Maximum": 20,
-	"Channels": 21, "ChannelPositions": 22, "ChannelLayout": 23, "SamplesPerFrame": 24, "SamplingRate": 25,
-	"SamplingCount": 26, "FrameRate": 27, "FrameCount": 28, "Source_FrameCount": 29, "Compression_Mode": 30,
-	"Delay": 31, "Delay_Source": 32, "Video_Delay": 33, "Encoded_Library": 34, "StreamSize": 35,
-	"Source_StreamSize": 36, "Title": 37, "Language": 38, "ServiceKind": 39, "Default": 40, "Forced": 41,
-	"AlternateGroup": 42, "extra": 43,
+	"Format_Profile": 11, "Format_Settings_SBR": 12, "Format_AdditionalFeatures": 13, "MuxingMode": 14, "CodecID": 15, "Duration": 16,
+	"Source_Duration": 17, "Source_Duration_LastFrame": 18, "BitRate_Mode": 19, "BitRate": 20, "BitRate_Maximum": 21,
+	"Channels": 22, "ChannelPositions": 23, "ChannelLayout": 24, "SamplesPerFrame": 25, "SamplingRate": 26,
+	"SamplingCount": 27, "FrameRate": 28, "FrameCount": 29, "Source_FrameCount": 30, "Compression_Mode": 31,
+	"Delay": 32, "Delay_Source": 33, "Video_Delay": 34, "Encoded_Library": 35, "StreamSize": 36,
+	"Source_StreamSize": 37, "Title": 38, "Language": 39, "ServiceKind": 40, "Default": 41, "Forced": 42,
+	"AlternateGroup": 43, "extra": 44,
 }
+
+var structuredOggGeneralFieldOrder = makeStructuredFieldOrder(
+	"@type", "VideoCount", "AudioCount", "TextCount", "ImageCount", "MenuCount", "FileExtension", "Format", "FileSize",
+	"Duration", "OverallBitRate_Mode", "OverallBitRate", "FrameRate", "FrameCount", "StreamSize", "Title", "Movie",
+	"File_Created_Date", "File_Created_Date_Local", "File_Modified_Date", "File_Modified_Date_Local", "Encoded_Application",
+	"TermsOfUse", "extra",
+)
+
+var structuredOggVideoFieldOrder = makeStructuredFieldOrder(
+	"@type", "ID", "Format", "Duration", "BitRate_Mode", "BitRate", "BitRate_Nominal", "Width", "Height", "PixelAspectRatio",
+	"DisplayAspectRatio", "FrameRate", "FrameRate_Num", "FrameRate_Den", "FrameCount", "Compression_Mode", "StreamSize",
+	"Encoded_Library", "Encoded_Library_Name", "Encoded_Library_Version", "Encoded_Library_Date",
+)
+
+var structuredOggAudioFieldOrder = makeStructuredFieldOrder(
+	"@type", "ID", "Format", "Format_Settings_Floor", "Duration", "BitRate_Mode", "BitRate", "Channels", "ChannelPositions", "ChannelLayout", "SamplingRate",
+	"SamplingCount", "Compression_Mode", "StreamSize", "Encoded_Library", "Encoded_Library_Name", "Encoded_Library_Version", "Encoded_Library_Date",
+)
 
 // structuredTextFieldOrder is the shared structured order for text keys.
 var structuredTextFieldOrder = map[string]int{
@@ -440,9 +458,25 @@ func structuredFieldOrderForContainer(kind StreamKind, containerFormat string) m
 		return structuredAVIFieldOrderPolicy(kind)
 	case "BDAV":
 		return structuredBDAVFieldOrderPolicy(kind)
+	case "Ogg":
+		return structuredOggFieldOrderPolicy(kind)
 	default:
 		return structuredFieldOrderPolicy(kind)
 	}
+}
+
+func structuredOggFieldOrderPolicy(kind StreamKind) map[string]int {
+	switch kind {
+	case StreamGeneral:
+		return structuredOggGeneralFieldOrder
+	case StreamVideo, StreamImage:
+		return structuredOggVideoFieldOrder
+	case StreamAudio:
+		return structuredOggAudioFieldOrder
+	case StreamText, StreamMenu:
+		return structuredFieldOrderPolicy(kind)
+	}
+	panic("unreachable StreamKind")
 }
 
 // structuredMP4FieldOrderPolicy returns ISO Base Media key order for kind.
