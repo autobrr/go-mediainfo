@@ -821,6 +821,8 @@ func mapMPEG1DisplayAspectRatio(width, height, code uint64) string {
 
 func mapMPEG2Standard(frameRate float64) string {
 	switch {
+	case frameRate > 50:
+		return "Component"
 	case frameRate > 0 && math.Abs(frameRate-29.97) < 0.01:
 		return "NTSC"
 	case frameRate > 0 && math.Abs(frameRate-30.0) < 0.01:

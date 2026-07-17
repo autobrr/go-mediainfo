@@ -50,6 +50,7 @@ var friendlyTextRawLabels = map[string]string{
 	"Format settings":                    "Format_Settings",
 	"Commercial name":                    "Format_Commercial_IfAny",
 	"Muxing mode":                        "MuxingMode",
+	"Muxing mode, more info":             "MuxingMode_MoreInfo",
 	"HDR format":                         "HDR_Format/String",
 	"Format settings, CABAC":             "Format_Settings_CABAC/String",
 	"Format settings, Reference frames":  "Format_Settings_RefFrames/String",
@@ -91,6 +92,9 @@ var friendlyTextRawLabels = map[string]string{
 	"Compression mode":                   "Compression_Mode/String",
 	"Bits/(Pixel*Frame)":                 "Bits-(Pixel*Frame)",
 	"Time code of first frame":           "TimeCode_FirstFrame",
+	"Time code source":                   "TimeCode_Source",
+	"GOP, Open/Closed":                   "Gop_OpenClosed/String",
+	"GOP, Open/Closed of first frame":    "Gop_OpenClosed_FirstFrame/String",
 	"Channel(s)":                         "Channel(s)/String",
 	"Channel layout":                     "ChannelLayout",
 	"Sampling rate":                      "SamplingRate/String",
@@ -120,6 +124,13 @@ var friendlyTextRawLabels = map[string]string{
 	"Bed channel count":                  "BedChannelCount",
 	"Bed channel configuration":          "BedChannelConfiguration",
 	"Dialog Normalization":               "dialnorm",
+	"Law rating":                         "LawRating",
+	"List":                               "List/String",
+	"Duration of the visible content":    "Duration_Start2End/String",
+	"Start time":                         "Duration_Start/String",
+	"End time":                           "Duration_End/String",
+	"Count of frames before first event": "FirstDisplay_Delay_Frames",
+	"Type of the first event":            "FirstDisplay_Type",
 	"ACTOR_CHARACTER":                    "ACTOR/CHARACTER",
 	"Encoded_Application_Url":            "Encoded_Application/Url",
 	"Writing_Library":                    "Writing Library",
@@ -260,7 +271,7 @@ func rawTextStructuredDerivations(kind StreamKind, structured map[string]string,
 	appendField("Format_Profile", formatRawTextProfile(kind, structured, structured["Format_Profile"]))
 	appendField("Format_Settings", formatRawTextSettings(structured))
 	appendField("Format_Settings_Floor", structured["Format_Settings_Floor"])
-	if count := structured["Format_Settings_SliceCount"]; count != "" {
+	if count := structured["Format_Settings_SliceCount"]; count != "" && count != "1" {
 		appendField("Format_Settings_SliceCount/Strin", count+" slice per frame")
 	}
 	appendField("BitRate_Mode/String", formatRawTextMode(structured["BitRate_Mode"], "CBR", "VBR"))
@@ -495,6 +506,9 @@ func rawTextFrameRateUsesRatio(kind StreamKind, structured map[string]string, nu
 	if kind == StreamText || structured["Format"] == "MPEG-4 Visual" {
 		return true
 	}
+	if kind == StreamVideo && structured["Format"] == "AVC" && numerator == "30000" && denominator == "1001" {
+		return true
+	}
 	return numerator == "23976" && denominator == "1000" || structured["Format"] == "AV1"
 }
 
@@ -658,7 +672,9 @@ func rawTextExtraVisible(key, value string) bool {
 	case "bsid", "acmod", "lfeon",
 		"dialnorm_Count", "compr_Average", "compr_Minimum", "compr_Maximum", "compr_Count",
 		"dynrng_Average", "dynrng_Minimum", "dynrng_Maximum", "dynrng_Count",
-		"intra_dc_precision", "IsTruncated":
+		"intra_dc_precision", "IsTruncated", "format_identifier",
+		"OverallBitRate_Precision_Min", "OverallBitRate_Precision_Max",
+		"CaptionServiceName", "CaptionServiceContent_IsPresent", "CaptionServiceDescriptor_IsPresent":
 		return false
 	case "dsurmod":
 		return value != "0"
@@ -878,7 +894,7 @@ func rawTextValue(kind StreamKind, label, display string, structured map[string]
 		}
 	case "HDR_Format/String":
 		return formatRawTextHDR(display, structured)
-	case "Duration/String", "Source_Duration/String":
+	case "Duration/String", "Source_Duration/String", "Duration_Start2End/String", "Duration_Start/String", "Duration_End/String":
 		key := strings.TrimSuffix(label, "/String")
 		if value := structured[key]; value != "" {
 			if milliseconds, err := strconv.ParseFloat(value, 64); err == nil {
@@ -980,6 +996,9 @@ func rawTextValue(kind StreamKind, label, display string, structured map[string]
 		}
 	case "StreamSize/String":
 		if size, err := strconv.ParseInt(structured["StreamSize"], 10, 64); err == nil && size >= 0 {
+			if kind == StreamText && size == 0 {
+				return "0.00 Byte (0%)"
+			}
 			return formatRawTextByteUnits(kind, formatStreamSize(size, totalFileSize), structured["ElementCount"])
 		}
 		return formatRawTextByteUnits(kind, display, structured["ElementCount"])
@@ -1360,7 +1379,8 @@ func rawTextFormatInfo(kind StreamKind, structured map[string]string) string {
 		return "Advanced Audio Codec Low Complexity"
 	case structured["CodecID"] == "A_EAC3" && strings.Contains(features, "JOC"):
 		return "Enhanced AC-3 with Joint Object Coding"
-	case structured["CodecID"] == "A_EAC3", format == "E-AC-3" || format == "AC-3 Dep":
+	case structured["CodecID"] == "A_EAC3", format == "E-AC-3" || format == "AC-3 Dep" ||
+		format == "AC-3" && strings.Contains(features, "Dep"):
 		return "Enhanced AC-3"
 	case format == "AC-3":
 		return "Audio Coding 3"
@@ -1416,9 +1436,9 @@ var (
 	)
 	rawTextTextFieldOrder = makeStructuredFieldOrder(
 		"ID/String", "MenuID/String", "UniqueID/String", "OriginalSourceMedium_ID/String", "Format/String", "Format/Info", "MuxingMode",
-		"CodecID", "CodecID/Info", "CodecID/Hint", "Duration/String", "Duration_FirstFrame/String", "Duration_LastFrame/String", "BitRate_Mode/String", "BitRate/String", "FrameRate/String",
+		"MuxingMode_MoreInfo", "CodecID", "CodecID/Info", "CodecID/Hint", "Duration/String", "Duration_Start2End/String", "Duration_Start/String", "Duration_End/String", "Duration_FirstFrame/String", "Duration_LastFrame/String", "BitRate_Mode/String", "BitRate/String", "FrameRate/String",
 		"ElementCount", "Compression_Mode/String", "Video_Delay/String", "StreamSize/String", "Title", "Encoded_Application/String",
-		"Encoded_Library/String", "Encoded_Library_Settings", "Language/String", "ServiceKind/String", "Default/String", "Forced/String", "AlternateGroup/String", "Encoded_Date", "Tagged_Date", "Events_Total",
+		"FirstDisplay_Delay_Frames", "FirstDisplay_Type", "Encoded_Library/String", "Encoded_Library_Settings", "Language/String", "ServiceKind/String", "Default/String", "Forced/String", "AlternateGroup/String", "Encoded_Date", "Tagged_Date", "Events_Total",
 		"  Issue", "FromStats_BitRate", "FromStats_Duration", "FromStats_FrameCount", "FromStats_StreamSize", "Source", "Source_ID", "MD5_Unencoded",
 	)
 	rawTextStreamFieldOrder = makeStructuredFieldOrder(
@@ -1430,7 +1450,7 @@ var (
 		"Width/String", "Height/String", "DisplayAspectRatio/String", "DisplayAspectRatio_Original/Stri", "ActiveFormatDescription/String", "Channel(s)/String", "ChannelLayout", "Channel(s)_Original/String", "ChannelLayout_Original", "SamplingRate/String",
 		"FrameRate_Mode/String", "FrameRate/String", "FrameRate_Minimum/String", "FrameRate_Maximum/String", "FrameRate_Original/String", "Standard", "ColorSpace", "ChromaSubsampling", "ChromaSubsampling/String", "BitDepth/String",
 		"BitDepth_Detected/String", "ScanType/String", "ScanType_StoreMethod/String", "ScanOrder/String", "Compression_Mode/String", "Bits-(Pixel*Frame)", "TimeCode_FirstFrame", "TimeCode_Source", "Gop_OpenClosed/String", "Gop_OpenClosed_FirstFrame/String", "ElementCount", "Video_Delay/String", "StreamSize/String", "Alignment/String", "Interleave_Duration/String", "Interleave_Preload/String",
-		"Title", "Encoded_Application/String", "Encoded_Library/String", "Encoded_Library_Settings", "Language/String", "ServiceKind/String",
+		"List/String", "Title", "Encoded_Application/String", "Encoded_Library/String", "Encoded_Library_Settings", "Language/String", "LawRating", "ServiceKind/String",
 		"Default/String", "Forced/String", "AlternateGroup/String", "Encoded_Date", "Tagged_Date",
 		"colour_range", "colour_primaries", "colour_primaries_Original", "transfer_characteristics", "transfer_characteristics_Origina", "matrix_coefficients", "matrix_coefficients_Original",
 		"MasteringDisplay_ColorPrimaries", "MasteringDisplay_Luminance", "MaxCLL/String", "MaxFALL/String", "mdhd_Duration", "Menus", "CodecConfigurationBox", "Events_Total",

@@ -219,6 +219,50 @@ var structuredTextFieldOrder = map[string]int{
 	"Title": 26, "Language": 27, "Default": 28, "Forced": 29, "extra": 30,
 }
 
+// structuredMPEGTSGeneralFieldOrder mirrors MPEG-TS General metadata placement,
+// including XDS title and rating fields before filesystem timestamps.
+var structuredMPEGTSGeneralFieldOrder = makeStructuredFieldOrder(
+	"@type", "ID", "VideoCount", "AudioCount", "TextCount", "ImageCount", "MenuCount", "FileExtension",
+	"Format", "FileSize", "Duration", "OverallBitRate_Mode", "OverallBitRate", "FrameRate", "FrameCount", "StreamSize",
+	"Title", "Movie", "LawRating", "File_Created_Date", "File_Created_Date_Local", "File_Modified_Date", "File_Modified_Date_Local", "extra",
+)
+
+// structuredMPEGTSVideoFieldOrder places MediaInfo's commercial codec label
+// directly after Format while retaining Go-derived codec details beside the
+// corresponding format settings.
+var structuredMPEGTSVideoFieldOrder = makeStructuredFieldOrder(
+	"@type", "@typeorder", "StreamOrder", "FirstPacketOrder", "ID", "MenuID", "UniqueID",
+	"Format", "Format_Commercial_IfAny", "Format_Version", "Format_Profile", "Format_Level", "Format_Tier",
+	"Format_Settings_BVOP", "Format_Settings_CABAC", "Format_Settings_RefFrames", "Format_Settings_QPel", "Format_Settings_GMC",
+	"Format_Settings_Matrix", "Format_Settings_Matrix_Data", "Format_Settings_GOP", "Format_Settings_PictureStructure",
+	"MuxingMode", "CodecID", "Duration", "BitRate_Mode", "BitRate", "BitRate_Nominal", "BitRate_Maximum",
+	"Width", "Height", "Stored_Width", "Stored_Height", "Sampled_Width", "Sampled_Height", "PixelAspectRatio", "DisplayAspectRatio",
+	"FrameRate_Mode", "FrameRate_Mode_Original", "FrameRate", "FrameRate_Num", "FrameRate_Den", "FrameCount", "Standard",
+	"ColorSpace", "ChromaSubsampling", "ChromaSubsampling_Position", "BitDepth", "ScanType", "ScanOrder", "Compression_Mode",
+	"Delay", "Delay_Settings", "Delay_DropFrame", "Delay_Source", "Delay_Original", "Delay_Original_DropFrame", "Delay_Original_Source",
+	"TimeCode_FirstFrame", "TimeCode_Source", "Gop_OpenClosed", "Gop_OpenClosed_FirstFrame", "StreamSize",
+	"Encoded_Library", "Encoded_Library_Name", "Encoded_Library_Version", "Encoded_Library_Settings", "Format_Settings_SliceCount", "BufferSize",
+	"colour_description_present", "colour_description_present_Source", "colour_range", "colour_range_Source",
+	"colour_primaries", "colour_primaries_Source", "transfer_characteristics", "transfer_characteristics_Source",
+	"matrix_coefficients", "matrix_coefficients_Source", "extra",
+)
+
+// structuredMPEGTSTextFieldOrder keeps program identity and A/53 muxing facts
+// ahead of measured caption timing.
+var structuredMPEGTSTextFieldOrder = makeStructuredFieldOrder(
+	"@type", "@typeorder", "StreamOrder", "ID", "MenuID", "Format", "MuxingMode", "MuxingMode_MoreInfo",
+	"Duration", "Duration_Start2End", "Duration_Start_Command", "Duration_Start", "Duration_End", "Duration_End_Command",
+	"BitRate_Mode", "Delay", "Delay_Source", "Video_Delay", "StreamSize", "Events_Total", "Events_RollUp", "Events_PaintOn",
+	"Lines_Count", "Lines_MaxCountPerEvent", "FirstDisplay_Delay_Frames", "FirstDisplay_Type", "Language", "extra",
+)
+
+// structuredMPEGTSMenuFieldOrder places ATSC program metadata before the PMT
+// descriptor object.
+var structuredMPEGTSMenuFieldOrder = makeStructuredFieldOrder(
+	"@type", "StreamOrder", "ID", "MenuID", "Format", "Duration", "Delay", "List_StreamKind", "List_StreamPos",
+	"ServiceName", "ServiceProvider", "ServiceType", "Title", "Language", "LawRating", "extra",
+)
+
 // MP4 structured orders mirror MediaInfo's ISO Base Media projection while
 // keeping retained Go extensions adjacent to their source fields.
 var structuredMP4GeneralFieldOrder = makeStructuredFieldOrder(
@@ -458,11 +502,31 @@ func structuredFieldOrderForContainer(kind StreamKind, containerFormat string) m
 		return structuredAVIFieldOrderPolicy(kind)
 	case "BDAV":
 		return structuredBDAVFieldOrderPolicy(kind)
+	case "MPEG-TS":
+		return structuredMPEGTSFieldOrderPolicy(kind)
 	case "Ogg":
 		return structuredOggFieldOrderPolicy(kind)
 	default:
 		return structuredFieldOrderPolicy(kind)
 	}
+}
+
+// structuredMPEGTSFieldOrderPolicy returns TS-specific General, Text, and Menu
+// ordering while sharing the codec stream registries.
+func structuredMPEGTSFieldOrderPolicy(kind StreamKind) map[string]int {
+	switch kind {
+	case StreamGeneral:
+		return structuredMPEGTSGeneralFieldOrder
+	case StreamText:
+		return structuredMPEGTSTextFieldOrder
+	case StreamMenu:
+		return structuredMPEGTSMenuFieldOrder
+	case StreamVideo, StreamImage:
+		return structuredMPEGTSVideoFieldOrder
+	case StreamAudio:
+		return structuredFieldOrderPolicy(kind)
+	}
+	panic("unreachable StreamKind")
 }
 
 func structuredOggFieldOrderPolicy(kind StreamKind) map[string]int {

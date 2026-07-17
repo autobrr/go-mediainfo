@@ -1170,12 +1170,16 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			// MediaInfoLib surfaces XDS Program Name as both Title and Movie in JSON for TS.
 			if title := findField(general.Fields, "Title"); title != "" {
 				generalFacts.SetSame("Title", title)
+				generalFacts.SetSame("Movie", title)
 			}
 			if movie := findField(general.Fields, "Movie"); movie != "" {
 				generalFacts.SetSame("Movie", movie)
 				if generalFacts.Legacy("Title") == "" {
 					generalFacts.SetSame("Title", movie)
 				}
+			}
+			if lawRating := findField(general.Fields, "Law rating"); lawRating != "" {
+				generalFacts.SetSame("LawRating", lawRating)
 			}
 			streams = parsedStreams
 			if id := findField(general.Fields, "ID"); id != "" {

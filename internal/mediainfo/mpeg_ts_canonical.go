@@ -44,8 +44,10 @@ func buildCanonicalMPEGTSStream(kind StreamKind, stream *tsStream, fields []Fiel
 			builder.DirectStructured(name, fact.canonical)
 		}
 		if fact.retainLegacy {
-			if name == "Duration" && decimalFractionDigits(fact.legacy) > 3 {
-				builder.SetStructuredDecimals(name, uint8(decimalFractionDigits(fact.legacy)))
+			if spec, known := structuredFieldSpec(kind, string(name)); known && spec.Measure == fieldMeasureMilliseconds {
+				if decimals := decimalFractionDigits(fact.legacy); decimals > 3 {
+					builder.SetStructuredDecimals(name, uint8(decimals))
+				}
 			}
 			builder.MarkLegacyJSON(name, fact.legacy)
 		}
@@ -384,7 +386,8 @@ func valuesDurationSeconds(facts *canonicalStructuredFacts) (float64, bool) {
 // canonicalMPEGTSStructuredValue converts serializer seconds to canonical milliseconds.
 func canonicalMPEGTSStructuredValue(name fieldName, value string) string {
 	switch name {
-	case "Duration", "Source_Duration", "Source_Duration_LastFrame":
+	case "Duration", "Source_Duration", "Source_Duration_LastFrame",
+		"Duration_Start2End", "Duration_Start_Command", "Duration_Start", "Duration_End", "Duration_End_Command":
 		if milliseconds, ok := decimalSecondsToMilliseconds(value); ok {
 			return milliseconds
 		}
@@ -450,6 +453,12 @@ func mpegTSStructuredTextLabel(name fieldName) string {
 		return "Muxing mode, more info"
 	case "Duration":
 		return "Duration"
+	case "Duration_Start2End":
+		return "Duration of the visible content"
+	case "Duration_Start":
+		return "Start time"
+	case "Duration_End":
+		return "End time"
 	case "BitRate_Mode":
 		return "Bit rate mode"
 	case "BitRate":
@@ -512,6 +521,14 @@ func mpegTSStructuredTextLabel(name fieldName) string {
 		return "Service provider"
 	case "ServiceType":
 		return "Service type"
+	case "FirstDisplay_Delay_Frames":
+		return "Count of frames before first event"
+	case "FirstDisplay_Type":
+		return "Type of the first event"
+	case "Title":
+		return "Title"
+	case "LawRating":
+		return "Law rating"
 	default:
 		return ""
 	}

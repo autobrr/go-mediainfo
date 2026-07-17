@@ -40,7 +40,8 @@ func TestSetEAC3CommercialJSON_NonJOCUsesDolbyDigitalPlus(t *testing.T) {
 }
 
 func TestBuildTSCaptionStreamSeedsDirectCanonicalFields(t *testing.T) {
-	stream := buildTSCaptionStream(256, 1, 1.25, 3.5, "EIA-608", "CC1", 0.5, true)
+	track := &ccTrack{firstCommandPTS: 135_000}
+	stream := buildTSCaptionStream(256, 1, 1.25, 3.5, 30, "EIA-608", "CC1", track, tsCaptionService{}, false, true)
 	if len(stream.canonicalSeed) == 0 {
 		t.Fatal("caption stream did not retain a canonical seed")
 	}
@@ -54,6 +55,63 @@ func TestBuildTSCaptionStreamSeedsDirectCanonicalFields(t *testing.T) {
 	}
 	if extra := canonicalSeedNode(stream, "extra"); extra == nil || extra.Kind != structuredObject {
 		t.Fatal("caption extra was not retained as a source-built object")
+	}
+}
+
+func TestUpdateCCTrackTSCapturesFirstRollUpEvent(t *testing.T) {
+	entry := &tsStream{}
+	updateCCTrackTS(entry, 0, 0x14, 0x25, 900_000, true, 100)
+	updateCCTrackTS(entry, 0, 'H', 'i', 903_000, true, 101)
+	updateCCTrackTS(entry, 0, 0x14, 0x2D, 906_000, true, 102)
+
+	if entry.ccOdd.firstType != "RollUp" {
+		t.Fatalf("first type=%q, want RollUp", entry.ccOdd.firstType)
+	}
+	if entry.ccOdd.firstContentPTS != 903_000 || entry.ccOdd.firstDisplayFrame != 94 {
+		t.Fatalf("first content=%d first display frame=%d", entry.ccOdd.firstContentPTS, entry.ccOdd.firstDisplayFrame)
+	}
+	if entry.ccOdd.lastContentPTS != 906_000 {
+		t.Fatalf("last content PTS=%d", entry.ccOdd.lastContentPTS)
+	}
+}
+
+func TestUpdateCCTrackTSSuppressesRepeatedControlPair(t *testing.T) {
+	entry := &tsStream{}
+	updateCCTrackTS(entry, 0, 0x14, 0x26, 900_000, true, 100)
+	updateCCTrackTS(entry, 0, 0x14, 0x26, 903_000, true, 102)
+
+	if entry.ccOdd.lastCommandPTS != 903_000 || !entry.ccOdd.commandDuplicated {
+		t.Fatalf("last command=%d duplicated=%v", entry.ccOdd.lastCommandPTS, entry.ccOdd.commandDuplicated)
+	}
+	if entry.ccOdd.rollUpLines != 3 {
+		t.Fatalf("roll-up lines=%d", entry.ccOdd.rollUpLines)
+	}
+}
+
+func TestUpdateCCTrackTSCarriageReturnChangesDisplayedState(t *testing.T) {
+	entry := &tsStream{}
+	updateCCTrackTS(entry, 0, 0x14, 0x26, 900_000, true, 100)
+	updateCCTrackTS(entry, 0, 0x14, 0x2D, 903_000, true, 102)
+
+	if entry.ccOdd.firstContentPTS != 903_000 || entry.ccOdd.lastContentPTS != 903_000 {
+		t.Fatalf("display change=%d..%d", entry.ccOdd.firstContentPTS, entry.ccOdd.lastContentPTS)
+	}
+}
+
+func TestMediaInfoCaptionTimestampUsesFloat32Milliseconds(t *testing.T) {
+	const fps = 60000.0 / 1001.0
+	tests := []struct {
+		pts  uint64
+		want float64
+	}{
+		{pts: 7_133_746_994, want: 79263.84},
+		{pts: 7_133_762_009, want: 79264.008},
+		{pts: 7_201_984_163, want: 80022.032},
+	}
+	for _, test := range tests {
+		if got := mediaInfoCaptionTimestamp(test.pts, fps, -1); got != test.want {
+			t.Fatalf("timestamp for %d=%f, want %f", test.pts, got, test.want)
+		}
 	}
 }
 

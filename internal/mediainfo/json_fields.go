@@ -692,6 +692,9 @@ func extractVersionNumber(value string) string {
 }
 
 func splitEncodedLibrary(value string) (string, string) {
+	if value == "Zencoder Video Encoding System" {
+		return value, ""
+	}
 	if strings.HasPrefix(value, "x264") {
 		trimmed := strings.TrimPrefix(value, "x264 - ")
 		trimmed = strings.TrimPrefix(trimmed, "x264 ")

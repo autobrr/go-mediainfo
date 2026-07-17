@@ -8,6 +8,10 @@ import (
 func findH264WritingLibrary(data []byte) string {
 	// MediaInfo sometimes derives Encoded_Library from encoder strings embedded in the bitstream (SEI user data).
 	// Keep this conservative: only return well-known, explicit markers.
+	const zencoder = "Zencoder Video Encoding System"
+	if bytes.Contains(data, []byte(zencoder)) {
+		return zencoder
+	}
 	if lib := findBiliBiliH264Encoder(data); lib != "" {
 		return lib
 	}

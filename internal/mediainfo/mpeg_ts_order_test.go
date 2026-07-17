@@ -112,3 +112,21 @@ func TestMergeTSStreamFromPMTUpdatesLanguageWhenPresent(t *testing.T) {
 		t.Fatalf("mergeTSStreamFromPMT() language=%q, want %q", existing.language, "zho")
 	}
 }
+
+func TestMergeTSStreamFromPMTReplacesProvisionalParserState(t *testing.T) {
+	existing := &tsStream{
+		pid: 49, provisional: true, kind: StreamVideo, format: "MPEG Video",
+		videoFrameCount: 15, ccFound: true,
+	}
+	existing.pts.add(90_000)
+	parsed := tsStream{pid: 49, programNumber: 3, streamType: 0x02, kind: StreamVideo, format: "MPEG Video"}
+
+	mergeTSStreamFromPMT(existing, parsed)
+
+	if existing.provisional || existing.pts.has() || existing.videoFrameCount != 0 || existing.ccFound {
+		t.Fatalf("provisional state survived PMT merge: %+v", existing)
+	}
+	if existing.programNumber != 3 || existing.streamType != 0x02 {
+		t.Fatalf("PMT identity not applied: %+v", existing)
+	}
+}

@@ -67,6 +67,11 @@ var canonicalFieldDefinitions = map[fieldName]fieldSpec{
 	"Duration":                   measuredField("Duration", "Duration", fieldMeasureMilliseconds, fieldValueDecimal),
 	"Source_Duration":            measuredField("Source_Duration", "Source duration", fieldMeasureMilliseconds, fieldValueDecimal),
 	"Source_Duration_LastFrame":  measuredField("Source_Duration_LastFrame", "Source_Duration_LastFrame", fieldMeasureMilliseconds, fieldValueDecimal),
+	"Duration_Start2End":         measuredField("Duration_Start2End", "Duration of the visible content", fieldMeasureMilliseconds, fieldValueDecimal),
+	"Duration_Start_Command":     structuredMeasuredField("Duration_Start_Command", fieldMeasureMilliseconds, fieldValueDecimal),
+	"Duration_Start":             measuredField("Duration_Start", "Start time", fieldMeasureMilliseconds, fieldValueDecimal),
+	"Duration_End":               measuredField("Duration_End", "End time", fieldMeasureMilliseconds, fieldValueDecimal),
+	"Duration_End_Command":       structuredMeasuredField("Duration_End_Command", fieldMeasureMilliseconds, fieldValueDecimal),
 	"BitRate":                    measuredField("BitRate", "Bit rate", fieldMeasureBitsPerSecond, fieldValueInteger),
 	"BitRate_Nominal":            measuredField("BitRate_Nominal", "Nominal bit rate", fieldMeasureBitsPerSecond, fieldValueInteger),
 	"BitRate_Maximum":            measuredField("BitRate_Maximum", "Maximum bit rate", fieldMeasureBitsPerSecond, fieldValueInteger),
@@ -118,6 +123,14 @@ func measuredField(name fieldName, textLabel string, measure fieldMeasure, value
 	spec := canonicalField(name, textLabel, measure, valueType)
 	spec.Options.ShowText = false
 	spec.StringSibling = name + "/String"
+	return spec
+}
+
+// structuredMeasuredField creates a measured scalar without a generated text
+// sibling for schema fields that MediaInfo exposes only in structured output.
+func structuredMeasuredField(name fieldName, measure fieldMeasure, valueType fieldValueType) fieldSpec {
+	spec := canonicalField(name, "", measure, valueType)
+	spec.Options.ShowText = false
 	return spec
 }
 

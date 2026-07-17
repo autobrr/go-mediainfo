@@ -20,6 +20,19 @@ func TestParsePATRejectsTooShortSectionLength(t *testing.T) {
 	}
 }
 
+func TestParsePATTransportStreamID(t *testing.T) {
+	payload := []byte{
+		0x00,
+		0x00, 0xB0, 0x0D, 0x0C, 0x0B, 0xC1, 0x00, 0x00,
+		0x00, 0x03, 0xE0, 0x30,
+		0x00, 0x00, 0x00, 0x00,
+	}
+	id, ok := parsePATTransportStreamID(payload)
+	if !ok || id != 3083 {
+		t.Fatalf("transport stream ID=%d, ok=%v; want 3083, true", id, ok)
+	}
+}
+
 func TestParseSDTRejectsTooShortSectionLength(t *testing.T) {
 	payload := make([]byte, 12)
 	payload[1] = 0x42

@@ -63,13 +63,26 @@ type psStream struct {
 }
 
 type ccTrack struct {
-	found             bool
-	firstFrame        int
-	lastFrame         int
-	firstPTS          uint64
-	lastPTS           uint64
-	firstCommandPTS   uint64
-	firstCommandFrame int
-	firstDisplayPTS   uint64
-	firstType         string
+	found                    bool
+	firstFrame               int
+	lastFrame                int
+	firstPTS                 uint64
+	lastPTS                  uint64
+	firstCommandPTS          uint64
+	firstCommandFrame        int
+	firstDisplayPTS          uint64
+	firstDisplayFrame        int
+	firstContentPTS          uint64
+	lastCommandPTS           uint64
+	lastContentPTS           uint64
+	currentType              string
+	firstType                string
+	inBack                   bool
+	rollUpLines              int
+	currentHasContent        bool
+	oldSpecialData1          byte
+	oldSpecialData2          byte
+	hasOldSpecial            bool
+	commandDuplicated        bool
+	commandAwaitingDuplicate bool
 }

@@ -15,6 +15,7 @@ import (
 type tsStream struct {
 	pid                 uint16
 	programNumber       uint16
+	provisional         bool
 	streamType          byte
 	kind                StreamKind
 	format              string
@@ -74,6 +75,8 @@ type tsStream struct {
 	dtvcc            dtvccState
 	dtvccServices    map[int]struct{}
 	language         string
+	maximumBitRate   int64
+	captionServices  map[string]tsCaptionService
 	videoFields      []Field
 	hasVideoFields   bool
 	audioProfile     string
@@ -85,6 +88,11 @@ type tsStream struct {
 	pcmChanAssign    byte
 	hasAudioInfo     bool
 	audioFrames      uint64
+	// audioFramesAtLastPTS marks the decoded-frame count at the most recent
+	// timestamped audio PES. It lets duration include every frame carried by
+	// the final PES instead of assuming one frame per timestamp.
+	audioFramesAtLastPTS    uint64
+	hasAudioFramesAtLastPTS bool
 	// DTS-HD ExSS metadata (used to match MediaInfoLib channels/layout/positions when available).
 	dtsSpeakerMask    uint16
 	hasDTSSpeakerMask bool
@@ -131,6 +139,8 @@ type tsStream struct {
 	// feeding the DTVCC/XDS parsers. We keep a small per-GOP buffer for XDS only.
 	mpeg2CurTemporalReference uint16
 	mpeg2XDSReorder           []mpeg2UserDataPacket
+	mpeg2LastISeen            bool
+	mpeg2PresentationEndPTS   uint64
 	// XDS parsing is per cc_type (field). MediaInfoLib uses one File_Eia608 parser per cc_type.
 	xds            [2]eia608XDS
 	xdsLawRating   string
@@ -148,6 +158,12 @@ type tsStream struct {
 	dvbSubRegionDepth []byte
 }
 
+// tsCaptionService describes one caption service declared by an ATSC caption
+// service descriptor on an elementary stream.
+type tsCaptionService struct {
+	Language string
+}
+
 func (s *tsStream) hasValidCEA608() bool {
 	if s == nil {
 		return false
@@ -159,6 +175,18 @@ func (s *tsStream) hasValidCEA608() bool {
 		return true
 	}
 	return false
+}
+
+// readyForDTVCCHeadLock reports whether bounded scanning has collected the
+// first display event for any co-carried CEA-608 service.
+func (s *tsStream) readyForDTVCCHeadLock() bool {
+	if s == nil || len(s.dtvccServices) == 0 {
+		return false
+	}
+	if !s.ccOdd.found && !s.ccEven.found {
+		return true
+	}
+	return s.ccOdd.firstContentPTS != 0 || s.ccEven.firstContentPTS != 0 || s.ccOdd.firstType != "" || s.ccEven.firstType != ""
 }
 
 // normalizeTSStreamOrder drops duplicate or stale PIDs from a discovered TS order.
@@ -200,12 +228,22 @@ func mergeTSStreamFromPMT(existing *tsStream, parsed tsStream) {
 	if existing == nil {
 		return
 	}
+	if existing.provisional {
+		*existing = parsed
+		return
+	}
 	existing.kind = parsed.kind
 	existing.format = parsed.format
 	existing.streamType = parsed.streamType
 	existing.programNumber = parsed.programNumber
 	if parsed.language != "" {
 		existing.language = parsed.language
+	}
+	if parsed.maximumBitRate > 0 {
+		existing.maximumBitRate = parsed.maximumBitRate
+	}
+	if len(parsed.captionServices) > 0 {
+		existing.captionServices = parsed.captionServices
 	}
 }
 
@@ -315,6 +353,9 @@ func ac3FormatSettingsMode(info ac3Info, dependentEAC3 bool) string {
 type mpeg2UserDataPacket struct {
 	temporalReference uint16
 	data              []byte
+	pts               uint64
+	hasPTS            bool
+	frame             int
 }
 
 func ParseMPEGTS(file io.ReadSeeker, size int64, parseSpeed float64) (ContainerInfo, []Stream, []Field, bool) {
@@ -328,6 +369,9 @@ func ParseBDAV(file io.ReadSeeker, size int64, parseSpeed float64) (ContainerInf
 
 const tsPTSGap = 30 * 90000 // 30 seconds
 const tsRegistrationHDMV = 0x48444D56
+
+// tsRegistrationGA94 identifies ATSC program streams and caption payloads.
+const tsRegistrationGA94 = 0x47413934
 
 // MediaInfoLib default: scan up to 64 MiB from the beginning and end of a TS when ParseSpeed<0.8.
 // We use this window size for TS/BDAV AC-3 stats sampling to match official outputs at ParseSpeed=0.5.
@@ -462,6 +506,9 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 
 	var primaryPMTPID uint16
 	var primaryProgramNumber uint16
+	var transportStreamID uint16
+	var primaryPMTInfo pmtInfo
+	primaryPMTAccepted := false
 	pmtPIDToProgram := map[uint16]uint16{}
 	var serviceName string
 	var serviceProvider string
@@ -529,6 +576,11 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 	ac3StatsHeadLocked := false
 	ac3StatsHeadAligned := false
 	sawDTVCC := false
+	transportAcceptOffset := int64(-1)
+	// MediaInfo adds the byte offset where it accepts the TS container to the
+	// nominal 64 MiB head horizon. PAT repetition is normally much tighter;
+	// retain a bounded probe allowance until the first valid PAT is parsed.
+	const tsAcceptanceProbeBytes = int64(1 << 20)
 
 	alignTSJumpBytes := func(jumpBytes int64) int64 {
 		// MediaInfo's bounded TS scans advance in 64 KiB read blocks with a persistent packet phase,
@@ -558,6 +610,13 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 
 	maybeLockAC3HeadByPCR := func(packetOffset int64) {
 		if !ac3StatsBounded || ac3StatsHeadLocked || size <= 0 {
+			return
+		}
+		// Once a complete ATSC caption-service descriptor is available,
+		// MediaInfo has finished identifying the elementary streams before the
+		// PCR duration bound is reached. It consequently keeps the configured
+		// 64 MiB begin/end windows instead of shrinking them at the PCR bound.
+		if primaryPMTInfo.CaptionServiceDescriptor {
 			return
 		}
 		// MediaInfoLib shrinks the begin/end windows once all PCR streams have exceeded the begin scan
@@ -639,12 +698,20 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 				// file reader finishes the current 64 KiB input buffer before honoring the
 				// seek. Preserve those fully buffered packets in the head sample.
 				headScanEnd := syncOff + ac3StatsHeadBytes
+				if shrinkHead && !isBDAV && ac3StatsHeadBytes == tsStatsMaxOffset {
+					if transportAcceptOffset >= 0 {
+						headScanEnd += transportAcceptOffset
+					} else {
+						headScanEnd += tsAcceptanceProbeBytes
+					}
+				}
 				if shrinkHead && ac3StatsHeadLocked && isBDAV {
 					const readBlock = int64(64 << 10)
 					bufferEnd := ((headScanEnd + readBlock - 1) / readBlock) * readBlock
 					headScanEnd = syncOff + ((bufferEnd-syncOff)/packetSize)*packetSize
 				}
-				if shrinkHead && ac3StatsHeadLocked && packetOffset >= headScanEnd {
+				fullTSHeadLimit := !isBDAV && ac3StatsHeadBytes == tsStatsMaxOffset && transportAcceptOffset >= 0
+				if shrinkHead && (ac3StatsHeadLocked || fullTSHeadLimit) && packetOffset >= headScanEnd {
 					headStoppedEarly = true
 					headScannedEnd = packetOffset
 					return true
@@ -721,6 +788,9 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 
 				if pid == 0 && payloadStart {
 					programs, sectionBytes := parsePAT(payload)
+					if id, ok := parsePATTransportStreamID(payload); ok {
+						transportStreamID = id
+					}
 					if sectionBytes > 0 {
 						psiBytes += int64(sectionBytes)
 					}
@@ -770,9 +840,9 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 					if asm.expected > 0 && len(asm.buf) >= asm.expected {
 						section := asm.buf[:asm.expected]
 						pmPayload := append([]byte{0}, section...)
-						parsed, pcr, pointer, sectionLen := parsePMT(pmPayload, programNumber)
-						if pcr != 0 {
-							pcrPIDs[pcr] = struct{}{}
+						parsed, metadata := parsePMT(pmPayload, programNumber)
+						if metadata.PCRPID != 0 {
+							pcrPIDs[metadata.PCRPID] = struct{}{}
 						}
 						// MediaInfo's General.StreamSize for BDAV behaves closer to counting
 						// non-A/V (subtitle) PMT entries than full PMT section payload.
@@ -784,9 +854,25 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 						}
 						psiBytes += int64(textCount * 5)
 						if pid == primaryPMTPID {
-							if sectionLen > 0 {
-								pmtPointer = pointer
-								pmtSectionLen = sectionLen
+							if !primaryPMTAccepted {
+								// MediaInfo starts elementary-stream and PCR timing only after
+								// accepting the primary PMT. Discard provisional pre-PMT
+								// timing and codec state while retaining the discovered PID order.
+								videoPTS = ptsTracker{}
+								anyPTS = ptsTracker{}
+								pcrPTS = ptsTracker{}
+								pcrFull = pcrTracker{}
+								pcrSpans = map[uint16]*pcrSpan{}
+								clear(pendingPTS)
+								primaryPMTAccepted = true
+								if transportAcceptOffset < 0 && packetOffset >= syncOff {
+									transportAcceptOffset = packetOffset - syncOff
+								}
+							}
+							primaryPMTInfo = metadata
+							if metadata.SectionLength > 0 {
+								pmtPointer = metadata.Pointer
+								pmtSectionLen = metadata.SectionLength
 							}
 							primaryPMTESOrder = primaryPMTESOrder[:0]
 							for _, st := range parsed {
@@ -796,24 +882,8 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 						for _, st := range parsed {
 							if existing, exists := streams[st.pid]; exists {
 								mergeTSStreamFromPMT(existing, st)
-								if pending, ok := pendingPTS[st.pid]; ok {
-									existing.pts = *pending
-									if st.kind == StreamVideo {
-										videoPTS.add(pending.min)
-										videoPTS.add(pending.max)
-									}
-									delete(pendingPTS, st.pid)
-								}
 							} else {
 								entry := st
-								if pending, ok := pendingPTS[st.pid]; ok {
-									entry.pts = *pending
-									if st.kind == StreamVideo {
-										videoPTS.add(pending.min)
-										videoPTS.add(pending.max)
-									}
-									delete(pendingPTS, st.pid)
-								}
 								streams[st.pid] = &entry
 								streamOrder = append(streamOrder, st.pid)
 							}
@@ -848,6 +918,10 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 								entry.lastPTS = pts
 								entry.hasLastPTS = true
 								entry.seenPTS = true
+								if entry.kind == StreamAudio {
+									entry.audioFramesAtLastPTS = entry.audioFrames
+									entry.hasAudioFramesAtLastPTS = true
+								}
 								if _, ok := videoPIDs[pid]; ok {
 									addPTSMode(&videoPTS, pts, !partialScan)
 								}
@@ -915,6 +989,7 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 							entry := tsStream{
 								pid:           pid,
 								programNumber: primaryProgramNumber,
+								provisional:   true,
 								kind:          StreamVideo,
 								format:        "MPEG Video",
 							}
@@ -1007,8 +1082,8 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 						}
 						// MediaInfoLib performs a mid-file scan for DTVCC, and (empirically) the head/tail
 						// windows are smaller in this mode than for pure head+tail scanning.
-						if shrinkHead && ac3StatsBounded && !ac3StatsHeadLocked && packetOffset >= syncOff {
-							if len(entry.dtvccServices) > 0 && pcrFull.ok && (pcrFull.max-pcrFull.min) > tsHeadBoundPCRDTVCC {
+						if shrinkHead && ac3StatsBounded && !ac3StatsHeadLocked && !primaryPMTInfo.CaptionServiceDescriptor && packetOffset >= syncOff {
+							if entry.readyForDTVCCHeadLock() && pcrFull.ok && (pcrFull.max-pcrFull.min) > tsHeadBoundPCRDTVCC {
 								rel := packetOffset - syncOff
 								ac3StatsHeadBytes = min(int64(tsStatsMaxOffset), rel+packetSize)
 								if !isBDAV {
@@ -1124,8 +1199,8 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 					if !sawDTVCC && len(entry.dtvccServices) > 0 {
 						sawDTVCC = true
 					}
-					if shrinkHead && ac3StatsBounded && !ac3StatsHeadLocked && packetOffset >= syncOff {
-						if len(entry.dtvccServices) > 0 && pcrFull.ok && (pcrFull.max-pcrFull.min) > tsHeadBoundPCRDTVCC {
+					if shrinkHead && ac3StatsBounded && !ac3StatsHeadLocked && !primaryPMTInfo.CaptionServiceDescriptor && packetOffset >= syncOff {
+						if entry.readyForDTVCCHeadLock() && pcrFull.ok && (pcrFull.max-pcrFull.min) > tsHeadBoundPCRDTVCC {
 							rel := packetOffset - syncOff
 							ac3StatsHeadBytes = min(int64(tsStatsMaxOffset), rel+packetSize)
 							if !isBDAV {
@@ -1185,6 +1260,9 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 	headEnd := size
 	if partialScan && size > 0 {
 		headEnd = min(size, syncOff+tsStatsMaxOffset)
+		if !isBDAV && headEnd < size {
+			headEnd = min(size, headEnd+tsAcceptanceProbeBytes)
+		}
 		if isBDAV && headEnd < size {
 			// A 64 MiB reader horizon ends mid-packet for 192-byte M2TS. MediaInfoLib
 			// reads the next 64 KiB input block before the parsed-byte threshold trips.
@@ -1213,7 +1291,7 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 	// MediaInfoLib v26.05 initializes both BDAV windows to MpegTs_MaximumOffset.
 	// Retain the smaller empirically matched end window for broadcast TS captures.
 	tailBytes := int64(tsStatsMaxOffset)
-	if !isBDAV {
+	if !isBDAV && !primaryPMTInfo.CaptionServiceDescriptor {
 		tailBytes /= 4
 	}
 	if tailBytes <= 0 {
@@ -1283,6 +1361,8 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 					st.dtsHDMarkerWindow = 0
 					st.videoStarted = false
 					st.mpeg2Parser = nil
+					st.mpeg2LastISeen = false
+					st.mpeg2PresentationEndPTS = 0
 					st.videoCCCarry = st.videoCCCarry[:0]
 					st.mpeg2XDSReorder = st.mpeg2XDSReorder[:0]
 				}
@@ -1290,7 +1370,7 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 
 			// MediaInfoLib sometimes performs an additional mid-file scan for DTVCC (CEA-708) when
 			// ParseSpeed is bounded, then continues with the end-window scan.
-			if !isBDAV && sawDTVCC && size > 0 && jumpBytes > 0 {
+			if !isBDAV && sawDTVCC && !primaryPMTInfo.CaptionServiceDescriptor && size > 0 && jumpBytes > 0 {
 				midStart := (size / 2) - jumpBytes
 				midEnd := (size / 2) + jumpBytes
 				if midStart < syncOff {
@@ -1435,7 +1515,6 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 			st.audioFramesStatsMax = max
 		}
 	}
-
 	if ac3StatsSampled {
 		for _, st := range streams {
 			finalizeBoundedAC3Stats(st)
@@ -1521,12 +1600,19 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 			}
 		}
 		if st.kind == StreamAudio && videoPTS.has() && st.pts.has() {
-			// Match MediaInfo: Video_Delay is computed from millisecond-rounded stream delays.
-			audioDelay := float64(st.pts.first) / 90000.0
-			videoDelay := float64(videoPTS.first) / 90000.0
-			audioDelay = math.Round(audioDelay*1000) / 1000
-			videoDelay = math.Round(videoDelay*1000) / 1000
-			streamFacts.Set("Video_Delay", fmt.Sprintf("%.3f", audioDelay-videoDelay))
+			delta := 0.0
+			if st.hasAC3 {
+				// AC-3 keeps the signed clock delta until the final projection.
+				delta = float64(int64(st.pts.first)-int64(videoPTS.first)) / 90000.0
+				delta = math.Round(delta*1000) / 1000
+			} else {
+				// Other TS audio parsers compare independently rounded millisecond
+				// timestamps. Ties use the even millisecond, matching MediaInfo.
+				audioDelay := math.RoundToEven(float64(st.pts.first)/90) / 1000
+				videoDelay := math.RoundToEven(float64(videoPTS.first)/90) / 1000
+				delta = audioDelay - videoDelay
+			}
+			streamFacts.Set("Video_Delay", fmt.Sprintf("%.3f", delta))
 		}
 		if st.kind == StreamText && videoPTS.has() && st.pts.has() {
 			if !isBDAV || st.streamType == 0x90 {
@@ -1561,6 +1647,16 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 			}
 		}
 		if st.kind == StreamVideo && st.height > 0 {
+			storedWidth := uint64(0)
+			if st.hasH264SPS {
+				storedWidth = st.h264SPS.CodedWidth
+			}
+			if st.format == "AVC" && storedWidth == 0 && st.width%16 != 0 {
+				storedWidth = ((st.width + 15) / 16) * 16
+			}
+			if storedWidth > 0 && storedWidth != st.width {
+				streamFacts.Set("Stored_Width", strconv.FormatUint(storedWidth, 10))
+			}
 			storedHeight := st.storedHeight
 			if storedHeight == 0 {
 				storedHeight = st.height
@@ -1699,7 +1795,8 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 		}
 		if st.kind == StreamVideo && hasMPEGVideo && st.format == "MPEG Video" && st.hasMPEG2Info {
 			info := st.mpeg2Info
-			if isBDAV && !info.GOPVariable {
+			exposeDominantGOP := isBDAV || mpeg2CommercialNameTS(info) != ""
+			if exposeDominantGOP && !info.GOPVariable {
 				if info.GOPM == 0 {
 					info.GOPM = info.GOPMDominant
 				}
@@ -1727,8 +1824,9 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 				streamFacts.Set("Format_Settings_Matrix_Data", info.MatrixData)
 			}
 			gop := formatMPEG2GOPSetting(info)
-			if isBDAV && !info.GOPVariable && info.GOPM > 0 && info.GOPN > 0 {
-				// BDAV exposes dominant M/N even for progressive MPEG-2 streams.
+			if exposeDominantGOP && !info.GOPVariable && info.GOPM > 0 && info.GOPN > 0 {
+				// HD component and BDAV streams expose dominant M/N even when
+				// their progressive picture cadence made the first pass ambiguous.
 				gop = fmt.Sprintf("M=%d, N=%d", info.GOPM, info.GOPN)
 			}
 			if gop != "" {
@@ -1875,6 +1973,11 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 				}
 			}
 			duration := ptsDuration(st.pts)
+			mpeg2PresentationDuration := false
+			if primaryPMTInfo.CaptionServiceDescriptor && st.format == "MPEG Video" && st.pts.has() && st.mpeg2PresentationEndPTS > st.pts.min {
+				duration = float64(st.mpeg2PresentationEndPTS-st.pts.min) / 90000.0
+				mpeg2PresentationDuration = true
+			}
 			if duration == 0 {
 				duration = videoDuration
 			}
@@ -1890,7 +1993,7 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 					duration = math.Round(duration*1000) / 1000
 				}
 			}
-			if partialScan && hasMPEGVideo && st.format == "MPEG Video" && st.hasMPEG2Info && duration > 0 {
+			if partialScan && !mpeg2PresentationDuration && hasMPEGVideo && st.format == "MPEG Video" && st.hasMPEG2Info && duration > 0 {
 				info := st.mpeg2Info
 				fps := 0.0
 				if info.FrameRateNumer > 0 && info.FrameRateDenom > 0 {
@@ -2076,10 +2179,8 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 				if info.ScanOrder != "" {
 					fields = append(fields, Field{Name: "Scan order", Value: info.ScanOrder})
 				}
-				if isBDAV {
-					if standard := mapMPEG2Standard(info.FrameRate); standard != "" {
-						fields = append(fields, Field{Name: "Standard", Value: standard})
-					}
+				if standard := mapMPEG2Standard(info.FrameRate); standard != "" && (isBDAV || mpeg2CommercialNameTS(info) != "") {
+					fields = append(fields, Field{Name: "Standard", Value: standard})
 				}
 				fields = append(fields, Field{Name: "Compression mode", Value: "Lossy"})
 				if duration > 0 && st.width > 0 && st.height > 0 && st.videoFrameRate > 0 {
@@ -2108,11 +2209,18 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 		if st.kind == StreamAudio {
 			duration := ptsDuration(st.pts)
 			// PTS deltas cover (N-1) frame intervals; official mediainfo reports full duration (N intervals).
-			if st.hasAC3 && !isTrueHD && st.ac3Info.sampleRate > 0 && st.ac3Info.spf > 0 && duration > 0 {
+			if st.hasAC3 && !isTrueHD && !primaryPMTInfo.CaptionServiceDescriptor && st.ac3Info.sampleRate > 0 && st.ac3Info.spf > 0 && duration > 0 {
 				duration += float64(st.ac3Info.spf) / float64(st.ac3Info.sampleRate)
 			}
 			if st.format == "AAC" && st.audioRate > 0 && st.audioSpf > 0 && duration > 0 {
-				duration += float64(st.audioSpf) / st.audioRate
+				finalPESFrames := uint64(1)
+				if size > tsStatsMaxOffset && st.hasAudioFramesAtLastPTS && st.audioFrames > st.audioFramesAtLastPTS {
+					finalPESFrames = st.audioFrames - st.audioFramesAtLastPTS
+				}
+				duration += float64(finalPESFrames*uint64(st.audioSpf)) / st.audioRate
+				if size > tsStatsMaxOffset {
+					duration = math.Floor(duration*1000) / 1000
+				}
 			}
 			if st.format == "DTS" && !st.dtsHD && st.audioRate > 0 && st.audioSpf > 0 && duration > 0 {
 				duration += float64(st.audioSpf) / st.audioRate
@@ -2260,6 +2368,10 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 				fields = append(fields, Field{Name: "Bit rate mode", Value: mode})
 				if st.audioBitRateKbps > 0 {
 					fields = append(fields, Field{Name: "Bit rate", Value: formatBitrate(float64(st.audioBitRateKbps) * 1000)})
+				}
+				if st.maximumBitRate > 0 {
+					fields = append(fields, Field{Name: "Maximum bit rate", Value: formatBitrate(float64(st.maximumBitRate))})
+					streamFacts.Set("BitRate_Maximum", strconv.FormatInt(st.maximumBitRate, 10))
 				}
 				channels := st.audioChannels
 				if isTrueHD {
@@ -2780,6 +2892,12 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 			info.DurationSeconds = float64(size*8) / overallBitrate
 		}
 	}
+	if !isBDAV && overallBitrate > 0 && size > tsStatsMaxOffset {
+		// MediaInfo derives the transport-stream General duration from the
+		// complete file size and the unrounded PCR bitrate. Stream/Menu timing
+		// remains timestamp-based.
+		info.DurationSeconds = float64(size*8) / overallBitrate
+	}
 	info.DurationSeconds = normalizeBDAVContainerDuration(info.DurationSeconds, size, overallBitrate, isBDAV)
 	info.BitrateMode = "Variable"
 	if size > 0 && packetSize > 0 {
@@ -2916,9 +3034,15 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 	}
 
 	generalFields := []Field{}
-	if primaryProgramNumber > 0 {
-		generalFields = append(generalFields, Field{Name: "ID", Value: formatID(uint64(primaryProgramNumber))})
+	generalID := transportStreamID
+	if generalID == 0 {
+		generalID = primaryProgramNumber
 	}
+	if generalID > 0 {
+		generalFields = append(generalFields, Field{Name: "ID", Value: formatID(uint64(generalID))})
+	}
+	xdsTitle := ""
+	xdsLawRating := ""
 	// General metadata from EIA-608 XDS (carried in GA94 user data) matches official mediainfo.
 	if !isBDAV {
 		for _, pid := range streamOrder {
@@ -2930,22 +3054,23 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 			// Keep XDS-derived General metadata only when 608 data is sufficiently synced.
 			// This avoids false positives on streams where random GA94 bytes mimic XDS packets.
 			if hasCaption && st.hasValidCEA608() && st.xdsLawRating != "" {
-				generalFields = append(generalFields, Field{Name: "Law rating", Value: st.xdsLawRating})
+				xdsLawRating = st.xdsLawRating
+				generalFields = append(generalFields, Field{Name: "Law rating", Value: xdsLawRating})
 			}
 			// MediaInfoLib sets Title/Movie to the last Program Name observed.
 			if hasCaption && st.hasValidCEA608() {
 				if title := st.xdsLastTitle; title != "" {
-					generalFields = append(generalFields, Field{Name: "Title", Value: title})
-					generalFields = append(generalFields, Field{Name: "Movie", Value: title})
+					xdsTitle = title
+					generalFields = append(generalFields, Field{Name: "Title", Value: xdsTitle})
 				}
 			}
 			break
 		}
 	}
 
-	// MediaInfo only emits a Menu track for TS when DVB service descriptors are present (SDT).
-	// (ATSC/PSIP streams often omit SDT and don't get a Menu track in official output.)
-	if primaryPMTPID != 0 && packetSize == tsPacketSize && (serviceName != "" || serviceProvider != "" || serviceType != "") {
+	// DVB SDT metadata and ATSC PMT descriptors both establish a program Menu.
+	hasProgramMetadata := serviceName != "" || serviceProvider != "" || serviceType != "" || primaryPMTInfo.ATSC
+	if primaryPMTPID != 0 && packetSize == tsPacketSize && hasProgramMetadata {
 		menuFields := []Field{
 			{Name: "ID", Value: formatID(uint64(primaryPMTPID))},
 		}
@@ -2956,6 +3081,8 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 		var list []string
 		var listKinds []string
 		var listPositions []string
+		var languages []string
+		hasLanguage := false
 		videoIndex := 0
 		audioIndex := 0
 		for _, pid := range streamOrder {
@@ -2967,7 +3094,14 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 				continue
 			}
 			formats = append(formats, st.format)
-			list = append(list, fmt.Sprintf("%s (%s)", formatStreamID(st.pid), st.format))
+			language := normalizeLanguageCode(st.language)
+			listFormat := st.format
+			if language != "" {
+				listFormat += ", " + language
+				hasLanguage = true
+			}
+			list = append(list, fmt.Sprintf("%s (%s)", formatStreamID(st.pid), listFormat))
+			languages = append(languages, language)
 			switch st.kind {
 			case StreamVideo:
 				listKinds = append(listKinds, "1")
@@ -2998,6 +3132,18 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 		if serviceType != "" {
 			menuFields = append(menuFields, Field{Name: "Service type", Value: serviceType})
 		}
+		if xdsTitle != "" {
+			menuFields = append(menuFields, Field{Name: "Title", Value: xdsTitle})
+		}
+		if hasLanguage {
+			menuFields = append(menuFields, Field{Name: "Language", Value: strings.Join(languages, " / ")})
+		}
+		if xdsLawRating != "" {
+			menuFields = append(menuFields, Field{Name: "Law rating", Value: xdsLawRating})
+		}
+		if primaryPMTInfo.MaximumBitRate > 0 {
+			menuFields = append(menuFields, Field{Name: "BitRate_Maximum", Value: strconv.FormatInt(primaryPMTInfo.MaximumBitRate, 10)})
+		}
 		menuFacts := &mpegTSStructuredFacts{}
 		menuFacts.Set("StreamOrder", "0")
 		menuFacts.Set("ID", strconv.FormatUint(uint64(primaryPMTPID), 10))
@@ -3017,12 +3163,26 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 		if len(listPositions) > 0 {
 			menuFacts.Set("List_StreamPos", strings.Join(listPositions, " / "))
 		}
+		if xdsTitle != "" {
+			menuFacts.Set("Title", xdsTitle)
+		}
+		if hasLanguage {
+			menuFacts.Set("Language", strings.Join(languages, " / "))
+		}
+		if xdsLawRating != "" {
+			menuFacts.Set("LawRating", xdsLawRating)
+		}
 		var menuExtra *structuredNode
 		if pmtSectionLen > 0 {
-			node := structuredObjectFromKVs([]jsonKV{
-				{Key: "pointer_field", Val: strconv.Itoa(pmtPointer)},
-				{Key: "section_length", Val: strconv.Itoa(pmtSectionLen)},
-			})
+			extraFields := make([]jsonKV, 0, 3)
+			if primaryPMTInfo.MaximumBitRate > 0 {
+				extraFields = append(extraFields, jsonKV{Key: "BitRate_Maximum", Val: strconv.FormatInt(primaryPMTInfo.MaximumBitRate, 10)})
+			}
+			extraFields = append(extraFields,
+				jsonKV{Key: "pointer_field", Val: strconv.Itoa(pmtPointer)},
+				jsonKV{Key: "section_length", Val: strconv.Itoa(pmtSectionLen)},
+			)
+			node := structuredObjectFromKVs(extraFields)
 			menuExtra = &node
 		}
 		streamsOut = append(streamsOut, buildCanonicalMPEGTSStream(StreamMenu, nil, menuFields, menuFacts, menuExtra, false))
@@ -3095,6 +3255,17 @@ type patProgram struct {
 	PMTPID        uint16
 }
 
+// pmtInfo retains program-level PMT facts needed by timing, Menu projection,
+// and ATSC caption-service handling.
+type pmtInfo struct {
+	PCRPID                   uint16
+	Pointer                  int
+	SectionLength            int
+	MaximumBitRate           int64
+	ATSC                     bool
+	CaptionServiceDescriptor bool
+}
+
 type psiAssembly struct {
 	buf      []byte
 	expected int
@@ -3147,32 +3318,59 @@ func parsePAT(payload []byte) ([]patProgram, int) {
 	return out, 3 + sectionLen
 }
 
-func parsePMT(payload []byte, programNumber uint16) ([]tsStream, uint16, int, int) {
+// parsePATTransportStreamID returns the PAT table-id extension, which is the
+// MPEG transport_stream_id surfaced as General.ID.
+func parsePATTransportStreamID(payload []byte) (uint16, bool) {
+	if len(payload) < 9 {
+		return 0, false
+	}
+	pointer := int(payload[0])
+	if 1+pointer+5 > len(payload) {
+		return 0, false
+	}
+	section := payload[1+pointer:]
+	if len(section) < 5 || section[0] != 0x00 {
+		return 0, false
+	}
+	sectionLen := int(binary.BigEndian.Uint16(section[1:3]) & 0x0FFF)
+	if sectionLen < 9 || 3+sectionLen > len(section) {
+		return 0, false
+	}
+	return binary.BigEndian.Uint16(section[3:5]), true
+}
+
+// parsePMT returns supported elementary streams and program-level metadata
+// from one complete program map section.
+func parsePMT(payload []byte, programNumber uint16) ([]tsStream, pmtInfo) {
 	if len(payload) < 12 {
-		return nil, 0, 0, 0
+		return nil, pmtInfo{}
 	}
 	pointer := int(payload[0])
 	if pointer+12 > len(payload) {
-		return nil, 0, 0, 0
+		return nil, pmtInfo{}
 	}
 	section := payload[1+pointer:]
 	if len(section) < 12 {
-		return nil, 0, 0, 0
+		return nil, pmtInfo{}
 	}
 	sectionLen := int(binary.BigEndian.Uint16(section[1:3]) & 0x0FFF)
 	if sectionLen+3 > len(section) {
-		return nil, 0, 0, 0
+		return nil, pmtInfo{}
 	}
 	pcrPID := binary.BigEndian.Uint16(section[8:10]) & 0x1FFF
 	programInfoLen := int(binary.BigEndian.Uint16(section[10:12]) & 0x0FFF)
 	programFormatID := uint32(0)
+	metadata := pmtInfo{PCRPID: pcrPID, Pointer: pointer, SectionLength: sectionLen}
 	if programInfoLen > 0 && 12+programInfoLen <= len(section) {
-		programFormatID = parseRegistrationFormatID(section[12 : 12+programInfoLen])
+		programDescriptors := section[12 : 12+programInfoLen]
+		programFormatID = parseRegistrationFormatID(programDescriptors)
+		metadata.MaximumBitRate = parseMaximumBitRateDescriptor(programDescriptors)
+		metadata.ATSC = programFormatID == tsRegistrationGA94
 	}
 	pos := 12 + programInfoLen
 	end := 3 + sectionLen - 4
 	if pos > end {
-		return nil, pcrPID, pointer, sectionLen
+		return nil, metadata
 	}
 	streams := make([]tsStream, 0)
 	for pos+5 <= end {
@@ -3180,12 +3378,20 @@ func parsePMT(payload []byte, programNumber uint16) ([]tsStream, uint16, int, in
 		pid := binary.BigEndian.Uint16(section[pos+1:pos+3]) & 0x1FFF
 		esInfoLen := int(binary.BigEndian.Uint16(section[pos+3:pos+5]) & 0x0FFF)
 		language := ""
+		maximumBitRate := int64(0)
+		captionServices := map[string]tsCaptionService(nil)
 		hasDVBSubtitleDescriptor := false
 		formatID := programFormatID
 		descStart := pos + 5
 		descEnd := descStart + esInfoLen
 		if esInfoLen > 0 && descEnd <= end && descEnd <= len(section) {
 			descs := section[descStart:descEnd]
+			maximumBitRate = parseMaximumBitRateDescriptor(descs)
+			captionServices = parseCaptionServiceDescriptor(descs)
+			if len(captionServices) > 0 {
+				metadata.ATSC = true
+				metadata.CaptionServiceDescriptor = true
+			}
 			if streamFormatID := parseRegistrationFormatID(descs); streamFormatID != 0 {
 				formatID = streamFormatID
 			}
@@ -3218,11 +3424,81 @@ func parsePMT(payload []byte, programNumber uint16) ([]tsStream, uint16, int, in
 			format = "DVB Subtitle"
 		}
 		if kind != "" {
-			streams = append(streams, tsStream{pid: pid, programNumber: programNumber, streamType: streamType, kind: kind, format: format, language: language})
+			streams = append(streams, tsStream{
+				pid: pid, programNumber: programNumber, streamType: streamType,
+				kind: kind, format: format, language: language,
+				maximumBitRate: maximumBitRate, captionServices: captionServices,
+			})
 		}
 		pos += 5 + esInfoLen
 	}
-	return streams, pcrPID, pointer, sectionLen
+	return streams, metadata
+}
+
+// parseMaximumBitRateDescriptor decodes ISO/IEC 13818-1 descriptor 0x0E.
+// Its 22-bit value is expressed in units of 50 bytes per second.
+func parseMaximumBitRateDescriptor(descriptors []byte) int64 {
+	for pos := 0; pos+2 <= len(descriptors); {
+		tag := descriptors[pos]
+		length := int(descriptors[pos+1])
+		pos += 2
+		if pos+length > len(descriptors) {
+			return 0
+		}
+		if tag == 0x0E && length >= 3 {
+			value := uint32(descriptors[pos]&0x3F)<<16 |
+				uint32(descriptors[pos+1])<<8 |
+				uint32(descriptors[pos+2])
+			return int64(value) * 400
+		}
+		pos += length
+	}
+	return 0
+}
+
+// parseCaptionServiceDescriptor decodes ATSC A/65 descriptor 0x86 into the
+// MediaInfo service names used for CEA-608 and CEA-708 tracks.
+func parseCaptionServiceDescriptor(descriptors []byte) map[string]tsCaptionService {
+	for pos := 0; pos+2 <= len(descriptors); {
+		tag := descriptors[pos]
+		length := int(descriptors[pos+1])
+		pos += 2
+		if pos+length > len(descriptors) {
+			return nil
+		}
+		if tag != 0x86 || length < 1 {
+			pos += length
+			continue
+		}
+		data := descriptors[pos : pos+length]
+		count := int(data[0] & 0x1F)
+		services := make(map[string]tsCaptionService, count)
+		entry := 1
+		for range count {
+			if entry+6 > len(data) {
+				break
+			}
+			language := normalizeLanguageCode(strings.TrimSpace(string(data[entry : entry+3])))
+			serviceByte := data[entry+3]
+			name := ""
+			if serviceByte&0x80 != 0 {
+				serviceNumber := int(serviceByte & 0x3F)
+				if serviceNumber > 0 {
+					name = strconv.Itoa(serviceNumber)
+				}
+			} else if serviceByte&0x01 != 0 {
+				name = "CC3"
+			} else {
+				name = "CC1"
+			}
+			if name != "" {
+				services[name] = tsCaptionService{Language: language}
+			}
+			entry += 6
+		}
+		return services
+	}
+	return nil
 }
 
 func parseRegistrationFormatID(descs []byte) uint32 {
@@ -3855,6 +4131,12 @@ func consumeAC3(entry *tsStream, payload []byte, collectStats bool, statsHead bo
 		if entry.audioBuffer[i] != 0x0B || entry.audioBuffer[i+1] != 0x77 {
 			i++
 			continue
+		}
+		if frameSize, ok := ac3CoreFrameSize(entry.audioBuffer[i:]); ok && i+frameSize > len(entry.audioBuffer) {
+			// Preserve a valid partial syncframe across TS packet/PES calls.
+			// MediaInfo's AC-3 synchronizer waits for the declared frame before
+			// deciding whether the sync candidate is valid.
+			break
 		}
 		info, frameSize, ok := parseAC3Frame(entry.audioBuffer[i:])
 		if !ok || frameSize <= 0 {

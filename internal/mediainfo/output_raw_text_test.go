@@ -156,6 +156,12 @@ func TestRawTextBDAVStructuredFormatting(t *testing.T) {
 			wantInfo:   "Enhanced AC-3",
 			wantSet:    "Dolby Surround EX",
 		},
+		{
+			name:       "dependent ac3",
+			kind:       StreamAudio,
+			structured: map[string]string{"Format": "AC-3", "Format_AdditionalFeatures": "Dep"},
+			wantInfo:   "Enhanced AC-3",
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -214,6 +220,30 @@ func TestRawTextBDAVStructuredDerivations(t *testing.T) {
 	} {
 		if got[label] != want {
 			t.Errorf("%s = %q, want %q", label, got[label], want)
+		}
+	}
+}
+
+func TestRawTextSliceCountKeepsNumericExtensionSeparate(t *testing.T) {
+	if got := rawTextLabel("Format settings, Slice count"); got != "Format settings, Slice count" {
+		t.Fatalf("numeric slice-count label = %q, want retained extension label", got)
+	}
+
+	for _, test := range []struct {
+		count string
+		want  string
+	}{
+		{count: "1"},
+		{count: "4", want: "4 slice per frame"},
+	} {
+		got := ""
+		for _, field := range rawTextStructuredDerivations(StreamVideo, map[string]string{"Format_Settings_SliceCount": test.count}, 0) {
+			if field.Label == "Format_Settings_SliceCount/Strin" {
+				got = field.Value
+			}
+		}
+		if got != test.want {
+			t.Errorf("count %s formatted sibling = %q, want %q", test.count, got, test.want)
 		}
 	}
 }

@@ -139,6 +139,11 @@ func (f *mpegPSStructuredFacts) Apply(builder *canonicalStreamBuilder, fields []
 				builder.DirectStructured(fact.name, fact.canonical)
 			}
 		}
+		if spec, known := structuredFieldSpec(builder.store.stream(builder.ref).Kind, string(fact.name)); known && spec.Measure == fieldMeasureMilliseconds {
+			if decimals := decimalFractionDigits(fact.legacy); decimals > 3 {
+				builder.SetStructuredDecimals(fact.name, uint8(decimals))
+			}
+		}
 		builder.MarkLegacyJSON(fact.name, fact.legacy)
 	}
 }
@@ -158,7 +163,8 @@ func buildMPEGPSCanonicalSnapshot(builder *canonicalStreamBuilder, fields []Fiel
 // canonicalMPEGPSStructuredValue converts serializer seconds to canonical milliseconds.
 func canonicalMPEGPSStructuredValue(name fieldName, value string) string {
 	switch name {
-	case "Duration", "Source_Duration", "Source_Duration_LastFrame":
+	case "Duration", "Source_Duration", "Source_Duration_LastFrame",
+		"Duration_Start2End", "Duration_Start_Command", "Duration_Start", "Duration_End", "Duration_End_Command":
 		if milliseconds, ok := decimalSecondsToMilliseconds(value); ok {
 			return milliseconds
 		}
