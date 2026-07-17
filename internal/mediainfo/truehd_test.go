@@ -120,7 +120,7 @@ func TestApplyMatroskaAudioProbes_TrueHDAtmosKeepsSevenOneLayout(t *testing.T) {
 	}
 
 	applyMatroskaAudioProbes(info, probes)
-	refreshCanonicalLegacySnapshot(&info.Tracks[0])
+	refreshCanonicalCompatibilitySnapshot(&info.Tracks[0])
 	stream := info.Tracks[0]
 	if got := findField(stream.Fields, "Format"); got != "MLP FBA 16-ch" {
 		t.Fatalf("Format=%q want MLP FBA 16-ch", got)
@@ -161,7 +161,7 @@ func TestApplyMatroskaAudioProbes_TrueHDNonAtmosKeepsMatroskaLayout(t *testing.T
 	}
 
 	applyMatroskaAudioProbes(info, probes)
-	refreshCanonicalLegacySnapshot(&info.Tracks[0])
+	refreshCanonicalCompatibilitySnapshot(&info.Tracks[0])
 	stream := info.Tracks[0]
 	if got := findField(stream.Fields, "Channel layout"); got != "L R C LFE Ls Rs" {
 		t.Fatalf("Channel layout=%q want Matroska layout", got)
@@ -207,7 +207,7 @@ func TestApplyMatroskaAudioProbes_TrueHDNonAtmosEightChannelLayout(t *testing.T)
 	}
 
 	applyMatroskaAudioProbes(info, probes)
-	refreshCanonicalLegacySnapshot(&info.Tracks[0])
+	refreshCanonicalCompatibilitySnapshot(&info.Tracks[0])
 	stream := info.Tracks[0]
 
 	if got := findField(stream.Fields, "Format"); got != "MLP FBA" {
@@ -243,7 +243,7 @@ func TestApplyMatroskaTagStatsPreservesTrueHDFrameCount(t *testing.T) {
 
 	seedMatroskaLegacyTestStream(&info.Tracks[0])
 	applyMatroskaTagStats(info, tags, 0)
-	refreshCanonicalLegacySnapshot(&info.Tracks[0])
+	refreshCanonicalCompatibilitySnapshot(&info.Tracks[0])
 
 	if got := info.Tracks[0].JSON["FrameCount"]; got != "8856498" {
 		t.Fatalf("FrameCount=%q want trusted Statistics Tags value", got)

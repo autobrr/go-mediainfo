@@ -349,7 +349,7 @@ func applyMatroskaTrackTags(info *MatroskaInfo) {
 		known, dynamic := matroskaTagFieldsForJSON(*set, stream.Kind, nil)
 		for name, value := range known {
 			if !streamHasCanonicalStructuredField(*stream, name) {
-				replaceCanonicalSeedLegacyFill(stream, fieldName(name), value, "", "")
+				replaceCanonicalSeedFill(stream, fieldName(name), value, "", "")
 			}
 		}
 		mergeMatroskaDynamicCanonicalExtras(stream, dynamic)
@@ -375,22 +375,22 @@ func applyMatroskaGeneralTags(general *Stream, set matroskaTagSet) {
 	if tagTitle := known["Title"]; tagTitle != "" {
 		canonicalTitle, _ := canonicalSeedValue(*general, "Title")
 		title := mergeMatroskaTitle(canonicalTitle, tagTitle)
-		replaceCanonicalSeedLegacyFill(general, "Title", title, "", "")
-		replaceCanonicalSeedLegacyFill(general, "Movie", title, "", "")
+		replaceCanonicalSeedFill(general, "Title", title, "", "")
+		replaceCanonicalSeedFill(general, "Movie", title, "", "")
 		delete(known, "Title")
 	}
 	for name, value := range known {
 		if !streamHasCanonicalStructuredField(*general, name) {
-			replaceCanonicalSeedLegacyFill(general, fieldName(name), value, "", "")
+			replaceCanonicalSeedFill(general, fieldName(name), value, "", "")
 		}
 	}
 	title, _ := canonicalSeedValue(*general, "Title")
 	if movie, _ := canonicalSeedValue(*general, "Movie"); title != "" && movie == "" {
-		replaceCanonicalSeedLegacyFill(general, "Movie", title, "", "")
+		replaceCanonicalSeedFill(general, "Movie", title, "", "")
 	}
 	titleMore, _ := canonicalSeedValue(*general, "Title_More")
 	if movieMore, _ := canonicalSeedValue(*general, "Movie_More"); titleMore != "" && movieMore == "" {
-		replaceCanonicalSeedLegacyFill(general, "Movie_More", titleMore, "", "")
+		replaceCanonicalSeedFill(general, "Movie_More", titleMore, "", "")
 	}
 	mergeMatroskaDynamicCanonicalExtras(general, dynamic)
 }

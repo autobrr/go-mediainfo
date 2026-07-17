@@ -8,12 +8,12 @@ import (
 	"strings"
 )
 
-// mpegPSStructuredFact retains one canonical PS fact and its exact legacy
-// structured value until the public compatibility snapshot is projected.
+// mpegPSStructuredFact retains one canonical PS fact and its exact structured
+// projection until the stream is built.
 type mpegPSStructuredFact struct {
-	name      fieldName
-	canonical string
-	legacy    string
+	name       fieldName
+	canonical  string
+	projection string
 }
 
 // mpegPSStructuredFacts stages parser facts without exposing JSON-shaped state
@@ -24,14 +24,14 @@ type mpegPSStructuredFacts struct {
 
 // Set replaces one structured fact while preserving its canonical base-unit
 // value and exact legacy projection value.
-func (f *mpegPSStructuredFacts) Set(name fieldName, legacy string) {
+func (f *mpegPSStructuredFacts) Set(name fieldName, projection string) {
 	if f == nil || name == "" {
 		return
 	}
 	fact := mpegPSStructuredFact{
-		name:      name,
-		canonical: canonicalMPEGPSStructuredValue(name, legacy),
-		legacy:    legacy,
+		name:       name,
+		canonical:  canonicalMPEGPSStructuredValue(name, projection),
+		projection: projection,
 	}
 	for index := range f.values {
 		if f.values[index].name == name {
@@ -42,14 +42,14 @@ func (f *mpegPSStructuredFacts) Set(name fieldName, legacy string) {
 	f.values = append(f.values, fact)
 }
 
-// Legacy returns the exact compatibility value staged for name.
-func (f *mpegPSStructuredFacts) Legacy(name fieldName) string {
+// Projection returns the exact projected value staged for name.
+func (f *mpegPSStructuredFacts) Projection(name fieldName) string {
 	if f == nil {
 		return ""
 	}
 	for index := range slices.Backward(f.values) {
 		if f.values[index].name == name {
-			return f.values[index].legacy
+			return f.values[index].projection
 		}
 	}
 	return ""
@@ -138,13 +138,14 @@ func (f *mpegPSStructuredFacts) Apply(builder *canonicalStreamBuilder, fields []
 			} else {
 				builder.DirectStructured(fact.name, fact.canonical)
 			}
+		} else {
+			builder.DirectStructured(fact.name, fact.canonical)
 		}
 		if spec, known := structuredFieldSpec(builder.store.stream(builder.ref).Kind, string(fact.name)); known && spec.Measure == fieldMeasureMilliseconds {
-			if decimals := decimalFractionDigits(fact.legacy); decimals > 3 {
+			if decimals := decimalFractionDigits(fact.projection); decimals > 3 {
 				builder.SetStructuredDecimals(fact.name, uint8(decimals))
 			}
 		}
-		builder.MarkLegacyJSON(fact.name, fact.legacy)
 	}
 }
 
@@ -155,7 +156,6 @@ func buildMPEGPSCanonicalSnapshot(builder *canonicalStreamBuilder, fields []Fiel
 	appendMissingMPEGPSCanonicalText(builder, fields)
 	if extra != nil {
 		builder.OverrideStructuredNode("extra", *extra)
-		builder.MarkLegacyJSONRaw("extra", structuredNodeText(*extra))
 	}
 	return builder.Snapshot(policy)
 }

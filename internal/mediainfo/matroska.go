@@ -628,7 +628,7 @@ func parseMatroskaWithOptions(r io.ReaderAt, size int64, opts AnalyzeOptions, pu
 		}
 		value := fmt.Sprintf("%.3f", ms/1000.0)
 		if milliseconds, ok := decimalSecondsToMilliseconds(value); ok {
-			replaceCanonicalSeedLegacyProjection(stream, "Duration", milliseconds, value, "", "")
+			replaceCanonicalSeedProjection(stream, "Duration", milliseconds, value, "", "")
 			setCanonicalSeedStructuredDecimals(stream, "Duration", 3)
 		}
 	}
@@ -645,7 +645,7 @@ func parseMatroskaWithOptions(r io.ReaderAt, size int64, opts AnalyzeOptions, pu
 	deriveCBRAudioStreamSizes(&info, size)
 	applyMatroskaTrackTags(&info)
 	if publishLegacySnapshots {
-		finalizeMatroskaLegacySnapshots(&info)
+		finalizeMatroskaDeferredFacts(&info)
 	}
 	return info, true
 }
@@ -682,7 +682,7 @@ func deriveMatroskaAudioFrameCounts(tracks []Stream) {
 			replaceCanonicalSeedJSONOnly(stream, "FrameCount", frameCount)
 			continue
 		}
-		replaceCanonicalSeedLegacyFill(stream, "FrameCount", frameCount, "", "")
+		replaceCanonicalSeedFill(stream, "FrameCount", frameCount, "", "")
 	}
 }
 
@@ -736,12 +736,12 @@ func applyMatroskaLavfDurationCorrection(info *MatroskaInfo) {
 			if frameCount <= 0 {
 				continue
 			}
-			replaceCanonicalSeedLegacyFill(stream, "FrameCount", strconv.FormatInt(frameCount, 10), "", "")
+			replaceCanonicalSeedFill(stream, "FrameCount", strconv.FormatInt(frameCount, 10), "", "")
 		}
 		precision := min(max(tag.durationPrec, 3), 9)
 		value := fmt.Sprintf("%.*f", precision, duration)
 		if milliseconds, ok := decimalSecondsToMilliseconds(value); ok {
-			replaceCanonicalSeedLegacyProjection(stream, "Duration", milliseconds, value, "", "")
+			replaceCanonicalSeedProjection(stream, "Duration", milliseconds, value, "", "")
 			setCanonicalSeedStructuredDecimals(stream, "Duration", uint8(precision))
 		}
 	}
@@ -1168,7 +1168,6 @@ func appendMatroskaChapterMenus(streams []Stream, editions [][]matroskaChapter) 
 		}
 		extra := matroskaMenuExtraNode(chapters)
 		builder.StructuredNode("extra", extra)
-		builder.MarkLegacyJSONRaw("extra", renderStructuredNode(extra))
 		menu := builder.Snapshot(canonicalStreamPolicy{SkipStreamOrder: true, SkipComputed: true})
 		streams = append(streams, menu)
 	}
@@ -1478,23 +1477,21 @@ func parseMatroskaTracks(buf []byte, segmentDuration float64, durationPrec int) 
 	return entries, len(entries) > 0
 }
 
-// matroskaLegacySnapshotFact retains one scalar for the exported Stream.JSON
-// compatibility snapshot without making that snapshot parser-owned truth.
-type matroskaLegacySnapshotFact struct {
+// matroskaDeferredFact retains one scalar until codec/container parsing has
+// built the canonical stream seed.
+type matroskaDeferredFact struct {
 	name  fieldName
 	value string
 }
 
-// matroskaLegacySnapshotFacts collects the exact Matroska compatibility-map
-// values that correspond to fields in a direct canonical TrackEntry seed.
-type matroskaLegacySnapshotFacts struct {
-	values   []matroskaLegacySnapshotFact
-	rawNodes []fieldName
+// matroskaDeferredFacts collects fallback TrackEntry facts whose canonical
+// builders may not yet expose a matching field.
+type matroskaDeferredFacts struct {
+	values []matroskaDeferredFact
 }
 
-// Set records or replaces one scalar compatibility value while preserving its
-// first-seen position for deterministic snapshot construction.
-func (facts *matroskaLegacySnapshotFacts) Set(name fieldName, value string) {
+// Set records or replaces one scalar while preserving first-seen order.
+func (facts *matroskaDeferredFacts) Set(name fieldName, value string) {
 	if facts == nil || name == "" || value == "" {
 		return
 	}
@@ -1504,11 +1501,11 @@ func (facts *matroskaLegacySnapshotFacts) Set(name fieldName, value string) {
 			return
 		}
 	}
-	facts.values = append(facts.values, matroskaLegacySnapshotFact{name: name, value: value})
+	facts.values = append(facts.values, matroskaDeferredFact{name: name, value: value})
 }
 
 // Value returns one retained scalar, or an empty string when it was not set.
-func (facts *matroskaLegacySnapshotFacts) Value(name fieldName) string {
+func (facts *matroskaDeferredFacts) Value(name fieldName) string {
 	if facts == nil {
 		return ""
 	}
@@ -1520,17 +1517,6 @@ func (facts *matroskaLegacySnapshotFacts) Value(name fieldName) string {
 	return ""
 }
 
-// MarkRawNode retains the canonical ordered node for name in Stream.JSONRaw.
-func (facts *matroskaLegacySnapshotFacts) MarkRawNode(name fieldName) {
-	if facts == nil || name == "" {
-		return
-	}
-	if slices.Contains(facts.rawNodes, name) {
-		return
-	}
-	facts.rawNodes = append(facts.rawNodes, name)
-}
-
 // parseMatroskaTrackEntry converts one TrackEntry payload into a stream and
 // reports false when no supported track can be produced.
 func parseMatroskaTrackEntry(buf []byte, segmentDuration float64, durationPrec int) (Stream, bool) {
@@ -1538,7 +1524,8 @@ func parseMatroskaTrackEntry(buf []byte, segmentDuration float64, durationPrec i
 	if !ok {
 		return Stream{}, false
 	}
-	stream.matroskaLegacySnapshot.ApplyToStream(&stream)
+	stream.matroskaDeferredFacts.ApplyToStream(&stream)
+	refreshCanonicalCompatibilitySnapshot(&stream)
 	return stream, true
 }
 
@@ -2267,67 +2254,67 @@ func parseCanonicalMatroskaTrackEntry(buf []byte, segmentDuration float64, durat
 		}
 		fields = insertFieldBefore(fields, Field{Name: "Title", Value: trackName}, before)
 	}
-	legacyFacts := &matroskaLegacySnapshotFacts{}
+	deferredFacts := &matroskaDeferredFacts{}
 	if kind == StreamAudio && audioBitDepth > 0 && (format == "PCM" || format == "E-AC-3") {
-		legacyFacts.Set("BitDepth", strconv.FormatUint(audioBitDepth, 10))
+		deferredFacts.Set("BitDepth", strconv.FormatUint(audioBitDepth, 10))
 	}
 	if kind == StreamAudio && format == "PCM" {
-		legacyFacts.Set("BitRate_Mode", "CBR")
+		deferredFacts.Set("BitRate_Mode", "CBR")
 		if strings.Contains(codecID, "/LIT") {
-			legacyFacts.Set("Format_Settings_Endianness", "Little")
+			deferredFacts.Set("Format_Settings_Endianness", "Little")
 		} else if strings.Contains(codecID, "/BIG") {
-			legacyFacts.Set("Format_Settings_Endianness", "Big")
+			deferredFacts.Set("Format_Settings_Endianness", "Big")
 		}
 		if strings.Contains(codecID, "/INT/") {
-			legacyFacts.Set("Format_Settings_Sign", "Signed")
+			deferredFacts.Set("Format_Settings_Sign", "Signed")
 		}
 		if strings.HasPrefix(codecID, "A_MS/ACM / 00000001-") {
-			legacyFacts.Set("Format_Settings_Endianness", "Little")
-			legacyFacts.Set("Format_Settings_Sign", "Signed")
+			deferredFacts.Set("Format_Settings_Endianness", "Little")
+			deferredFacts.Set("Format_Settings_Sign", "Signed")
 			if acmBitRate > 0 {
-				legacyFacts.Set("BitRate", strconv.FormatUint(acmBitRate, 10))
+				deferredFacts.Set("BitRate", strconv.FormatUint(acmBitRate, 10))
 			}
 		}
 		if audioBitDepth > 0 {
-			legacyFacts.Set("BitDepth", strconv.FormatUint(audioBitDepth, 10))
+			deferredFacts.Set("BitDepth", strconv.FormatUint(audioBitDepth, 10))
 		}
 		if defaultDuration > 0 && audioSampleRate > 0 {
 			samplesPerFrame := int64(math.Round(audioSampleRate * float64(defaultDuration) / 1e9))
 			if samplesPerFrame > 0 {
 				frameRate := audioSampleRate / float64(samplesPerFrame)
-				legacyFacts.Set("SamplesPerFrame", strconv.FormatInt(samplesPerFrame, 10))
-				legacyFacts.Set("FrameRate", fmt.Sprintf("%.3f", frameRate))
+				deferredFacts.Set("SamplesPerFrame", strconv.FormatInt(samplesPerFrame, 10))
+				deferredFacts.Set("FrameRate", fmt.Sprintf("%.3f", frameRate))
 				if math.Abs(frameRate-math.Round(frameRate)) < 0.0005 {
-					legacyFacts.Set("FrameRate_Num", strconv.FormatInt(int64(math.Round(frameRate)), 10))
-					legacyFacts.Set("FrameRate_Den", "1")
+					deferredFacts.Set("FrameRate_Num", strconv.FormatInt(int64(math.Round(frameRate)), 10))
+					deferredFacts.Set("FrameRate_Den", "1")
 				}
 				if segmentDuration > 0 {
 					frameCount := int64(math.Round(segmentDuration * frameRate))
-					legacyFacts.Set("FrameCount", strconv.FormatInt(frameCount, 10))
-					legacyFacts.Set("SamplingCount", strconv.FormatInt(frameCount*samplesPerFrame, 10))
+					deferredFacts.Set("FrameCount", strconv.FormatInt(frameCount, 10))
+					deferredFacts.Set("SamplingCount", strconv.FormatInt(frameCount*samplesPerFrame, 10))
 				}
 			}
 		}
 	}
 	if kind == StreamVideo && format == "VC-1" && vc1Info.BufferSize > 0 {
-		legacyFacts.Set("BufferSize", strconv.FormatInt(vc1Info.BufferSize, 10))
+		deferredFacts.Set("BufferSize", strconv.FormatInt(vc1Info.BufferSize, 10))
 	}
 	if trackNumber > 0 {
-		legacyFacts.Set("StreamOrder", strconv.FormatUint(trackNumber-1, 10))
+		deferredFacts.Set("StreamOrder", strconv.FormatUint(trackNumber-1, 10))
 	}
 	if kind == StreamAudio && format == "Opus" && audioChannels == 6 {
-		legacyFacts.Set("ChannelLayout", "L R C Lb Rb LFE")
-		legacyFacts.Set("ChannelPositions", "Front: L C R, Back: L R, LFE")
+		deferredFacts.Set("ChannelLayout", "L R C Lb Rb LFE")
+		deferredFacts.Set("ChannelPositions", "Front: L C R, Back: L R, LFE")
 	}
 	if trackUID > 0 {
-		legacyFacts.Set("UniqueID", strconv.FormatUint(trackUID, 10))
+		deferredFacts.Set("UniqueID", strconv.FormatUint(trackUID, 10))
 	}
 	if bitRate > 0 && kind != StreamVideo {
 		// Keep JSON BitRate exact; parsing from the formatted text field can introduce rounding drift.
-		legacyFacts.Set("BitRate", strconv.FormatUint(bitRate, 10))
+		deferredFacts.Set("BitRate", strconv.FormatUint(bitRate, 10))
 	}
 	if languageCode != "" {
-		legacyFacts.Set("Language", languageCode)
+		deferredFacts.Set("Language", languageCode)
 	}
 	serviceKinds := make([]string, 0, 2)
 	if flagHearingImpaired {
@@ -2340,33 +2327,33 @@ func parseCanonicalMatroskaTrackEntry(buf []byte, segmentDuration float64, durat
 		serviceKinds = append(serviceKinds, "C")
 	}
 	if len(serviceKinds) > 0 {
-		legacyFacts.Set("ServiceKind", strings.Join(serviceKinds, " / "))
+		deferredFacts.Set("ServiceKind", strings.Join(serviceKinds, " / "))
 	}
 	_ = trackOffset
 	_ = hasTrackOffset
 	if aacSBRMode != "" {
-		legacyFacts.Set("Format_Settings_SBR", aacSBRMode)
+		deferredFacts.Set("Format_Settings_SBR", aacSBRMode)
 		if strings.HasPrefix(aacSBRMode, "Yes") {
-			legacyFacts.Set("SamplesPerFrame", "2048")
-			legacyFacts.Set("Format_AdditionalFeatures", "LC SBR")
-			legacyFacts.Set("Format_Commercial_IfAny", "HE-AAC")
+			deferredFacts.Set("SamplesPerFrame", "2048")
+			deferredFacts.Set("Format_AdditionalFeatures", "LC SBR")
+			deferredFacts.Set("Format_Commercial_IfAny", "HE-AAC")
 		}
 		if aacPSMode != "" {
-			legacyFacts.Set("Format_Settings_PS", aacPSMode)
+			deferredFacts.Set("Format_Settings_PS", aacPSMode)
 		} else if aacSBRMode == "Yes (Explicit)" {
-			legacyFacts.Set("Format_Settings_PS", "No (Explicit)")
+			deferredFacts.Set("Format_Settings_PS", "No (Explicit)")
 		}
 	}
 	if kind == StreamText && hasContentCompression && contentCompAlgo == 0 {
-		legacyFacts.Set("MuxingMode", "zlib")
+		deferredFacts.Set("MuxingMode", "zlib")
 	}
 	if flacInfo.sampleRate > 0 {
-		legacyFacts.Set("BitRate_Mode", "VBR")
+		deferredFacts.Set("BitRate_Mode", "VBR")
 		if flacInfo.bitsPerSample > 0 && (flacEncoder == "" || strings.Contains(flacEncoder, "libFLAC")) {
-			legacyFacts.Set("BitDepth_Detected", matroskaFLACDetectedBitDepth(flacInfo))
+			deferredFacts.Set("BitDepth_Detected", matroskaFLACDetectedBitDepth(flacInfo))
 		}
 		if flacInfo.bitsPerSample > 0 {
-			legacyFacts.Set("BitDepth", strconv.Itoa(int(flacInfo.bitsPerSample)))
+			deferredFacts.Set("BitDepth", strconv.Itoa(int(flacInfo.bitsPerSample)))
 		}
 		samplingCount := uint64(0)
 		if segmentDuration > 0 {
@@ -2374,83 +2361,81 @@ func parseCanonicalMatroskaTrackEntry(buf []byte, segmentDuration float64, durat
 		}
 		if flacInfo.maxBlockSize > 0 {
 			samplesPerFrame := uint64(flacInfo.maxBlockSize)
-			legacyFacts.Set("SamplesPerFrame", strconv.FormatUint(samplesPerFrame, 10))
-			legacyFacts.Set("FrameRate", fmt.Sprintf("%.3f", float64(flacInfo.sampleRate)/float64(samplesPerFrame)))
+			deferredFacts.Set("SamplesPerFrame", strconv.FormatUint(samplesPerFrame, 10))
+			deferredFacts.Set("FrameRate", fmt.Sprintf("%.3f", float64(flacInfo.sampleRate)/float64(samplesPerFrame)))
 			if samplingCount > 0 {
 				frameCount := (samplingCount + samplesPerFrame - 1) / samplesPerFrame
-				legacyFacts.Set("FrameCount", strconv.FormatUint(frameCount, 10))
+				deferredFacts.Set("FrameCount", strconv.FormatUint(frameCount, 10))
 			}
 		}
 		if samplingCount > 0 {
-			legacyFacts.Set("SamplingCount", strconv.FormatUint(samplingCount, 10))
+			deferredFacts.Set("SamplingCount", strconv.FormatUint(samplingCount, 10))
 		}
 		if flacInfo.md5 != "" {
-			legacyFacts.MarkRawNode("extra")
 		}
 		if flacEncoder != "" {
-			legacyFacts.Set("Encoded_Library", flacEncoder)
+			deferredFacts.Set("Encoded_Library", flacEncoder)
 			if name, version, date := splitFLACEncodedLibrary(flacEncoder); name != "" {
-				legacyFacts.Set("Encoded_Library_Name", name)
+				deferredFacts.Set("Encoded_Library_Name", name)
 				if version != "" {
-					legacyFacts.Set("Encoded_Library_Version", version)
+					deferredFacts.Set("Encoded_Library_Version", version)
 				}
 				if date != "" {
-					legacyFacts.Set("Encoded_Library_Date", date)
+					deferredFacts.Set("Encoded_Library_Date", date)
 				}
 			}
 		}
 	}
 	if kind == StreamAudio && format == "Vorbis" {
-		legacyFacts.Set("BitRate_Mode", "VBR")
-		legacyFacts.Set("Compression_Mode", "Lossy")
-		legacyFacts.Set("Format_Settings_Floor", "1")
+		deferredFacts.Set("BitRate_Mode", "VBR")
+		deferredFacts.Set("Compression_Mode", "Lossy")
+		deferredFacts.Set("Format_Settings_Floor", "1")
 		if vorbisInfo.nominalBitRate > 0 {
-			legacyFacts.Set("BitRate", strconv.FormatInt(vorbisInfo.nominalBitRate, 10))
+			deferredFacts.Set("BitRate", strconv.FormatInt(vorbisInfo.nominalBitRate, 10))
 			if segmentDuration > 0 {
 				streamSize := int64(math.Round(float64(vorbisInfo.nominalBitRate) * segmentDuration / 8))
-				legacyFacts.Set("StreamSize", strconv.FormatInt(streamSize, 10))
+				deferredFacts.Set("StreamSize", strconv.FormatInt(streamSize, 10))
 			}
 		}
 		if vorbisInfo.maximumBitRate > 0 {
-			legacyFacts.Set("BitRate_Maximum", strconv.FormatInt(vorbisInfo.maximumBitRate, 10))
+			deferredFacts.Set("BitRate_Maximum", strconv.FormatInt(vorbisInfo.maximumBitRate, 10))
 		}
 		if vorbisInfo.minimumBitRate > 0 {
-			legacyFacts.Set("BitRate_Minimum", strconv.FormatInt(vorbisInfo.minimumBitRate, 10))
+			deferredFacts.Set("BitRate_Minimum", strconv.FormatInt(vorbisInfo.minimumBitRate, 10))
 		}
 		if vorbisInfo.vendor != "" {
-			legacyFacts.Set("Encoded_Library", vorbisInfo.vendor)
+			deferredFacts.Set("Encoded_Library", vorbisInfo.vendor)
 			name, version, date := splitMatroskaVorbisLibrary(vorbisInfo.vendor)
 			if name != "" {
-				legacyFacts.Set("Encoded_Library_Name", name)
+				deferredFacts.Set("Encoded_Library_Name", name)
 			}
 			if version != "" {
-				legacyFacts.Set("Encoded_Library_Version", version)
+				deferredFacts.Set("Encoded_Library_Version", version)
 			}
 			if date != "" {
-				legacyFacts.Set("Encoded_Library_Date", date)
+				deferredFacts.Set("Encoded_Library_Date", date)
 			}
 		}
 		if vorbisInfo.encoder != "" {
-			legacyFacts.Set("Encoded_Application", vorbisInfo.encoder)
+			deferredFacts.Set("Encoded_Application", vorbisInfo.encoder)
 		}
 		if vorbisInfo.applicationURL != "" {
-			legacyFacts.MarkRawNode("extra")
 		}
 		if audioSampleRate > 0 && segmentDuration > 0 {
-			legacyFacts.Set("SamplingCount", strconv.FormatInt(int64(math.RoundToEven(audioSampleRate*segmentDuration)), 10))
+			deferredFacts.Set("SamplingCount", strconv.FormatInt(int64(math.RoundToEven(audioSampleRate*segmentDuration)), 10))
 		}
 	}
 	if kind == StreamVideo || kind == StreamAudio {
-		legacyFacts.Set("Delay", "0.000")
-		legacyFacts.Set("Delay_Source", "Container")
+		deferredFacts.Set("Delay", "0.000")
+		deferredFacts.Set("Delay_Source", "Container")
 		if kind == StreamAudio {
-			legacyFacts.Set("Video_Delay", "0.000")
+			deferredFacts.Set("Video_Delay", "0.000")
 		}
 	}
 	if kind == StreamVideo {
 		if videoInfo.stereoMode == 13 {
-			legacyFacts.Set("MultiView_Count", "2")
-			legacyFacts.Set("MultiView_Layout", "Both Eyes laced in one block (left eye first)")
+			deferredFacts.Set("MultiView_Count", "2")
+			deferredFacts.Set("MultiView_Layout", "Both Eyes laced in one block (left eye first)")
 		}
 		sampledWidth := videoInfo.pixelWidth
 		sampledHeight := videoInfo.pixelHeight
@@ -2469,7 +2454,7 @@ func parseCanonicalMatroskaTrackEntry(buf []byte, segmentDuration float64, durat
 			storedHeight = videoInfo.codedHeight
 		}
 		if storedWidth > 0 && sampledWidth > 0 && storedWidth != sampledWidth {
-			legacyFacts.Set("Stored_Width", strconv.FormatUint(storedWidth, 10))
+			deferredFacts.Set("Stored_Width", strconv.FormatUint(storedWidth, 10))
 		}
 		if storedHeight == sampledHeight && sampledHeight > 0 && codecID == "V_MPEG4/ISO/AVC" {
 			if sampledHeight%16 != 0 {
@@ -2477,7 +2462,7 @@ func parseCanonicalMatroskaTrackEntry(buf []byte, segmentDuration float64, durat
 			}
 		}
 		if storedHeight > 0 && sampledHeight > 0 && storedHeight != sampledHeight {
-			legacyFacts.Set("Stored_Height", strconv.FormatUint(storedHeight, 10))
+			deferredFacts.Set("Stored_Height", strconv.FormatUint(storedHeight, 10))
 		}
 		if spsInfo.HasSAR && spsInfo.SARWidth > 0 && spsInfo.SARHeight > 0 && spsInfo.SARWidth != spsInfo.SARHeight {
 			pixelRatio := float64(spsInfo.SARWidth) / float64(spsInfo.SARHeight)
@@ -2489,36 +2474,36 @@ func parseCanonicalMatroskaTrackEntry(buf []byte, segmentDuration float64, durat
 			storedDiffers := storedWidth != sampledWidth || storedHeight != sampledHeight
 			if storedDiffers && containerRatio > 0 && math.Abs(containerRatio-displayRatio) >= 0.001 {
 				containerPixelRatio := containerRatio / (float64(sampledWidth) / float64(sampledHeight))
-				legacyFacts.Set("PixelAspectRatio", formatJSONFloat(containerPixelRatio))
-				legacyFacts.Set("PixelAspectRatio_Original", formatJSONFloat(pixelRatio))
-				legacyFacts.Set("DisplayAspectRatio", formatJSONFloat(containerRatio))
-				legacyFacts.Set("DisplayAspectRatio_Original", formatJSONFloat(displayRatio))
+				deferredFacts.Set("PixelAspectRatio", formatJSONFloat(containerPixelRatio))
+				deferredFacts.Set("PixelAspectRatio_Original", formatJSONFloat(pixelRatio))
+				deferredFacts.Set("DisplayAspectRatio", formatJSONFloat(containerRatio))
+				deferredFacts.Set("DisplayAspectRatio_Original", formatJSONFloat(displayRatio))
 			} else {
-				legacyFacts.Set("PixelAspectRatio", formatJSONFloat(pixelRatio))
+				deferredFacts.Set("PixelAspectRatio", formatJSONFloat(pixelRatio))
 				if !storedDiffers && math.Abs(pixelRatio-1) < 0.01 {
-					legacyFacts.Set("PixelAspectRatio", "1.000")
-					legacyFacts.Set("DisplayAspectRatio", formatJSONFloat(float64(sampledWidth)/float64(sampledHeight)))
+					deferredFacts.Set("PixelAspectRatio", "1.000")
+					deferredFacts.Set("DisplayAspectRatio", formatJSONFloat(float64(sampledWidth)/float64(sampledHeight)))
 				}
 			}
 		}
 		if math.Abs(spsInfo.FrameRate-24) < 1e-9 && defaultDuration > 0 {
 			rate := 1e9 / float64(defaultDuration)
 			if math.Abs(rate-(24000.0/1001.0)) < 0.005 {
-				legacyFacts.Set("FrameRate_Num", "23976")
-				legacyFacts.Set("FrameRate_Den", "1000")
-				legacyFacts.Set("FrameRate_Original", "24.000")
+				deferredFacts.Set("FrameRate_Num", "23976")
+				deferredFacts.Set("FrameRate_Den", "1000")
+				deferredFacts.Set("FrameRate_Original", "24.000")
 			}
 		}
 		if spsInfo.HasFixedFrameRate && !spsInfo.FixedFrameRate {
 			if findField(fields, "Frame rate mode") == "Constant" {
-				legacyFacts.Set("FrameRate_Mode_Original", "VFR")
+				deferredFacts.Set("FrameRate_Mode_Original", "VFR")
 			}
 		}
 		if codecID == "V_MPEG4/ISO/AVC" && spsInfo.FrameRate > 0 {
 			const ntscFilm = 24000.0 / 1001.0
 			if math.Abs(spsInfo.FrameRate-ntscFilm) < 1e-9 {
-				legacyFacts.Set("FrameRate_Num", "24000")
-				legacyFacts.Set("FrameRate_Den", "1001")
+				deferredFacts.Set("FrameRate_Num", "24000")
+				deferredFacts.Set("FrameRate_Den", "1001")
 			}
 		}
 		if videoInfo.colorRange != "" || videoInfo.colorPrimaries != "" || videoInfo.transferCharacteristics != "" || videoInfo.matrixCoefficients != "" {
@@ -2531,30 +2516,30 @@ func parseCanonicalMatroskaTrackEntry(buf []byte, segmentDuration float64, durat
 				colorSource = "Stream"
 			}
 			if videoInfo.colorPrimaries != "" || videoInfo.transferCharacteristics != "" || videoInfo.matrixCoefficients != "" {
-				legacyFacts.Set("colour_description_present", "Yes")
-				legacyFacts.Set("colour_description_present_Source", colorSource)
+				deferredFacts.Set("colour_description_present", "Yes")
+				deferredFacts.Set("colour_description_present_Source", colorSource)
 				if videoInfo.transferCharacteristics == "" && strings.Contains(colorSource, "Stream") {
-					legacyFacts.Set("transfer_characteristics_Source", matroskaColorSource(videoInfo.transferSource, colorSource))
+					deferredFacts.Set("transfer_characteristics_Source", matroskaColorSource(videoInfo.transferSource, colorSource))
 				}
 				if videoInfo.colorPrimaries == "" && strings.Contains(colorSource, "Stream") {
-					legacyFacts.Set("colour_primaries_Source", matroskaColorSource(videoInfo.colorPrimariesSource, colorSource))
+					deferredFacts.Set("colour_primaries_Source", matroskaColorSource(videoInfo.colorPrimariesSource, colorSource))
 				}
 			}
 			if videoInfo.colorRange != "" {
-				legacyFacts.Set("colour_range", videoInfo.colorRange)
-				legacyFacts.Set("colour_range_Source", matroskaColorSource(videoInfo.colorRangeSource, colorSource))
+				deferredFacts.Set("colour_range", videoInfo.colorRange)
+				deferredFacts.Set("colour_range_Source", matroskaColorSource(videoInfo.colorRangeSource, colorSource))
 			}
 			if videoInfo.colorPrimaries != "" {
-				legacyFacts.Set("colour_primaries", videoInfo.colorPrimaries)
-				legacyFacts.Set("colour_primaries_Source", matroskaColorSource(videoInfo.colorPrimariesSource, colorSource))
+				deferredFacts.Set("colour_primaries", videoInfo.colorPrimaries)
+				deferredFacts.Set("colour_primaries_Source", matroskaColorSource(videoInfo.colorPrimariesSource, colorSource))
 			}
 			if videoInfo.transferCharacteristics != "" {
-				legacyFacts.Set("transfer_characteristics", videoInfo.transferCharacteristics)
-				legacyFacts.Set("transfer_characteristics_Source", matroskaColorSource(videoInfo.transferSource, colorSource))
+				deferredFacts.Set("transfer_characteristics", videoInfo.transferCharacteristics)
+				deferredFacts.Set("transfer_characteristics_Source", matroskaColorSource(videoInfo.transferSource, colorSource))
 			}
 			if videoInfo.matrixCoefficients != "" {
-				legacyFacts.Set("matrix_coefficients", videoInfo.matrixCoefficients)
-				legacyFacts.Set("matrix_coefficients_Source", matroskaColorSource(videoInfo.matrixSource, colorSource))
+				deferredFacts.Set("matrix_coefficients", videoInfo.matrixCoefficients)
+				deferredFacts.Set("matrix_coefficients_Source", matroskaColorSource(videoInfo.matrixSource, colorSource))
 			}
 		}
 		validHRD := !spsInfo.HasBitRate || spsInfo.BitRate >= 10_000
@@ -2563,15 +2548,15 @@ func parseCanonicalMatroskaTrackEntry(buf []byte, segmentDuration float64, durat
 			if spsInfo.HasBufferSizeNAL && spsInfo.HasBufferSizeVCL {
 				bufferSize = strconv.FormatInt(spsInfo.BufferSizeNAL, 10) + " / " + strconv.FormatInt(spsInfo.BufferSizeVCL, 10)
 			}
-			legacyFacts.Set("BufferSize", bufferSize)
+			deferredFacts.Set("BufferSize", bufferSize)
 		}
 		// A CBR HRD value is the stream bitrate; VBR HRD exposes the maximum.
 		if validHRD && spsInfo.HasBitRate && spsInfo.BitRate > 0 {
 			if spsInfo.HasBitRateCBR && spsInfo.BitRateCBR {
 				fields = setFieldValue(fields, "Bit rate", formatBitrate(float64(spsInfo.BitRate)))
-				legacyFacts.Set("BitRate", strconv.FormatInt(spsInfo.BitRate, 10))
+				deferredFacts.Set("BitRate", strconv.FormatInt(spsInfo.BitRate, 10))
 			} else {
-				legacyFacts.Set("BitRate_Maximum", strconv.FormatInt(spsInfo.BitRate, 10))
+				deferredFacts.Set("BitRate_Maximum", strconv.FormatInt(spsInfo.BitRate, 10))
 			}
 		}
 	}
@@ -2581,8 +2566,8 @@ func parseCanonicalMatroskaTrackEntry(buf []byte, segmentDuration float64, durat
 	}
 	_ = hasTrackTSScale
 	_ = trackTSScale
-	if kind == StreamVideo && derivedVideoFrameCount > 0 && legacyFacts.Value("FrameCount") == "" {
-		legacyFacts.Set("FrameCount", strconv.FormatInt(derivedVideoFrameCount, 10))
+	if kind == StreamVideo && derivedVideoFrameCount > 0 && deferredFacts.Value("FrameCount") == "" {
+		deferredFacts.Set("FrameCount", strconv.FormatInt(derivedVideoFrameCount, 10))
 	}
 	if kind == StreamAudio && format == "MPEG Audio" && codecDelay+seekPreRoll > 0 {
 		delay := codecDelay + seekPreRoll
@@ -2598,9 +2583,9 @@ func parseCanonicalMatroskaTrackEntry(buf []byte, segmentDuration float64, durat
 	if durationSeconds > 0 {
 		if durationPrec <= 3 {
 			durationSeconds = math.Round(durationSeconds*1000) / 1000
-			legacyFacts.Set("Duration", fmt.Sprintf("%.3f", durationSeconds))
+			deferredFacts.Set("Duration", fmt.Sprintf("%.3f", durationSeconds))
 		} else {
-			legacyFacts.Set("Duration", fmt.Sprintf("%.9f", durationSeconds))
+			deferredFacts.Set("Duration", fmt.Sprintf("%.9f", durationSeconds))
 		}
 		if kind == StreamVideo && findField(fields, "Duration") == "" {
 			fields = addStreamDuration(fields, durationSeconds)
@@ -2617,7 +2602,7 @@ func parseCanonicalMatroskaTrackEntry(buf []byte, segmentDuration float64, durat
 	// fails (likely due to muxer variations), so keep a conservative ASS fallback.
 	if kind == StreamText && (codecID == "S_TEXT/ASS" || codecID == "S_TEXT/SSA") {
 		fields = insertFieldBefore(fields, Field{Name: "Compression mode", Value: "Lossless"}, "Default")
-		legacyFacts.Set("Compression_Mode", "Lossless")
+		deferredFacts.Set("Compression_Mode", "Lossless")
 	}
 	stream := Stream{
 		Kind:                kind,
@@ -2802,7 +2787,7 @@ func parseCanonicalMatroskaTrackEntry(buf []byte, segmentDuration float64, durat
 			defaultValue: defaultValue, forcedValue: forcedValue, serviceKinds: serviceKinds,
 		})
 	}
-	stream.matroskaLegacySnapshot = legacyFacts
+	stream.matroskaDeferredFacts = deferredFacts
 	return stream, true
 }
 
@@ -4664,9 +4649,9 @@ func applyMatroskaEncoders(streams []Stream, encodersByTrackUID map[uint64]strin
 			if findField(streams[i].Fields, "Writing library") != "" {
 				continue
 			}
-			replaceCanonicalSeedLegacyFill(&streams[i], "Encoded_Library", enc, "Writing library", enc)
+			replaceCanonicalSeedFill(&streams[i], "Encoded_Library", enc, "Writing library", enc)
 			if findField(streams[i].Fields, "Format") == "AC-3" && strings.Contains(enc, "ac3_fixed") {
-				replaceCanonicalSeedLegacyFill(&streams[i], "BitDepth", "16", "", "")
+				replaceCanonicalSeedFill(&streams[i], "BitDepth", "16", "", "")
 			}
 			if findField(streams[i].Fields, "Format") == "FLAC" && strings.HasPrefix(enc, "Lavc") {
 				clearCanonicalSeedField(&streams[i], "BitDepth_Detected", "")
@@ -4685,7 +4670,7 @@ func applyMatroskaEncoders(streams []Stream, encodersByTrackUID map[uint64]strin
 					layout = "L R C LFE Ls Rs"
 				}
 				if layout != "" {
-					replaceCanonicalSeedLegacyFill(&streams[i], "ChannelLayout", layout, "Channel layout", layout)
+					replaceCanonicalSeedFill(&streams[i], "ChannelLayout", layout, "Channel layout", layout)
 					setCanonicalSeedXMLVisibility(&streams[i], "ChannelLayout", true)
 					if positions := matroskaGoChannelPositions(uint64(channels)); positions != "" {
 						replaceCanonicalSeedFill(&streams[i], "ChannelPositions", positions, "", "")
@@ -4694,12 +4679,12 @@ func applyMatroskaEncoders(streams []Stream, encodersByTrackUID map[uint64]strin
 				}
 			}
 			if name, version, date := splitFLACEncodedLibrary(enc); name != "" {
-				replaceCanonicalSeedLegacyFill(&streams[i], "Encoded_Library_Name", name, "", "")
+				replaceCanonicalSeedFill(&streams[i], "Encoded_Library_Name", name, "", "")
 				if version != "" {
-					replaceCanonicalSeedLegacyFill(&streams[i], "Encoded_Library_Version", version, "", "")
+					replaceCanonicalSeedFill(&streams[i], "Encoded_Library_Version", version, "", "")
 				}
 				if date != "" {
-					replaceCanonicalSeedLegacyFill(&streams[i], "Encoded_Library_Date", date, "", "")
+					replaceCanonicalSeedFill(&streams[i], "Encoded_Library_Date", date, "", "")
 				}
 			}
 		}
@@ -4769,7 +4754,7 @@ func applyMatroskaTagLanguages(streams []Stream, langsByTrackUID map[uint64]stri
 			code = normalizeLanguageCode(strings.ToLower(lang))
 		}
 		if display := formatLanguage(lang); code != "" {
-			replaceCanonicalSeedLegacyFill(&streams[i], "Language", code, "Language", display)
+			replaceCanonicalSeedFill(&streams[i], "Language", code, "Language", display)
 		}
 	}
 }

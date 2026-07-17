@@ -60,9 +60,9 @@ type Stream struct {
 	mkvHEVCX265Settings string
 	mkvTrackOffsetNs    int64
 	mkvStereoMode       uint64
-	// matroskaLegacySnapshot defers exported map materialization until all
-	// TrackEntry refinements have updated the canonical seed.
-	matroskaLegacySnapshot *matroskaLegacySnapshotFacts
+	// matroskaDeferredFacts holds fallback TrackEntry values until all parser
+	// refinements have updated the canonical seed.
+	matroskaDeferredFacts *matroskaDeferredFacts
 	// reportStore is attached only to General to preserve Report's public three-field layout.
 	reportStore *fieldStore
 	// reportSnapshot detects caller mutation before a renderer reuses reportStore.
@@ -71,8 +71,6 @@ type Stream struct {
 	canonicalSeed []fieldEntry
 	// canonicalPolicy retains format-neutral projection policy until adapters publish legacy flags.
 	canonicalPolicy canonicalStreamPolicy
-	// compatibilityDeletes retains scalar tombstones for a partial public snapshot.
-	compatibilityDeletes []fieldName
 }
 
 // Report contains the public compatibility snapshot for one analyzed input.

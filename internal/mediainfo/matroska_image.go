@@ -16,7 +16,6 @@ func matroskaAttachmentImageStream(attachment matroskaAttachment) (Stream, bool)
 	builder := newCanonicalStreamBuilder(StreamImage)
 	fillStructured := func(name fieldName, value string) {
 		builder.Structured(name, value)
-		builder.MarkLegacyJSON(name, value)
 	}
 	fillStructured("MuxingMode", "Attachment")
 	coverType := matroskaAttachmentCoverType(attachment)
@@ -54,7 +53,6 @@ func matroskaAttachmentImageStream(attachment matroskaAttachment) (Stream, bool)
 			members = append(members, structuredMember{Key: "colour_primaries_ICC_Description", Value: structuredNode{Kind: structuredString, Text: iccDescription}})
 			extra := structuredNode{Kind: structuredObject, Object: members}
 			builder.StructuredNode("extra", extra)
-			builder.MarkLegacyJSONRaw("extra", renderStructuredNode(extra))
 		}
 		size = subtractAttachmentMetadataSize(size, metadataBytes)
 	case detected && detection.kind == embeddedImagePNG:
@@ -88,7 +86,6 @@ func matroskaAttachmentImageStream(attachment matroskaAttachment) (Stream, bool)
 		if len(members) > 0 {
 			extra := structuredNode{Kind: structuredObject, Object: members}
 			builder.StructuredNode("extra", extra)
-			builder.MarkLegacyJSONRaw("extra", renderStructuredNode(extra))
 		}
 		size = subtractAttachmentMetadataSize(size, metadataBytes)
 	case detected && detection.kind == embeddedImageGIF:

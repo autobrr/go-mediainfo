@@ -3,7 +3,7 @@ package mediainfo
 import "slices"
 
 // canonicalStreamBuilder collects one parser stream in canonical form while
-// retaining the legacy public snapshot required by Stream callers.
+// retaining the public compatibility snapshot required by Stream callers.
 type canonicalStreamBuilder struct {
 	store *fieldStore
 	ref   streamRef
@@ -108,7 +108,14 @@ func (b *canonicalStreamBuilder) DirectStructured(name fieldName, value string) 
 		entry.Projected = false
 		return
 	}
-	fillGeneratedStructured(b.store, b.ref, name, value)
+	spec, known := structuredFieldSpec(stream.Kind, string(name))
+	b.store.appendEntry(stream, fieldEntry{
+		Name:          name,
+		Value:         fieldValue{Text: value},
+		Dynamic:       !known,
+		Options:       fieldOptions{ShowStructured: true, ShowXML: true, ValueType: spec.Options.ValueType},
+		StructuredKey: string(name),
+	})
 }
 
 // HasStructured reports whether the builder already contains a structured key.
@@ -214,9 +221,8 @@ func (b *canonicalStreamBuilder) OverrideStructured(name fieldName, value string
 		if entry.Node == nil && projectCanonicalStructuredValue(stream.Kind, *entry) == value {
 			return
 		}
-		entry.Value.Text = value
-		entry.Node = nil
-		entry.Projected = true
+		node := structuredNode{Kind: structuredString, Text: value}
+		entry.StructuredOverride = &node
 		return
 	}
 	fillGeneratedStructured(b.store, b.ref, name, value)
@@ -289,22 +295,6 @@ func (b *canonicalStreamBuilder) OverrideStructuredNode(name fieldName, node str
 	}
 }
 
-// MarkLegacyJSON retains one scalar override in the public Stream snapshot.
-func (b *canonicalStreamBuilder) MarkLegacyJSON(name fieldName, value string) {
-	if b == nil || b.store == nil || value == "" {
-		return
-	}
-	b.store.MarkLegacyJSON(b.ref, name, value, false)
-}
-
-// MarkLegacyJSONRaw retains one raw override in the public Stream snapshot.
-func (b *canonicalStreamBuilder) MarkLegacyJSONRaw(name fieldName, value string) {
-	if b == nil || b.store == nil || value == "" {
-		return
-	}
-	b.store.MarkLegacyJSON(b.ref, name, value, true)
-}
-
 // Snapshot finalizes the stream and returns its compatibility representation.
 func (b *canonicalStreamBuilder) Snapshot(policy canonicalStreamPolicy) Stream {
 	if b == nil {
@@ -352,6 +342,17 @@ func canonicalSeedValue(stream Stream, key fieldName) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// canonicalSeedHasStructured reports whether key already has a scalar or node.
+func canonicalSeedHasStructured(stream Stream, key fieldName) bool {
+	for _, entry := range stream.canonicalSeed {
+		structuredKey := firstNonEmpty(entry.StructuredKey, string(entry.Name))
+		if entry.Options.ShowStructured && structuredKey == string(key) {
+			return true
+		}
+	}
+	return false
 }
 
 // canonicalSeedTextValue returns the first direct canonical display value for
@@ -404,59 +405,6 @@ func canonicalSeedStructuredNode(stream *Stream, key fieldName) *structuredNode 
 	return nil
 }
 
-// setCanonicalSeedLegacyObject records the current ordered canonical object as
-// the exported raw compatibility value for key.
-func setCanonicalSeedLegacyObject(stream *Stream, key fieldName) {
-	if node := canonicalSeedStructuredNode(stream, key); node != nil {
-		setCanonicalSeedLegacyValue(stream, key, structuredNodeText(*node), true)
-	}
-}
-
-// moveCanonicalSeedLegacyObjectMemberAfter reorders one compatibility-only
-// object member without changing the canonical renderer's ordered node.
-func moveCanonicalSeedLegacyObjectMemberAfter(stream *Stream, key fieldName, memberKey, afterKey string) {
-	if stream == nil || memberKey == "" {
-		return
-	}
-	for index := range slices.Backward(stream.canonicalSeed) {
-		entry := &stream.canonicalSeed[index]
-		structuredKey := firstNonEmpty(entry.StructuredKey, string(entry.Name))
-		if !entry.LegacyJSONRaw || structuredKey != string(key) {
-			continue
-		}
-		node, err := parseStructuredNode(entry.LegacyValue)
-		if err != nil || node.Kind != structuredObject {
-			return
-		}
-		var moved *structuredMember
-		kept := make([]structuredMember, 0, len(node.Object))
-		for _, member := range node.Object {
-			if member.Key == memberKey {
-				movedMember := member
-				moved = &movedMember
-				continue
-			}
-			kept = append(kept, member)
-		}
-		if moved == nil {
-			return
-		}
-		position := len(kept)
-		for memberIndex, member := range kept {
-			if member.Key == afterKey {
-				position = memberIndex + 1
-				break
-			}
-		}
-		kept = append(kept, structuredMember{})
-		copy(kept[position+1:], kept[position:])
-		kept[position] = *moved
-		node.Object = kept
-		entry.LegacyValue = structuredNodeText(node)
-		return
-	}
-}
-
 // appendCanonicalSeedObjectMembers extends one direct structured object while
 // preserving the source member order and duplicate-key behavior.
 func appendCanonicalSeedObjectMembers(stream *Stream, key fieldName, members []structuredMember) {
@@ -471,9 +419,6 @@ func appendCanonicalSeedObjectMembers(stream *Stream, key fieldName, members []s
 		}
 		entry.Node.Object = append(entry.Node.Object, members...)
 		entry.Value.Text = structuredNodeText(*entry.Node)
-		if entry.LegacyJSONRaw {
-			entry.LegacyValue = entry.Value.Text
-		}
 		entry.Projected = false
 		return
 	}
@@ -488,17 +433,6 @@ func appendCanonicalSeedObjectMembers(stream *Stream, key fieldName, members []s
 		StructuredKey: string(key),
 		Node:          &node,
 	})
-}
-
-// appendCanonicalSeedLegacyObjectMembers extends one direct object and records
-// the resulting object as the exported raw compatibility snapshot.
-func appendCanonicalSeedLegacyObjectMembers(stream *Stream, key fieldName, members []structuredMember) {
-	appendCanonicalSeedObjectMembers(stream, key, members)
-	node := canonicalSeedStructuredNode(stream, key)
-	if node == nil {
-		return
-	}
-	setCanonicalSeedLegacyValue(stream, key, structuredNodeText(*node), true)
 }
 
 // replaceCanonicalSeedObjectValues mirrors compatibility corrections into
@@ -520,9 +454,6 @@ func replaceCanonicalSeedObjectValues(stream *Stream, key fieldName, values map[
 			}
 		}
 		entry.Value.Text = structuredNodeText(*entry.Node)
-		if entry.LegacyJSONRaw {
-			entry.LegacyValue = entry.Value.Text
-		}
 		entry.Projected = false
 		return
 	}
@@ -545,9 +476,6 @@ func prependCanonicalSeedObjectMembers(stream *Stream, key fieldName, members []
 		object = append(object, entry.Node.Object...)
 		entry.Node.Object = object
 		entry.Value.Text = structuredNodeText(*entry.Node)
-		if entry.LegacyJSONRaw {
-			entry.LegacyValue = entry.Value.Text
-		}
 		entry.Projected = false
 		return
 	}
@@ -579,9 +507,6 @@ func insertCanonicalSeedObjectMembersBefore(stream *Stream, key fieldName, befor
 		object = append(object, entry.Node.Object[position:]...)
 		entry.Node.Object = object
 		entry.Value.Text = structuredNodeText(*entry.Node)
-		if entry.LegacyJSONRaw {
-			entry.LegacyValue = entry.Value.Text
-		}
 		entry.Projected = false
 		return
 	}
@@ -590,7 +515,7 @@ func insertCanonicalSeedObjectMembersBefore(stream *Stream, key fieldName, befor
 
 // replaceCanonicalSeedFill mirrors a post-parse media fact into both projections.
 func replaceCanonicalSeedFill(stream *Stream, name fieldName, raw, label, display string) {
-	if stream == nil || len(stream.canonicalSeed) == 0 || raw == "" {
+	if stream == nil || raw == "" {
 		return
 	}
 	foundStructured := false
@@ -602,9 +527,7 @@ func replaceCanonicalSeedFill(stream *Stream, name fieldName, raw, label, displa
 			entry.Name = name
 			entry.Value.Text = raw
 			entry.Node = nil
-			if entry.LegacyJSON {
-				entry.LegacyValue = raw
-			}
+			entry.StructuredOverride = nil
 			entry.Projected = false
 			if display != "" {
 				entry.Options.ShowXML = true
@@ -643,31 +566,13 @@ func replaceCanonicalSeedFill(stream *Stream, name fieldName, raw, label, displa
 	}
 }
 
-// replaceCanonicalSeedLegacyFill updates one parser-owned fact and records the
-// exact scalar retained in the exported JSON compatibility snapshot.
-func replaceCanonicalSeedLegacyFill(stream *Stream, name fieldName, raw, label, display string) {
-	if stream == nil || raw == "" {
-		return
-	}
-	if len(stream.canonicalSeed) == 0 {
-		spec, known := structuredFieldSpec(stream.Kind, string(name))
-		stream.canonicalSeed = append(stream.canonicalSeed, fieldEntry{
-			Name:          spec.Name,
-			Value:         fieldValue{Text: raw},
-			Dynamic:       !known,
-			Options:       fieldOptions{ShowStructured: true, ShowXML: true, ValueType: spec.Options.ValueType},
-			StructuredKey: string(name),
-		})
-	}
+// replaceCanonicalSeedProjection updates a parser-owned value while retaining
+// the serializer precision represented by projected.
+func replaceCanonicalSeedProjection(stream *Stream, name fieldName, raw, projected, label, display string) {
 	replaceCanonicalSeedFill(stream, name, raw, label, display)
-	setCanonicalSeedLegacyValue(stream, name, raw, false)
-}
-
-// replaceCanonicalSeedLegacyProjection updates one parser-owned fact whose
-// exported compatibility override differs from its canonical source value.
-func replaceCanonicalSeedLegacyProjection(stream *Stream, name fieldName, raw, legacy, label, display string) {
-	replaceCanonicalSeedLegacyFill(stream, name, raw, label, display)
-	setCanonicalSeedLegacyValue(stream, name, legacy, false)
+	if decimals := decimalFractionDigits(projected); decimals > 0 {
+		setCanonicalSeedStructuredDecimals(stream, name, uint8(decimals))
+	}
 }
 
 // replaceCanonicalSeedText mirrors a source display fact without deriving a
@@ -689,7 +594,7 @@ func replaceCanonicalSeedText(stream *Stream, label, value string) {
 		Name:      name,
 		Value:     fieldValue{Text: value},
 		Dynamic:   !known,
-		Options:   spec.Options,
+		Options:   fieldOptions{ShowText: true, ValueType: spec.Options.ValueType},
 		Sequence:  uint32(len(stream.canonicalSeed)),
 		TextLabel: label,
 	})

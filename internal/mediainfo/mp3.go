@@ -197,7 +197,7 @@ func parseMP3(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, *canonic
 	}
 
 	// MediaInfo appears to omit General OverallBitRate_Mode when a cover is present.
-	if xingTag != "" && generalFacts.Legacy("Cover") == "" {
+	if xingTag != "" && generalFacts.Projection("Cover") == "" {
 		generalFacts.Set("OverallBitRate_Mode", mode, modeJSON)
 	}
 
@@ -262,12 +262,12 @@ func canonicalMP3ImageStream(pic id3Picture) (Stream, string) {
 	for _, field := range fields {
 		name := fieldName(field.Key)
 		fillGeneratedStructured(store, ref, name, field.Val)
-		store.MarkLegacyJSON(ref, name, field.Val, false)
 	}
 	return canonicalStreamSnapshot(store, ref, canonicalStreamPolicy{SkipStreamOrder: true, SkipComputed: true}), mime
 }
 
-// canonicalMP3AudioStream records parsed MPEG audio facts before creating a legacy stream snapshot.
+// canonicalMP3AudioStream records MPEG audio facts before publishing the
+// public compatibility snapshot.
 func canonicalMP3AudioStream(header mp3HeaderInfo, duration float64, mode string, samplesPerFrame float64, frameCount, streamSize int64, formatSettingsMode, formatSettingsModeExtension, encodedLibrary string) Stream {
 	store := &fieldStore{}
 	ref := store.Prepare(StreamAudio)
@@ -336,7 +336,6 @@ func canonicalMP3AudioStream(header mp3HeaderInfo, duration float64, mode string
 		if _, ok := store.Get(ref, name); !ok {
 			fillGeneratedStructured(store, ref, name, override.Val)
 		}
-		store.MarkLegacyJSON(ref, name, override.Val, false)
 	}
 	return canonicalStreamSnapshot(store, ref, canonicalStreamPolicy{SkipStreamOrder: true, SkipComputed: true})
 }
@@ -660,7 +659,7 @@ func findLAMELibrary(buf []byte) string {
 func applyID3TextToGeneralFacts(facts *canonicalStructuredFacts, extras *[]jsonKV, text map[string]string) {
 	set := func(k, v string) {
 		name := fieldName(k)
-		if v != "" && facts.Legacy(name) == "" {
+		if v != "" && facts.Projection(name) == "" {
 			facts.SetSame(name, v)
 		}
 	}

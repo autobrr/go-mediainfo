@@ -65,14 +65,13 @@ func TestMatroskaFallbackTypeOrderOmitsXMLChild(t *testing.T) {
 
 func TestMatroskaLegacyDurationRequiresCanonicalProjection(t *testing.T) {
 	snapshotOnly := Stream{JSON: map[string]string{"Duration": "7.070"}}
-	if got := matroskaLegacyDuration(snapshotOnly); got != "" {
+	if got := matroskaProjectedDuration(snapshotOnly); got != "" {
 		t.Fatalf("snapshot-only compatibility scalar = %q; want empty", got)
 	}
 	builder := newCanonicalStreamBuilder(StreamAudio)
 	builder.DirectStructured("Duration", "7070")
 	stream := builder.Snapshot(canonicalStreamPolicy{})
-	setCanonicalSeedLegacyValue(&stream, "Duration", "7.070", false)
-	if got := matroskaLegacyDuration(stream); got != "7.070" {
+	if got := matroskaProjectedDuration(stream); got != "7.070" {
 		t.Fatalf("canonical compatibility scalar = %q; want 7.070", got)
 	}
 }
@@ -134,14 +133,13 @@ func TestStreamCanonicalBitRateRejectsSnapshotOnlyValues(t *testing.T) {
 func TestRemoveMatroskaCanonicalFieldPublishesThroughSnapshotRefresh(t *testing.T) {
 	builder := newCanonicalStreamBuilder(StreamVideo)
 	builder.Fill("Format_Settings_GOP", "M=3, N=12", "Format settings, GOP", "M=3, N=12")
-	builder.MarkLegacyJSON("Format_Settings_GOP", "M=3, N=12")
 	stream := builder.Snapshot(canonicalStreamPolicy{})
 
 	removeMatroskaCanonicalField(&stream, "Format_Settings_GOP", "Format settings, GOP")
 	if _, found := canonicalSeedValue(stream, "Format_Settings_GOP"); found {
 		t.Fatal("canonical Format_Settings_GOP remains after removal")
 	}
-	refreshCanonicalLegacySnapshot(&stream)
+	refreshCanonicalCompatibilitySnapshot(&stream)
 	if stream.JSON["Format_Settings_GOP"] != "" {
 		t.Fatalf("snapshot Format_Settings_GOP = %q; want removed", stream.JSON["Format_Settings_GOP"])
 	}
@@ -160,7 +158,7 @@ func TestReplaceMatroskaCanonicalOverridesPublishesStableSnapshot(t *testing.T) 
 	if len(stream.canonicalSeed) != 2 || stream.canonicalSeed[0].StructuredKey != "BitRate" || stream.canonicalSeed[1].StructuredKey != "Format" {
 		t.Fatalf("canonical override order = %#v; want BitRate, Format", stream.canonicalSeed)
 	}
-	refreshCanonicalLegacySnapshot(&stream)
+	refreshCanonicalCompatibilitySnapshot(&stream)
 	for key, want := range map[string]string{"BitRate": "192000", "Format": "AVC"} {
 		if got := stream.JSON[key]; got != want {
 			t.Fatalf("snapshot %s = %q; want %q", key, got, want)
@@ -183,7 +181,7 @@ func TestReplaceMatroskaCanonicalJSONOnlyOverridesHidesXML(t *testing.T) {
 			t.Fatalf("JSON-only entry %q is visible in XML", entry.StructuredKey)
 		}
 	}
-	refreshCanonicalLegacySnapshot(&stream)
+	refreshCanonicalCompatibilitySnapshot(&stream)
 	for _, key := range []string{"Delay", "Video_Delay"} {
 		if got := stream.JSON[key]; got != "0.011" {
 			t.Fatalf("snapshot %s = %q; want 0.011", key, got)
@@ -200,7 +198,7 @@ func TestReplaceMatroskaCanonicalJSONOnlyProjectionKeepsRawUnits(t *testing.T) {
 	if got, found := projectedCanonicalSeedValue(stream, "Duration"); !found || got != "4.021" {
 		t.Fatalf("projected Duration = %q, %v; want 4.021, true", got, found)
 	}
-	refreshCanonicalLegacySnapshot(&stream)
+	refreshCanonicalCompatibilitySnapshot(&stream)
 	if got := stream.JSON["Duration"]; got != "4.021" {
 		t.Fatalf("snapshot Duration = %q; want 4.021", got)
 	}
@@ -247,7 +245,7 @@ func TestMatroskaWriterCompatibilityUsesCanonicalSegmentUID(t *testing.T) {
 	videoBuilder.DirectStructured("UniqueID", "1454056016244297151")
 	videoBuilder.DirectStructured("BitRate", "1")
 	streams := []Stream{videoBuilder.Snapshot(canonicalStreamPolicy{})}
-	applyMatroskaWriterCompatibility("", &general, streams)
+	applyMatroskaWriterRules("", &general, streams)
 
 	got, found := canonicalSeedValue(streams[0], "BitRate")
 	if !found || got != "144000" {
@@ -261,8 +259,8 @@ func TestMatroskaTrackCompatibilityRenumbersCanonicalStreamOrder(t *testing.T) {
 		builder.DirectStructured("UniqueID", uid)
 		builder.DirectStructured("StreamOrder", order)
 		stream := builder.Snapshot(canonicalStreamPolicy{})
-		stream.matroskaLegacySnapshot = &matroskaLegacySnapshotFacts{}
-		stream.matroskaLegacySnapshot.Set("StreamOrder", order)
+		stream.matroskaDeferredFacts = &matroskaDeferredFacts{}
+		stream.matroskaDeferredFacts.Set("StreamOrder", order)
 		return stream
 	}
 	streams := []Stream{
@@ -270,14 +268,15 @@ func TestMatroskaTrackCompatibilityRenumbersCanonicalStreamOrder(t *testing.T) {
 		makeStream(StreamMenu, "92", "5"),
 		makeStream(StreamAudio, "93", "6"),
 	}
-	applyMatroskaTrackCompatibility("279432490384478975316367262664809380522", nil, streams)
+	applyMatroskaTrackIdentityOverrides("279432490384478975316367262664809380522", nil, streams)
 
 	for index, want := range map[int]string{0: "0", 1: "5", 2: "1"} {
 		got, found := canonicalSeedValue(streams[index], "StreamOrder")
 		if !found || got != want {
 			t.Fatalf("stream %d canonical StreamOrder = %q, %v; want %q", index, got, found, want)
 		}
-		streams[index].matroskaLegacySnapshot.ApplyToStream(&streams[index])
+		streams[index].matroskaDeferredFacts.ApplyToStream(&streams[index])
+		refreshCanonicalCompatibilitySnapshot(&streams[index])
 		if streams[index].JSON["StreamOrder"] != want {
 			t.Fatalf("stream %d snapshot StreamOrder = %q; want %q", index, streams[index].JSON["StreamOrder"], want)
 		}
@@ -292,12 +291,12 @@ func TestMatroskaTrackCompatibilityFillsCanonicalGeneralFrameCount(t *testing.T)
 	videoBuilder.DirectStructured("UniqueID", "2685510896410436351")
 	streams := []Stream{videoBuilder.Snapshot(canonicalStreamPolicy{})}
 
-	applyMatroskaTrackCompatibility("", &general, streams)
+	applyMatroskaTrackIdentityOverrides("", &general, streams)
 	got, found := canonicalSeedValue(general, "FrameCount")
 	if !found || got != "115931" {
 		t.Fatalf("General canonical FrameCount = %q, %v; want 115931", got, found)
 	}
-	refreshCanonicalLegacySnapshot(&general)
+	refreshCanonicalCompatibilitySnapshot(&general)
 	if got := general.JSON["FrameCount"]; got != "115931" {
 		t.Fatalf("General snapshot FrameCount = %q; want 115931", got)
 	}
@@ -675,7 +674,7 @@ func TestMatroskaPCMCanonicalSeedTracksCompatibilityOverrides(t *testing.T) {
 				defaultValue: true,
 			}),
 		}
-		applyAdditionalMatroskaTrackCompatibility("65364540277330267530421739970038369442", &stream)
+		applyMatroskaSegmentIdentityOverride("65364540277330267530421739970038369442", &stream)
 		for key, want := range map[fieldName]string{"FrameCount": "82015", "SamplingCount": "131223843"} {
 			got, found := projectedCanonicalSeedValue(stream, key)
 			if !found || got != want {
@@ -695,7 +694,7 @@ func TestMatroskaPCMCanonicalSeedTracksCompatibilityOverrides(t *testing.T) {
 				defaultValue: true,
 			}),
 		}
-		applyAdditionalMatroskaTrackCompatibility("250995523967597885859320780901778164451", &stream)
+		applyMatroskaSegmentIdentityOverride("250995523967597885859320780901778164451", &stream)
 		for key, want := range map[fieldName]string{
 			"BitRate": "1152000", "Channels": "1", "SamplingCount": "266032128", "StreamSize": "798096384",
 		} {
@@ -792,7 +791,7 @@ func TestMatroskaVorbisCanonicalSeedTracksLibraryCompatibility(t *testing.T) {
 		}),
 	}
 	streams := []Stream{stream}
-	applyMatroskaTrackCompatibility("", nil, streams)
+	applyMatroskaTrackIdentityOverrides("", nil, streams)
 	stream = streams[0]
 	got, found := projectedCanonicalSeedValue(stream, "Encoded_Library_Version")
 	if !found || got != "20090709" {
@@ -940,7 +939,7 @@ func TestMatroskaFLACCanonicalSeedTracksCompatibilityOverrides(t *testing.T) {
 		}),
 	}
 	streams := []Stream{stream}
-	applyMatroskaTrackCompatibility("", nil, streams)
+	applyMatroskaTrackIdentityOverrides("", nil, streams)
 	for key, want := range map[fieldName]string{"Duration": "4835296", "SamplingCount": "232094208"} {
 		got, found := canonicalSeedValue(streams[0], key)
 		if !found || got != want {
@@ -1026,24 +1025,72 @@ func TestMatroskaMPEGAudioCanonicalSeedTracksBoundedProbe(t *testing.T) {
 	assertMatroskaDirectStreamMatchesLegacy(t, stream, "canonical-mpeg-audio.mkv")
 }
 
-func TestMatroskaMPEGAudioCanonicalSeedTracksLayerTwoCompatibility(t *testing.T) {
+func TestMatroskaMPEGAudioCanonicalSeedDerivesLayerTwoTiming(t *testing.T) {
 	stream := Stream{
 		Kind: StreamAudio,
-		JSON: map[string]string{"UniqueID": "622040981096581920"},
+		canonicalSeed: matroskaMPEGAudioCanonicalSeed(matroskaMPEGAudioCanonicalFacts{
+			codecID: "A_MPEG/L2", trackUID: 42,
+			audioChannels: 2, audioSampleRate: 48_000, structuredDuration: 811.632, defaultValue: true,
+		}),
+	}
+	for key, want := range map[fieldName]string{
+		"Format_Version": "1", "Format_Profile": "Layer 2", "SamplesPerFrame": "1152",
+		"FrameRate": "41.667", "Compression_Mode": "Lossy",
+	} {
+		got, found := canonicalSeedValue(stream, key)
+		if !found || got != want {
+			t.Fatalf("canonical %s = %q, %v; want %q", key, got, found, want)
+		}
+	}
+}
+
+func TestMatroskaMPEGAudioIdentityOverrideRetainsFullStreamCounts(t *testing.T) {
+	stream := Stream{
+		Kind: StreamAudio,
 		canonicalSeed: matroskaMPEGAudioCanonicalSeed(matroskaMPEGAudioCanonicalFacts{
 			codecID: "A_MPEG/L2", trackUID: 622040981096581920,
-			audioChannels: 2, audioSampleRate: 48_000, defaultValue: true,
+			audioChannels: 2, audioSampleRate: 48_000, structuredDuration: 812.149, defaultValue: true,
 		}),
 	}
 	streams := []Stream{stream}
-	applyMatroskaTrackCompatibility("", nil, streams)
-	for key, want := range map[fieldName]string{
-		"Format_Version": "1", "Format_Profile": "Layer 2", "SamplesPerFrame": "1152", "FrameCount": "33818",
-	} {
+	applyMatroskaTrackIdentityOverrides("", nil, streams)
+	for key, want := range map[fieldName]string{"BitRate_Mode": "CBR", "SamplingCount": "38958336", "FrameCount": "33818"} {
 		got, found := canonicalSeedValue(streams[0], key)
 		if !found || got != want {
 			t.Fatalf("canonical %s = %q, %v; want %q", key, got, found, want)
 		}
+	}
+}
+
+func TestNormalizeMatroskaDeclaredFrameRatesUsesSurvivingRatio(t *testing.T) {
+	builder := newCanonicalStreamBuilder(StreamVideo)
+	builder.DirectStructured("FrameRate_Mode", "CFR")
+	builder.DirectStructured("FrameRate", "23.974")
+	builder.DirectStructured("FrameRate_Num", "23976")
+	builder.DirectStructured("FrameRate_Den", "1000")
+	builder.DirectStructured("FrameRate_Original", "24.000")
+	streams := []Stream{builder.Snapshot(canonicalStreamPolicy{})}
+
+	normalizeMatroskaDeclaredFrameRates(streams)
+
+	if got, found := canonicalSeedValue(streams[0], "FrameRate"); !found || got != "23.976" {
+		t.Fatalf("FrameRate = %q, %v; want 23.976, true", got, found)
+	}
+}
+
+func TestNormalizeMatroskaMPEG4VisualSettingsSeparatesRawAndDisplayValues(t *testing.T) {
+	builder := newCanonicalStreamBuilder(StreamVideo)
+	builder.DirectStructured("Format", "MPEG-4 Visual")
+	builder.Fill("Format_Settings_GMC", "No", "Format settings, GMC", "No")
+	streams := []Stream{builder.Snapshot(canonicalStreamPolicy{})}
+
+	normalizeMatroskaMPEG4VisualSettings(streams)
+
+	if got, found := canonicalSeedValue(streams[0], "Format_Settings_GMC"); !found || got != "0" {
+		t.Fatalf("Format_Settings_GMC = %q, %v; want 0, true", got, found)
+	}
+	if got, found := canonicalSeedTextValue(streams[0], "Format settings, GMC"); !found || got != "No" {
+		t.Fatalf("Format settings, GMC = %q, %v; want No, true", got, found)
 	}
 }
 
@@ -1132,7 +1179,7 @@ func TestMatroskaTrueHDCanonicalSeedTracksLegacyDepthCompatibility(t *testing.T)
 		}),
 	}
 	streams := []Stream{stream}
-	applyMatroskaTrackCompatibility("", nil, streams)
+	applyMatroskaTrackIdentityOverrides("", nil, streams)
 	for key, want := range map[fieldName]string{"BitDepth": "24", "BitRate": "2537536"} {
 		got, found := canonicalSeedValue(streams[0], key)
 		if !found || got != want {
@@ -1262,7 +1309,7 @@ func TestMatroskaDTSCanonicalSeedTracksLegacyOriginalLayout(t *testing.T) {
 			defaultValue: true,
 		}),
 	}
-	applyAdditionalMatroskaTrackCompatibility("", &stream)
+	applyMatroskaSegmentIdentityOverride("", &stream)
 	for key, want := range map[fieldName]string{
 		"ChannelLayout_Original":    "C L R Ls Rs LFE",
 		"ChannelPositions_Original": "Front: L C R, Side: L R, LFE",
@@ -1543,7 +1590,7 @@ func TestMatroskaOpusCanonicalSeedTracksCompatibilityOverrides(t *testing.T) {
 					audioSampleRate: 48_000, defaultValue: true,
 				}),
 			}
-			applyAdditionalMatroskaTrackCompatibility(test.segmentUID, &stream)
+			applyMatroskaSegmentIdentityOverride(test.segmentUID, &stream)
 			for key, want := range test.want {
 				got, found := projectedCanonicalSeedValue(stream, key)
 				if !found || got != want {
@@ -1629,7 +1676,7 @@ func TestMatroskaStaticVideoCanonicalSeedTracksAV1Compatibility(t *testing.T) {
 		extras: []jsonKV{{Key: "FilterChain", Val: "initial"}},
 	}}, 4_096_000)
 	stream = info.Tracks[0]
-	applyAdditionalMatroskaTrackCompatibility("256831988852141542374207303932639545548", &stream)
+	applyMatroskaSegmentIdentityOverride("256831988852141542374207303932639545548", &stream)
 	sortFields(stream.Kind, stream.Fields)
 
 	for key, want := range map[fieldName]string{
@@ -1923,30 +1970,49 @@ func buildMatroskaVorbisPrivateForTest() []byte {
 func assertMatroskaDirectStreamMatchesLegacy(t *testing.T, stream Stream, ref string) {
 	t.Helper()
 	refreshed := stream
-	refreshCanonicalLegacySnapshot(&refreshed)
+	refreshCanonicalCompatibilitySnapshot(&refreshed)
 	first := captureLegacyStreamState(refreshed, true)
-	refreshCanonicalLegacySnapshot(&refreshed)
+	refreshCanonicalCompatibilitySnapshot(&refreshed)
 	if second := captureLegacyStreamState(refreshed, true); !reflect.DeepEqual(first, second) {
 		t.Fatalf("canonical compatibility refresh is not idempotent:\nfirst=%#v\nsecond=%#v", first, second)
 	}
 	legacyStream := matroskaLegacyStreamWithCanonicalExtra(refreshed)
 	jsonLegacyStream := matroskaLegacyStreamWithRetainedJSON(legacyStream)
+	xmlLegacyStream := matroskaLegacyStreamForXML(legacyStream, stream.canonicalSeed)
 	jsonLegacyStream.canonicalSeed = nil
+	xmlLegacyStream.canonicalSeed = nil
 	legacyStream.canonicalSeed = nil
 	general := Stream{Kind: StreamGeneral, Fields: []Field{{Name: "Format", Value: "Matroska"}}, JSON: map[string]string{"Format": "Matroska"}}
 	legacyReport := Report{Ref: ref, General: general, Streams: []Stream{legacyStream}}
 	jsonLegacyReport := Report{Ref: ref, General: general, Streams: []Stream{jsonLegacyStream}}
+	xmlLegacyReport := Report{Ref: ref, General: general, Streams: []Stream{xmlLegacyStream}}
 	directReport := Report{Ref: ref, General: general, Streams: []Stream{stream}}
 	attachCanonicalStore(&directReport)
 	for name, outputs := range map[string][2]string{
 		"JSON": {RenderJSON([]Report{jsonLegacyReport}), RenderJSON([]Report{directReport})},
 		"text": {RenderText([]Report{legacyReport}), RenderText([]Report{directReport})},
-		"XML":  {RenderXML([]Report{legacyReport}), RenderXML([]Report{directReport})},
+		"XML":  {RenderXML([]Report{xmlLegacyReport}), RenderXML([]Report{directReport})},
 	} {
 		if outputs[0] != outputs[1] {
 			t.Fatalf("%s projection differs:\nlegacy=%s\ndirect=%s", name, outputs[0], outputs[1])
 		}
 	}
+}
+
+// matroskaLegacyStreamForXML removes canonical JSON-only fields from the
+// compatibility fixture before exercising the legacy XML adapter.
+func matroskaLegacyStreamForXML(stream Stream, seed []fieldEntry) Stream {
+	stream.JSON = maps.Clone(stream.JSON)
+	stream.JSONRaw = maps.Clone(stream.JSONRaw)
+	for _, entry := range seed {
+		if !entry.Options.ShowStructured || entry.Options.ShowXML {
+			continue
+		}
+		key := firstNonEmpty(entry.StructuredKey, string(entry.Name))
+		delete(stream.JSON, key)
+		delete(stream.JSONRaw, key)
+	}
+	return stream
 }
 
 // matroskaLegacyStreamWithCanonicalExtra recreates removed dynamic-tag staging

@@ -179,6 +179,14 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 	if completeNameLast != "" {
 		general.Fields = appendFieldUnique(general.Fields, Field{Name: "CompleteName_Last", Value: completeNameLast})
 	}
+	generalBuilder := newCanonicalStreamBuilder(StreamGeneral)
+	generalBuilder.Text("Complete name", path)
+	generalBuilder.Fill("Format", format, "Format", format)
+	generalBuilder.Fill("FileSize", strconv.FormatInt(fileSize, 10), "File size", formatBytes(fileSize))
+	if completeNameLast != "" {
+		generalBuilder.Text("CompleteName_Last", completeNameLast)
+	}
+	general.canonicalSeed = generalBuilder.Snapshot(canonicalStreamPolicy{}).canonicalSeed
 
 	info := ContainerInfo{}
 	streams := []Stream{}
@@ -200,7 +208,6 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			}
 			info.DurationSeconds = mp4Duration
 			generalFacts := &canonicalStructuredFacts{}
-			generalFacts.PreserveLegacySnapshot()
 			mp4WritingApplication := ""
 			for _, field := range parsed.General {
 				general.Fields = appendFieldUnique(general.Fields, field)
@@ -328,7 +335,6 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 				if track.Kind == StreamVideo {
 					trackFacts.Set("Rotation", "0.000")
 					builder.Structured("Rotation", "0.000")
-					builder.MarkLegacyJSON("Rotation", "0.000")
 				}
 				if encoded := formatMP4UTCTime(track.CreationTime); encoded != "" {
 					fields = appendFieldUnique(fields, Field{Name: "Encoded date", Value: encoded})
@@ -343,7 +349,6 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 					if code != "" {
 						trackFacts.Set("Language", code)
 						builder.OverrideStructured("Language", code)
-						builder.MarkLegacyJSON("Language", code)
 					}
 				}
 				if displayDuration > 0 {
@@ -360,14 +365,12 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 					trackFacts.Set("Duration", durationValue)
 					builder.Fill("Duration", strconv.FormatFloat(displayDuration*1000, 'f', -1, 64), "Duration", formatDuration(displayDuration))
 					builder.OverrideStructured("Duration", durationValue)
-					builder.MarkLegacyJSON("Duration", durationValue)
 					if sourceDuration > 0 {
 						fields = appendFieldUnique(fields, Field{Name: "Source duration", Value: formatDuration(sourceDuration)})
 						sourceDurationValue := formatJSONSeconds(sourceDuration)
 						trackFacts.Set("Source_Duration", sourceDurationValue)
 						builder.Fill("Source_Duration", strconv.FormatFloat(sourceDuration*1000, 'f', -1, 64), "Source duration", formatDuration(sourceDuration))
 						builder.OverrideStructured("Source_Duration", sourceDurationValue)
-						builder.MarkLegacyJSON("Source_Duration", sourceDurationValue)
 						if track.SampleDelta > 0 && track.LastSampleDelta > 0 && track.Timescale > 0 {
 							if track.LastSampleDelta != track.SampleDelta {
 								diffSamples := int64(track.LastSampleDelta) - int64(track.SampleDelta)
@@ -379,17 +382,14 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 									display := strconv.FormatInt(diffMs, 10) + " ms"
 									builder.Fill("Source_Duration_LastFrame", strconv.FormatInt(diffMs, 10), "Source_Duration_LastFrame", display)
 									builder.OverrideStructured("Source_Duration_LastFrame", lastFrameDuration)
-									builder.MarkLegacyJSON("Source_Duration_LastFrame", lastFrameDuration)
 									if strings.HasPrefix(track.HandlerName, "BAMTech ") {
 										trackFacts.Set("Duration_LastFrame", lastFrameDuration)
 										builder.Fill("Duration_LastFrame", strconv.FormatInt(diffMs, 10), "Duration_LastFrame/String", strconv.FormatInt(diffMs, 10)+"ms")
 										builder.OverrideStructured("Duration_LastFrame", lastFrameDuration)
-										builder.MarkLegacyJSON("Duration_LastFrame", lastFrameDuration)
 									}
 								} else if diffSamples < 0 && strings.HasPrefix(track.HandlerName, "BAMTech ") {
 									trackFacts.Set("Duration_LastFrame", "-0.000")
 									builder.DirectStructured("Duration_LastFrame", "-0.000")
-									builder.MarkLegacyJSON("Duration_LastFrame", "-0.000")
 								}
 							}
 						}
@@ -412,7 +412,6 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 						}
 						trackFacts.Set("BitRate", bitRateValue)
 						builder.Fill("BitRate", bitRateValue, "Bit rate", formatBitrate(bitrate))
-						builder.MarkLegacyJSON("BitRate", bitRateValue)
 					}
 				}
 				if track.SampleBytes > 0 {
@@ -466,7 +465,6 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 						streamSizeValue := strconv.FormatInt(streamBytes, 10)
 						trackFacts.Set("StreamSize", streamSizeValue)
 						builder.Fill("StreamSize", streamSizeValue, "Stream size", formatStreamSize(streamBytes, stat.Size()))
-						builder.MarkLegacyJSON("StreamSize", streamSizeValue)
 					}
 					// MP4 AAC: derive BitRate from StreamSize and the exact mdhd duration
 					// instead of trusting ESDS/btrt average-rate declarations.
@@ -485,7 +483,6 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 									fields = setFieldValue(fields, "Bit rate", formatBitrate(derived))
 									builder.ReplaceText("Bit rate", formatBitrate(derived))
 									builder.DirectStructured("BitRate", bitRateValue)
-									builder.MarkLegacyJSON("BitRate", bitRateValue)
 								}
 							}
 						}
@@ -497,19 +494,16 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 						sourceStreamSize := strconv.FormatInt(int64(track.SampleBytes), 10)
 						trackFacts.Set("Source_StreamSize", sourceStreamSize)
 						builder.Fill("Source_StreamSize", sourceStreamSize, "Source stream size", formatStreamSize(int64(track.SampleBytes), stat.Size()))
-						builder.MarkLegacyJSON("Source_StreamSize", sourceStreamSize)
 						if track.Kind == StreamAudio {
 							if displaySamples > 0 {
 								frameCountValue := strconv.FormatInt(int64(math.Round(displaySamples)), 10)
 								trackFacts.Set("FrameCount", frameCountValue)
 								builder.Structured("FrameCount", frameCountValue)
-								builder.MarkLegacyJSON("FrameCount", frameCountValue)
 							}
 							if track.SampleCount > 0 {
 								sourceFrameCount := strconv.FormatUint(track.SampleCount, 10)
 								trackFacts.Set("Source_FrameCount", sourceFrameCount)
 								builder.Structured("Source_FrameCount", sourceFrameCount)
-								builder.MarkLegacyJSON("Source_FrameCount", sourceFrameCount)
 							}
 						}
 					} else if track.Kind == StreamAudio && track.SampleCount > 0 && trackFacts.Get("FrameCount") == "" {
@@ -517,7 +511,6 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 						frameCountValue := strconv.FormatUint(track.SampleCount, 10)
 						trackFacts.Set("FrameCount", frameCountValue)
 						builder.Structured("FrameCount", frameCountValue)
-						builder.MarkLegacyJSON("FrameCount", frameCountValue)
 					}
 				}
 				if track.Kind == StreamVideo && track.SampleCount > 0 && displayDuration > 0 {
@@ -547,7 +540,6 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 							fields = setFieldValue(fields, "Bit rate", formatBitrate(derivedBitRate))
 							builder.ReplaceText("Bit rate", formatBitrate(derivedBitRate))
 							builder.DirectStructured("BitRate", bitRateValue)
-							builder.MarkLegacyJSON("BitRate", bitRateValue)
 						}
 						if track.VariableDeltas && track.Timescale > 0 {
 							if track.MaximumSampleDelta > 0 {
@@ -575,7 +567,6 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 					frameCountValue := strconv.FormatUint(track.SampleCount, 10)
 					trackFacts.Set("FrameCount", frameCountValue)
 					builder.Structured("FrameCount", frameCountValue)
-					builder.MarkLegacyJSON("FrameCount", frameCountValue)
 					// Original frame rate mode for MP4 is detected from the AVC bitstream (SPS VUI),
 					// and is filled earlier in the pipeline when present.
 					if generalFrameCount == "" {
@@ -638,22 +629,18 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 								// Keep a human-readable string in text, but match official JSON ServiceKind short codes.
 								if code := ac3ServiceKindCode(ac3.bsmod); code != "" {
 									trackFacts.Set("ServiceKind", code)
-									builder.MarkLegacyJSON("ServiceKind", code)
 								}
 								trackFacts.Set("Format_Settings_Endianness", "Big")
 								builder.Structured("Format_Settings_Endianness", "Big")
-								builder.MarkLegacyJSON("Format_Settings_Endianness", "Big")
 								if ac3.spf > 0 {
 									samplesPerFrame := strconv.Itoa(ac3.spf)
 									trackFacts.Set("SamplesPerFrame", samplesPerFrame)
 									builder.Structured("SamplesPerFrame", samplesPerFrame)
-									builder.MarkLegacyJSON("SamplesPerFrame", samplesPerFrame)
 								}
 								if ac3.frameRate > 0 {
 									frameRateValue := formatJSONFloat(ac3.frameRate)
 									trackFacts.Set("FrameRate", frameRateValue)
 									builder.OverrideStructured("FrameRate", frameRateValue)
-									builder.MarkLegacyJSON("FrameRate", frameRateValue)
 								}
 								if durStr := trackFacts.Get("Duration"); durStr != "" && ac3.frameRate > 0 {
 									if duration, err := strconv.ParseFloat(durStr, 64); err == nil && duration > 0 {
@@ -662,12 +649,10 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 											frameCountValue := strconv.FormatInt(frameCount, 10)
 											trackFacts.Set("FrameCount", frameCountValue)
 											builder.OverrideStructured("FrameCount", frameCountValue)
-											builder.MarkLegacyJSON("FrameCount", frameCountValue)
 											if ac3.spf > 0 {
 												samplingCount := strconv.FormatInt(frameCount*int64(ac3.spf), 10)
 												trackFacts.Set("SamplingCount", samplingCount)
 												builder.Structured("SamplingCount", samplingCount)
-												builder.MarkLegacyJSON("SamplingCount", samplingCount)
 											}
 										}
 									}
@@ -697,7 +682,6 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 										node := structuredObjectFromKVs(extraFields)
 										extraNode = &node
 										builder.OverrideStructuredNode("extra", node)
-										builder.MarkLegacyJSONRaw("extra", structuredNodeText(node))
 									}
 								}
 							}
@@ -713,7 +697,6 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 							samplingCount := strconv.FormatInt(int64(math.Round(durationMS*ac3.sampleRate/1000)), 10)
 							trackFacts.Set("SamplingCount", samplingCount)
 							builder.OverrideStructured("SamplingCount", samplingCount)
-							builder.MarkLegacyJSON("SamplingCount", samplingCount)
 						}
 					}
 				}
@@ -852,7 +835,6 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 								value := strconv.FormatInt(int64(samplingCount), 10)
 								trackFacts.Set("SamplingCount", value)
 								builder.OverrideStructured("SamplingCount", value)
-								builder.MarkLegacyJSON("SamplingCount", value)
 							}
 						}
 					}
@@ -887,7 +869,6 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 				trackFacts.Apply(builder)
 				if extraNode != nil {
 					builder.OverrideStructuredNode("extra", *extraNode)
-					builder.MarkLegacyJSONRaw("extra", structuredNodeText(*extraNode))
 				}
 				streams = append(streams, builder.Snapshot(canonicalStreamPolicy{}))
 			}
@@ -902,7 +883,6 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 				}
 				node := structuredObjectFromKVs(extras)
 				menuBuilder.StructuredNode("extra", node)
-				menuBuilder.MarkLegacyJSONRaw("extra", structuredNodeText(node))
 				streams = append(streams, menuBuilder.Snapshot(canonicalStreamPolicy{SkipStreamOrder: true, SkipComputed: true}))
 			}
 			for _, stream := range streams {
@@ -925,18 +905,15 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 				builder.ImportCanonicalSeed(general.canonicalSeed)
 				node := structuredObjectFromKVs(parsed.generalExtra)
 				builder.StructuredNode("extra", node)
-				builder.MarkLegacyJSONRaw("extra", structuredNodeText(node))
 				augmented := builder.Snapshot(canonicalStreamPolicy{})
 				general.canonicalSeed = augmented.canonicalSeed
-				general.JSON = augmented.JSON
-				general.JSONRaw = augmented.JSONRaw
 			}
 		}
 	case "Matroska":
 		if parsed, ok := parseMatroskaForAnalysis(file, stat.Size(), opts); ok {
 			info = parsed.Container
 			matroskaCanRetainGeneralStreamSize = len(parsed.attachments) == 0
-			replaceCanonicalSeedLegacyFill(&general, "Format", format, "", "")
+			replaceCanonicalSeedFill(&general, "Format", format, "", "")
 			var rawWritingApp string
 			var rawWritingLibrary string
 			for _, field := range parsed.General {
@@ -945,7 +922,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 					if idx := strings.IndexAny(uniqueID, " ("); idx >= 0 {
 						uniqueID = strings.TrimSpace(uniqueID[:idx])
 					}
-					replaceCanonicalSeedLegacyFill(&general, "UniqueID", uniqueID, "", "")
+					replaceCanonicalSeedFill(&general, "UniqueID", uniqueID, "", "")
 				}
 				if field.Name == "Writing application" {
 					rawWritingApp = field.Value
@@ -955,10 +932,10 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 					rawWritingLibrary = field.Value
 				}
 				if field.Name == "Title" {
-					replaceCanonicalSeedLegacyFill(&general, "Title", field.Value, "", "")
+					replaceCanonicalSeedFill(&general, "Title", field.Value, "", "")
 				}
 				if field.Name == "Encoded date" {
-					replaceCanonicalSeedLegacyFill(&general, "Encoded_Date", field.Value, "", "")
+					replaceCanonicalSeedFill(&general, "Encoded_Date", field.Value, "", "")
 				}
 				general.Fields = appendFieldUnique(general.Fields, field)
 			}
@@ -1005,21 +982,20 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			if len(generalExtras) > 0 {
 				node := structuredObjectFromKVs(generalExtras)
 				appendCanonicalSeedObjectMembers(&general, "extra", node.Object)
-				setCanonicalSeedLegacyObject(&general, "extra")
 			}
 			if creationTime := formatMatroskaTagEncodedDate(parsed.generalTags["CREATION_TIME"]); creationTime != "" {
 				if encodedDate := findField(general.Fields, "Encoded date"); encodedDate != "" {
 					creationTime = encodedDate + " / " + creationTime
 				}
 				general.Fields = setFieldValue(general.Fields, "Encoded date", creationTime)
-				replaceCanonicalSeedLegacyFill(&general, "Encoded_Date", creationTime, "", "")
+				replaceCanonicalSeedFill(&general, "Encoded_Date", creationTime, "", "")
 			}
 			if rawWritingApp != "" {
-				replaceCanonicalSeedLegacyFill(&general, "Encoded_Application", rawWritingApp, "", "")
+				replaceCanonicalSeedFill(&general, "Encoded_Application", rawWritingApp, "", "")
 				if name, version, _ := splitWritingApplication(rawWritingApp); exposeWritingApplicationComponents(name, version) {
-					replaceCanonicalSeedLegacyFill(&general, "Encoded_Application_Name", name, "", "")
+					replaceCanonicalSeedFill(&general, "Encoded_Application_Name", name, "", "")
 					if version != "" {
-						replaceCanonicalSeedLegacyFill(&general, "Encoded_Application_Version", version, "", "")
+						replaceCanonicalSeedFill(&general, "Encoded_Application_Version", version, "", "")
 					}
 				}
 			}
@@ -1028,24 +1004,24 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 					rawWritingLibrary += " / " + encoder
 					general.Fields = setFieldValue(general.Fields, "Writing library", rawWritingLibrary)
 				}
-				replaceCanonicalSeedLegacyFill(&general, "Encoded_Library", rawWritingLibrary, "", "")
+				replaceCanonicalSeedFill(&general, "Encoded_Library", rawWritingLibrary, "", "")
 				if name, version, _ := splitWritingApplication(rawWritingLibrary); exposeWritingApplicationComponents(name, version) {
-					replaceCanonicalSeedLegacyFill(&general, "Encoded_Library_Name", name, "", "")
-					replaceCanonicalSeedLegacyFill(&general, "Encoded_Library_Version", version, "", "")
+					replaceCanonicalSeedFill(&general, "Encoded_Library_Name", name, "", "")
+					replaceCanonicalSeedFill(&general, "Encoded_Library_Version", version, "", "")
 				}
 			}
 			applyMatroskaGeneralTags(&general, parsed.scopedTags.general)
 			// MediaInfo emits the resolved Matroska title as both Title and Movie.
 			canonicalTitle, _ := canonicalSeedValue(general, "Title")
 			if title := canonicalTitle; title != "" {
-				replaceCanonicalSeedLegacyFill(&general, "Title", title, "", "")
-				replaceCanonicalSeedLegacyFill(&general, "Movie", title, "", "")
+				replaceCanonicalSeedFill(&general, "Title", title, "", "")
+				replaceCanonicalSeedFill(&general, "Movie", title, "", "")
 			}
 			generalValues := map[string]string{"IsStreamable": "Yes"}
 			if info.DurationSeconds > 0 {
-				legacyDuration := formatJSONFloat(info.DurationSeconds + 1e-9)
-				if canonicalDuration, ok := decimalSecondsToMilliseconds(legacyDuration); ok {
-					replaceMatroskaCanonicalJSONOnlyProjection(&general, "Duration", canonicalDuration, legacyDuration)
+				projectedDuration := formatJSONFloat(info.DurationSeconds + 1e-9)
+				if canonicalDuration, ok := decimalSecondsToMilliseconds(projectedDuration); ok {
+					replaceCanonicalSeedProjection(&general, "Duration", canonicalDuration, projectedDuration, "", "")
 				}
 			}
 			if overallBitRate, ok := overallBitRateValue(stat.Size(), info.DurationSeconds); ok {
@@ -1057,7 +1033,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 					break
 				}
 			}
-			replaceMatroskaCanonicalJSONOnlyOverrides(&general, generalValues)
+			replaceMatroskaCanonicalOverrides(&general, generalValues)
 			overallModeField := overallBitRateModeForKind(streams, StreamVideo)
 			// Variable audio makes the complete payload variable even when video is CBR.
 			audioModeField := overallBitRateModeForKind(streams, StreamAudio)
@@ -1073,7 +1049,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 				if textMode == "Variable" {
 					general.Fields = appendFieldUnique(general.Fields, Field{Name: "Overall bit rate mode", Value: textMode})
 				}
-				replaceMatroskaCanonicalJSONOnlyOverrides(&general, map[string]string{"OverallBitRate_Mode": mapBitrateMode(overallModeField)})
+				replaceCanonicalSeedFill(&general, "OverallBitRate_Mode", mapBitrateMode(overallModeField), "", "")
 			}
 			for _, stream := range streams {
 				if stream.Kind != StreamVideo {
@@ -1081,7 +1057,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 				}
 				frameCount, _ := canonicalSeedValue(stream, "FrameCount")
 				if frameCount != "" {
-					replaceMatroskaCanonicalJSONOnlyOverrides(&general, map[string]string{"FrameCount": frameCount})
+					replaceCanonicalSeedFill(&general, "FrameCount", frameCount, "", "")
 				}
 				break
 			}
@@ -1131,14 +1107,14 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 						// Constant targets tolerate muxing overhead, but a larger mismatch
 						// identifies a trimmed or remuxed payload whose measured rate wins.
 						if delta < 0.02 || constantTarget && delta < 0.05 {
-							replaceCanonicalSeedLegacyFill(&streams[i], "BitRate", strconv.FormatInt(int64(math.Round(x264Bitrate)), 10), "Bit rate", formatBitrate(x264Bitrate))
+							replaceCanonicalSeedFill(&streams[i], "BitRate", strconv.FormatInt(int64(math.Round(x264Bitrate)), 10), "Bit rate", formatBitrate(x264Bitrate))
 							// A rate absent before remainder derivation remains an explicit x264
 							// nominal target even when the derived average converges on it.
 							if !goNominalBitRate[i] {
 								clearCanonicalSeedField(&streams[i], "BitRate_Nominal", "Nominal bit rate")
 							}
 						} else if constantTarget {
-							replaceCanonicalSeedLegacyFill(&streams[i], "BitRate_Nominal", strconv.FormatInt(int64(math.Round(x264Bitrate)), 10), "Nominal bit rate", formatBitrate(x264Bitrate))
+							replaceCanonicalSeedFill(&streams[i], "BitRate_Nominal", strconv.FormatInt(int64(math.Round(x264Bitrate)), 10), "Nominal bit rate", formatBitrate(x264Bitrate))
 						}
 					}
 				}
@@ -1147,7 +1123,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 					matroskaStreamDisplay(streams[i], "Nominal bit rate") == "" &&
 					matroskaStreamDisplay(streams[i], "Bit rate") == "" &&
 					matroskaStreamScalar(streams[i], "BitRate") == "" {
-					replaceCanonicalSeedLegacyFill(&streams[i], "BitRate_Nominal", strconv.FormatInt(int64(math.Round(x264Bitrate)), 10), "Nominal bit rate", formatBitrate(x264Bitrate))
+					replaceCanonicalSeedFill(&streams[i], "BitRate_Nominal", strconv.FormatInt(int64(math.Round(x264Bitrate)), 10), "Nominal bit rate", formatBitrate(x264Bitrate))
 				}
 				// MediaInfo reports VBV constraints only when HRD signaling is enabled.
 				hrdEnabled, hrdDisabled := matroskaX264HRDState(enc)
@@ -1163,13 +1139,13 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 					if maxKbps, ok := findX264VbvMaxrate(enc); ok && maxKbps > 0 {
 						maxBps := maxKbps * 1000
 						if matroskaStreamDisplay(streams[i], "Maximum bit rate") == "" && matroskaStreamScalar(streams[i], "BitRate_Maximum") == "" {
-							replaceCanonicalSeedLegacyFill(&streams[i], "BitRate_Maximum", strconv.FormatInt(int64(math.Round(maxBps)), 10), "Maximum bit rate", formatBitrate(maxBps))
+							replaceCanonicalSeedFill(&streams[i], "BitRate_Maximum", strconv.FormatInt(int64(math.Round(maxBps)), 10), "Maximum bit rate", formatBitrate(maxBps))
 						}
 					}
 					if bufKbps, ok := findX264VbvBufsize(enc); ok && bufKbps > 0 {
 						bufBps := bufKbps * 1000
 						if matroskaStreamScalar(streams[i], "BufferSize") == "" {
-							replaceCanonicalSeedLegacyFill(&streams[i], "BufferSize", strconv.FormatInt(int64(math.Round(bufBps)), 10), "", "")
+							replaceCanonicalSeedFill(&streams[i], "BufferSize", strconv.FormatInt(int64(math.Round(bufBps)), 10), "", "")
 						}
 					}
 				}
@@ -1181,20 +1157,15 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 					replaceMatroskaCanonicalJSONOnlyOverrides(&general, map[string]string{"StreamSize": remainingSize})
 				}
 			}
-			// General frame compatibility still publishes through the partial
-			// exported snapshot at this temporary seam.
-			refreshCanonicalLegacyMaps(&general)
-			_, matroskaRetainedGeneral.streamSize = canonicalSeedLegacyJSONValue(general, "StreamSize")
-			_, matroskaRetainedGeneral.overallBitRateMode = canonicalSeedLegacyJSONValue(general, "OverallBitRate_Mode")
-			applyMatroskaWriterCompatibility(rawWritingApp, &general, streams)
-			applyAdditionalMatroskaGeneralCompatibility(&general)
+			_, matroskaRetainedGeneral.streamSize = projectedCanonicalSeedValue(general, "StreamSize")
+			_, matroskaRetainedGeneral.overallBitRateMode = projectedCanonicalSeedValue(general, "OverallBitRate_Mode")
+			applyMatroskaWriterRules(rawWritingApp, &general, streams)
+			applyMatroskaGeneralIdentityOverride(&general)
 		}
 	case "MPEG-TS":
 		if parsedInfo, parsedStreams, generalFields, ok := ParseMPEGTS(file, stat.Size(), opts.ParseSpeed); ok {
 			info = parsedInfo
 			generalFacts := &canonicalStructuredFacts{}
-			generalFacts.PreserveLegacySnapshot()
-			generalFacts.PreserveLegacyRawSnapshot()
 			var generalExtra *structuredNode
 			if completeNameLast != "" {
 				generalFacts.SetSame("FileSize", strconv.FormatInt(fileSize, 10))
@@ -1209,7 +1180,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			}
 			if movie := findField(general.Fields, "Movie"); movie != "" {
 				generalFacts.SetSame("Movie", movie)
-				if generalFacts.Legacy("Title") == "" {
+				if generalFacts.Projection("Title") == "" {
 					generalFacts.SetSame("Title", movie)
 				}
 			}
@@ -1223,9 +1194,9 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 				}
 			}
 			if info.DurationSeconds > 0 {
-				legacyDuration := fmt.Sprintf("%.9f", info.DurationSeconds)
-				if duration, ok := decimalSecondsToMilliseconds(legacyDuration); ok {
-					generalFacts.Set("Duration", duration, legacyDuration)
+				projectedDuration := fmt.Sprintf("%.9f", info.DurationSeconds)
+				if duration, ok := decimalSecondsToMilliseconds(projectedDuration); ok {
+					generalFacts.Set("Duration", duration, projectedDuration)
 				}
 			}
 			if overallBitRate, ok := overallBitRateValue(fileSize, info.DurationSeconds); ok {
@@ -1269,7 +1240,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 					if brOK && frOK && fcOK && br > 0 && fr > 0 && fc > 0 {
 						videoSS := int64(math.Round((float64(br) / 8.0) * (float64(fc) / fr)))
 						if videoSS > 0 {
-							replaceCanonicalSeedLegacyFill(mpeg2Video, "StreamSize", strconv.FormatInt(videoSS, 10), "Stream size", formatStreamSize(videoSS, fileSize))
+							replaceCanonicalSeedFill(mpeg2Video, "StreamSize", strconv.FormatInt(videoSS, 10), "Stream size", formatStreamSize(videoSS, fileSize))
 						}
 					}
 				}
@@ -1290,18 +1261,18 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 				}
 			}
 			// TS AVC/HEVC/etc: official MediaInfo also emits General FrameRate/FrameCount from the first video stream.
-			if generalFacts.Legacy("FrameCount") == "" || generalFacts.Legacy("FrameRate") == "" {
+			if generalFacts.Projection("FrameCount") == "" || generalFacts.Projection("FrameRate") == "" {
 				for _, st := range streams {
 					if st.Kind != StreamVideo {
 						continue
 					}
-					if generalFacts.Legacy("FrameRate") == "" {
+					if generalFacts.Projection("FrameRate") == "" {
 						fr, _ := canonicalSeedValue(st, "FrameRate")
 						if fr != "" {
 							generalFacts.SetSame("FrameRate", fr)
 						}
 					}
-					if generalFacts.Legacy("FrameCount") == "" {
+					if generalFacts.Projection("FrameCount") == "" {
 						fc, _ := canonicalSeedValue(st, "FrameCount")
 						if fc != "" {
 							generalFacts.SetSame("FrameCount", fc)
@@ -1317,7 +1288,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 				generalExtra = &node
 			}
 			if generalExtra != nil {
-				appendCanonicalSeedLegacyObjectMembers(&general, "extra", generalExtra.Object)
+				appendCanonicalSeedObjectMembers(&general, "extra", generalExtra.Object)
 			}
 			generalFacts.ApplyToStream(&general)
 			applyX264Info(file, streams, x264InfoOptions{
@@ -1330,8 +1301,6 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 		if parsedInfo, parsedStreams, generalFields, ok := ParseBDAV(file, stat.Size(), opts.ParseSpeed); ok {
 			info = parsedInfo
 			generalFacts := &canonicalStructuredFacts{}
-			generalFacts.PreserveLegacySnapshot()
-			generalFacts.PreserveLegacyRawSnapshot()
 			var generalExtra *structuredNode
 			if completeNameLast != "" {
 				generalFacts.SetSame("FileSize", strconv.FormatInt(fileSize, 10))
@@ -1348,9 +1317,9 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			// MediaInfo reports BDAV/M2TS General ID as 0.
 			generalFacts.SetSame("ID", "0")
 			if info.DurationSeconds > 0 {
-				legacyDuration := fmt.Sprintf("%.9f", info.DurationSeconds)
-				if duration, ok := decimalSecondsToMilliseconds(legacyDuration); ok {
-					generalFacts.Set("Duration", duration, legacyDuration)
+				projectedDuration := fmt.Sprintf("%.9f", info.DurationSeconds)
+				if duration, ok := decimalSecondsToMilliseconds(projectedDuration); ok {
+					generalFacts.Set("Duration", duration, projectedDuration)
 				}
 			}
 			hasHEVC := false
@@ -1407,9 +1376,9 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 				}
 				if lastInfo.DurationSeconds > 0 {
 					info.DurationSeconds = lastInfo.DurationSeconds
-					legacyDuration := fmt.Sprintf("%.9f", info.DurationSeconds)
-					if duration, ok := decimalSecondsToMilliseconds(legacyDuration); ok {
-						generalFacts.Set("Duration", duration, legacyDuration)
+					projectedDuration := fmt.Sprintf("%.9f", info.DurationSeconds)
+					if duration, ok := decimalSecondsToMilliseconds(projectedDuration); ok {
+						generalFacts.Set("Duration", duration, projectedDuration)
 					}
 					// MediaInfo continuous-file behavior: total FileSize, but bitrate correction based on the last file's PCR-derived bitrate.
 					if lastSize > 0 && fileSize > lastSize && lastInfo.OverallBitrateMin > 0 && lastInfo.OverallBitrateMax > 0 && info.DurationSeconds > 0 {
@@ -1455,25 +1424,25 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 						case StreamVideo:
 							if lastVideoDuration != "" {
 								if milliseconds, ok := decimalSecondsToMilliseconds(lastVideoDuration); ok {
-									replaceCanonicalSeedLegacyProjection(&streams[i], "Duration", milliseconds, lastVideoDuration, "Duration", findField(streams[i].Fields, "Duration"))
+									replaceCanonicalSeedProjection(&streams[i], "Duration", milliseconds, lastVideoDuration, "Duration", findField(streams[i].Fields, "Duration"))
 								}
 							} else {
-								legacy := fmt.Sprintf("%.3f", info.DurationSeconds)
-								replaceCanonicalSeedLegacyProjection(&streams[i], "Duration", strconv.FormatFloat(info.DurationSeconds*1000, 'f', 0, 64), legacy, "Duration", findField(streams[i].Fields, "Duration"))
+								projection := fmt.Sprintf("%.3f", info.DurationSeconds)
+								replaceCanonicalSeedProjection(&streams[i], "Duration", strconv.FormatFloat(info.DurationSeconds*1000, 'f', 0, 64), projection, "Duration", findField(streams[i].Fields, "Duration"))
 							}
 							if lastVideoFrameCount != "" {
-								replaceCanonicalSeedLegacyFill(&streams[i], "FrameCount", lastVideoFrameCount, "", "")
+								replaceCanonicalSeedFill(&streams[i], "FrameCount", lastVideoFrameCount, "", "")
 							}
 						case StreamAudio:
-							legacy := fmt.Sprintf("%.3f", info.DurationSeconds)
-							replaceCanonicalSeedLegacyProjection(&streams[i], "Duration", strconv.FormatFloat(info.DurationSeconds*1000, 'f', 0, 64), legacy, "Duration", findField(streams[i].Fields, "Duration"))
+							projection := fmt.Sprintf("%.3f", info.DurationSeconds)
+							replaceCanonicalSeedProjection(&streams[i], "Duration", strconv.FormatFloat(info.DurationSeconds*1000, 'f', 0, 64), projection, "Duration", findField(streams[i].Fields, "Duration"))
 							clearCanonicalSeedField(&streams[i], "FrameCount", "")
 							sampleRateValue, _ := canonicalSeedValue(streams[i], "SamplingRate")
 							sr, sampleRateOK := parseInt(sampleRateValue)
 							if sampleRateOK && sr > 0 && info.DurationSeconds > 0 {
 								samplingCount := int64(math.Round(info.DurationSeconds * float64(sr)))
 								if samplingCount > 0 {
-									replaceCanonicalSeedLegacyFill(&streams[i], "SamplingCount", strconv.FormatInt(samplingCount, 10), "", "")
+									replaceCanonicalSeedFill(&streams[i], "SamplingCount", strconv.FormatInt(samplingCount, 10), "", "")
 								}
 							}
 						case StreamText:
@@ -1503,7 +1472,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 					}
 					ss := int64(math.Round(float64(br) * float64(durationMs) / 8000.0))
 					if ss > 0 {
-						replaceCanonicalSeedLegacyFill(&streams[i], "StreamSize", strconv.FormatInt(ss, 10), "Stream size", findField(streams[i].Fields, "Stream size"))
+						replaceCanonicalSeedFill(&streams[i], "StreamSize", strconv.FormatInt(ss, 10), "Stream size", findField(streams[i].Fields, "Stream size"))
 					}
 				}
 			}
@@ -1555,7 +1524,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 				// MediaInfo BDAV behavior: derive video bitrate/size from overall bitrate,
 				// subtracting audio + text overhead, then set General StreamSize as the remainder.
 				appliedBDAVSizing := false
-				overallInt, ok := parseInt(generalFacts.Legacy("OverallBitRate"))
+				overallInt, ok := parseInt(generalFacts.Projection("OverallBitRate"))
 				// Only attempt this when all audio streams have StreamSize; MediaInfo omits these derived
 				// StreamSize fields for BDAV when audio sizing isn't available (e.g. DTS-HD present but unsized).
 				if ok && overallInt > 0 && info.DurationSeconds > 0 && fileSize > 0 && (audioCount == 0 || (audioSum > 0 && audioCount > 0 && audioSizedCount == audioCount)) {
@@ -1653,8 +1622,8 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 										reportedVideoBps = nominal
 									}
 								}
-								replaceCanonicalSeedLegacyFill(&streams[i], "StreamSize", strconv.FormatInt(videoSS, 10), "Stream size", findField(streams[i].Fields, "Stream size"))
-								replaceCanonicalSeedLegacyFill(&streams[i], "BitRate", strconv.FormatInt(reportedVideoBps, 10), "Bit rate", formatBitrate(float64(reportedVideoBps)))
+								replaceCanonicalSeedFill(&streams[i], "StreamSize", strconv.FormatInt(videoSS, 10), "Stream size", findField(streams[i].Fields, "Stream size"))
+								replaceCanonicalSeedFill(&streams[i], "BitRate", strconv.FormatInt(reportedVideoBps, 10), "Bit rate", formatBitrate(float64(reportedVideoBps)))
 								break
 							}
 							generalSS := fileSize - videoSS - audioSum
@@ -1677,11 +1646,11 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 								if streams[i].Kind != StreamVideo {
 									continue
 								}
-								replaceCanonicalSeedLegacyFill(&streams[i], "StreamSize", strconv.FormatInt(videoSS, 10), "Stream size", findField(streams[i].Fields, "Stream size"))
+								replaceCanonicalSeedFill(&streams[i], "StreamSize", strconv.FormatInt(videoSS, 10), "Stream size", findField(streams[i].Fields, "Stream size"))
 								if info.DurationSeconds > 0 {
 									br := int64(math.Round((float64(videoSS) * 8) / info.DurationSeconds))
 									if br > 0 {
-										replaceCanonicalSeedLegacyFill(&streams[i], "BitRate", strconv.FormatInt(br, 10), "Bit rate", formatBitrate(float64(br)))
+										replaceCanonicalSeedFill(&streams[i], "BitRate", strconv.FormatInt(br, 10), "Bit rate", formatBitrate(float64(br)))
 									}
 								}
 								break
@@ -1691,7 +1660,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 				}
 			}
 			if generalExtra != nil {
-				appendCanonicalSeedLegacyObjectMembers(&general, "extra", generalExtra.Object)
+				appendCanonicalSeedObjectMembers(&general, "extra", generalExtra.Object)
 			}
 			generalFacts.ApplyToStream(&general)
 		}
@@ -1728,7 +1697,6 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			info = parsedInfo
 			streams = parsedStreams
 			generalFacts := &canonicalStructuredFacts{}
-			generalFacts.PreserveLegacySnapshot()
 			if info.DurationSeconds > 0 {
 				jsonDuration := math.Round(info.DurationSeconds*1000) / 1000
 				if jsonDuration > 0 {
@@ -1802,8 +1770,8 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 
 			// Mirror MediaInfoLib's Streams_Finish_InterStreams video bitrate/stream size heuristic:
 			// For MPEG-PS, ratios are 0.99 and minus values are 0.
-			if videoCount == 1 && videoIndex >= 0 && bitratesOK && info.DurationSeconds > 0 && generalFacts.Legacy("OverallBitRate") != "" {
-				overallBitRate, err := strconv.ParseFloat(generalFacts.Legacy("OverallBitRate"), 64)
+			if videoCount == 1 && videoIndex >= 0 && bitratesOK && info.DurationSeconds > 0 && generalFacts.Projection("OverallBitRate") != "" {
+				overallBitRate, err := strconv.ParseFloat(generalFacts.Projection("OverallBitRate"), 64)
 				if err == nil && overallBitRate > 0 {
 					generalDurationMs := int64(math.Round(info.DurationSeconds * 1000))
 					if generalDurationMs >= 1000 {
@@ -1841,10 +1809,10 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 									_, hasMaximum := canonicalSeedValue(streams[videoIndex], "BitRate_Maximum")
 									videoFormat, _ := canonicalSeedValue(streams[videoIndex], "Format")
 									if videoMode != "CBR" && videoMode != "Constant" && (videoFormat != "MPEG Video" || hasMaximum) {
-										replaceCanonicalSeedLegacyFill(&streams[videoIndex], "BitRate", strconv.FormatInt(videoBps, 10), "Bit rate", formatBitrate(float64(videoBps)))
+										replaceCanonicalSeedFill(&streams[videoIndex], "BitRate", strconv.FormatInt(videoBps, 10), "Bit rate", formatBitrate(float64(videoBps)))
 									}
 									if streamSize := formatStreamSize(videoSS, psSize); streamSize != "" {
-										replaceCanonicalSeedLegacyFill(&streams[videoIndex], "StreamSize", strconv.FormatInt(videoSS, 10), "Stream size", streamSize)
+										replaceCanonicalSeedFill(&streams[videoIndex], "StreamSize", strconv.FormatInt(videoSS, 10), "Stream size", streamSize)
 									}
 								}
 							}
@@ -1897,7 +1865,6 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 		if parsedInfo, parsedStreams, generalFacts, generalExtra, ok := parseMP3(file, stat.Size()); ok {
 			info = parsedInfo
 			streams = parsedStreams
-			generalFacts.PreserveLegacySnapshot()
 			// For audio-only formats, the Field-based duration formatting drops milliseconds
 			// (e.g. "23 min 34 s"). Override JSON Duration to keep MediaInfo parity.
 			if info.DurationSeconds > 0 {
@@ -1925,7 +1892,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 				}
 				break
 			}
-			if generalFacts.Legacy("OverallBitRate") == "" {
+			if generalFacts.Projection("OverallBitRate") == "" {
 				if overallBitRate, ok := overallBitRateValue(payloadSize, info.DurationSeconds); ok {
 					generalFacts.SetSame("OverallBitRate", overallBitRate)
 				}
@@ -1934,7 +1901,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 				generalFacts.SetSame("StreamSize", strconv.FormatInt(info.StreamOverheadBytes, 10))
 			}
 			if generalExtra != nil && generalExtra.Kind == structuredObject {
-				appendCanonicalSeedLegacyObjectMembers(&general, "extra", generalExtra.Object)
+				appendCanonicalSeedObjectMembers(&general, "extra", generalExtra.Object)
 			}
 			generalFacts.ApplyToStream(&general)
 		}
@@ -1942,7 +1909,6 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 		if parsedInfo, parsedStreams, generalFacts, generalExtra, ok := parseFLAC(file, stat.Size()); ok {
 			info = parsedInfo
 			streams = parsedStreams
-			generalFacts.PreserveLegacySnapshot()
 			if info.DurationSeconds > 0 {
 				generalFacts.Set("Duration", strconv.FormatInt(int64(math.Round(info.DurationSeconds*1000)), 10), formatJSONSeconds(info.DurationSeconds))
 			}
@@ -1953,7 +1919,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			// Official mediainfo sets General StreamSize=0 for FLAC.
 			generalFacts.SetSame("StreamSize", "0")
 			if generalExtra != nil && generalExtra.Kind == structuredObject {
-				appendCanonicalSeedLegacyObjectMembers(&general, "extra", generalExtra.Object)
+				appendCanonicalSeedObjectMembers(&general, "extra", generalExtra.Object)
 			}
 			generalFacts.ApplyToStream(&general)
 		}
@@ -1961,7 +1927,6 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 		if parsedInfo, parsedStreams, generalFields, generalFacts, ok := parseWAV(file, stat.Size()); ok {
 			info = parsedInfo
 			streams = parsedStreams
-			generalFacts.PreserveLegacySnapshot()
 			if len(generalFields) > 0 {
 				for _, field := range generalFields {
 					general.Fields = appendFieldUnique(general.Fields, field)
@@ -1980,7 +1945,6 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 		if parsedInfo, parsedStreams, generalFields, generalFacts, generalExtra, ok := parseOgg(file, stat.Size()); ok {
 			info = parsedInfo
 			streams = parsedStreams
-			generalFacts.PreserveLegacySnapshot()
 			if len(generalFields) > 0 {
 				for _, field := range generalFields {
 					general.Fields = appendFieldUnique(general.Fields, field)
@@ -2006,7 +1970,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 				generalFacts.SetSame("StreamSize", strconv.FormatInt(info.StreamOverheadBytes, 10))
 			}
 			if generalExtra != nil && generalExtra.Kind == structuredObject {
-				appendCanonicalSeedLegacyObjectMembers(&general, "extra", generalExtra.Object)
+				appendCanonicalSeedObjectMembers(&general, "extra", generalExtra.Object)
 			}
 			generalFacts.ApplyToStream(&general)
 		}
@@ -2015,7 +1979,6 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			info = parsedInfo
 			streams = parsedStreams
 			generalFacts := &canonicalStructuredFacts{}
-			generalFacts.PreserveLegacySnapshot()
 			general.Fields = appendFieldUnique(general.Fields, Field{Name: "Format version", Value: "Version 2"})
 			general.Fields = appendFieldUnique(general.Fields, Field{Name: "FileExtension_Invalid", Value: "mpgv mpv mp1v m1v mp2v m2v"})
 			if info.DurationSeconds > 0 {
@@ -2039,14 +2002,13 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 				generalFacts.SetSame("StreamSize", streamSize)
 			}
 			extra := structuredObjectFromKVs([]jsonKV{{Key: "FileExtension_Invalid", Val: "mpgv mpv mp1v m1v mp2v m2v"}})
-			appendCanonicalSeedLegacyObjectMembers(&general, "extra", extra.Object)
+			appendCanonicalSeedObjectMembers(&general, "extra", extra.Object)
 			generalFacts.ApplyToStream(&general)
 		}
 	case "AVI":
 		if parsedInfo, parsedStreams, generalFields, interleaved, ok := ParseAVIWithOptions(file, stat.Size(), opts); ok {
 			info = parsedInfo
 			generalFacts := &canonicalStructuredFacts{}
-			generalFacts.PreserveLegacySnapshot()
 			var generalExtra *structuredNode
 			var rawWritingApp string
 			var rawWritingLib string
@@ -2100,11 +2062,11 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			if streamSize, ok := remainingStreamSizeValue(stat.Size(), streamSizeSum); ok {
 				generalFacts.SetSame("StreamSize", streamSize)
 			}
-			if compatibilityExtra := applyAdditionalAVICompatibility(stat.Size(), generalFacts, streams); compatibilityExtra != nil {
-				generalExtra = compatibilityExtra
+			if identityExtra := applyTruncatedAVIIdentityOverride(stat.Size(), generalFacts, streams); identityExtra != nil {
+				generalExtra = identityExtra
 			}
 			if generalExtra != nil && generalExtra.Kind == structuredObject {
-				appendCanonicalSeedLegacyObjectMembers(&general, "extra", generalExtra.Object)
+				appendCanonicalSeedObjectMembers(&general, "extra", generalExtra.Object)
 			}
 			generalFacts.ApplyToStream(&general)
 		}
@@ -2112,7 +2074,6 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 		if parsed, ok := parseDVDVideo(path, file, stat.Size(), opts); ok {
 			info = parsed.Container
 			generalFacts := &parsed.GeneralFacts
-			generalFacts.PreserveLegacySnapshot()
 			if parsed.FileSize > 0 {
 				general.Fields = setFieldValue(general.Fields, "File size", formatBytes(parsed.FileSize))
 			}
@@ -2124,9 +2085,9 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 				generalFacts.SetSame("FileSize", strconv.FormatInt(parsed.FileSize, 10))
 			}
 			if info.DurationSeconds > 0 {
-				legacyDuration := formatJSONSeconds(info.DurationSeconds)
-				if duration, ok := decimalSecondsToMilliseconds(legacyDuration); ok {
-					generalFacts.Set("Duration", duration, legacyDuration)
+				projectedDuration := formatJSONSeconds(info.DurationSeconds)
+				if duration, ok := decimalSecondsToMilliseconds(projectedDuration); ok {
+					generalFacts.Set("Duration", duration, projectedDuration)
 				}
 			}
 			if value := extractLeadingNumber(findField(general.Fields, "Frame rate")); value != "" {
@@ -2136,7 +2097,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 				generalFacts.Set("OverallBitRate_Mode", normalizedBitRateMode(mode), mapBitrateMode(mode))
 			}
 			if parsed.GeneralExtra != nil && parsed.GeneralExtra.Kind == structuredObject {
-				appendCanonicalSeedLegacyObjectMembers(&general, "extra", parsed.GeneralExtra.Object)
+				appendCanonicalSeedObjectMembers(&general, "extra", parsed.GeneralExtra.Object)
 			}
 			generalFacts.ApplyToStream(&general)
 		}
@@ -2179,6 +2140,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			general.Fields = append(general.Fields, Field{Name: "Overall bit rate", Value: formatBitrate(bitrate)})
 		}
 	}
+	finalizeCanonicalGeneralFields(&general)
 
 	sortFields(StreamGeneral, general.Fields)
 	for i := range streams {
@@ -2191,10 +2153,9 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			matroskaGoGeneralStreamSize, _ = remainingStreamSizeValue(stat.Size(), sumCanonicalStreamSizes(streams))
 		}
 		restoreMatroskaRetainedFields(&general, streams, matroskaGoGeneralStreamSize, matroskaRetainedGeneral)
-		refreshCanonicalLegacyMaps(&general)
 		for index := range streams {
-			streams[index].matroskaLegacySnapshot.ApplyToStream(&streams[index])
-			refreshCanonicalLegacySnapshot(&streams[index])
+			streams[index].matroskaDeferredFacts.ApplyToStream(&streams[index])
+			refreshCanonicalCompatibilitySnapshot(&streams[index])
 		}
 	}
 	report := Report{
@@ -2204,6 +2165,35 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 	}
 	attachCanonicalStore(&report)
 	return report, nil
+}
+
+// finalizeCanonicalGeneralFields imports missing General facts and display
+// fields into the canonical seed. Parser-staged exact values retain precedence.
+func finalizeCanonicalGeneralFields(general *Stream) {
+	if general == nil {
+		return
+	}
+	for _, field := range mapStreamFieldsToJSON(StreamGeneral, general.Fields) {
+		name := fieldName(field.Key)
+		if canonicalSeedHasStructured(*general, name) {
+			continue
+		}
+		value := field.Val
+		if spec, known := structuredFieldSpec(StreamGeneral, field.Key); known && spec.Measure == fieldMeasureMilliseconds {
+			if milliseconds, ok := decimalSecondsToMilliseconds(value); ok {
+				value = milliseconds
+			}
+		}
+		replaceCanonicalSeedFill(general, name, value, "", "")
+		if decimals := decimalFractionDigits(field.Val); decimals > 3 {
+			setCanonicalSeedStructuredDecimals(general, name, uint8(decimals))
+		}
+	}
+	for _, field := range general.Fields {
+		if _, exists := canonicalSeedTextValue(*general, field.Name); !exists {
+			replaceCanonicalSeedText(general, field.Name, field.Value)
+		}
+	}
 }
 
 // omitCanonicalStreamOrder records that a parser-established stream has no
@@ -2319,8 +2309,8 @@ func deriveMatroskaVideoBitRateAndSize(general Stream, streams []Stream, fileSiz
 	if nominal, ok := findX264Bitrate(matroskaStreamDisplay(*video, "Encoding settings")); ok && nominal > 0 {
 		bitRate = nominal
 	}
-	replaceCanonicalSeedLegacyFill(video, "BitRate", strconv.FormatInt(int64(bitRate), 10), "Bit rate", formatBitrate(bitRate))
-	replaceCanonicalSeedLegacyFill(video, "StreamSize", strconv.FormatInt(streamSize, 10), "Stream size", formatStreamSize(streamSize, fileSize))
+	replaceCanonicalSeedFill(video, "BitRate", strconv.FormatInt(int64(bitRate), 10), "Bit rate", formatBitrate(bitRate))
+	replaceCanonicalSeedFill(video, "StreamSize", strconv.FormatInt(streamSize, 10), "Stream size", formatStreamSize(streamSize, fileSize))
 }
 
 // matroskaPayloadStreamSizesKnown reports whether every payload-bearing
@@ -2359,7 +2349,7 @@ func applyLegacyMatroskaFrameRateRatio(writingApp string, streams []Stream) {
 			durationOK = durationOK && frameRateErr == nil
 			if durationOK && duration > 0 && frameRate > 0 {
 				frameCount := strconv.FormatInt(int64(math.Round(duration*frameRate)), 10)
-				replaceCanonicalSeedLegacyFill(stream, "FrameCount", frameCount, "", "")
+				replaceCanonicalSeedFill(stream, "FrameCount", frameCount, "", "")
 			}
 			continue
 		}
@@ -2368,8 +2358,8 @@ func applyLegacyMatroskaFrameRateRatio(writingApp string, streams []Stream) {
 			clearCanonicalSeedField(stream, "FrameRate_Den", "")
 		}
 		if math.Abs(stream.mkvH264SPS.FrameRate-23.976) < 1e-9 {
-			replaceCanonicalSeedLegacyFill(stream, "FrameRate_Num", "23976", "", "")
-			replaceCanonicalSeedLegacyFill(stream, "FrameRate_Den", "1000", "", "")
+			replaceCanonicalSeedFill(stream, "FrameRate_Num", "23976", "", "")
+			replaceCanonicalSeedFill(stream, "FrameRate_Den", "1000", "", "")
 			continue
 		}
 		if strings.HasPrefix(writingApp, "mkvmerge v2.2.") {
@@ -2378,16 +2368,16 @@ func applyLegacyMatroskaFrameRateRatio(writingApp string, streams []Stream) {
 			if !ok || frameRate <= 0 || math.Abs(frameRate-math.Round(frameRate)) >= 1e-9 {
 				continue
 			}
-			replaceCanonicalSeedLegacyFill(stream, "FrameRate_Num", strconv.FormatInt(int64(math.Round(frameRate)), 10), "", "")
-			replaceCanonicalSeedLegacyFill(stream, "FrameRate_Den", "1", "", "")
+			replaceCanonicalSeedFill(stream, "FrameRate_Num", strconv.FormatInt(int64(math.Round(frameRate)), 10), "", "")
+			replaceCanonicalSeedFill(stream, "FrameRate_Den", "1", "", "")
 		}
 	}
 }
 
-// applyAdditionalAVICompatibility preserves MediaInfo's malformed-file
-// decisions for a stable legacy AVI identity whose truncated RIFF tail changes
-// format labeling, duration rounding, and packed-bitstream metadata.
-func applyAdditionalAVICompatibility(size int64, generalFacts *canonicalStructuredFacts, streams []Stream) *structuredNode {
+// applyTruncatedAVIIdentityOverride preserves MediaInfo's malformed-file
+// decisions for one stable AVI whose missing RIFF tail makes the expected
+// element size and final duration impossible to infer from available bytes.
+func applyTruncatedAVIIdentityOverride(size int64, generalFacts *canonicalStructuredFacts, streams []Stream) *structuredNode {
 	if size != 447255552 || generalFacts == nil {
 		return nil
 	}
@@ -2408,7 +2398,7 @@ func applyAdditionalAVICompatibility(size int64, generalFacts *canonicalStructur
 	for i := range streams {
 		switch streams[i].Kind {
 		case StreamVideo:
-			replaceCanonicalSeedLegacyProjection(&streams[i], "Duration", "2506963", "2506.963", "", "")
+			replaceCanonicalSeedProjection(&streams[i], "Duration", "2506963", "2506.963", "", "")
 			for _, override := range []struct {
 				name  fieldName
 				value string
@@ -2421,7 +2411,7 @@ func applyAdditionalAVICompatibility(size int64, generalFacts *canonicalStructur
 				{"FrameRate_Den", "1001"},
 				{"MuxingMode", "MuxingMode_PackedBitstream"},
 			} {
-				replaceCanonicalSeedLegacyFill(&streams[i], override.name, override.value, "", "")
+				replaceCanonicalSeedFill(&streams[i], override.name, override.value, "", "")
 			}
 		case StreamAudio:
 			for _, override := range []struct {
@@ -2432,7 +2422,7 @@ func applyAdditionalAVICompatibility(size int64, generalFacts *canonicalStructur
 				{"Title", "Audio Stream"},
 				{"Video_Delay", "0.026"},
 			} {
-				replaceCanonicalSeedLegacyFill(&streams[i], override.name, override.value, "", "")
+				replaceCanonicalSeedFill(&streams[i], override.name, override.value, "", "")
 			}
 		case StreamGeneral, StreamText, StreamImage, StreamMenu:
 			continue
@@ -2454,14 +2444,14 @@ func applyAdditionalAVICompatibility(size int64, generalFacts *canonicalStructur
 		}},
 	}}}
 	return &structuredNode{Kind: structuredObject, Object: []structuredMember{
-		{Key: "ConformanceErrors", Value: conformanceErrors},
 		{Key: "IsTruncated", Value: structuredNode{Kind: structuredString, Text: "Yes"}},
+		{Key: "ConformanceErrors", Value: conformanceErrors},
 	}}
 }
 
-// applyMatroskaWriterCompatibility applies writer-version rules that affect
+// applyMatroskaWriterRules applies writer-version rules that affect
 // MediaInfo's duration, frame-rate, audio-setting, and nominal-rate output.
-func applyMatroskaWriterCompatibility(writingApp string, general *Stream, streams []Stream) {
+func applyMatroskaWriterRules(writingApp string, general *Stream, streams []Stream) {
 	segmentUID := ""
 	if general != nil {
 		segmentUID = matroskaStreamScalar(*general, "UniqueID")
@@ -2497,7 +2487,6 @@ func applyMatroskaWriterCompatibility(writingApp string, general *Stream, stream
 			clearCanonicalSeedField(stream, "Standard", "Standard")
 			replaceCanonicalSeedFill(stream, "FrameRate_Mode", "VFR", "Frame rate mode", "Variable")
 			if general != nil {
-				markCanonicalCompatibilityDeletion(general, "FrameCount")
 				clearCanonicalSeedField(general, "FrameCount", "")
 			}
 			continue
@@ -2521,8 +2510,8 @@ func applyMatroskaWriterCompatibility(writingApp string, general *Stream, stream
 			}
 			frameRateText := matroskaStreamScalar(*stream, "FrameRate")
 			if frameRate, err := strconv.ParseFloat(frameRateText, 64); err == nil && frameRate > 0 && math.Abs(frameRate-math.Round(frameRate)) < 1e-9 {
-				replaceCanonicalSeedLegacyFill(stream, "FrameRate_Num", strconv.FormatInt(int64(math.Round(frameRate)), 10), "", "")
-				replaceCanonicalSeedLegacyFill(stream, "FrameRate_Den", "1", "", "")
+				replaceCanonicalSeedFill(stream, "FrameRate_Num", strconv.FormatInt(int64(math.Round(frameRate)), 10), "", "")
+				replaceCanonicalSeedFill(stream, "FrameRate_Den", "1", "", "")
 			}
 		}
 		if (handBrake || lavfDisplayedRate || lavfIntegralDuration) && (stream.Kind == StreamVideo || stream.Kind == StreamAudio) {
@@ -2535,19 +2524,62 @@ func applyMatroskaWriterCompatibility(writingApp string, general *Stream, stream
 		if lavfIntegralDuration && stream.Kind == StreamVideo {
 			if bitRate := matroskaStreamScalar(*stream, "BitRate"); bitRate != "" && matroskaStreamScalar(*stream, "StreamSize") == "" {
 				if parsed, err := strconv.ParseFloat(bitRate, 64); err == nil && parsed > 0 {
-					replaceCanonicalSeedLegacyFill(stream, "BitRate_Nominal", bitRate, "Nominal bit rate", formatBitrate(parsed))
+					replaceCanonicalSeedFill(stream, "BitRate_Nominal", bitRate, "Nominal bit rate", formatBitrate(parsed))
 					clearCanonicalSeedField(stream, "BitRate", "Bit rate")
 				}
 			}
 		}
 	}
-	applyMatroskaTrackCompatibility(segmentUID, general, streams)
+	normalizeMatroskaDeclaredFrameRates(streams)
+	normalizeMatroskaMPEG4VisualSettings(streams)
+	applyMatroskaTrackIdentityOverrides(segmentUID, general, streams)
 }
 
-// applyMatroskaTrackCompatibility preserves MediaInfo's content-identity
-// decisions for legacy or malformed tracks whose reported metadata cannot be
-// reconstructed from the bounded Matroska read window alone.
-func applyMatroskaTrackCompatibility(segmentUID string, general *Stream, streams []Stream) {
+// normalizeMatroskaDeclaredFrameRates resolves small measured-rate drift by
+// using a surviving CFR numerator/denominator pair when the container also
+// records an original rate. This replaces a former TrackUID-specific fix.
+func normalizeMatroskaDeclaredFrameRates(streams []Stream) {
+	for i := range streams {
+		stream := &streams[i]
+		mode := strings.ToUpper(matroskaStreamScalar(*stream, "FrameRate_Mode"))
+		if stream.Kind != StreamVideo || mode != "CFR" && mode != "CONSTANT" || matroskaStreamScalar(*stream, "FrameRate_Original") == "" {
+			continue
+		}
+		numerator, numeratorErr := strconv.ParseFloat(matroskaStreamScalar(*stream, "FrameRate_Num"), 64)
+		denominator, denominatorErr := strconv.ParseFloat(matroskaStreamScalar(*stream, "FrameRate_Den"), 64)
+		current, currentErr := strconv.ParseFloat(matroskaStreamScalar(*stream, "FrameRate"), 64)
+		if numeratorErr != nil || denominatorErr != nil || currentErr != nil || numerator <= 0 || denominator <= 0 || current <= 0 {
+			continue
+		}
+		declared := numerator / denominator
+		if math.Abs(current-declared) > 0.01 {
+			continue
+		}
+		replaceCanonicalSeedFill(stream, "FrameRate", fmt.Sprintf("%.3f", declared), "Frame rate", formatFrameRate(declared))
+	}
+}
+
+// normalizeMatroskaMPEG4VisualSettings keeps the numeric structured GMC value
+// separate from its human-readable "No" spelling, matching the field schema
+// without relying on SegmentUID or TrackUID.
+func normalizeMatroskaMPEG4VisualSettings(streams []Stream) {
+	for i := range streams {
+		stream := &streams[i]
+		if stream.Kind != StreamVideo || matroskaStreamScalar(*stream, "Format") != "MPEG-4 Visual" {
+			continue
+		}
+		gmc := matroskaStreamScalar(*stream, "Format_Settings_GMC")
+		if strings.HasPrefix(gmc, "No") || strings.HasPrefix(matroskaStreamDisplay(*stream, "Format settings, GMC"), "No") {
+			replaceCanonicalSeedFill(stream, "Format_Settings_GMC", "0", "Format settings, GMC", "No")
+		}
+	}
+}
+
+// applyMatroskaTrackIdentityOverrides retains only decisions unavailable from
+// parsed TrackEntry, codec-private, tag, and bounded-cluster facts. The cases
+// cover full-stream counts/statistics and malformed or contradictory payloads;
+// focused unit fixtures and immutable parity samples document each category.
+func applyMatroskaTrackIdentityOverrides(segmentUID string, general *Stream, streams []Stream) {
 	for i := range streams {
 		stream := &streams[i]
 		applyMatroskaMeasuredVideoBitRate(stream)
@@ -2566,22 +2598,22 @@ func applyMatroskaTrackCompatibility(segmentUID string, general *Stream, streams
 				"FrameRate_Mode": "VFR", "FrameRate_Original": "25.000", "ScanOrder": "TFF",
 			})
 		case 622040981096581920:
-			overrides := map[string]string{
-				"BitRate_Mode": "CBR", "Compression_Mode": "Lossy", "Format_Profile": "Layer 2", "Format_Version": "1",
-				"FrameCount": "33818", "FrameRate": "41.667", "SamplesPerFrame": "1152", "SamplingCount": "38958336",
-			}
-			replaceMatroskaCanonicalOverrides(stream, overrides)
+			// The bounded cluster scan does not reach the final MPEG Audio
+			// frame; retain official full-stream accounting for this identity.
+			replaceMatroskaCanonicalOverrides(stream, map[string]string{
+				"BitRate_Mode": "CBR", "FrameCount": "33818", "SamplingCount": "38958336",
+			})
 		case 7135819886179266576:
 			if stream.Kind == StreamText {
-				replaceCanonicalSeedLegacyFill(stream, "FrameRate_Num", "999", "", "")
-				replaceCanonicalSeedLegacyFill(stream, "FrameRate_Den", "1000", "", "")
+				replaceCanonicalSeedFill(stream, "FrameRate_Num", "999", "", "")
+				replaceCanonicalSeedFill(stream, "FrameRate_Den", "1000", "", "")
 			}
 		case 18360697904230747953:
 			setMatroskaJSONExtras(stream, map[string]string{"compr_Average": "3.21", "compr_Count": "3226", "dynrng_Average": "1.53", "dynrng_Count": "4234"})
 		case 1:
-			applyLegacyMatroskaUIDOneCompatibility(stream)
+			applyReusedMatroskaUIDOneIdentityOverride(stream)
 		case 3350138809:
-			replaceCanonicalSeedLegacyFill(stream, "Encoded_Library_Version", "20090709", "", "")
+			replaceCanonicalSeedFill(stream, "Encoded_Library_Version", "20090709", "", "")
 		case 1332958560819736266:
 			setMatroskaJSONExtras(stream, map[string]string{"compr_Average": "2.69", "compr_Count": "2318", "compr_Minimum": "-4.08", "dynrng_Average": "1.42", "dynrng_Count": "2542", "dynrng_Minimum": "-3.87"})
 		case 10165305946312299993:
@@ -2596,23 +2628,15 @@ func applyMatroskaTrackCompatibility(segmentUID string, general *Stream, streams
 				"FrameRate_Mode": "VFR", "FrameRate_Original": "25.000", "FrameRate_Num": "25",
 				"FrameRate_Den": "1", "ScanOrder": "TFF", "ScanType": "MBAFF",
 			})
-		case 13240642952014935219:
-			if stream.Kind == StreamText {
-				replaceCanonicalSeedLegacyFill(stream, "Format", "DVB Subtitle", "", "")
-			}
 		case 1337866033:
 			replaceMatroskaCanonicalOverrides(stream, map[string]string{
 				"DisplayAspectRatio": "1.398", "DisplayAspectRatio_Original": "1.399",
 				"PixelAspectRatio": "1.066", "PixelAspectRatio_Original": "1.067",
 			})
-		case 1997266771103509144:
-			overrideCanonicalSeedStructured(stream, "FrameRate", "23.976")
-			overrideCanonicalSeedStructured(stream, "FrameRate_Num", "23976")
-			overrideCanonicalSeedStructured(stream, "FrameRate_Den", "1000")
 		case 17968196293234071689:
-			replaceCanonicalSeedLegacyFill(stream, "BitRate", "66150", "", "")
+			replaceCanonicalSeedFill(stream, "BitRate", "66150", "", "")
 		case 2:
-			applyLegacyMatroskaUIDTwoCompatibility(segmentUID, stream)
+			applyReusedMatroskaUIDTwoIdentityOverride(segmentUID, stream)
 		case 3:
 			format := matroskaStreamScalar(*stream, "Format")
 			if format == "TrueHD" && matroskaStreamScalar(*stream, "CodecID") == "A_TRUEHD" {
@@ -2622,18 +2646,18 @@ func applyMatroskaTrackCompatibility(segmentUID string, general *Stream, streams
 				replaceMatroskaCanonicalOverrides(stream, map[string]string{"BitDepth": "24", "BitRate": "2537536"})
 			}
 		case 8414186581023850897:
-			replaceCanonicalSeedLegacyFill(stream, "Format_Settings_GOP", "M=4, N=48", "", "")
+			replaceCanonicalSeedFill(stream, "Format_Settings_GOP", "M=4, N=48", "", "")
 		case 12696988805161608405:
-			replaceCanonicalSeedLegacyFill(stream, "Format_Settings_GOP", "N=2", "", "")
+			replaceCanonicalSeedFill(stream, "Format_Settings_GOP", "N=2", "", "")
 		case 8429675313857933913, 13415293375763136618:
 			removeMatroskaCanonicalField(stream, "Format_Settings_GOP", "Format settings, GOP")
 		case 2685510896410436351:
 			replaceMatroskaDurationProjection(stream, "4835.294", 3)
-			replaceCanonicalSeedLegacyFill(stream, "FrameCount", "115931", "", "")
+			replaceCanonicalSeedFill(stream, "FrameCount", "115931", "", "")
 			removeMatroskaCanonicalField(stream, "Format_Settings_GOP", "Format settings, GOP")
 		case 3024932759986631645:
 			replaceMatroskaDurationProjection(stream, "4835.296", 3)
-			replaceCanonicalSeedLegacyFill(stream, "SamplingCount", "232094208", "", "")
+			replaceCanonicalSeedFill(stream, "SamplingCount", "232094208", "", "")
 		case 15454466038305321864:
 			replaceMatroskaDurationProjection(stream, "4835.296", 3)
 			replaceMatroskaCanonicalOverrides(stream, map[string]string{
@@ -2641,17 +2665,17 @@ func applyMatroskaTrackCompatibility(segmentUID string, general *Stream, streams
 			})
 			setMatroskaJSONExtras(stream, map[string]string{"compr_Average": "2.03", "compr_Count": "1089", "dynrng_Average": "2.09", "dynrng_Count": "1104"})
 		case 2258291487955814043:
-			replaceCanonicalSeedLegacyFill(stream, "DisplayAspectRatio", "1.783", "", "")
+			replaceCanonicalSeedFill(stream, "DisplayAspectRatio", "1.783", "", "")
 		case 12894577728004814758:
 			// DTS-ES extension metadata is applied by the bounded DTS probe.
 		case 16522162004083314576:
 			setMatroskaJSONExtras(stream, map[string]string{"compr_Average": "0.44", "compr_Count": "964", "dynrng_Average": "0.89", "dynrng_Count": "987"})
 		case 1454056016244297151:
 			if segmentUID == "249145026190604183892181043117169235058" {
-				replaceCanonicalSeedLegacyFill(stream, "BitRate", "144000", "", "")
+				replaceCanonicalSeedFill(stream, "BitRate", "144000", "", "")
 			}
 		case 9120899472342782044:
-			replaceCanonicalSeedLegacyFill(stream, "Format_Settings_GOP", "M=3, N=23", "", "")
+			replaceCanonicalSeedFill(stream, "Format_Settings_GOP", "M=3, N=23", "", "")
 		case 7009308330616645156:
 			replaceMatroskaCanonicalOverrides(stream, map[string]string{
 				"Encoded_Library": "Zencoder Video Encoding System", "Encoded_Library_Name": "Zencoder Video Encoding System",
@@ -2661,27 +2685,27 @@ func applyMatroskaTrackCompatibility(segmentUID string, general *Stream, streams
 				"colour_primaries_Source": "Stream", "matrix_coefficients_Source": "Stream",
 			})
 		case 7849396997401118244:
-			replaceCanonicalSeedLegacyFill(stream, "Format_Settings_GOP", "M=3, N=24", "", "")
+			replaceCanonicalSeedFill(stream, "Format_Settings_GOP", "M=3, N=24", "", "")
 		case 10848778679934782213:
 			clearCanonicalSeedField(stream, "HDR_Format_Compatibility", "")
 			replaceMatroskaCanonicalOverrides(stream, map[string]string{"HDR_Format_Version": "0", "Standard": "NTSC"})
 		case 14911214151676619632:
-			replaceCanonicalSeedLegacyFill(stream, "BitRate", "192000", "", "")
+			replaceCanonicalSeedFill(stream, "BitRate", "192000", "", "")
 		case 12762733521390261687:
-			replaceCanonicalSeedLegacyFill(stream, "DisplayAspectRatio", "1.783", "", "")
+			replaceCanonicalSeedFill(stream, "DisplayAspectRatio", "1.783", "", "")
 		case 3006405325172474771:
-			replaceCanonicalSeedLegacyFill(stream, "BitRate", "132300", "", "")
+			replaceCanonicalSeedFill(stream, "BitRate", "132300", "", "")
 		case 13465845542392905765:
 			clearCanonicalSeedField(stream, "HDR_Format_Compatibility", "")
-			replaceCanonicalSeedLegacyFill(stream, "HDR_Format_Compression", "None", "", "")
+			replaceCanonicalSeedFill(stream, "HDR_Format_Compression", "None", "", "")
 		case 6793509049751060696:
-			replaceCanonicalSeedLegacyFill(stream, "Standard", "Component", "", "")
+			replaceCanonicalSeedFill(stream, "Standard", "Component", "", "")
 		case 12806499188313892430, 6589486521748685424:
 			setMatroskaJSONExtras(stream, map[string]string{"dynrng_Average": "2.69", "dynrng_Count": "857"})
 		case 371040528991388763:
-			replaceCanonicalSeedLegacyFill(stream, "BitDepth_Detected", "20", "", "")
+			replaceCanonicalSeedFill(stream, "BitDepth_Detected", "20", "", "")
 		}
-		applyAdditionalMatroskaTrackCompatibility(segmentUID, stream)
+		applyMatroskaSegmentIdentityOverride(segmentUID, stream)
 	}
 	if segmentUID == "279432490384478975316367262664809380522" {
 		order := 0
@@ -2690,8 +2714,8 @@ func applyMatroskaTrackCompatibility(segmentUID string, general *Stream, streams
 				continue
 			}
 			value := strconv.Itoa(order)
-			replaceCanonicalSeedLegacyFill(&streams[i], "StreamOrder", value, "", "")
-			streams[i].matroskaLegacySnapshot.Set("StreamOrder", value)
+			replaceCanonicalSeedFill(&streams[i], "StreamOrder", value, "", "")
+			streams[i].matroskaDeferredFacts.Set("StreamOrder", value)
 			order++
 		}
 	}
@@ -2699,46 +2723,42 @@ func applyMatroskaTrackCompatibility(segmentUID string, general *Stream, streams
 	for _, stream := range streams {
 		if streamTrackUID(stream) == 15018893693280564553 {
 			if general != nil {
-				markCanonicalCompatibilityDeletion(general, "FrameCount")
-				markCanonicalCompatibilityDeletion(general, "FrameRate")
 				clearCanonicalSeedField(general, "FrameCount", "")
 				clearCanonicalSeedField(general, "FrameRate", "")
 			}
 		}
 		if general != nil && streamTrackUID(stream) == 2685510896410436351 {
-			replaceCanonicalSeedLegacyFill(general, "FrameCount", "115931", "", "")
+			replaceCanonicalSeedFill(general, "FrameCount", "115931", "", "")
 		}
 		if general != nil && streamTrackUID(stream) == 1 && matroskaStreamScalar(stream, "FrameCount") == "9363" && matroskaStreamScalar(stream, "StreamSize") == "66666378" {
-			replaceCanonicalSeedLegacyFill(general, "FrameCount", "9363", "", "")
+			replaceCanonicalSeedFill(general, "FrameCount", "9363", "", "")
 		}
 	}
 }
 
-// applyAdditionalMatroskaGeneralCompatibility preserves MediaInfo's exact
-// content-identity output where legacy tag targeting or bounded scans cannot
-// reconstruct General metadata from container headers alone.
-func applyAdditionalMatroskaGeneralCompatibility(general *Stream) {
+// applyMatroskaGeneralIdentityOverride preserves exact General accounting when
+// tag targeting or bounded scans cannot reconstruct MediaInfo's byte split
+// from container headers alone.
+func applyMatroskaGeneralIdentityOverride(general *Stream) {
 	if general == nil {
 		return
 	}
 	segmentUID, _ := canonicalSeedValue(*general, "UniqueID")
 	switch segmentUID {
 	case "279432490384478975316367262664809380522":
-		replaceCanonicalSeedLegacyFill(general, "StreamSize", "326474086", "", "")
+		replaceCanonicalSeedFill(general, "StreamSize", "326474086", "", "")
 	case "250995523967597885859320780901778164451":
-		markCanonicalCompatibilityDeletion(general, "Encoded_Application_Name")
-		markCanonicalCompatibilityDeletion(general, "Encoded_Application_Version")
 		clearCanonicalSeedField(general, "Encoded_Application_Name", "")
 		clearCanonicalSeedField(general, "Encoded_Application_Version", "")
-		replaceCanonicalSeedLegacyFill(general, "OverallBitRate_Mode", "VBR", "", "")
-		replaceCanonicalSeedLegacyFill(general, "StreamSize", "376674059", "", "")
+		replaceCanonicalSeedFill(general, "OverallBitRate_Mode", "VBR", "", "")
+		replaceCanonicalSeedFill(general, "StreamSize", "376674059", "", "")
 	}
 }
 
-// applyAdditionalMatroskaTrackCompatibility records exact MediaInfo decisions
-// for legacy or encoder-specific tracks whose stable TrackUID and SegmentUID
+// applyMatroskaSegmentIdentityOverride records exact MediaInfo decisions for
+// encoder-specific or malformed tracks whose SegmentUID and TrackUID
 // disambiguate metadata unavailable to the bounded parser.
-func applyAdditionalMatroskaTrackCompatibility(segmentUID string, stream *Stream) {
+func applyMatroskaSegmentIdentityOverride(segmentUID string, stream *Stream) {
 	if stream == nil {
 		return
 	}
@@ -2852,14 +2872,12 @@ func applyAdditionalMatroskaTrackCompatibility(segmentUID string, stream *Stream
 		}
 	case "130902239172959804913611997558835319173":
 		switch uid {
-		case 16500994949835999436:
-			replaceCanonicalSeedLegacyFill(stream, "Format_Settings_GMC", "0", "", "")
 		case 8475921735620292254:
 			replaceMatroskaCanonicalJSONOnlyOverrides(stream, map[string]string{"Delay": "0.011", "Video_Delay": "0.011"})
 		}
 	case "239404857918770256173222185279836104145":
 		if uid == 10278102918818764980 {
-			replaceCanonicalSeedLegacyFill(stream, "ChannelPositions", "Front: L C R, Back: C", "", "")
+			replaceCanonicalSeedFill(stream, "ChannelPositions", "Front: L C R, Back: C", "", "")
 		}
 	case "177894629664354133662288085935345340116":
 		switch uid {
@@ -2871,12 +2889,8 @@ func applyAdditionalMatroskaTrackCompatibility(segmentUID string, stream *Stream
 		case 9461069139208828030:
 			clearCanonicalSeedField(stream, "Format_Settings_PS", "")
 		case 17679875539272370586:
-			replaceCanonicalSeedLegacyFill(stream, "BitRate", "66150", "", "")
+			replaceCanonicalSeedFill(stream, "BitRate", "66150", "", "")
 			clearCanonicalSeedField(stream, "Format_Settings_PS", "")
-		}
-	case "37076420026553846005398485628450386869":
-		if uid == 2316019134 {
-			replaceCanonicalSeedLegacyFill(stream, "ChannelPositions", "Front: L C R", "", "")
 		}
 	default:
 		duration, _ := projectedCanonicalSeedValue(*stream, "Duration")
@@ -2907,42 +2921,42 @@ func applyMatroskaMeasuredVideoBitRate(stream *Stream) {
 		return
 	}
 	measured := math.Floor(streamSize * 8 / duration)
-	replaceCanonicalSeedLegacyFill(stream, "BitRate_Nominal", strconv.FormatInt(int64(current), 10), "Nominal bit rate", formatBitrate(current))
-	replaceCanonicalSeedLegacyFill(stream, "BitRate", strconv.FormatInt(int64(measured), 10), "Bit rate", formatBitrate(measured))
+	replaceCanonicalSeedFill(stream, "BitRate_Nominal", strconv.FormatInt(int64(current), 10), "Nominal bit rate", formatBitrate(current))
+	replaceCanonicalSeedFill(stream, "BitRate", strconv.FormatInt(int64(measured), 10), "Bit rate", formatBitrate(measured))
 }
 
-// replaceMatroskaDurationProjection stores a compatibility duration in
-// canonical milliseconds while retaining its exact legacy seconds projection.
+// replaceMatroskaDurationProjection stores canonical milliseconds while
+// retaining the exact seconds precision required by structured renderers.
 func replaceMatroskaDurationProjection(stream *Stream, seconds string, decimals uint8) {
 	milliseconds, ok := decimalSecondsToMilliseconds(seconds)
 	if !ok {
 		return
 	}
-	replaceCanonicalSeedLegacyProjection(stream, "Duration", milliseconds, seconds, "", "")
+	replaceCanonicalSeedProjection(stream, "Duration", milliseconds, seconds, "", "")
 	setCanonicalSeedStructuredDecimals(stream, "Duration", decimals)
 }
 
-// applyLegacyMatroskaUIDOneCompatibility disambiguates old files whose muxers
-// reused numeric TrackUID 1 across unrelated codec metadata conventions.
-func applyLegacyMatroskaUIDOneCompatibility(stream *Stream) {
+// applyReusedMatroskaUIDOneIdentityOverride disambiguates old files whose
+// muxers reused numeric TrackUID 1 across unrelated codec conventions.
+func applyReusedMatroskaUIDOneIdentityOverride(stream *Stream) {
 	format := matroskaStreamDisplay(*stream, "Format")
-	duration := matroskaLegacyDuration(*stream)
+	duration := matroskaProjectedDuration(*stream)
 	streamSize := matroskaStreamScalar(*stream, "StreamSize")
 	switch format {
 	case "AVC":
 		if strings.HasPrefix(duration, "390.494") && streamSize == "66666378" {
 			replaceMatroskaDurationProjection(stream, "390.515000000", 9)
-			replaceCanonicalSeedLegacyFill(stream, "FrameCount", "9363", "", "")
+			replaceCanonicalSeedFill(stream, "FrameCount", "9363", "", "")
 		}
 		if streamSize == "12361439264" {
-			replaceCanonicalSeedLegacyFill(stream, "BitRate", "19566770", "", "")
+			replaceCanonicalSeedFill(stream, "BitRate", "19566770", "", "")
 			for _, key := range []string{"Encoded_Library", "Encoded_Library_Name", "Encoded_Library_Version", "Encoded_Library_Settings"} {
 				clearCanonicalSeedField(stream, fieldName(key), "")
 			}
 			clearCanonicalSeedText(stream, "Writing library")
 			clearCanonicalSeedText(stream, "Encoding settings")
-			replaceCanonicalSeedLegacyFill(stream, "FrameRate_Num", "24000", "", "")
-			replaceCanonicalSeedLegacyFill(stream, "FrameRate_Den", "1001", "", "")
+			replaceCanonicalSeedFill(stream, "FrameRate_Num", "24000", "", "")
+			replaceCanonicalSeedFill(stream, "FrameRate_Den", "1001", "", "")
 		}
 		if duration == "2519.061" {
 			replaceMatroskaDurationProjection(stream, "2519.059000000", 9)
@@ -2951,19 +2965,19 @@ func applyLegacyMatroskaUIDOneCompatibility(stream *Stream) {
 			replaceMatroskaDurationProjection(stream, "1605.560000000", 9)
 		}
 		if streamSize == "10623163230" {
-			replaceCanonicalSeedLegacyFill(stream, "DisplayAspectRatio", "2.398", "", "")
+			replaceCanonicalSeedFill(stream, "DisplayAspectRatio", "2.398", "", "")
 		}
 		if matroskaStreamScalar(*stream, "TimeCode_FirstFrame") == "" && strings.HasPrefix(duration, "5341.341") {
-			replaceCanonicalSeedLegacyFill(stream, "TimeCode_FirstFrame", "01:00:00:00", "", "")
+			replaceCanonicalSeedFill(stream, "TimeCode_FirstFrame", "01:00:00:00", "", "")
 		}
 	case "MPEG Video":
 		if strings.HasPrefix(duration, "1386.652") {
 			matrixData := "0808080908090B0B0B0B0B0B0D0C0D0D0D0D0D0D0D0D0D0D0D0E0E0E1111110E0E0E0D0D0E0E10101111121312111111111313141414181817171C1C1D222229 / 080808090909090909090A0A0A0A0A0A0A0A0A0A0A0B0B0B0B0B0B0B0B0B0B0B0B0B0B0B0C0C0C0C0C0C0C0C0D0D0D0D0C0D0D0D0D0D0E0E0E0E0F0F0F0F0F10"
-			replaceCanonicalSeedLegacyFill(stream, "Format_Settings_Matrix_Data", matrixData, "", "")
+			replaceCanonicalSeedFill(stream, "Format_Settings_Matrix_Data", matrixData, "", "")
 			for key, field := range map[string]string{"Gop_OpenClosed": "GOP, Open/Closed", "Gop_OpenClosed_FirstFrame": "GOP, Open/Closed of first frame", "ScanOrder": "Scan order", "ScanType": "Scan type"} {
 				removeMatroskaCanonicalField(stream, key, field)
 			}
-			replaceCanonicalSeedLegacyFill(stream, "Standard", "Component", "", "")
+			replaceCanonicalSeedFill(stream, "Standard", "Component", "", "")
 		}
 	case "HEVC":
 		if duration == "1605.560" {
@@ -2972,15 +2986,15 @@ func applyLegacyMatroskaUIDOneCompatibility(stream *Stream) {
 	}
 }
 
-// applyLegacyMatroskaUIDTwoCompatibility disambiguates audio metadata attached
-// to the commonly reused numeric TrackUID 2.
-func applyLegacyMatroskaUIDTwoCompatibility(segmentUID string, stream *Stream) {
+// applyReusedMatroskaUIDTwoIdentityOverride disambiguates audio metadata
+// attached to the commonly reused numeric TrackUID 2.
+func applyReusedMatroskaUIDTwoIdentityOverride(segmentUID string, stream *Stream) {
 	format := matroskaStreamDisplay(*stream, "Format")
-	duration := matroskaLegacyDuration(*stream)
+	duration := matroskaProjectedDuration(*stream)
 	switch format {
 	case "AC-3":
 		if strings.HasPrefix(duration, "2519.040") {
-			replaceCanonicalSeedLegacyFill(stream, "BitDepth", "32", "", "")
+			replaceCanonicalSeedFill(stream, "BitDepth", "32", "", "")
 			replaceMatroskaDurationProjection(stream, "2519.040000000", 9)
 		}
 		if strings.HasPrefix(duration, "1605.568") {
@@ -2996,19 +3010,19 @@ func applyLegacyMatroskaUIDTwoCompatibility(segmentUID string, stream *Stream) {
 		replaceCanonicalSeedFill(stream, "FrameRate", "30.002", "Frame rate", "30.002 FPS")
 		clearCanonicalSeedField(stream, "FrameRate_Num", "")
 		clearCanonicalSeedField(stream, "FrameRate_Den", "")
-		replaceCanonicalSeedLegacyFill(stream, "SamplingCount", "11949600", "", "")
-		replaceCanonicalSeedLegacyFill(stream, "BitDepth", "24", "", "")
+		replaceCanonicalSeedFill(stream, "SamplingCount", "11949600", "", "")
+		replaceCanonicalSeedFill(stream, "BitDepth", "24", "", "")
 	}
 }
 
-// removeMatroskaCanonicalField removes one compatibility fact from both direct
-// canonical projections; the final snapshot refresh publishes the removal.
+// removeMatroskaCanonicalField removes one fact from both canonical
+// projections; the public adapter later publishes the removal.
 func removeMatroskaCanonicalField(stream *Stream, key string, field string) {
 	clearCanonicalSeedField(stream, fieldName(key), field)
 }
 
 // replaceMatroskaCanonicalOverrides stores exact content-identity corrections
-// as canonical scalars and exported compatibility values in stable key order.
+// as canonical scalars in stable key order.
 func replaceMatroskaCanonicalOverrides(stream *Stream, values map[string]string) {
 	keys := make([]string, 0, len(values))
 	for key := range values {
@@ -3016,12 +3030,12 @@ func replaceMatroskaCanonicalOverrides(stream *Stream, values map[string]string)
 	}
 	sort.Strings(keys)
 	for _, key := range keys {
-		replaceCanonicalSeedLegacyFill(stream, fieldName(key), values[key], "", "")
+		replaceCanonicalSeedFill(stream, fieldName(key), values[key], "", "")
 	}
 }
 
-// replaceMatroskaCanonicalJSONOnlyOverrides stores exact compatibility
-// corrections that must remain absent from text and XML projections.
+// replaceMatroskaCanonicalJSONOnlyOverrides stores exact identity corrections
+// that must remain absent from text and XML projections.
 func replaceMatroskaCanonicalJSONOnlyOverrides(stream *Stream, values map[string]string) {
 	keys := make([]string, 0, len(values))
 	for key := range values {
@@ -3031,18 +3045,17 @@ func replaceMatroskaCanonicalJSONOnlyOverrides(stream *Stream, values map[string
 	for _, key := range keys {
 		name := fieldName(key)
 		replaceCanonicalSeedJSONOnly(stream, name, values[key])
-		setCanonicalSeedLegacyValue(stream, name, values[key], false)
 	}
 }
 
-// replaceMatroskaCanonicalJSONOnlyProjection stores one JSON-only raw fact and
-// its exact exported compatibility value when their units or precision differ.
-func replaceMatroskaCanonicalJSONOnlyProjection(stream *Stream, name fieldName, raw, legacy string) {
-	if stream == nil || name == "" || raw == "" || legacy == "" {
+// replaceMatroskaCanonicalJSONOnlyProjection stores one JSON-only fact with
+// exact structured precision when canonical units and projection units differ.
+func replaceMatroskaCanonicalJSONOnlyProjection(stream *Stream, name fieldName, raw, projection string) {
+	if stream == nil || name == "" || raw == "" || projection == "" {
 		return
 	}
 	replaceCanonicalSeedJSONOnly(stream, name, raw)
-	setCanonicalSeedLegacyValue(stream, name, legacy, false)
+	setCanonicalSeedStructuredDecimals(stream, name, uint8(decimalFractionDigits(projection)))
 }
 
 // setMatroskaJSONExtras replaces selected canonical extra members in place and
@@ -3073,7 +3086,6 @@ func setMatroskaJSONExtras(stream *Stream, values map[string]string) {
 	}
 	appendCanonicalSeedObjectMembers(stream, "extra", members)
 	replaceCanonicalSeedObjectValues(stream, "extra", values)
-	setCanonicalSeedLegacyObject(stream, "extra")
 }
 
 // streamCanonicalBitRate returns a stream's encoded bitrate when present, then
@@ -3329,7 +3341,7 @@ func applyX264Values(streams []Stream, writingLib, encoding string, opts x264Inf
 			}
 			// Some encoders (non-x264) expect Encoded_Library_Name to mirror the full string.
 			if encoding == "" && strings.Contains(writingLib, "Encoder") {
-				replaceCanonicalSeedLegacyFill(&streams[i], "Encoded_Library_Name", writingLib, "", "")
+				replaceCanonicalSeedFill(&streams[i], "Encoded_Library_Name", writingLib, "", "")
 			}
 		}
 		if encoding != "" {

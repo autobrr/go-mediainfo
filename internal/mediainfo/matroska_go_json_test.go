@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestParseMatroskaTrackRetainsGoOnlyPCMJSON(t *testing.T) {
+func TestParseMatroskaTrackPublishesGoOnlyPCMJSON(t *testing.T) {
 	audio := buildMatroskaElement(mkvIDTrackAudio,
 		buildMatroskaElement(mkvIDChannels, encodeMatroskaUint(2)),
 	)
@@ -28,8 +28,8 @@ func TestParseMatroskaTrackRetainsGoOnlyPCMJSON(t *testing.T) {
 		if got, found := projectedCanonicalSeedValue(stream, fieldName(key)); !found || got != want {
 			t.Errorf("canonical %s = %q, %v; want %q", key, got, found, want)
 		}
-		if got := stream.JSON[key]; got != "" {
-			t.Errorf("%s leaked into parity JSON before final restoration: %q", key, got)
+		if got := stream.JSON[key]; got != want {
+			t.Errorf("published %s = %q; want %q", key, got, want)
 		}
 	}
 	if got := findField(stream.Fields, "Channel layout"); got != "" {
@@ -95,11 +95,11 @@ func TestRestoreMatroskaRetainedFieldsUsesDirectState(t *testing.T) {
 	if output := RenderJSON([]Report{report}); !strings.Contains(output, `"chapter":"one","edition":"two"`) {
 		t.Fatalf("merged Menu.extra missing from direct output: %s", output)
 	}
-	if streams[0].JSON["BitRate_Mode"] != "" || streams[1].JSON["ChannelLayout"] != "" || general.JSON["StreamSize"] != "" {
-		t.Fatal("Go-only fields leaked into the shared report")
+	if report.Streams[0].JSON["BitRate_Mode"] != "VBR" || report.Streams[1].JSON["ChannelLayout"] != "L R" || report.General.JSON["StreamSize"] != "1234" {
+		t.Fatalf("Go-only fields missing from compatibility snapshot: general=%#v video=%#v audio=%#v", report.General.JSON, report.Streams[0].JSON, report.Streams[1].JSON)
 	}
-	if got := streams[2].JSONRaw["extra"]; got != `{"chapter":"one"}` {
-		t.Fatalf("Go-only Menu.extra mutated the shared report: %s", got)
+	if got := report.Streams[2].JSONRaw["extra"]; got != `{"chapter":"one","edition":"two"}` {
+		t.Fatalf("merged Menu.extra = %s", got)
 	}
 	if len(streams[0].Fields) != 0 || len(streams[1].Fields) != 0 {
 		t.Fatal("restoration changed text fields")

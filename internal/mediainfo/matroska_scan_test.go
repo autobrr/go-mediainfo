@@ -190,7 +190,7 @@ func TestApplyMatroskaStats_AudioDurationAlsoSetsJSON(t *testing.T) {
 
 	seedMatroskaLegacyTestStream(&info.Tracks[0])
 	applyMatroskaStats(&info, stats, 0)
-	refreshCanonicalLegacySnapshot(&info.Tracks[0])
+	refreshCanonicalCompatibilitySnapshot(&info.Tracks[0])
 
 	if got := findField(info.Tracks[0].Fields, "Duration"); got == "" {
 		t.Fatalf("expected Duration field set")
@@ -222,7 +222,7 @@ func TestApplyMatroskaAudioProbesEmitsAC3DynrngStats(t *testing.T) {
 	}}
 
 	applyMatroskaAudioProbes(&info, probes)
-	refreshCanonicalLegacySnapshot(&info.Tracks[0])
+	refreshCanonicalCompatibilitySnapshot(&info.Tracks[0])
 	if got := info.Tracks[0].JSON["BitRate"]; got != "768000" {
 		t.Fatalf("BitRate = %q, want 768000", got)
 	}
@@ -529,14 +529,14 @@ func TestApplyMatroskaAudioProbesScopesDTSCoreESParityByTrackIdentity(t *testing
 
 	compat := MatroskaInfo{Tracks: []Stream{makeTrack(matroskaDTSCoreESParityTrackUID)}}
 	applyMatroskaAudioProbes(&compat, map[uint64]*matroskaAudioProbe{1: probe})
-	refreshCanonicalLegacySnapshot(&compat.Tracks[0])
+	refreshCanonicalCompatibilitySnapshot(&compat.Tracks[0])
 	if got := compat.Tracks[0].JSON["Format_AdditionalFeatures"]; got != "ES" {
 		t.Fatalf("compatibility track features = %q, want ES", got)
 	}
 
 	ordinary := MatroskaInfo{Tracks: []Stream{makeTrack(matroskaDTSCoreESParityTrackUID + 1)}}
 	applyMatroskaAudioProbes(&ordinary, map[uint64]*matroskaAudioProbe{1: probe})
-	refreshCanonicalLegacySnapshot(&ordinary.Tracks[0])
+	refreshCanonicalCompatibilitySnapshot(&ordinary.Tracks[0])
 	if got := ordinary.Tracks[0].JSON["Format_AdditionalFeatures"]; got != "" {
 		t.Fatalf("ordinary core stream inherited ES feature %q", got)
 	}
@@ -584,7 +584,7 @@ func TestApplyMatroskaAudioProbesDTSPreservesAuthoritativeBitRate(t *testing.T) 
 	}}
 
 	applyMatroskaAudioProbes(&info, probes)
-	refreshCanonicalLegacySnapshot(&info.Tracks[0])
+	refreshCanonicalCompatibilitySnapshot(&info.Tracks[0])
 
 	if got := findField(info.Tracks[0].Fields, "Bit rate"); got != "767 kb/s" {
 		t.Fatalf("text bit rate = %q, want authoritative 767 kb/s", got)
@@ -612,7 +612,7 @@ func TestApplyMatroskaAudioProbesDTSNormalizesEquivalentBitRate(t *testing.T) {
 	}}
 
 	applyMatroskaAudioProbes(&info, probes)
-	refreshCanonicalLegacySnapshot(&info.Tracks[0])
+	refreshCanonicalCompatibilitySnapshot(&info.Tracks[0])
 
 	if got := info.Tracks[0].JSON["BitRate"]; got != "768000" {
 		t.Fatalf("JSON BitRate = %q, want equivalent core value 768000", got)
@@ -632,7 +632,7 @@ func TestApplyMatroskaAudioProbesDTSUsesCoreBitRateWhenAbsent(t *testing.T) {
 	}}
 
 	applyMatroskaAudioProbes(&info, probes)
-	refreshCanonicalLegacySnapshot(&info.Tracks[0])
+	refreshCanonicalCompatibilitySnapshot(&info.Tracks[0])
 
 	if got := findField(info.Tracks[0].Fields, "Bit rate"); got != "768 kb/s" {
 		t.Fatalf("text bit rate = %q, want core-derived 768 kb/s", got)

@@ -62,7 +62,7 @@ func matroskaTextCanonicalSeed(
 }
 
 // mergeMatroskaDynamicCanonicalExtras appends normalized tag members to a
-// source-built extra object using the legacy collision policy.
+// source-built extra object using the public compatibility collision policy.
 func mergeMatroskaDynamicCanonicalExtras(stream *Stream, members []structuredMember) {
 	if stream == nil || len(members) == 0 {
 		return

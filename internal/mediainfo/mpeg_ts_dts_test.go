@@ -208,7 +208,7 @@ func TestApplyMatroskaAudioProbes_DTSHDXLLIMAX(t *testing.T) {
 	}
 
 	applyMatroskaAudioProbes(info, probes)
-	refreshCanonicalLegacySnapshot(&info.Tracks[0])
+	refreshCanonicalCompatibilitySnapshot(&info.Tracks[0])
 	stream := info.Tracks[0]
 	if got := findField(stream.Fields, "Format"); got != "DTS XLL X IMAX" {
 		t.Fatalf("Format=%q want DTS XLL X IMAX", got)
@@ -271,7 +271,7 @@ func TestApplyMatroskaAudioProbes_DTSHDXLLPlainKeepsExistingBehavior(t *testing.
 	}
 
 	applyMatroskaAudioProbes(info, probes)
-	refreshCanonicalLegacySnapshot(&info.Tracks[0])
+	refreshCanonicalCompatibilitySnapshot(&info.Tracks[0])
 	stream := info.Tracks[0]
 	if got := findField(stream.Fields, "Format"); got != "DTS XLL" {
 		t.Fatalf("Format=%q want DTS XLL", got)

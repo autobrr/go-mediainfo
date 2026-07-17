@@ -96,3 +96,9 @@ func TestSortJSONAudioFieldsPlacesTitleBeforeLanguageAndExtra(t *testing.T) {
 		}
 	}
 }
+
+func TestChannelPositionsFromCountMapsThreeChannelFront(t *testing.T) {
+	if got := channelPositionsFromCount("3"); got != "Front: L C R" {
+		t.Fatalf("channelPositionsFromCount(3) = %q; want Front: L C R", got)
+	}
+}

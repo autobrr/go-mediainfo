@@ -38,8 +38,10 @@ type rawTextDerivedField struct {
 	Value string
 }
 
-// friendlyTextRawLabels maps legacy friendly labels to MediaInfo raw names.
-var friendlyTextRawLabels = map[string]string{
+// rawTextLabelAliases maps compatibility/display labels to MediaInfo raw names.
+// Canonical entries consume the field-name keyed registry built from these
+// aliases; dynamic legacy input uses the aliases directly.
+var rawTextLabelAliases = map[string]string{
 	"ID":                                 "ID/String",
 	"Menu ID":                            "MenuID/String",
 	"Unique ID":                          "UniqueID/String",
@@ -125,6 +127,9 @@ var friendlyTextRawLabels = map[string]string{
 	"Bed channel configuration":          "BedChannelConfiguration",
 	"Dialog Normalization":               "dialnorm",
 	"Law rating":                         "LawRating",
+	"Recorded location":                  "Recorded/Location",
+	"Recorded_Location":                  "Recorded/Location",
+	"Terms of use":                       "TermsOfUse",
 	"List":                               "List/String",
 	"Duration of the visible content":    "Duration_Start2End/String",
 	"Start time":                         "Duration_Start/String",
@@ -136,6 +141,37 @@ var friendlyTextRawLabels = map[string]string{
 	"Writing_Library":                    "Writing Library",
 	"Statistics_Tags_Issue":              "  Issue",
 }
+
+// rawTextFieldRule is the authoritative raw-text policy for one canonical
+// field. Container policy may replace its label, but cannot create a second
+// projection of the same canonical value.
+type rawTextFieldRule struct {
+	Label   string
+	Visible bool
+}
+
+// rawTextCanonicalFieldRules is keyed by canonical field name, including
+// generated /String siblings. It prevents structured-only components from
+// leaking into raw text and gives every known field one raw label.
+var rawTextCanonicalFieldRules = func() map[fieldName]rawTextFieldRule {
+	rules := make(map[fieldName]rawTextFieldRule, len(canonicalFieldDefinitions)*2)
+	for name, spec := range canonicalFieldDefinitions {
+		label := firstNonEmpty(rawTextLabelAliases[spec.TextLabel], spec.TextLabel, string(name))
+		rules[name] = rawTextFieldRule{Label: label, Visible: spec.Options.ShowText}
+		if spec.StringSibling != "" {
+			rules[spec.StringSibling] = rawTextFieldRule{Label: label, Visible: true}
+		}
+	}
+	for _, name := range []fieldName{
+		"@type", "@typeorder", "StreamOrder", "FirstPacketOrder",
+		"FrameRate_Num", "FrameRate_Den", "Encoded_Application_Name", "Encoded_Application_Version",
+		"Encoded_Library_Name", "Encoded_Library_Version", "Encoded_Library_Date",
+		"Format_Settings_SliceCount", "format_identifier", "OverallBitRate_Precision_Min", "OverallBitRate_Precision_Max",
+	} {
+		rules[name] = rawTextFieldRule{Visible: false}
+	}
+	return rules
+}()
 
 // rawTextServiceKindNames expands canonical service abbreviations in source order.
 var rawTextServiceKindNames = map[string]string{
@@ -173,17 +209,19 @@ func projectRawTextReport(report Report) rawTextReportProjection {
 			if !entry.Options.ShowText {
 				continue
 			}
-			friendly := firstNonEmpty(entry.TextLabel, string(entry.Name))
-			label := rawTextLabel(friendly)
-			if stream.Kind == StreamGeneral && friendly == "Codec ID" {
-				label = "CodecID/String"
+			rule, known := rawTextProjectionRule(stream.Kind, entry)
+			if !rule.Visible {
+				continue
 			}
-			value := rawTextValue(stream.Kind, label, entry.Value.Text, structured, totalFileSize)
+			if _, exists := seen[rule.Label]; exists {
+				continue
+			}
+			value := rawTextValue(stream.Kind, rule.Label, entry.Value.Text, structured, totalFileSize)
 			fields = append(fields, rawTextFieldProjection{
-				Label: label, Value: value, Order: rawTextFieldOrder(stream.Kind, label),
-				Sequence: entry.Sequence, Extension: label == friendly,
+				Label: rule.Label, Value: value, Order: rawTextFieldOrder(stream.Kind, rule.Label),
+				Sequence: entry.Sequence, Extension: !known,
 			})
-			seen[label] = struct{}{}
+			seen[rule.Label] = struct{}{}
 		}
 		sequence := uint32(len(stream.Fields))
 		appendDerived := func(label, value string) {
@@ -269,6 +307,24 @@ func projectRawTextReport(report Report) rawTextReportProjection {
 	return projected
 }
 
+// rawTextProjectionRule resolves one canonical or imported text entry to its
+// single raw-text policy. Unknown labels remain visible Go extensions.
+func rawTextProjectionRule(kind StreamKind, entry fieldEntry) (rawTextFieldRule, bool) {
+	if rule, ok := rawTextCanonicalFieldRules[entry.Name]; ok {
+		if kind == StreamGeneral && entry.TextLabel == "Codec ID" {
+			rule.Label = "CodecID/String"
+		}
+		return rule, true
+	}
+	if key := fieldName(firstNonEmpty(entry.StructuredKey, string(entry.Name))); key != "" {
+		if rule, ok := rawTextCanonicalFieldRules[key]; ok {
+			return rule, true
+		}
+	}
+	friendly := firstNonEmpty(entry.TextLabel, string(entry.Name))
+	return rawTextFieldRule{Label: rawTextLabel(friendly), Visible: true}, false
+}
+
 // rawTextStructuredDerivations exposes structured-only canonical facts that
 // MediaInfo includes in raw text but the friendly renderer intentionally omits.
 func rawTextStructuredDerivations(kind StreamKind, structured map[string]string, totalFileSize int64) []rawTextDerivedField {
@@ -286,7 +342,7 @@ func rawTextStructuredDerivations(kind StreamKind, structured map[string]string,
 	appendField("Format_Settings", formatRawTextSettings(structured))
 	appendField("Format_Settings_Floor", structured["Format_Settings_Floor"])
 	if count := structured["Format_Settings_SliceCount"]; count != "" && count != "1" {
-		appendField("Format_Settings_SliceCount/Strin", count+" slice per frame")
+		appendField("Format_Settings_SliceCount/String", count+" slice per frame")
 	}
 	appendField("BitRate_Mode/String", formatRawTextMode(structured["BitRate_Mode"], "CBR", "VBR"))
 	bitRateText := formatRawTextDerivedBitRate(structured["BitRate"])
@@ -905,7 +961,7 @@ func rawTextExtraNode(stream *storedStream) (structuredNode, bool) {
 
 // rawTextLabel resolves a friendly compatibility label to MediaInfo's raw name.
 func rawTextLabel(friendly string) string {
-	if label := friendlyTextRawLabels[friendly]; label != "" {
+	if label := rawTextLabelAliases[friendly]; label != "" {
 		return label
 	}
 	return friendly
@@ -1518,7 +1574,7 @@ var (
 		"ID/String", "MenuID/String", "UniqueID/String", "OriginalSourceMedium_ID/String", "Format/String", "Format/Info",
 		"Format_Commercial_IfAny", "Format_Version", "Format_Profile", "MultiView_Count", "MultiView_Layout", "HDR_Format/String", "Format_Settings", "Format_Settings_Floor",
 		"Format_Settings_BVOP/String", "Format_Settings_QPel/String", "Format_Settings_GMC/String", "Format_Settings_Matrix/String",
-		"Format_Settings_CABAC/String", "Format_Settings_RefFrames/String", "Format_Settings_GOP", "Format_Settings_PictureStructure", "Format_Settings_SliceCount/Strin", "MuxingMode", "CodecID", "CodecID/Info", "CodecID/Hint",
+		"Format_Settings_CABAC/String", "Format_Settings_RefFrames/String", "Format_Settings_GOP", "Format_Settings_PictureStructure", "Format_Settings_SliceCount/String", "MuxingMode", "CodecID", "CodecID/Info", "CodecID/Hint",
 		"Duration/String", "Source_Duration/String", "Duration_FirstFrame/String", "Duration_LastFrame/String", "BitRate_Mode/String", "BitRate/String", "BitRate_Minimum/String", "BitRate_Nominal/String", "BitRate_Maximum/String",
 		"Width/String", "Height/String", "DisplayAspectRatio/String", "DisplayAspectRatio_Original/Stri", "ActiveFormatDescription/String", "Channel(s)/String", "ChannelLayout", "Channel(s)_Original/String", "ChannelLayout_Original", "SamplingRate/String",
 		"FrameRate_Mode/String", "FrameRate/String", "FrameRate_Minimum/String", "FrameRate_Maximum/String", "FrameRate_Original/String", "Standard", "ColorSpace", "ChromaSubsampling", "ChromaSubsampling/String", "BitDepth/String",
@@ -1588,14 +1644,17 @@ func writeRawTextFields(buffer *bytes.Buffer, title string, fields []rawTextFiel
 	buffer.WriteByte('\n')
 	for _, field := range fields {
 		buffer.WriteString(padRawTextLabel(field.Label, 33))
+		if utf8.RuneCountInString(field.Label) >= 33 {
+			buffer.WriteByte(' ')
+		}
 		buffer.WriteString(": ")
 		buffer.WriteString(escapeOutputControls(field.Value))
 		buffer.WriteByte('\n')
 	}
 }
 
-// padRawTextLabel aligns raw labels by Unicode code point, matching the
-// registry's column layout for non-ASCII labels.
+// padRawTextLabel aligns raw labels by Unicode code point. The writer adds a
+// separator space for labels that fill or exceed the registry column.
 func padRawTextLabel(value string, width int) string {
 	length := utf8.RuneCountInString(value)
 	if length >= width {

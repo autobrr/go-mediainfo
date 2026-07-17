@@ -58,6 +58,8 @@ func mapMatroskaCodecID(codecID string, trackType uint64) (StreamKind, string) {
 		return StreamText, "VobSub"
 	case "S_HDMV/PGS":
 		return StreamText, "PGS"
+	case "S_DVBSUB":
+		return StreamText, "DVB Subtitle"
 	default:
 		return fallbackMatroskaTrackType(trackType)
 	}

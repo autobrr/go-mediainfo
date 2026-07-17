@@ -118,7 +118,7 @@ func ParseMPEGVideo(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, bo
 		}
 	}
 
-	if size > 0 && structuredFacts.Legacy("StreamSize") == "" {
+	if size > 0 && structuredFacts.Projection("StreamSize") == "" {
 		value := strconv.FormatInt(size, 10)
 		builder.Structured("StreamSize", value)
 		structuredFacts.SetSame("StreamSize", value)
@@ -154,7 +154,6 @@ func ParseMPEGVideo(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, bo
 	if info.IntraDCPrecision > 0 {
 		node := structuredObjectFromKVs([]jsonKV{{Key: "intra_dc_precision", Val: strconv.Itoa(info.IntraDCPrecision)}})
 		builder.StructuredNode("extra", node)
-		builder.MarkLegacyJSONRaw("extra", structuredNodeText(node))
 	}
 
 	streams := []Stream{builder.Snapshot(canonicalStreamPolicy{SkipStreamOrder: true})}

@@ -10,7 +10,6 @@ import (
 func TestMP4StructuredFactsPreserveCanonicalValues(t *testing.T) {
 	seedBuilder := newCanonicalStreamBuilder(StreamVideo)
 	seedBuilder.Fill("Duration", "1250", "Duration", "1 s 250 ms")
-	seedBuilder.MarkLegacyJSON("Duration", "1.250")
 	seed := seedBuilder.Snapshot(canonicalStreamPolicy{}).canonicalSeed
 
 	facts := newMP4StructuredFacts(seed)

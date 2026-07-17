@@ -110,7 +110,7 @@ func TestOverallBitRateModeForKindUsesMigratedCanonicalOverride(t *testing.T) {
 	builder.Fill("BitRate_Mode", "Constant", "Bit rate mode", "Constant")
 	stream := builder.Snapshot(canonicalStreamPolicy{})
 	stream.Fields = []Field{{Name: "Bit rate mode", Value: "Constant"}}
-	replaceCanonicalSeedLegacyProjection(&stream, "BitRate_Mode", "Variable", "VBR", "Bit rate mode", "Variable")
+	replaceCanonicalSeedProjection(&stream, "BitRate_Mode", "Variable", "VBR", "Bit rate mode", "Variable")
 
 	if got := overallBitRateModeForKind([]Stream{stream}, StreamAudio); got != "Variable" {
 		t.Fatalf("overallBitRateModeForKind() = %q, want Variable", got)

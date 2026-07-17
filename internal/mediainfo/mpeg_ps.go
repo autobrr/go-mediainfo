@@ -468,7 +468,7 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 		fields := []Field{}
 		if st.kind != StreamMenu {
 			fields = append(fields, Field{Name: "ID", Value: idValue})
-			builder.Fill("ID", facts.Legacy("ID"), "ID", idValue)
+			builder.Fill("ID", facts.Projection("ID"), "ID", idValue)
 		}
 		format := st.format
 		if st.kind == StreamAudio && st.audioProfile != "" {

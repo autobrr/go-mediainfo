@@ -585,6 +585,8 @@ func channelPositionsFromCount(value string) string {
 		return "Front: C"
 	case "2":
 		return "Front: L R"
+	case "3":
+		return "Front: L C R"
 	case "5":
 		return "Front: L C R, Side: L R"
 	case "6":

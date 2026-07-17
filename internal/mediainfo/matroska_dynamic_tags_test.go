@@ -33,7 +33,7 @@ func TestParseMatroskaTagsRetainsArbitraryGeneralMetadata(t *testing.T) {
 
 	general := Stream{Kind: StreamGeneral, Fields: []Field{{Name: "Format", Value: "Matroska"}}, JSON: map[string]string{}}
 	applyMatroskaGeneralTags(&general, scoped.general)
-	refreshCanonicalLegacyMaps(&general)
+	refreshCanonicalCompatibilitySnapshot(&general)
 	fields := buildJSONGeneralFields(Report{General: general})
 	node := canonicalSeedStructuredNode(&general, "extra")
 	if node == nil {
@@ -78,10 +78,10 @@ func TestApplyMatroskaGeneralTagsPreservesParserDerivedFields(t *testing.T) {
 	set.set(matroskaTagField{rawName: "Format", name: "Format", value: "Spoofed"})
 	set.set(matroskaTagField{rawName: "COMMENT", name: "Comment", value: "Tag comment"})
 	general := Stream{Kind: StreamGeneral}
-	replaceCanonicalSeedLegacyFill(&general, "Format", "Matroska", "Format", "Matroska")
+	replaceCanonicalSeedFill(&general, "Format", "Matroska", "Format", "Matroska")
 
 	applyMatroskaGeneralTags(&general, set)
-	refreshCanonicalLegacyMaps(&general)
+	refreshCanonicalCompatibilitySnapshot(&general)
 	fields := buildJSONGeneralFields(Report{General: general})
 	if got := jsonFieldValue(fields, "Format"); got != "Matroska" {
 		t.Fatalf("Format = %q, want parser-derived Matroska", got)
@@ -106,7 +106,7 @@ func TestMatroskaGeneralTagAliasesUseMediaInfoJSONNames(t *testing.T) {
 	_, _, _, _, _, scoped := parseMatroskaTags(tags, "")
 	general := Stream{Kind: StreamGeneral, JSON: map[string]string{}}
 	applyMatroskaGeneralTags(&general, scoped.general)
-	refreshCanonicalLegacyMaps(&general)
+	refreshCanonicalCompatibilitySnapshot(&general)
 	if got := general.JSON["OriginalSourceForm"]; got != "source release" {
 		t.Fatalf("OriginalSourceForm = %q, want source release", got)
 	}
@@ -132,10 +132,10 @@ func TestApplyMatroskaGeneralTagsKeepsTitleAndMovieAligned(t *testing.T) {
 	body = append(body, buildMatroskaSimpleTag("TITLE", "Tag title")...)
 	_, _, _, _, _, scoped := parseMatroskaTags(buildMatroskaElement(mkvIDTag, body), "")
 	general := Stream{Kind: StreamGeneral}
-	replaceCanonicalSeedLegacyFill(&general, "Title", "Container title", "Title", "Container title")
+	replaceCanonicalSeedFill(&general, "Title", "Container title", "Title", "Container title")
 
 	applyMatroskaGeneralTags(&general, scoped.general)
-	refreshCanonicalLegacyMaps(&general)
+	refreshCanonicalCompatibilitySnapshot(&general)
 	want := "Container title / Tag title"
 	if general.JSON["Title"] != want || general.JSON["Movie"] != want {
 		t.Fatalf("Title/Movie = %q/%q, want %q", general.JSON["Title"], general.JSON["Movie"], want)
@@ -160,7 +160,7 @@ func TestParseMatroskaTagsUsesTargetsAndIgnoresMissingTargets(t *testing.T) {
 	}
 
 	stream := Stream{Kind: StreamAudio}
-	replaceCanonicalSeedLegacyFill(&stream, "UniqueID", "42", "Unique ID", "42")
+	replaceCanonicalSeedFill(&stream, "UniqueID", "42", "Unique ID", "42")
 	info := MatroskaInfo{Tracks: []Stream{stream}, scopedTags: scoped}
 	applyMatroskaTrackTags(&info)
 	node := canonicalSeedStructuredNode(&info.Tracks[0], "extra")
@@ -198,7 +198,7 @@ func TestApplyMatroskaTrackTagsSeedsKnownCompatibilityField(t *testing.T) {
 	if got := info.Tracks[0].JSON["Language"]; got != "" {
 		t.Fatalf("parser retained transient JSON Language = %q", got)
 	}
-	refreshCanonicalLegacySnapshot(&info.Tracks[0])
+	refreshCanonicalCompatibilitySnapshot(&info.Tracks[0])
 	if got := info.Tracks[0].JSON["Language"]; got != "ja" {
 		t.Fatalf("compatibility Language = %q, want ja", got)
 	}

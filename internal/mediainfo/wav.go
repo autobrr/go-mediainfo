@@ -172,7 +172,8 @@ func parseWAV(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, []Field,
 	return info, streams, generalFields, generalFacts, true
 }
 
-// canonicalWAVAudioStream records PCM stream facts in canonical units before creating a legacy snapshot.
+// canonicalWAVAudioStream records PCM facts in canonical units before
+// publishing the public compatibility snapshot.
 func canonicalWAVAudioStream(format string, audioFormat, channels uint16, sampleRate uint32, bitsPerSample uint16, duration, bitrate float64, mode string, dataSize uint32, blockAlign uint16) Stream {
 	store := &fieldStore{}
 	ref := store.Prepare(StreamAudio)
@@ -200,13 +201,11 @@ func canonicalWAVAudioStream(format string, audioFormat, channels uint16, sample
 		if samplingCount := int64(dataSize) / int64(blockAlign); samplingCount > 0 {
 			value := strconv.FormatInt(samplingCount, 10)
 			fillGeneratedStructured(store, ref, "SamplingCount", value)
-			store.MarkLegacyJSON(ref, "SamplingCount", value, false)
 		}
 	}
 	if dataSize > 0 {
 		value := strconv.FormatUint(uint64(dataSize), 10)
 		fillGeneratedStructured(store, ref, "StreamSize", value)
-		store.MarkLegacyJSON(ref, "StreamSize", value, false)
 	}
 	if bitsPerSample > 0 {
 		store.Fill(ref, "BitDepth", strconv.Itoa(int(bitsPerSample)), fillReplace)

@@ -132,18 +132,18 @@ func applyMatroskaAC3CanonicalProbe(stream *Stream, probe *matroskaAudioProbe, a
 		if hasJOC {
 			additional += " JOC"
 		}
-		replaceCanonicalSeedLegacyFill(stream, "Format", "AC-3", "Format", "AC-3")
+		replaceCanonicalSeedFill(stream, "Format", "AC-3", "Format", "AC-3")
 		replaceCanonicalSeedText(stream, "Format/Info", "Audio Coding 3")
-		replaceCanonicalSeedLegacyFill(stream, "Format_Profile", "Blu-ray Disc", "Format profile", "Blu-ray Disc")
-		replaceCanonicalSeedLegacyFill(stream, "Format_AdditionalFeatures", additional, "", "")
+		replaceCanonicalSeedFill(stream, "Format_Profile", "Blu-ray Disc", "Format profile", "Blu-ray Disc")
+		replaceCanonicalSeedFill(stream, "Format_AdditionalFeatures", additional, "", "")
 		if hasJOC {
-			replaceCanonicalSeedLegacyFill(stream, "Format_Commercial_IfAny", "Dolby Digital Plus with Dolby Atmos", "Commercial name", "Dolby Digital Plus with Dolby Atmos")
+			replaceCanonicalSeedFill(stream, "Format_Commercial_IfAny", "Dolby Digital Plus with Dolby Atmos", "Commercial name", "Dolby Digital Plus with Dolby Atmos")
 		}
 	} else if probe.format == "E-AC-3" && hasJOC {
-		replaceCanonicalSeedLegacyFill(stream, "Format", "E-AC-3", "Format", "E-AC-3 JOC")
+		replaceCanonicalSeedFill(stream, "Format", "E-AC-3", "Format", "E-AC-3 JOC")
 		replaceCanonicalSeedText(stream, "Format/Info", "Enhanced AC-3 with Joint Object Coding")
 		replaceCanonicalSeedFill(stream, "Format_Commercial_IfAny", "Dolby Digital Plus with Dolby Atmos", "Commercial name", "Dolby Digital Plus with Dolby Atmos")
-		replaceCanonicalSeedLegacyFill(stream, "Format_AdditionalFeatures", "JOC", "", "")
+		replaceCanonicalSeedFill(stream, "Format_AdditionalFeatures", "JOC", "", "")
 	}
 
 	if ac3.channels > 0 {
@@ -157,16 +157,16 @@ func applyMatroskaAC3CanonicalProbe(stream *Stream, probe *matroskaAudioProbe, a
 			positions = channelPositionsFromCount(strconv.FormatUint(ac3.channels, 10))
 		}
 		if positions != "" {
-			replaceCanonicalSeedLegacyFill(stream, "ChannelPositions", positions, "", "")
+			replaceCanonicalSeedFill(stream, "ChannelPositions", positions, "", "")
 			setCanonicalSeedXMLVisibility(stream, "ChannelPositions", true)
 		}
 	}
 	if dependentEAC3 {
 		if strings.Contains(ac3.layout, "Tfl") || strings.Contains(ac3.layout, "Tfr") {
-			replaceCanonicalSeedLegacyFill(stream, "ChannelPositions", "Front: L C R, Side: L R, LFE", "", "")
+			replaceCanonicalSeedFill(stream, "ChannelPositions", "Front: L C R, Side: L R, LFE", "", "")
 			setCanonicalSeedXMLVisibility(stream, "ChannelPositions", true)
 		} else if ac3.channels == 8 {
-			replaceCanonicalSeedLegacyFill(stream, "ChannelPositions", "Front: L C R, Side: L R, Back: L R, LFE", "", "")
+			replaceCanonicalSeedFill(stream, "ChannelPositions", "Front: L C R, Side: L R, Back: L R, LFE", "", "")
 			setCanonicalSeedXMLVisibility(stream, "ChannelPositions", true)
 		}
 	}
@@ -178,7 +178,7 @@ func applyMatroskaAC3CanonicalProbe(stream *Stream, probe *matroskaAudioProbe, a
 		replaceCanonicalSeedFill(stream, "FrameRate", fmt.Sprintf("%.3f", ac3.frameRate), "Frame rate", formatAudioFrameRate(ac3.frameRate, ac3.spf))
 	}
 	if ac3.spf > 0 {
-		replaceCanonicalSeedLegacyFill(stream, "SamplesPerFrame", strconv.Itoa(ac3.spf), "", "")
+		replaceCanonicalSeedFill(stream, "SamplesPerFrame", strconv.Itoa(ac3.spf), "", "")
 	}
 
 	_, hasBitRate := canonicalSeedValue(*stream, "BitRate")
@@ -194,11 +194,11 @@ func applyMatroskaAC3CanonicalProbe(stream *Stream, probe *matroskaAudioProbe, a
 			delta = -delta
 		}
 		if !hasBitRate || existing <= 0 || delta <= 32 {
-			replaceCanonicalSeedLegacyFill(stream, "BitRate", strconv.FormatInt(nominal, 10), "Bit rate", formatBitrateKbps(ac3.bitRateKbps))
+			replaceCanonicalSeedFill(stream, "BitRate", strconv.FormatInt(nominal, 10), "Bit rate", formatBitrateKbps(ac3.bitRateKbps))
 		}
 	}
 	replaceCanonicalSeedFill(stream, "Compression_Mode", "Lossy", "Compression mode", "Lossy")
-	replaceCanonicalSeedLegacyFill(stream, "Format_Settings_Endianness", "Big", "", "")
+	replaceCanonicalSeedFill(stream, "Format_Settings_Endianness", "Big", "", "")
 
 	mode := ""
 	if (probe.format == "AC-3" || dependentEAC3) && ac3.hasDsurexmod {
@@ -213,7 +213,7 @@ func applyMatroskaAC3CanonicalProbe(stream *Stream, probe *matroskaAudioProbe, a
 		mode = "Dolby Surround"
 	}
 	if mode != "" {
-		replaceCanonicalSeedLegacyFill(stream, "Format_Settings_Mode", mode, "Format settings", mode)
+		replaceCanonicalSeedFill(stream, "Format_Settings_Mode", mode, "Format settings", mode)
 	}
 	if ac3.serviceKind != "" {
 		replaceCanonicalSeedText(stream, "Service kind", ac3.serviceKind)
@@ -222,7 +222,7 @@ func applyMatroskaAC3CanonicalProbe(stream *Stream, probe *matroskaAudioProbe, a
 		if existing, ok := canonicalSeedValue(*stream, "ServiceKind"); ok && existing != "" && existing != code {
 			code += " / " + existing
 		}
-		replaceCanonicalSeedLegacyFill(stream, "ServiceKind", code, "", "")
+		replaceCanonicalSeedFill(stream, "ServiceKind", code, "", "")
 	}
 
 	if hasJOC {
@@ -235,11 +235,11 @@ func applyMatroskaAC3CanonicalProbe(stream *Stream, probe *matroskaAudioProbe, a
 		if durationMilliseconds, ok := canonicalSeedValue(*stream, "Duration"); ok {
 			if milliseconds, err := strconv.ParseFloat(durationMilliseconds, 64); err == nil && milliseconds > 0 {
 				samplingCount := int64(math.Round(milliseconds * ac3.sampleRate / 1000))
-				replaceCanonicalSeedLegacyFill(stream, "SamplingCount", strconv.FormatInt(samplingCount, 10), "", "")
+				replaceCanonicalSeedFill(stream, "SamplingCount", strconv.FormatInt(samplingCount, 10), "", "")
 			}
 		} else if frameCountRaw, ok := canonicalSeedValue(*stream, "FrameCount"); ok && ac3.spf > 0 {
 			if frameCount, err := strconv.ParseInt(frameCountRaw, 10, 64); err == nil {
-				replaceCanonicalSeedLegacyFill(stream, "SamplingCount", strconv.FormatInt(frameCount*int64(ac3.spf), 10), "", "")
+				replaceCanonicalSeedFill(stream, "SamplingCount", strconv.FormatInt(frameCount*int64(ac3.spf), 10), "", "")
 			}
 		}
 	}
@@ -252,9 +252,6 @@ func applyMatroskaAC3CanonicalProbe(stream *Stream, probe *matroskaAudioProbe, a
 			members = append(members, structuredMember{Key: field.Key, Value: structuredNode{Kind: structuredString, Text: field.Val}})
 		}
 		appendCanonicalSeedObjectMembers(stream, "extra", members)
-		if node := canonicalSeedStructuredNode(stream, "extra"); node != nil {
-			setCanonicalSeedLegacyValue(stream, "extra", structuredNodeText(*node), true)
-		}
 	}
 }
 

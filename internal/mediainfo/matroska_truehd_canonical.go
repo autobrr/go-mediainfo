@@ -112,9 +112,9 @@ func applyMatroskaTrueHDCanonicalProbe(stream *Stream, info trueHDInfo) {
 	if stream == nil || len(stream.canonicalSeed) == 0 {
 		return
 	}
-	replaceCanonicalSeedLegacyFill(stream, "Format", "MLP FBA", "Format", "MLP FBA")
+	replaceCanonicalSeedFill(stream, "Format", "MLP FBA", "Format", "MLP FBA")
 	replaceCanonicalSeedText(stream, "Format/Info", "Dolby TrueHD")
-	replaceCanonicalSeedLegacyFill(stream, "Format_Commercial_IfAny", "Dolby TrueHD", "Commercial name", "Dolby TrueHD")
+	replaceCanonicalSeedFill(stream, "Format_Commercial_IfAny", "Dolby TrueHD", "Commercial name", "Dolby TrueHD")
 
 	channels, _ := canonicalSeedValue(*stream, "Channels")
 	switch channels {
@@ -125,10 +125,10 @@ func applyMatroskaTrueHDCanonicalProbe(stream *Stream, info trueHDInfo) {
 	}
 
 	if atmos, ok := trueHDAtmosPresentationInfo(info); ok {
-		replaceCanonicalSeedLegacyFill(stream, "Format", "MLP FBA", "Format", "MLP FBA 16-ch")
+		replaceCanonicalSeedFill(stream, "Format", "MLP FBA", "Format", "MLP FBA 16-ch")
 		replaceCanonicalSeedText(stream, "Format/Info", "Meridian Lossless Packing FBA with 16-channel presentation")
-		replaceCanonicalSeedLegacyFill(stream, "Format_Commercial_IfAny", "Dolby TrueHD with Dolby Atmos", "Commercial name", "Dolby TrueHD with Dolby Atmos")
-		replaceCanonicalSeedLegacyFill(stream, "Format_AdditionalFeatures", atmos.additionalFeatures, "", "")
+		replaceCanonicalSeedFill(stream, "Format_Commercial_IfAny", "Dolby TrueHD with Dolby Atmos", "Commercial name", "Dolby TrueHD with Dolby Atmos")
+		replaceCanonicalSeedFill(stream, "Format_AdditionalFeatures", atmos.additionalFeatures, "", "")
 		replaceCanonicalSeedText(stream, "Number of dynamic objects", strconv.Itoa(atmos.dynamicObjects))
 		replaceCanonicalSeedText(stream, "Bed channel count", formatChannels(atmos.bedChannelCount))
 		replaceCanonicalSeedText(stream, "Bed channel configuration", atmos.bedChannelConfig)
@@ -138,45 +138,42 @@ func applyMatroskaTrueHDCanonicalProbe(stream *Stream, info trueHDInfo) {
 			{Key: "BedChannelCount", Value: structuredNode{Kind: structuredString, Text: strconv.FormatUint(atmos.bedChannelCount, 10)}},
 			{Key: "BedChannelConfiguration", Value: structuredNode{Kind: structuredString, Text: atmos.bedChannelConfigShort}},
 		})
-		if node := canonicalSeedStructuredNode(stream, "extra"); node != nil {
-			setCanonicalSeedLegacyValue(stream, "extra", structuredNodeText(*node), true)
-		}
 	}
 	if info.maxBitRate > 0 {
 		raw := strconv.FormatInt(info.maxBitRate, 10)
-		replaceCanonicalSeedLegacyFill(stream, "BitRate_Maximum", raw, "Maximum bit rate", formatBitrate(float64(info.maxBitRate)))
+		replaceCanonicalSeedFill(stream, "BitRate_Maximum", raw, "Maximum bit rate", formatBitrate(float64(info.maxBitRate)))
 	}
-	replaceCanonicalSeedLegacyProjection(stream, "BitRate_Mode", "Variable", "VBR", "Bit rate mode", "Variable")
+	replaceCanonicalSeedProjection(stream, "BitRate_Mode", "Variable", "VBR", "Bit rate mode", "Variable")
 	if info.sampleRate > 0 && info.samplesPerFrame > 0 {
 		frameRate := float64(info.sampleRate) / float64(info.samplesPerFrame)
 		frameRateRaw := fmt.Sprintf("%.3f", frameRate)
-		replaceCanonicalSeedLegacyFill(stream, "FrameRate", frameRateRaw, "Frame rate", formatAudioFrameRate(frameRate, info.samplesPerFrame))
+		replaceCanonicalSeedFill(stream, "FrameRate", frameRateRaw, "Frame rate", formatAudioFrameRate(frameRate, info.samplesPerFrame))
 		if info.sampleRate%info.samplesPerFrame == 0 {
-			replaceCanonicalSeedLegacyFill(stream, "FrameRate_Num", strconv.Itoa(info.sampleRate/info.samplesPerFrame), "", "")
-			replaceCanonicalSeedLegacyFill(stream, "FrameRate_Den", "1", "", "")
+			replaceCanonicalSeedFill(stream, "FrameRate_Num", strconv.Itoa(info.sampleRate/info.samplesPerFrame), "", "")
+			replaceCanonicalSeedFill(stream, "FrameRate_Den", "1", "", "")
 		} else {
-			replaceCanonicalSeedLegacyFill(stream, "FrameRate_Num", strconv.Itoa(info.sampleRate), "", "")
-			replaceCanonicalSeedLegacyFill(stream, "FrameRate_Den", strconv.Itoa(info.samplesPerFrame), "", "")
+			replaceCanonicalSeedFill(stream, "FrameRate_Num", strconv.Itoa(info.sampleRate), "", "")
+			replaceCanonicalSeedFill(stream, "FrameRate_Den", strconv.Itoa(info.samplesPerFrame), "", "")
 		}
-		replaceCanonicalSeedLegacyFill(stream, "SamplesPerFrame", strconv.Itoa(info.samplesPerFrame), "", "")
+		replaceCanonicalSeedFill(stream, "SamplesPerFrame", strconv.Itoa(info.samplesPerFrame), "", "")
 		if durationMilliseconds, ok := canonicalSeedValue(*stream, "Duration"); ok {
 			if milliseconds, err := strconv.ParseFloat(durationMilliseconds, 64); err == nil && milliseconds > 0 {
 				duration := milliseconds / 1000
 				samplingCount := int64(math.Round(duration * float64(info.sampleRate)))
-				replaceCanonicalSeedLegacyFill(stream, "SamplingCount", strconv.FormatInt(samplingCount, 10), "", "")
+				replaceCanonicalSeedFill(stream, "SamplingCount", strconv.FormatInt(samplingCount, 10), "", "")
 				if _, exists := canonicalSeedValue(*stream, "FrameCount"); !exists {
 					frameCount := int64(math.Floor(duration * frameRate))
-					replaceCanonicalSeedLegacyFill(stream, "FrameCount", strconv.FormatInt(frameCount, 10), "", "")
+					replaceCanonicalSeedFill(stream, "FrameCount", strconv.FormatInt(frameCount, 10), "", "")
 				}
 			}
 		}
 	}
-	replaceCanonicalSeedLegacyFill(stream, "Compression_Mode", "Lossless", "Compression mode", "Lossless")
+	replaceCanonicalSeedFill(stream, "Compression_Mode", "Lossless", "Compression mode", "Lossless")
 }
 
 // applyMatroskaTrueHDCanonicalLayout records the backward-compatible channel
 // render shared by ordinary and Atmos TrueHD presentations.
 func applyMatroskaTrueHDCanonicalLayout(stream *Stream, layout, positions string) {
-	replaceCanonicalSeedLegacyFill(stream, "ChannelLayout", layout, "Channel layout", layout)
-	replaceCanonicalSeedLegacyFill(stream, "ChannelPositions", positions, "", "")
+	replaceCanonicalSeedFill(stream, "ChannelLayout", layout, "Channel layout", layout)
+	replaceCanonicalSeedFill(stream, "ChannelPositions", positions, "", "")
 }

@@ -108,13 +108,13 @@ func TestApplyMatroskaTrackSourceTags(t *testing.T) {
 		source: "UHD Blu-ray", hasSource: true,
 		sourceID: 0x1011, hasSourceID: true,
 	}}, 0)
-	refreshCanonicalLegacySnapshot(&info.Tracks[0])
+	refreshCanonicalCompatibilitySnapshot(&info.Tracks[0])
 
 	stream := info.Tracks[0]
 	if got := stream.JSON["OriginalSourceMedium_ID"]; got != "4113" {
 		t.Fatalf("OriginalSourceMedium_ID = %q", got)
 	}
-	if got := stream.JSONRaw["extra"]; got != `{"Source":"UHD Blu-ray","OriginalSourceMedium":"Blu-ray"}` {
+	if got := stream.JSONRaw["extra"]; got != `{"OriginalSourceMedium":"Blu-ray","Source":"UHD Blu-ray"}` {
 		t.Fatalf("extra = %s", got)
 	}
 }
@@ -200,7 +200,7 @@ func TestApplyMatroskaEncodersAddsFLACLibraryComponents(t *testing.T) {
 	streams := []Stream{stream}
 
 	applyMatroskaEncoders(streams, map[uint64]string{42: "reference libFLAC 1.3.4 20220220"}, nil)
-	refreshCanonicalLegacySnapshot(&streams[0])
+	refreshCanonicalCompatibilitySnapshot(&streams[0])
 
 	for key, want := range map[string]string{
 		"Encoded_Library":         "reference libFLAC 1.3.4 20220220",
@@ -244,7 +244,7 @@ func TestApplyMatroskaTagStats(t *testing.T) {
 			hasBitRate:      true,
 		},
 	}, 2*1048576)
-	refreshCanonicalLegacySnapshot(&info.Tracks[0])
+	refreshCanonicalCompatibilitySnapshot(&info.Tracks[0])
 	if !complete {
 		t.Fatalf("expected complete stats coverage")
 	}
@@ -305,7 +305,7 @@ func TestApplyMatroskaLavfDurationCorrection(t *testing.T) {
 			seedMatroskaLegacyTestStream(&info.Tracks[0])
 
 			applyMatroskaLavfDurationCorrection(&info)
-			refreshCanonicalLegacySnapshot(&info.Tracks[0])
+			refreshCanonicalCompatibilitySnapshot(&info.Tracks[0])
 
 			if got := info.Tracks[0].JSON["Duration"]; got != tt.wantDuration {
 				t.Errorf("Duration = %q, want %q", got, tt.wantDuration)
@@ -446,7 +446,7 @@ func TestApplyMatroskaTagStatsKeepsContainerCBR(t *testing.T) {
 		dataBytes: 371521536, hasDataBytes: true,
 		durationSeconds: 3870.019, hasDuration: true,
 	}}, 0)
-	refreshCanonicalLegacySnapshot(&info.Tracks[0])
+	refreshCanonicalCompatibilitySnapshot(&info.Tracks[0])
 
 	if got := info.Tracks[0].JSON["BitRate"]; got != "768000" {
 		t.Fatalf("BitRate = %q, want 768000", got)
@@ -464,7 +464,7 @@ func TestApplyMatroskaTagStatsRoundsTextDurationToNanoseconds(t *testing.T) {
 	applyMatroskaTagStats(&info, map[uint64]matroskaTagStats{123: {
 		trusted: true, durationSeconds: 8313.166, hasDuration: true,
 	}}, 0)
-	refreshCanonicalLegacySnapshot(&info.Tracks[0])
+	refreshCanonicalCompatibilitySnapshot(&info.Tracks[0])
 
 	if got := info.Tracks[0].JSON["Duration"]; got != "8313.166000000" {
 		t.Fatalf("Duration = %q, want 8313.166000000", got)
@@ -488,7 +488,7 @@ func TestApplyMatroskaTagStatsUpdatesFLACSampleCounts(t *testing.T) {
 	applyMatroskaTagStats(&info, map[uint64]matroskaTagStats{123: {
 		trusted: true, durationSeconds: 124.501, hasDuration: true,
 	}}, 0)
-	refreshCanonicalLegacySnapshot(&info.Tracks[0])
+	refreshCanonicalCompatibilitySnapshot(&info.Tracks[0])
 
 	if got := info.Tracks[0].JSON["SamplingCount"]; got != "5976048" {
 		t.Fatalf("SamplingCount = %q", got)
@@ -513,7 +513,7 @@ func TestApplyMatroskaTagStatsDerivesOpusCadenceFromTrustedCounts(t *testing.T) 
 	applyMatroskaTagStats(&info, map[uint64]matroskaTagStats{123: {
 		trusted: true, durationSeconds: 10, hasDuration: true, frameCount: 400, hasFrameCount: true,
 	}}, 0)
-	refreshCanonicalLegacySnapshot(&info.Tracks[0])
+	refreshCanonicalCompatibilitySnapshot(&info.Tracks[0])
 
 	json := info.Tracks[0].JSON
 	if json["SamplingCount"] != "480000" || json["FrameCount"] != "400" || json["FrameRate"] != "40.000" || json["SamplesPerFrame"] != "1200" {
@@ -535,7 +535,7 @@ func TestApplyMatroskaTagStatsUsesTrustedAACBitRate(t *testing.T) {
 	applyMatroskaTagStats(&info, map[uint64]matroskaTagStats{123: {
 		trusted: true, bitRate: 191999, hasBitRate: true,
 	}}, 0)
-	refreshCanonicalLegacySnapshot(&info.Tracks[0])
+	refreshCanonicalCompatibilitySnapshot(&info.Tracks[0])
 
 	if got := info.Tracks[0].JSON["BitRate"]; got != "191999" {
 		t.Fatalf("AAC BitRate = %q, want trusted 191999", got)
@@ -593,7 +593,7 @@ func TestApplyMatroskaMP3ProbeUsesPerStreamEvidence(t *testing.T) {
 	plain := Stream{Kind: StreamAudio, JSON: map[string]string{"Duration": "10.000"}}
 	seedMatroskaLegacyTestStream(&plain)
 	applyMatroskaMP3Probe(&plain, &base)
-	refreshCanonicalLegacySnapshot(&plain)
+	refreshCanonicalCompatibilitySnapshot(&plain)
 	if got := plain.JSON["Format_Settings_ModeExtension"]; got != "" {
 		t.Fatalf("plain joint-stereo mode extension = %q, want empty", got)
 	}
@@ -604,7 +604,7 @@ func TestApplyMatroskaMP3ProbeUsesPerStreamEvidence(t *testing.T) {
 	ms := Stream{Kind: StreamAudio, JSON: map[string]string{"Duration": "10.000"}}
 	seedMatroskaLegacyTestStream(&ms)
 	applyMatroskaMP3Probe(&ms, &msProbe)
-	refreshCanonicalLegacySnapshot(&ms)
+	refreshCanonicalCompatibilitySnapshot(&ms)
 	if got := ms.JSON["Format_Settings_ModeExtension"]; got != "MS Stereo" {
 		t.Fatalf("MS joint-stereo mode extension = %q", got)
 	}
@@ -628,7 +628,7 @@ func TestApplyMatroskaAudioProbesKeepsMPEGTracksIndependent(t *testing.T) {
 
 	applyMatroskaAudioProbes(&info, probes)
 	for index := range info.Tracks {
-		refreshCanonicalLegacySnapshot(&info.Tracks[index])
+		refreshCanonicalCompatibilitySnapshot(&info.Tracks[index])
 	}
 
 	if got := info.Tracks[0].JSON["Format_Settings_ModeExtension"]; got != "" {
@@ -668,7 +668,7 @@ func TestProbeMatroskaMP3UsesInfoFrameAndFollowingAudioFrame(t *testing.T) {
 	stream := Stream{Kind: StreamAudio, JSON: map[string]string{"Duration": "3.000"}}
 	seedMatroskaLegacyTestStream(&stream)
 	applyMatroskaMP3Probe(&stream, probe)
-	refreshCanonicalLegacySnapshot(&stream)
+	refreshCanonicalCompatibilitySnapshot(&stream)
 	if stream.JSON["FrameCount"] != "100" || stream.JSON["Duration"] != "2.400" || stream.JSON["StreamSize"] != "19008" || stream.JSON["Format_Settings_ModeExtension"] != "MS Stereo" {
 		t.Fatalf("Info-derived MP3 metadata mismatch: %#v", stream.JSON)
 	}
@@ -685,7 +685,7 @@ func TestApplyMatroskaMP3ProbeScopesLegacyModeParityByFrameIdentity(t *testing.T
 	stream := Stream{Kind: StreamAudio, JSON: map[string]string{"Duration": "2.400"}}
 	seedMatroskaLegacyTestStream(&stream)
 	applyMatroskaMP3Probe(&stream, probe)
-	refreshCanonicalLegacySnapshot(&stream)
+	refreshCanonicalCompatibilitySnapshot(&stream)
 	if got := stream.JSON["Format_Settings_ModeExtension"]; got != "" {
 		t.Fatalf("legacy parity stream mode extension = %q, want empty", got)
 	}
@@ -693,10 +693,10 @@ func TestApplyMatroskaMP3ProbeScopesLegacyModeParityByFrameIdentity(t *testing.T
 
 func TestMatroskaTagCompletenessIsPerTrack(t *testing.T) {
 	track11 := Stream{Kind: StreamAudio}
-	replaceCanonicalSeedLegacyFill(&track11, "UniqueID", "11", "Unique ID", "11")
+	replaceCanonicalSeedFill(&track11, "UniqueID", "11", "Unique ID", "11")
 	track12 := Stream{Kind: StreamAudio}
-	replaceCanonicalSeedLegacyFill(&track12, "UniqueID", "12", "Unique ID", "12")
-	replaceCanonicalSeedLegacyFill(&track12, "Language", "en", "Language", "English")
+	replaceCanonicalSeedFill(&track12, "UniqueID", "12", "Unique ID", "12")
+	replaceCanonicalSeedFill(&track12, "Language", "en", "Language", "English")
 	tracks := []Stream{track11, track12}
 	if matroskaHasCompleteTagLanguages(tracks, map[uint64]string{}) {
 		t.Fatal("missing language for track 11 reported complete")
@@ -771,7 +771,7 @@ func TestParseMatroskaLanguageOnlyTagsFromHeadAndTailWindows(t *testing.T) {
 			if !ok || len(info.Tracks) != 1 {
 				t.Fatalf("parse failed: ok=%v tracks=%d", ok, len(info.Tracks))
 			}
-			refreshCanonicalLegacySnapshot(&info.Tracks[0])
+			refreshCanonicalCompatibilitySnapshot(&info.Tracks[0])
 			if got := info.Tracks[0].JSON["Language"]; got == "" {
 				t.Fatal("language-only Tags fallback did not reach audio output")
 			}
@@ -1262,11 +1262,11 @@ func TestStandardMatroskaH264GOPLength(t *testing.T) {
 
 func TestMatroskaH264GOPNeedsExplicitRate(t *testing.T) {
 	stream := Stream{Kind: StreamVideo}
-	replaceCanonicalSeedLegacyFill(&stream, "FrameRate", "24.000", "Frame rate", "24.000 FPS")
+	replaceCanonicalSeedFill(&stream, "FrameRate", "24.000", "Frame rate", "24.000 FPS")
 	if matroskaH264GOPNeedsExplicitRate(stream, 24) {
 		t.Fatal("exact one-second GOP should be implicit")
 	}
-	replaceCanonicalSeedLegacyFill(&stream, "FrameRate", "23.976", "Frame rate", "23.976 FPS")
+	replaceCanonicalSeedFill(&stream, "FrameRate", "23.976", "Frame rate", "23.976 FPS")
 	if !matroskaH264GOPNeedsExplicitRate(stream, 24) {
 		t.Fatal("fractional-rate GOP should be explicit")
 	}
@@ -1332,9 +1332,9 @@ func TestScanMatroskaClusters_HEVCStopsAtPacketCapWithoutX265(t *testing.T) {
 
 func TestApplyMatroskaVideoProbes_X265SEIOverridesContainerEncoder(t *testing.T) {
 	stream := Stream{Kind: StreamVideo}
-	replaceCanonicalSeedLegacyFill(&stream, "ID", "1", "ID", "1")
-	replaceCanonicalSeedLegacyFill(&stream, "Encoded_Library", "HandBrake 1.7.0", "Writing library", "HandBrake 1.7.0")
-	replaceCanonicalSeedLegacyFill(&stream, "Encoded_Library_Settings", "container settings", "Encoding settings", "container settings")
+	replaceCanonicalSeedFill(&stream, "ID", "1", "ID", "1")
+	replaceCanonicalSeedFill(&stream, "Encoded_Library", "HandBrake 1.7.0", "Writing library", "HandBrake 1.7.0")
+	replaceCanonicalSeedFill(&stream, "Encoded_Library_Settings", "container settings", "Encoding settings", "container settings")
 	info := MatroskaInfo{Tracks: []Stream{stream}}
 	probes := map[uint64]*matroskaVideoProbe{1: {
 		codec: "HEVC",
@@ -1367,7 +1367,7 @@ func TestApplyMatroskaVideoProbes_DolbyVisionWithStaticHDR10(t *testing.T) {
 			blPresent:       true,
 			compatibilityID: 1,
 		}}
-	replaceCanonicalSeedLegacyFill(&stream, "ID", "1", "ID", "1")
+	replaceCanonicalSeedFill(&stream, "ID", "1", "ID", "1")
 	info := MatroskaInfo{Tracks: []Stream{stream}}
 	probes := map[uint64]*matroskaVideoProbe{1: {
 		codec: "HEVC",
@@ -1537,8 +1537,8 @@ func TestParsePNGAttachmentRejectsOverflowingChunkLength(t *testing.T) {
 func TestApplyMatroskaVideoProbesMasteringPrimariesSource(t *testing.T) {
 	containerPrimaries := "R: x=0.680000 y=0.320000, G: x=0.265000 y=0.690000, B: x=0.150000 y=0.060000, White point: x=0.312700 y=0.329000"
 	stream := Stream{Kind: StreamVideo}
-	replaceCanonicalSeedLegacyFill(&stream, "ID", "1", "ID", "1")
-	replaceCanonicalSeedLegacyFill(&stream, "MasteringDisplay_ColorPrimaries", containerPrimaries, "Mastering display color primaries", containerPrimaries)
+	replaceCanonicalSeedFill(&stream, "ID", "1", "ID", "1")
+	replaceCanonicalSeedFill(&stream, "MasteringDisplay_ColorPrimaries", containerPrimaries, "Mastering display color primaries", containerPrimaries)
 	info := MatroskaInfo{Tracks: []Stream{stream}}
 	probes := map[uint64]*matroskaVideoProbe{1: {codec: "HEVC", hdrInfo: hevcHDRInfo{masteringPrimaries: "BT.2020"}}}
 	applyMatroskaVideoProbes(&info, probes)
@@ -1551,11 +1551,11 @@ func TestApplyMatroskaVideoProbesMasteringPrimariesSource(t *testing.T) {
 
 func TestApplyMatroskaVideoProbesAFD8PreservesIncompatibleGeometry(t *testing.T) {
 	stream := Stream{Kind: StreamVideo}
-	replaceCanonicalSeedLegacyFill(&stream, "ID", "1", "ID", "1")
-	replaceCanonicalSeedLegacyFill(&stream, "Width", "1920", "Width", "1 920 pixels")
-	replaceCanonicalSeedLegacyFill(&stream, "Height", "1080", "Height", "1 080 pixels")
-	replaceCanonicalSeedLegacyFill(&stream, "PixelAspectRatio", "1.000", "Pixel aspect ratio", "1.000")
-	replaceCanonicalSeedLegacyFill(&stream, "DisplayAspectRatio", "1.778", "Display aspect ratio", "16:9")
+	replaceCanonicalSeedFill(&stream, "ID", "1", "ID", "1")
+	replaceCanonicalSeedFill(&stream, "Width", "1920", "Width", "1 920 pixels")
+	replaceCanonicalSeedFill(&stream, "Height", "1080", "Height", "1 080 pixels")
+	replaceCanonicalSeedFill(&stream, "PixelAspectRatio", "1.000", "Pixel aspect ratio", "1.000")
+	replaceCanonicalSeedFill(&stream, "DisplayAspectRatio", "1.778", "Display aspect ratio", "16:9")
 	info := MatroskaInfo{Tracks: []Stream{stream}}
 	applyMatroskaVideoProbes(&info, map[uint64]*matroskaVideoProbe{1: {codec: "AVC", activeFormat: 8}})
 	activeFormat, _ := canonicalSeedValue(info.Tracks[0], "ActiveFormatDescription")
@@ -1566,9 +1566,9 @@ func TestApplyMatroskaVideoProbesAFD8PreservesIncompatibleGeometry(t *testing.T)
 	}
 
 	stream = Stream{Kind: StreamVideo}
-	replaceCanonicalSeedLegacyFill(&stream, "ID", "1", "ID", "1")
-	replaceCanonicalSeedLegacyFill(&stream, "Width", "2350", "Width", "2 350 pixels")
-	replaceCanonicalSeedLegacyFill(&stream, "Height", "1000", "Height", "1 000 pixels")
+	replaceCanonicalSeedFill(&stream, "ID", "1", "ID", "1")
+	replaceCanonicalSeedFill(&stream, "Width", "2350", "Width", "2 350 pixels")
+	replaceCanonicalSeedFill(&stream, "Height", "1000", "Height", "1 000 pixels")
 	info.Tracks[0] = stream
 	applyMatroskaVideoProbes(&info, map[uint64]*matroskaVideoProbe{1: {codec: "AVC", activeFormat: 8}})
 	pixelAspectRatio, _ = canonicalSeedValue(info.Tracks[0], "PixelAspectRatio")

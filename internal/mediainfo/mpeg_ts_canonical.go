@@ -6,13 +6,13 @@ import (
 	"strings"
 )
 
-// mpegTSStructuredFacts stages exact legacy TS scalars alongside canonical
-// base-unit values without exposing JSON-shaped parser state.
+// mpegTSStructuredFacts stages exact TS projections alongside canonical
+// base-unit values without exposing serializer-shaped parser state.
 type mpegTSStructuredFacts struct {
 	canonicalStructuredFacts
 }
 
-// Set records one legacy TS scalar after converting measured seconds to
+// Set records one projected TS scalar after converting measured seconds to
 // canonical base units.
 func (f *mpegTSStructuredFacts) Set(name fieldName, value string) {
 	if f == nil {
@@ -29,8 +29,8 @@ func (f *mpegTSStructuredFacts) Delete(name fieldName) {
 }
 
 // buildCanonicalMPEGTSStream assembles one TS-family stream from demuxer facts.
-// The returned Stream retains legacy fields and JSON overrides as a public
-// compatibility snapshot, while canonicalSeed remains the rendering source.
+// canonicalSeed remains the rendering source; deprecated public maps are
+// published from it only by the compatibility adapter.
 func buildCanonicalMPEGTSStream(kind StreamKind, stream *tsStream, fields []Field, values *mpegTSStructuredFacts, extra *structuredNode, isBDAV bool) Stream {
 	builder := newCanonicalStreamBuilder(kind)
 	facts := canonicalMPEGTSFacts(stream, fields, values, isBDAV)
@@ -43,31 +43,27 @@ func buildCanonicalMPEGTSStream(kind StreamKind, stream *tsStream, fields []Fiel
 		} else {
 			builder.DirectStructured(name, fact.canonical)
 		}
-		if fact.retainLegacy {
-			if spec, known := structuredFieldSpec(kind, string(name)); known && spec.Measure == fieldMeasureMilliseconds {
-				if decimals := decimalFractionDigits(fact.legacy); decimals > 3 {
-					builder.SetStructuredDecimals(name, uint8(decimals))
-				}
+		if spec, known := structuredFieldSpec(kind, string(name)); known && spec.Measure == fieldMeasureMilliseconds {
+			if decimals := decimalFractionDigits(fact.projection); decimals > 3 {
+				builder.SetStructuredDecimals(name, uint8(decimals))
 			}
-			builder.MarkLegacyJSON(name, fact.legacy)
 		}
 	}
 	if extra != nil {
 		builder.StructuredNode("extra", *extra)
-		builder.MarkLegacyJSONRaw("extra", structuredNodeText(*extra))
 	}
 	appendMissingMPEGTSCanonicalText(builder, fields)
 	return builder.Snapshot(canonicalStreamPolicy{})
 }
 
 // replaceMPEGTSCanonicalSnapshotField updates one authoritative canonical fact
-// and its exported legacy text/JSON snapshots at the TS parser boundary.
+// and refreshes its deprecated public snapshot at the TS parser boundary.
 func replaceMPEGTSCanonicalSnapshotField(stream *Stream, name fieldName, value, label, display string) {
 	if stream == nil || name == "" || value == "" {
 		return
 	}
-	replaceCanonicalSeedLegacyFill(stream, name, value, label, display)
-	refreshCanonicalLegacySnapshot(stream)
+	replaceCanonicalSeedFill(stream, name, value, label, display)
+	refreshCanonicalCompatibilitySnapshot(stream)
 }
 
 // decimalFractionDigits returns the number of digits after a decimal point.

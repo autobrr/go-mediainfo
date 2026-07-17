@@ -35,6 +35,13 @@ type matroskaMPEGAudioCanonicalFacts struct {
 func matroskaMPEGAudioCanonicalSeed(facts matroskaMPEGAudioCanonicalFacts) []fieldEntry {
 	builder := newCanonicalStreamBuilder(StreamAudio)
 	builder.Fill("Format", "MPEG Audio", "Format", "MPEG Audio")
+	version, layer, samplesPerFrame := matroskaMPEGAudioCharacteristics(facts.codecID, facts.audioSampleRate)
+	if version != "" {
+		builder.Fill("Format_Version", version, "Format version", "Version "+version)
+	}
+	if layer != "" {
+		builder.Fill("Format_Profile", layer, "Format profile", layer)
+	}
 	if facts.trackNumber > 0 {
 		value := strconv.FormatUint(facts.trackNumber, 10)
 		builder.Fill("ID", value, "ID", value)
@@ -82,7 +89,13 @@ func matroskaMPEGAudioCanonicalSeed(facts matroskaMPEGAudioCanonicalFacts) []fie
 	if facts.audioSampleRate > 0 {
 		value := strconv.FormatFloat(facts.audioSampleRate, 'f', -1, 64)
 		builder.Fill("SamplingRate", value, "Sampling rate", formatSampleRate(facts.audioSampleRate))
+		if samplesPerFrame > 0 {
+			frameRate := facts.audioSampleRate / float64(samplesPerFrame)
+			builder.Fill("FrameRate", fmt.Sprintf("%.3f", frameRate), "Frame rate", formatAudioFrameRate(frameRate, samplesPerFrame))
+			builder.Structured("SamplesPerFrame", strconv.Itoa(samplesPerFrame))
+		}
 	}
+	builder.Fill("Compression_Mode", "Lossy", "Compression mode", "Lossy")
 	builder.Structured("Delay", "0.000")
 	builder.Structured("Delay_Source", "Container")
 	builder.Structured("Video_Delay", "0.000")
@@ -109,4 +122,34 @@ func matroskaMPEGAudioCanonicalSeed(facts matroskaMPEGAudioCanonicalFacts) []fie
 	}
 	builder.Fill("Forced", forcedText, "Forced", forcedText)
 	return builder.Snapshot(canonicalStreamPolicy{}).canonicalSeed
+}
+
+// matroskaMPEGAudioCharacteristics derives layer timing from the Matroska
+// CodecID and sample rate instead of relying on a content-specific TrackUID.
+func matroskaMPEGAudioCharacteristics(codecID string, sampleRate float64) (version, layer string, samplesPerFrame int) {
+	switch codecID {
+	case "A_MPEG/L2":
+		layer = "Layer 2"
+		samplesPerFrame = 1152
+	case "A_MPEG/L3":
+		layer = "Layer 3"
+		samplesPerFrame = 1152
+	default:
+		return "", "", 0
+	}
+	switch {
+	case sampleRate > 24_000:
+		version = "1"
+	case sampleRate >= 16_000:
+		version = "2"
+		if codecID == "A_MPEG/L3" {
+			samplesPerFrame = 576
+		}
+	case sampleRate > 0:
+		version = "2.5"
+		if codecID == "A_MPEG/L3" {
+			samplesPerFrame = 576
+		}
+	}
+	return version, layer, samplesPerFrame
 }

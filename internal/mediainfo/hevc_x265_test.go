@@ -146,11 +146,11 @@ func TestApplyMatroskaVideoProbesX265OutranksGenericEncoder(t *testing.T) {
 	hdr.timeCode = "01:02:03:04"
 
 	stream := Stream{Kind: StreamVideo}
-	replaceCanonicalSeedLegacyFill(&stream, "ID", "1", "ID", "1")
-	replaceCanonicalSeedLegacyFill(&stream, "Encoded_Library", "container encoder", "Writing library", "container encoder")
-	replaceCanonicalSeedLegacyFill(&stream, "Encoded_Library_Name", "container", "", "")
-	replaceCanonicalSeedLegacyFill(&stream, "Encoded_Library_Version", "1", "", "")
-	replaceCanonicalSeedLegacyFill(&stream, "Encoded_Library_Settings", "container settings", "Encoding settings", "container settings")
+	replaceCanonicalSeedFill(&stream, "ID", "1", "ID", "1")
+	replaceCanonicalSeedFill(&stream, "Encoded_Library", "container encoder", "Writing library", "container encoder")
+	replaceCanonicalSeedFill(&stream, "Encoded_Library_Name", "container", "", "")
+	replaceCanonicalSeedFill(&stream, "Encoded_Library_Version", "1", "", "")
+	replaceCanonicalSeedFill(&stream, "Encoded_Library_Settings", "container settings", "Encoding settings", "container settings")
 	info := MatroskaInfo{Tracks: []Stream{stream}}
 	applyMatroskaVideoProbes(&info, map[uint64]*matroskaVideoProbe{1: {codec: "HEVC", hdrInfo: hdr}})
 
@@ -186,7 +186,7 @@ func TestApplyMatroskaVideoProbesGenericEncoderWithoutX265(t *testing.T) {
 		timeCode:       "01:02:03:04",
 	}
 	stream := Stream{Kind: StreamVideo}
-	replaceCanonicalSeedLegacyFill(&stream, "ID", "1", "ID", "1")
+	replaceCanonicalSeedFill(&stream, "ID", "1", "ID", "1")
 	info := MatroskaInfo{Tracks: []Stream{stream}}
 
 	applyMatroskaVideoProbes(&info, map[uint64]*matroskaVideoProbe{1: {codec: "HEVC", hdrInfo: hdr}})

@@ -215,7 +215,7 @@ func TestApplyMatroskaAudioProbes_EAC3JOCTextMetadata(t *testing.T) {
 	}
 
 	applyMatroskaAudioProbes(info, probes)
-	refreshCanonicalLegacySnapshot(&info.Tracks[0])
+	refreshCanonicalCompatibilitySnapshot(&info.Tracks[0])
 
 	stream := info.Tracks[0]
 	checks := map[string]string{
@@ -282,7 +282,7 @@ func TestApplyMatroskaAudioProbes_EAC3TypeAOnlyOmitsAtmosFields(t *testing.T) {
 	}}
 
 	applyMatroskaAudioProbes(info, probes)
-	refreshCanonicalLegacySnapshot(&info.Tracks[0])
+	refreshCanonicalCompatibilitySnapshot(&info.Tracks[0])
 
 	stream := info.Tracks[0]
 	if got := findField(stream.Fields, "Commercial name"); got != "Dolby Digital Plus" {

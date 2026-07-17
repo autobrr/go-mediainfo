@@ -356,6 +356,5 @@ func buildMP4ChapterMenu(reader io.ReaderAt, track MP4Track) Stream {
 	}
 	node := structuredObjectFromKVs(extras)
 	builder.StructuredNode("extra", node)
-	builder.MarkLegacyJSONRaw("extra", structuredNodeText(node))
 	return builder.Snapshot(canonicalStreamPolicy{})
 }

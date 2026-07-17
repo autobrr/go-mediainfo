@@ -112,8 +112,8 @@ func applyMatroskaDTSCanonicalProbe(stream *Stream, dts dtsInfo, preserveContain
 		return
 	}
 	if dts.lbr {
-		replaceCanonicalSeedLegacyFill(stream, "Format", "DTS LBR", "Format", "DTS LBR")
-		replaceCanonicalSeedLegacyFill(stream, "Format_Commercial_IfAny", "DTS Express", "Commercial name", "DTS Express")
+		replaceCanonicalSeedFill(stream, "Format", "DTS LBR", "Format", "DTS LBR")
+		replaceCanonicalSeedFill(stream, "Format_Commercial_IfAny", "DTS Express", "Commercial name", "DTS Express")
 	}
 	if dts.hd {
 		switch {
@@ -138,15 +138,15 @@ func applyMatroskaDTSCanonicalProbe(stream *Stream, dts dtsInfo, preserveContain
 				commercial = "DTS-HD MA + DTS:X"
 				features = "XLL X"
 			}
-			replaceCanonicalSeedLegacyFill(stream, "Format", "DTS", "Format", format)
-			replaceCanonicalSeedLegacyFill(stream, "Format_AdditionalFeatures", features, "", "")
-			replaceCanonicalSeedLegacyFill(stream, "Format_Commercial_IfAny", commercial, "Commercial name", commercial)
+			replaceCanonicalSeedFill(stream, "Format", "DTS", "Format", format)
+			replaceCanonicalSeedFill(stream, "Format_AdditionalFeatures", features, "", "")
+			replaceCanonicalSeedFill(stream, "Format_Commercial_IfAny", commercial, "Commercial name", commercial)
 		case dts.hdXBR:
 			replaceCanonicalSeedFill(stream, "Format", "DTS", "Format", "DTS XBR")
-			replaceCanonicalSeedLegacyFill(stream, "Format_AdditionalFeatures", "XBR", "", "")
-			replaceCanonicalSeedLegacyFill(stream, "Format_Commercial_IfAny", "DTS-HD High Resolution Audio", "Commercial name", "DTS-HD High Resolution Audio")
+			replaceCanonicalSeedFill(stream, "Format_AdditionalFeatures", "XBR", "", "")
+			replaceCanonicalSeedFill(stream, "Format_Commercial_IfAny", "DTS-HD High Resolution Audio", "Commercial name", "DTS-HD High Resolution Audio")
 		default:
-			replaceCanonicalSeedLegacyFill(stream, "Format_Commercial_IfAny", "DTS-HD", "Commercial name", "DTS-HD")
+			replaceCanonicalSeedFill(stream, "Format_Commercial_IfAny", "DTS-HD", "Commercial name", "DTS-HD")
 		}
 	}
 	if !dts.hd && dts.coreES {
@@ -158,11 +158,11 @@ func applyMatroskaDTSCanonicalProbe(stream *Stream, dts dtsInfo, preserveContain
 			commercial = "DTS-ES Discrete"
 			features = "ES XCh"
 		}
-		replaceCanonicalSeedLegacyFill(stream, "Format_AdditionalFeatures", features, "", "")
-		replaceCanonicalSeedLegacyFill(stream, "Format_Commercial_IfAny", commercial, "Commercial name", commercial)
-		replaceCanonicalSeedLegacyFill(stream, "Channels_Original", strconv.Itoa(dts.channels+1), "", "")
-		replaceCanonicalSeedLegacyFill(stream, "ChannelLayout_Original", "C L R Ls Rs Cb LFE", "", "")
-		replaceCanonicalSeedLegacyFill(stream, "ChannelPositions_Original", "Front: L C R, Side: L R, Back: C, LFE", "", "")
+		replaceCanonicalSeedFill(stream, "Format_AdditionalFeatures", features, "", "")
+		replaceCanonicalSeedFill(stream, "Format_Commercial_IfAny", commercial, "Commercial name", commercial)
+		replaceCanonicalSeedFill(stream, "Channels_Original", strconv.Itoa(dts.channels+1), "", "")
+		replaceCanonicalSeedFill(stream, "ChannelLayout_Original", "C L R Ls Rs Cb LFE", "", "")
+		replaceCanonicalSeedFill(stream, "ChannelPositions_Original", "Front: L C R, Side: L R, Back: C, LFE", "", "")
 		clearCanonicalSeedField(stream, "ChannelLayout", "Channel layout")
 		clearCanonicalSeedField(stream, "ChannelPositions", "")
 		replaceCanonicalSeedJSONOnly(stream, "ChannelLayout", containerLayout)
@@ -179,7 +179,7 @@ func applyMatroskaDTSCanonicalProbe(stream *Stream, dts dtsInfo, preserveContain
 	}
 	if channels > 0 {
 		channelsRaw := strconv.Itoa(channels)
-		replaceCanonicalSeedLegacyFill(stream, "Channels", channelsRaw, "Channel(s)", formatChannels(uint64(channels)))
+		replaceCanonicalSeedFill(stream, "Channels", channelsRaw, "Channel(s)", formatChannels(uint64(channels)))
 		layout := ""
 		positions := ""
 		textLayout := ""
@@ -219,18 +219,18 @@ func applyMatroskaDTSCanonicalProbe(stream *Stream, dts dtsInfo, preserveContain
 		}
 		if layout != "" {
 			if textLayout != "" {
-				replaceCanonicalSeedLegacyFill(stream, "ChannelLayout", layout, "Channel layout", textLayout)
+				replaceCanonicalSeedFill(stream, "ChannelLayout", layout, "Channel layout", textLayout)
 			} else {
-				replaceCanonicalSeedLegacyFill(stream, "ChannelLayout", layout, "", "")
+				replaceCanonicalSeedFill(stream, "ChannelLayout", layout, "", "")
 			}
 		}
 		if positions != "" {
-			replaceCanonicalSeedLegacyFill(stream, "ChannelPositions", positions, "", "")
+			replaceCanonicalSeedFill(stream, "ChannelPositions", positions, "", "")
 		}
 	}
 	if bitDepth > 0 {
 		value := strconv.Itoa(bitDepth)
-		replaceCanonicalSeedLegacyFill(stream, "BitDepth", value, "Bit depth", value+" bits")
+		replaceCanonicalSeedFill(stream, "BitDepth", value, "Bit depth", value+" bits")
 	}
 	sampleRate := dts.sampleRate
 	if dts.hd && dts.hdSampleRate > 0 {
@@ -242,8 +242,8 @@ func applyMatroskaDTSCanonicalProbe(stream *Stream, dts dtsInfo, preserveContain
 	}
 	if sampleRate > 0 && dts.samplesPerFrame > 0 {
 		frameRate := float64(sampleRate) / float64(dts.samplesPerFrame)
-		replaceCanonicalSeedLegacyFill(stream, "FrameRate", fmt.Sprintf("%.3f", frameRate), "Frame rate", formatAudioFrameRate(frameRate, dts.samplesPerFrame))
-		replaceCanonicalSeedLegacyFill(stream, "SamplesPerFrame", strconv.Itoa(dts.samplesPerFrame), "", "")
+		replaceCanonicalSeedFill(stream, "FrameRate", fmt.Sprintf("%.3f", frameRate), "Frame rate", formatAudioFrameRate(frameRate, dts.samplesPerFrame))
+		replaceCanonicalSeedFill(stream, "SamplesPerFrame", strconv.Itoa(dts.samplesPerFrame), "", "")
 	}
 
 	_, hasStreamSize := canonicalSeedValue(*stream, "StreamSize")
@@ -251,16 +251,16 @@ func applyMatroskaDTSCanonicalProbe(stream *Stream, dts dtsInfo, preserveContain
 	_, hadBitRateMode := canonicalSeedValue(*stream, "BitRate_Mode")
 	switch {
 	case dts.hd:
-		replaceCanonicalSeedLegacyProjection(stream, "BitRate_Mode", "Variable", "VBR", "Bit rate mode", "Variable")
+		replaceCanonicalSeedProjection(stream, "BitRate_Mode", "Variable", "VBR", "Bit rate mode", "Variable")
 		if hasBitRate && !dts.hdDTSX && !hasStreamSize {
 			clearCanonicalSeedField(stream, "BitRate", "Bit rate")
 		}
 	case dts.bitRateBps > 0 && !preserveContainerBitRate:
-		replaceCanonicalSeedLegacyProjection(stream, "BitRate_Mode", "Constant", "CBR", "Bit rate mode", "Constant")
-		replaceCanonicalSeedLegacyFill(stream, "BitRate", strconv.FormatInt(dts.bitRateBps, 10), "Bit rate", formatBitrate(float64(dts.bitRateBps)))
+		replaceCanonicalSeedProjection(stream, "BitRate_Mode", "Constant", "CBR", "Bit rate mode", "Constant")
+		replaceCanonicalSeedFill(stream, "BitRate", strconv.FormatInt(dts.bitRateBps, 10), "Bit rate", formatBitrate(float64(dts.bitRateBps)))
 	case hasBitRate:
 		if _, hasMode := canonicalSeedValue(*stream, "BitRate_Mode"); !hasMode {
-			replaceCanonicalSeedLegacyProjection(stream, "BitRate_Mode", "Constant", "CBR", "Bit rate mode", "Constant")
+			replaceCanonicalSeedProjection(stream, "BitRate_Mode", "Constant", "CBR", "Bit rate mode", "Constant")
 		}
 	}
 	if dts.lbr && !hadBitRateMode {
@@ -270,14 +270,14 @@ func applyMatroskaDTSCanonicalProbe(stream *Stream, dts dtsInfo, preserveContain
 	if dts.hd && dts.hdXLL {
 		compression = "Lossless"
 	}
-	replaceCanonicalSeedLegacyFill(stream, "Compression_Mode", compression, "Compression mode", compression)
-	replaceCanonicalSeedLegacyFill(stream, "Format_Settings_Endianness", "Big", "", "")
-	replaceCanonicalSeedLegacyFill(stream, "Format_Settings_Mode", "16", "", "")
+	replaceCanonicalSeedFill(stream, "Compression_Mode", compression, "Compression mode", compression)
+	replaceCanonicalSeedFill(stream, "Format_Settings_Endianness", "Big", "", "")
+	replaceCanonicalSeedFill(stream, "Format_Settings_Mode", "16", "", "")
 	if sampleRate > 0 {
 		if durationMilliseconds, ok := canonicalSeedValue(*stream, "Duration"); ok {
 			if milliseconds, err := strconv.ParseFloat(durationMilliseconds, 64); err == nil && milliseconds > 0 {
 				samplingCount := int64(math.Round(milliseconds * float64(sampleRate) / 1000))
-				replaceCanonicalSeedLegacyFill(stream, "SamplingCount", strconv.FormatInt(samplingCount, 10), "", "")
+				replaceCanonicalSeedFill(stream, "SamplingCount", strconv.FormatInt(samplingCount, 10), "", "")
 			}
 		}
 	}

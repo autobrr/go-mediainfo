@@ -201,7 +201,8 @@ func parseFLAC(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, *canoni
 	return info, []Stream{audioStream}, generalFacts, generalExtra, true
 }
 
-// canonicalFLACAudioStream records FLAC audio facts in canonical units before creating a legacy snapshot.
+// canonicalFLACAudioStream records FLAC audio facts in canonical units before
+// publishing the public compatibility snapshot.
 func canonicalFLACAudioStream(channels uint8, sampleRate uint32, bitsPerSample uint8, totalSamples uint64, duration, displayBitrate float64, rawBitrate string, streamSize int64, encoder, encodedLibraryName, encodedLibraryVersion, encodedLibraryDate, md5Hex string) Stream {
 	store := &fieldStore{}
 	ref := store.Prepare(StreamAudio)
@@ -267,7 +268,6 @@ func canonicalFLACAudioStream(channels uint8, sampleRate uint32, bitsPerSample u
 		if _, ok := store.Get(ref, name); !ok {
 			fillGeneratedStructured(store, ref, name, override.Val)
 		}
-		store.MarkLegacyJSON(ref, name, override.Val, false)
 	}
 	if md5Hex != "" {
 		node := structuredObjectFromKVs([]jsonKV{{Key: "MD5_Unencoded", Val: md5Hex}})
@@ -281,7 +281,6 @@ func canonicalFLACAudioStream(channels uint8, sampleRate uint32, bitsPerSample u
 			StructuredKey: "extra",
 			Node:          &node,
 		})
-		store.MarkLegacyJSON(ref, "extra", raw, true)
 	}
 	return canonicalStreamSnapshot(store, ref, canonicalStreamPolicy{SkipStreamOrder: true})
 }
@@ -639,7 +638,7 @@ func flacTagsToGeneralFacts(tags map[string]string, encoder string) (*canonicalS
 		mapped["DATE"] = true
 	}
 	if v := tags["YEAR"]; v != "" {
-		if general.Legacy("Recorded_Date") == "" {
+		if general.Projection("Recorded_Date") == "" {
 			set("Recorded_Date", v)
 		}
 		mapped["YEAR"] = true

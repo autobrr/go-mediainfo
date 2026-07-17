@@ -15,15 +15,9 @@ func seedMatroskaLegacyTestStream(stream *Stream) {
 		return
 	}
 	stream.canonicalSeed = append([]fieldEntry(nil), store.streams[1].Fields...)
-	for key, value := range stream.JSON {
-		setCanonicalSeedLegacyValue(stream, fieldName(key), value, false)
-	}
-	for key, value := range stream.JSONRaw {
-		setCanonicalSeedLegacyValue(stream, fieldName(key), value, true)
-	}
 	if seconds := stream.JSON["Duration"]; seconds != "" {
 		if milliseconds, ok := decimalSecondsToMilliseconds(seconds); ok {
-			replaceCanonicalSeedLegacyProjection(stream, "Duration", milliseconds, seconds, "", "")
+			replaceCanonicalSeedProjection(stream, "Duration", milliseconds, seconds, "", "")
 			setCanonicalSeedStructuredDecimals(stream, "Duration", uint8(decimalFractionDigits(seconds)))
 		}
 	}

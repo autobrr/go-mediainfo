@@ -80,6 +80,12 @@ func projectStructuredReportFor(report Report, target structuredProjectionTarget
 	if target == structuredProjectionXML {
 		ensureLegacyXMLProjection(store)
 	}
+	return projectStructuredStore(store, target)
+}
+
+// projectStructuredStore projects an already-resolved store without routing
+// through the public Report compatibility adapter.
+func projectStructuredStore(store *fieldStore, target structuredProjectionTarget) structuredReport {
 	store.projectionMu.RLock()
 	defer store.projectionMu.RUnlock()
 	projected := structuredReport{Ref: store.ref, Streams: make([]structuredStream, 0, len(store.streams))}
@@ -127,6 +133,9 @@ func projectStructuredReportFor(report Report, target structuredProjectionTarget
 				value = *entry.Node
 			} else if !entry.Projected {
 				value.Text = projectCanonicalStructuredValue(stream.Kind, entry)
+			}
+			if entry.StructuredOverride != nil {
+				value = *entry.StructuredOverride
 			}
 			projectedStream.Fields = append(projectedStream.Fields, structuredField{Key: key, Value: value})
 		}

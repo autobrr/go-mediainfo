@@ -130,7 +130,7 @@ func buildCCTextStream(entry *psStream, videoDelay float64, videoDuration float6
 	extraNode := structuredObjectFromKVs(extraFields)
 
 	builder := newCanonicalStreamBuilder(StreamText)
-	builder.Fill("ID", facts.Legacy("ID"), "ID", idLabel)
+	builder.Fill("ID", facts.Projection("ID"), "ID", idLabel)
 	builder.Fill("Format", "EIA-608", "Format", "EIA-608")
 	builder.Fill("MuxingMode_MoreInfo", "Muxed in Video #1", "Muxing mode, more info", "Muxed in Video #1")
 	stream := buildMPEGPSCanonicalSnapshot(

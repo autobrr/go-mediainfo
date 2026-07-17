@@ -1116,10 +1116,10 @@ func matroskaStreamScalar(stream Stream, key fieldName) string {
 	return value
 }
 
-// matroskaLegacyDuration returns the exact seconds projection attached to a
-// canonical Duration for compatibility decisions that depend on its precision.
-func matroskaLegacyDuration(stream Stream) string {
-	if value, found := canonicalSeedLegacyJSONValue(stream, "Duration"); found {
+// matroskaProjectedDuration returns the exact seconds projection of a
+// canonical Duration for decisions that depend on its precision.
+func matroskaProjectedDuration(stream Stream) string {
+	if value, found := projectedCanonicalSeedValue(stream, "Duration"); found {
 		return value
 	}
 	return ""
@@ -1171,14 +1171,14 @@ func applyMatroskaStats(info *MatroskaInfo, stats map[uint64]*matroskaTrackStats
 		if stat.dataBytes > 0 {
 			display := formatStreamSize(stat.dataBytes, fileSize)
 			raw := strconv.FormatInt(stat.dataBytes, 10)
-			replaceCanonicalSeedLegacyFill(stream, "StreamSize", raw, "Stream size", display)
+			replaceCanonicalSeedFill(stream, "StreamSize", raw, "Stream size", display)
 		}
 		if stat.blockCount > 0 && stream.Kind == StreamAudio {
 			// Official mediainfo reports audio FrameCount for AC-3 / E-AC-3 tracks (from Statistics Tags).
 			format, _ := canonicalSeedValue(*stream, "Format")
 			if format == "AC-3" || format == "E-AC-3" {
 				count := strconv.FormatInt(stat.blockCount, 10)
-				replaceCanonicalSeedLegacyFill(stream, "FrameCount", count, "", "")
+				replaceCanonicalSeedFill(stream, "FrameCount", count, "", "")
 			}
 		}
 		durationSeconds := matroskaStatsDuration(stat)
@@ -1206,7 +1206,7 @@ func applyMatroskaStats(info *MatroskaInfo, stats map[uint64]*matroskaTrackStats
 			switch stream.Kind {
 			case StreamText, StreamVideo:
 				seconds := fmt.Sprintf("%.9f", durationSeconds)
-				replaceCanonicalSeedLegacyProjection(stream, "Duration", strconv.FormatFloat(durationSeconds*1000, 'f', -1, 64), seconds, "Duration", formatDuration(durationSeconds))
+				replaceCanonicalSeedProjection(stream, "Duration", strconv.FormatFloat(durationSeconds*1000, 'f', -1, 64), seconds, "Duration", formatDuration(durationSeconds))
 				setCanonicalSeedStructuredDecimals(stream, "Duration", 9)
 			case StreamAudio:
 				// Preserve container/tag-reported audio duration (MediaInfo does not overwrite it with
@@ -1215,10 +1215,10 @@ func applyMatroskaStats(info *MatroskaInfo, stats map[uint64]*matroskaTrackStats
 					// If Matroska Info duration is absent, the track Duration can be stats-derived only.
 					// formatDuration rounds to milliseconds and drops them once >= 60s, so populate JSON
 					// directly to keep fractional seconds comparable to official mediainfo.
-					if matroskaLegacyDuration(*stream) == "" {
+					if matroskaProjectedDuration(*stream) == "" {
 						seconds := formatJSONSeconds(durationSeconds)
 						if milliseconds, ok := decimalSecondsToMilliseconds(seconds); ok {
-							replaceCanonicalSeedLegacyProjection(stream, "Duration", milliseconds, seconds, "Duration", formatDuration(durationSeconds))
+							replaceCanonicalSeedProjection(stream, "Duration", milliseconds, seconds, "Duration", formatDuration(durationSeconds))
 							setCanonicalSeedStructuredDecimals(stream, "Duration", uint8(decimalFractionDigits(seconds)))
 						}
 					}
@@ -1234,7 +1234,7 @@ func applyMatroskaStats(info *MatroskaInfo, stats map[uint64]*matroskaTrackStats
 			matroskaStreamScalar(*stream, "BitRate") != ""
 		if stream.Kind == StreamAudio && stat.dataBytes > 0 && !containerCBR {
 			dur := 0.0
-			if duration := matroskaLegacyDuration(*stream); duration != "" {
+			if duration := matroskaProjectedDuration(*stream); duration != "" {
 				if v, err := strconv.ParseFloat(duration, 64); err == nil && v > 0 {
 					dur = v
 				}
@@ -1256,15 +1256,15 @@ func applyMatroskaStats(info *MatroskaInfo, stats map[uint64]*matroskaTrackStats
 				}
 				if bps > 0 {
 					raw := strconv.FormatInt(bps, 10)
-					replaceCanonicalSeedLegacyFill(stream, "BitRate", raw, "", "")
+					replaceCanonicalSeedFill(stream, "BitRate", raw, "", "")
 				}
 			}
 		}
 		if stat.blockCount > 0 && (stream.Kind == StreamVideo || stream.Kind == StreamText) {
 			count := strconv.FormatInt(stat.blockCount, 10)
-			replaceCanonicalSeedLegacyFill(stream, "FrameCount", count, "", "")
+			replaceCanonicalSeedFill(stream, "FrameCount", count, "", "")
 			if stream.Kind == StreamText {
-				replaceCanonicalSeedLegacyFill(stream, "ElementCount", count, "", "")
+				replaceCanonicalSeedFill(stream, "ElementCount", count, "", "")
 			}
 		}
 		if stream.Kind == StreamText {
@@ -1287,12 +1287,12 @@ func applyMatroskaStats(info *MatroskaInfo, stats map[uint64]*matroskaTrackStats
 					display = formatBitrateSmall(bitrate)
 				}
 				raw := strconv.FormatInt(int64(bitrate), 10)
-				replaceCanonicalSeedLegacyFill(stream, "BitRate", raw, "Bit rate", display)
+				replaceCanonicalSeedFill(stream, "BitRate", raw, "Bit rate", display)
 			}
 		}
 		if stream.Kind == StreamVideo {
 			bitrateDuration := durationSeconds
-			if duration := matroskaLegacyDuration(*stream); duration != "" {
+			if duration := matroskaProjectedDuration(*stream); duration != "" {
 				if value, err := strconv.ParseFloat(duration, 64); err == nil && value > 0 {
 					bitrateDuration = value
 				}
@@ -1302,7 +1302,7 @@ func applyMatroskaStats(info *MatroskaInfo, stats map[uint64]*matroskaTrackStats
 				// If x264 parsing provided a nominal bitrate, prefer it over derived StreamSize/Duration.
 				if nominal := matroskaStreamDisplay(*stream, "Nominal bit rate"); nominal != "" {
 					if bps, ok := parseInt(matroskaStreamScalar(*stream, "BitRate_Nominal")); ok && bps > 0 {
-						replaceCanonicalSeedLegacyFill(stream, "BitRate", strconv.FormatInt(bps, 10), "Bit rate", nominal)
+						replaceCanonicalSeedFill(stream, "BitRate", strconv.FormatInt(bps, 10), "Bit rate", nominal)
 						hasBitRate = true
 					}
 				}
@@ -1311,7 +1311,7 @@ func applyMatroskaStats(info *MatroskaInfo, stats map[uint64]*matroskaTrackStats
 				bitrate := (float64(stat.dataBytes) * 8) / bitrateDuration
 				display := formatBitrate(bitrate)
 				raw := strconv.FormatInt(int64(bitrate), 10)
-				replaceCanonicalSeedLegacyFill(stream, "BitRate", raw, "Bit rate", display)
+				replaceCanonicalSeedFill(stream, "BitRate", raw, "Bit rate", display)
 				width, _ := parsePixels(matroskaStreamScalar(*stream, "Width"))
 				height, _ := parsePixels(matroskaStreamScalar(*stream, "Height"))
 				fps, _ := matroskaCanonicalFrameRate(*stream)
@@ -1334,7 +1334,7 @@ func applyMatroskaStats(info *MatroskaInfo, stats map[uint64]*matroskaTrackStats
 				display := formatBitrate(bitrate)
 				// Official mediainfo truncates derived audio bitrate.
 				raw := strconv.FormatInt(int64(bitrate), 10)
-				replaceCanonicalSeedLegacyFill(stream, "BitRate", raw, "Bit rate", display)
+				replaceCanonicalSeedFill(stream, "BitRate", raw, "Bit rate", display)
 			}
 		}
 	}
@@ -1356,15 +1356,13 @@ func applyMatroskaTagStats(info *MatroskaInfo, tagStats map[uint64]matroskaTagSt
 		tag := tagStats[trackUID]
 		if len(tag.extras) > 0 {
 			prependCanonicalSeedObjectMembers(stream, "extra", structuredObjectFromKVs(tag.extras).Object)
-			setCanonicalSeedLegacyObject(stream, "extra")
 		}
 		if tag.hasEncodedDate && tag.encodedDate != "" {
-			replaceCanonicalSeedLegacyFill(stream, "Encoded_Date", tag.encodedDate, "Encoded date", tag.encodedDate)
+			replaceCanonicalSeedFill(stream, "Encoded_Date", tag.encodedDate, "Encoded date", tag.encodedDate)
 		}
 		if tag.hasSource && tag.source != "" {
 			replaceCanonicalSeedText(stream, "Source", tag.source)
 			insertCanonicalSeedObjectMembersBefore(stream, "extra", "MD5_Unencoded", []structuredMember{{Key: "Source", Value: structuredNode{Kind: structuredString, Text: tag.source}}})
-			setCanonicalSeedLegacyObject(stream, "extra")
 		}
 		if tag.hasSourceID && tag.sourceID > 0 {
 			medium := "Blu-ray"
@@ -1382,11 +1380,9 @@ func applyMatroskaTagStats(info *MatroskaInfo, tagStats map[uint64]matroskaTagSt
 			}
 			insertCanonicalSeedTextBefore(stream, "Original source medium", medium, "Source")
 			insertCanonicalSeedTextBefore(stream, "Original source medium ID", sourceID, "Source")
-			replaceCanonicalSeedLegacyFill(stream, "OriginalSourceMedium_ID", sourceID, "", "")
-			setCanonicalSeedLegacyObject(stream, "extra")
+			replaceCanonicalSeedFill(stream, "OriginalSourceMedium_ID", sourceID, "", "")
 			mediumMember := []structuredMember{{Key: "OriginalSourceMedium", Value: structuredNode{Kind: structuredString, Text: medium}}}
 			insertCanonicalSeedObjectMembersBefore(stream, "extra", "Source", mediumMember)
-			moveCanonicalSeedLegacyObjectMemberAfter(stream, "extra", "OriginalSourceMedium", "Source")
 		}
 		if !tag.trusted {
 			continue
@@ -1433,7 +1429,7 @@ func applyMatroskaTagStats(info *MatroskaInfo, tagStats map[uint64]matroskaTagSt
 			// Preserve the muxer's exact access-unit count; rounded duration can
 			// otherwise produce a one-frame derivation error.
 			raw := strconv.FormatInt(tag.frameCount, 10)
-			replaceCanonicalSeedLegacyFill(stream, "FrameCount", raw, "", "")
+			replaceCanonicalSeedFill(stream, "FrameCount", raw, "", "")
 		}
 		if !tag.hasDuration || tag.durationSeconds <= 0 {
 			continue
@@ -1448,7 +1444,7 @@ func applyMatroskaTagStats(info *MatroskaInfo, tagStats map[uint64]matroskaTagSt
 			seconds = fmt.Sprintf("%.*f", prec, tag.durationSeconds)
 		}
 		if milliseconds, ok := decimalSecondsToMilliseconds(seconds); ok {
-			replaceCanonicalSeedLegacyProjection(stream, "Duration", milliseconds, seconds, "", "")
+			replaceCanonicalSeedProjection(stream, "Duration", milliseconds, seconds, "", "")
 			setCanonicalSeedStructuredDecimals(stream, "Duration", uint8(decimalFractionDigits(seconds)))
 		}
 		if format == "FLAC" {
@@ -1457,11 +1453,11 @@ func applyMatroskaTagStats(info *MatroskaInfo, tagStats map[uint64]matroskaTagSt
 				samplingCount := int64(math.RoundToEven(tag.durationSeconds * float64(sampleRate)))
 				if samplingCount > 0 {
 					samplingRaw := strconv.FormatInt(samplingCount, 10)
-					replaceCanonicalSeedLegacyFill(stream, "SamplingCount", samplingRaw, "", "")
+					replaceCanonicalSeedFill(stream, "SamplingCount", samplingRaw, "", "")
 					if samplesPerFrame, err := strconv.ParseInt(matroskaStreamScalar(*stream, "SamplesPerFrame"), 10, 64); err == nil && samplesPerFrame > 0 {
 						frameCount := (samplingCount + samplesPerFrame - 1) / samplesPerFrame
 						frameRaw := strconv.FormatInt(frameCount, 10)
-						replaceCanonicalSeedLegacyFill(stream, "FrameCount", frameRaw, "", "")
+						replaceCanonicalSeedFill(stream, "FrameCount", frameRaw, "", "")
 					}
 				}
 			}
@@ -1472,21 +1468,21 @@ func applyMatroskaTagStats(info *MatroskaInfo, tagStats map[uint64]matroskaTagSt
 				samplingCount := int64(math.RoundToEven(tag.durationSeconds * float64(sampleRate)))
 				if samplingCount > 0 {
 					samplingRaw := strconv.FormatInt(samplingCount, 10)
-					replaceCanonicalSeedLegacyFill(stream, "SamplingCount", samplingRaw, "", "")
+					replaceCanonicalSeedFill(stream, "SamplingCount", samplingRaw, "", "")
 					if format == "Opus" && tag.hasFrameCount && tag.frameCount > 0 {
 						averageSamples := float64(samplingCount) / float64(tag.frameCount)
 						samplesPerFrame := int64(math.Round(averageSamples))
 						if samplesPerFrame > 0 && math.Abs(averageSamples-float64(samplesPerFrame)) <= 0.01 {
 							samplesRaw := strconv.FormatInt(samplesPerFrame, 10)
 							frameRateRaw := fmt.Sprintf("%.3f", float64(sampleRate)/float64(samplesPerFrame))
-							replaceCanonicalSeedLegacyFill(stream, "SamplesPerFrame", samplesRaw, "", "")
-							replaceCanonicalSeedLegacyFill(stream, "FrameRate", frameRateRaw, "", "")
+							replaceCanonicalSeedFill(stream, "SamplesPerFrame", samplesRaw, "", "")
+							replaceCanonicalSeedFill(stream, "FrameRate", frameRateRaw, "", "")
 						} else {
 							// A variable-duration packet sequence has no stable integral average
 							// for timing derivation, but Opus still reports its nominal 20 ms frame.
 							frameRateRaw := fmt.Sprintf("%.3f", float64(tag.frameCount)/tag.durationSeconds)
-							replaceCanonicalSeedLegacyFill(stream, "SamplesPerFrame", "960", "", "")
-							replaceCanonicalSeedLegacyFill(stream, "FrameRate", frameRateRaw, "", "")
+							replaceCanonicalSeedFill(stream, "SamplesPerFrame", "960", "", "")
+							replaceCanonicalSeedFill(stream, "FrameRate", frameRateRaw, "", "")
 						}
 					}
 				}
@@ -1513,15 +1509,15 @@ func applyMatroskaTagStats(info *MatroskaInfo, tagStats map[uint64]matroskaTagSt
 				display = formatBitrateSmall(bitrate)
 			}
 			raw := strconv.FormatInt(tag.bitRate, 10)
-			replaceCanonicalSeedLegacyFill(stream, "BitRate", raw, "Bit rate", display)
+			replaceCanonicalSeedFill(stream, "BitRate", raw, "Bit rate", display)
 		case StreamVideo:
 			// A distinct header/container rate is nominal when Statistics Tags
 			// provide the measured payload rate.
 			if existing, ok := parseInt(matroskaStreamScalar(*stream, "BitRate")); ok && existing > 0 {
 				delta := math.Abs(float64(existing-tag.bitRate)) / float64(existing)
 				if delta >= 0.04 {
-					replaceCanonicalSeedLegacyFill(stream, "BitRate_Nominal", strconv.FormatInt(existing, 10), "Nominal bit rate", formatBitrate(float64(existing)))
-					replaceCanonicalSeedLegacyFill(stream, "BitRate", strconv.FormatInt(tag.bitRate, 10), "Bit rate", formatBitrate(bitrate))
+					replaceCanonicalSeedFill(stream, "BitRate_Nominal", strconv.FormatInt(existing, 10), "Nominal bit rate", formatBitrate(float64(existing)))
+					replaceCanonicalSeedFill(stream, "BitRate", strconv.FormatInt(tag.bitRate, 10), "Bit rate", formatBitrate(bitrate))
 					continue
 				}
 				continue
@@ -1529,7 +1525,7 @@ func applyMatroskaTagStats(info *MatroskaInfo, tagStats map[uint64]matroskaTagSt
 			if matroskaStreamScalar(*stream, "BitRate") != "" || matroskaStreamScalar(*stream, "BitRate_Nominal") != "" {
 				continue
 			}
-			replaceCanonicalSeedLegacyFill(stream, "BitRate", strconv.FormatInt(tag.bitRate, 10), "Bit rate", formatBitrate(bitrate))
+			replaceCanonicalSeedFill(stream, "BitRate", strconv.FormatInt(tag.bitRate, 10), "Bit rate", formatBitrate(bitrate))
 			width, _ := parsePixels(matroskaStreamScalar(*stream, "Width"))
 			height, _ := parsePixels(matroskaStreamScalar(*stream, "Height"))
 			fps, _ := matroskaCanonicalFrameRate(*stream)
@@ -1548,7 +1544,7 @@ func applyMatroskaTagStats(info *MatroskaInfo, tagStats map[uint64]matroskaTagSt
 				}
 				raw := strconv.FormatInt(tag.bitRate, 10)
 				display := formatBitrate(float64(tag.bitRate))
-				replaceCanonicalSeedLegacyFill(stream, "BitRate", raw, "Bit rate", display)
+				replaceCanonicalSeedFill(stream, "BitRate", raw, "Bit rate", display)
 				continue
 			}
 			isCBR := streamBitRateMode(*stream) == "Constant"
@@ -1560,14 +1556,14 @@ func applyMatroskaTagStats(info *MatroskaInfo, tagStats map[uint64]matroskaTagSt
 					}
 				}
 				display := formatBitrate(float64(cbrRate))
-				replaceCanonicalSeedLegacyFill(stream, "BitRate", strconv.FormatInt(cbrRate, 10), "Bit rate", display)
+				replaceCanonicalSeedFill(stream, "BitRate", strconv.FormatInt(cbrRate, 10), "Bit rate", display)
 				continue
 			}
 			// Prefer derived average bitrate (StreamSize/Duration) over Statistics Tags for audio.
 			// MediaInfo reports exact BitRate in JSON (e.g. 241184) even when Statistics Tags carry
 			// quantized values (e.g. 240000).
 			if bytes, ok := parseInt(matroskaStreamScalar(*stream, "StreamSize")); ok && bytes > 0 {
-				if dur, err := strconv.ParseFloat(matroskaLegacyDuration(*stream), 64); err == nil && dur > 0 {
+				if dur, err := strconv.ParseFloat(matroskaProjectedDuration(*stream), 64); err == nil && dur > 0 {
 					bps := int64(math.Floor((float64(bytes)*8)/dur + 1e-9))
 					if bps > 0 {
 						// Official MediaInfo quantizes Matroska AAC bitrates to 8 kb/s steps when derived.
@@ -1579,14 +1575,14 @@ func applyMatroskaTagStats(info *MatroskaInfo, tagStats map[uint64]matroskaTagSt
 						}
 						raw := strconv.FormatInt(bps, 10)
 						display := formatBitrate(float64(bps))
-						replaceCanonicalSeedLegacyFill(stream, "BitRate", raw, "Bit rate", display)
+						replaceCanonicalSeedFill(stream, "BitRate", raw, "Bit rate", display)
 						continue
 					}
 				}
 			}
 			if bps, ok := parseInt(matroskaStreamScalar(*stream, "BitRate")); ok && bps > 0 {
 				display := formatBitrate(float64(bps))
-				replaceCanonicalSeedLegacyFill(stream, "BitRate", strconv.FormatInt(bps, 10), "Bit rate", display)
+				replaceCanonicalSeedFill(stream, "BitRate", strconv.FormatInt(bps, 10), "Bit rate", display)
 				continue
 			}
 			// Official MediaInfo quantizes AAC bitrates to 8 kb/s steps.
@@ -1601,7 +1597,7 @@ func applyMatroskaTagStats(info *MatroskaInfo, tagStats map[uint64]matroskaTagSt
 			// Match official JSON: when Statistics Tags provide BPS for audio, emit BitRate even if
 			// we also derived a bitrate earlier from StreamSize/Duration.
 			raw := strconv.FormatInt(int64(math.Round(bitrate)), 10)
-			replaceCanonicalSeedLegacyFill(stream, "BitRate", raw, "Bit rate", formatBitrate(bitrate))
+			replaceCanonicalSeedFill(stream, "BitRate", raw, "Bit rate", formatBitrate(bitrate))
 		}
 	}
 	return matroskaHasCompleteTagStats(info.Tracks, tagStats)
@@ -1724,27 +1720,27 @@ func applyMatroskaMP3Probe(stream *Stream, probe *matroskaAudioProbe) {
 		version = "2"
 	}
 	replaceCanonicalSeedFill(stream, "Format", "MPEG Audio", "Format", "MPEG Audio")
-	replaceCanonicalSeedLegacyFill(stream, "Format_Version", version, "Format version", "Version "+version)
-	replaceCanonicalSeedLegacyFill(stream, "Format_Profile", "Layer 3", "Format profile", "Layer 3")
+	replaceCanonicalSeedFill(stream, "Format_Version", version, "Format version", "Version "+version)
+	replaceCanonicalSeedFill(stream, "Format_Profile", "Layer 3", "Format profile", "Layer 3")
 	mode := "Constant"
 	modeJSON := "CBR"
 	if vbr {
 		mode = "Variable"
 		modeJSON = "VBR"
 	}
-	replaceCanonicalSeedLegacyProjection(stream, "BitRate_Mode", mode, modeJSON, "Bit rate mode", mode)
+	replaceCanonicalSeedProjection(stream, "BitRate_Mode", mode, modeJSON, "Bit rate mode", mode)
 	if vbr {
 		clearCanonicalSeedField(stream, "BitRate", "Bit rate")
 	} else {
-		replaceCanonicalSeedLegacyFill(stream, "BitRate", strconv.Itoa(header.bitrateKbps*1000), "Bit rate", formatBitrateKbps(int64(header.bitrateKbps)))
+		replaceCanonicalSeedFill(stream, "BitRate", strconv.Itoa(header.bitrateKbps*1000), "Bit rate", formatBitrateKbps(int64(header.bitrateKbps)))
 	}
-	replaceCanonicalSeedLegacyFill(stream, "Compression_Mode", "Lossy", "Compression mode", "Lossy")
-	replaceCanonicalSeedLegacyFill(stream, "SamplesPerFrame", strconv.FormatInt(samplesPerFrame, 10), "", "")
-	replaceCanonicalSeedLegacyFill(stream, "FrameRate", fmt.Sprintf("%.3f", float64(header.sampleRate)/float64(samplesPerFrame)), "", "")
+	replaceCanonicalSeedFill(stream, "Compression_Mode", "Lossy", "Compression mode", "Lossy")
+	replaceCanonicalSeedFill(stream, "SamplesPerFrame", strconv.FormatInt(samplesPerFrame, 10), "", "")
+	replaceCanonicalSeedFill(stream, "FrameRate", fmt.Sprintf("%.3f", float64(header.sampleRate)/float64(samplesPerFrame)), "", "")
 	if header.channels == 2 && header.channelMode == 0x01 {
-		replaceCanonicalSeedLegacyFill(stream, "Format_Settings_Mode", "Joint stereo", "", "")
+		replaceCanonicalSeedFill(stream, "Format_Settings_Mode", "Joint stereo", "", "")
 		if (header.modeExt&0x02 != 0 && probe.mp3FrameCount > 0 && probe.mp3FirstFrameSHA != matroskaMP3NoMSParityFrameSHA) || strings.HasPrefix(probe.mp3Library, "LAME3.98") {
-			replaceCanonicalSeedLegacyFill(stream, "Format_Settings_ModeExtension", "MS Stereo", "", "")
+			replaceCanonicalSeedFill(stream, "Format_Settings_ModeExtension", "MS Stereo", "", "")
 		}
 	}
 	duration := 0.0
@@ -1764,21 +1760,21 @@ func applyMatroskaMP3Probe(stream *Stream, probe *matroskaAudioProbe) {
 			frameCountRaw := strconv.FormatInt(frameCount, 10)
 			samplingCountRaw := strconv.FormatInt(frameCount*samplesPerFrame, 10)
 			if milliseconds, ok := decimalSecondsToMilliseconds(durationRaw); ok {
-				replaceCanonicalSeedLegacyProjection(stream, "Duration", milliseconds, durationRaw, "", "")
+				replaceCanonicalSeedProjection(stream, "Duration", milliseconds, durationRaw, "", "")
 				setCanonicalSeedStructuredDecimals(stream, "Duration", uint8(decimalFractionDigits(durationRaw)))
 			}
-			replaceCanonicalSeedLegacyFill(stream, "FrameCount", frameCountRaw, "", "")
-			replaceCanonicalSeedLegacyFill(stream, "SamplingCount", samplingCountRaw, "", "")
+			replaceCanonicalSeedFill(stream, "FrameCount", frameCountRaw, "", "")
+			replaceCanonicalSeedFill(stream, "SamplingCount", samplingCountRaw, "", "")
 			if frameSize := mp3FrameLengthBytes(header); frameSize > 0 {
 				streamSize := frameCount * int64(frameSize)
 				if probe.mp3PayloadBytes > 0 {
 					streamSize = probe.mp3PayloadBytes
 				}
 				streamSizeRaw := strconv.FormatInt(streamSize, 10)
-				replaceCanonicalSeedLegacyFill(stream, "StreamSize", streamSizeRaw, "", "")
+				replaceCanonicalSeedFill(stream, "StreamSize", streamSizeRaw, "", "")
 				if vbr && duration > 0 && streamSize > 0 {
 					bitRate := int64(math.Floor(float64(streamSize)*8/duration + 1e-9))
-					replaceCanonicalSeedLegacyFill(stream, "BitRate", strconv.FormatInt(bitRate, 10), "Bit rate", formatBitrate(float64(bitRate)))
+					replaceCanonicalSeedFill(stream, "BitRate", strconv.FormatInt(bitRate, 10), "Bit rate", formatBitrate(float64(bitRate)))
 				}
 			}
 		}
@@ -1788,10 +1784,10 @@ func applyMatroskaMP3Probe(stream *Stream, probe *matroskaAudioProbe) {
 		if library == "" {
 			library = probe.mp3Library
 		}
-		replaceCanonicalSeedLegacyFill(stream, "Encoded_Library", library, "Writing library", library)
+		replaceCanonicalSeedFill(stream, "Encoded_Library", library, "Writing library", library)
 		if header.bitrateKbps == 64 {
 			settings := "-m j -V 4 -q 2 -lowpass 11 -b 64"
-			replaceCanonicalSeedLegacyFill(stream, "Encoded_Library_Settings", settings, "Encoding settings", settings)
+			replaceCanonicalSeedFill(stream, "Encoded_Library_Settings", settings, "Encoding settings", settings)
 		}
 	}
 }
@@ -1843,7 +1839,7 @@ func deriveCBRAudioStreamSizes(info *MatroskaInfo, fileSize int64) {
 		if bytes <= 0 {
 			continue
 		}
-		replaceCanonicalSeedLegacyFill(stream, "StreamSize", strconv.FormatInt(bytes, 10), "Stream size", formatStreamSize(bytes, fileSize))
+		replaceCanonicalSeedFill(stream, "StreamSize", strconv.FormatInt(bytes, 10), "Stream size", formatStreamSize(bytes, fileSize))
 	}
 }
 
@@ -1920,13 +1916,13 @@ func applyMatroskaTrackDelays(info *MatroskaInfo, stats map[uint64]*matroskaTrac
 		}
 		delaySeconds := float64(stat.minTimeNs+stream.mkvTrackOffsetNs) / 1e9
 		delay := fmt.Sprintf("%.3f", delaySeconds)
-		replaceCanonicalSeedLegacyFill(stream, "Delay", delay, "", "")
-		replaceCanonicalSeedLegacyFill(stream, "Delay_Source", "Container", "", "")
+		replaceCanonicalSeedFill(stream, "Delay", delay, "", "")
+		replaceCanonicalSeedFill(stream, "Delay_Source", "Container", "", "")
 		if stream.Kind == StreamAudio {
 			// MediaInfo: audio Delay is relative to the earliest stream; Video_Delay is relative to video.
 			videoDelaySeconds := float64(stat.minTimeNs-videoBaseNs+stream.mkvTrackOffsetNs) / 1e9
 			videoDelay := fmt.Sprintf("%.3f", videoDelaySeconds)
-			replaceCanonicalSeedLegacyFill(stream, "Video_Delay", videoDelay, "", "")
+			replaceCanonicalSeedFill(stream, "Video_Delay", videoDelay, "", "")
 		}
 	}
 }
@@ -1997,14 +1993,14 @@ func applyMatroskaVideoProbes(info *MatroskaInfo, probes map[uint64]*matroskaVid
 			}
 			if probe.sliceCount > 1 {
 				sliceCount := strconv.Itoa(probe.sliceCount)
-				replaceCanonicalSeedLegacyFill(stream, "Format_Settings_SliceCount", sliceCount, "", "")
+				replaceCanonicalSeedFill(stream, "Format_Settings_SliceCount", sliceCount, "", "")
 			}
 			if m, n, ok := inferH264GOP(probe.avcAnnexB); ok && (probe.timeCode != "" || stream.mkvStereoMode == 13) && matroskaStreamDisplay(*stream, "Scan type") != "MBAFF" && standardMatroskaH264GOPLength(n) && matroskaH264GOPNeedsExplicitRate(*stream, n) {
 				gop := fmt.Sprintf("M=%d, N=%d", m, n)
-				replaceCanonicalSeedLegacyFill(stream, "Format_Settings_GOP", gop, "Format settings, GOP", gop)
+				replaceCanonicalSeedFill(stream, "Format_Settings_GOP", gop, "Format settings, GOP", gop)
 			}
 			if probe.timeCode != "" && stream.mkvStereoMode != 13 {
-				replaceCanonicalSeedLegacyFill(stream, "TimeCode_FirstFrame", probe.timeCode, "Time code of first frame", probe.timeCode)
+				replaceCanonicalSeedFill(stream, "TimeCode_FirstFrame", probe.timeCode, "Time code of first frame", probe.timeCode)
 			}
 			if library := matroskaStreamDisplay(*stream, "Writing library"); library != "" {
 				encodedLibrary := canonicalEncodedLibrary(library)
@@ -2027,10 +2023,10 @@ func applyMatroskaVideoProbes(info *MatroskaInfo, probes map[uint64]*matroskaVid
 				if strings.Contains(library, "Video Mastering Works") && !strings.HasPrefix(library, "encoded by TMPGEnc ") {
 					library = "encoded by TMPGEnc " + library
 				}
-				replaceCanonicalSeedLegacyFill(stream, "Encoded_Library", library, "Writing library", library)
+				replaceCanonicalSeedFill(stream, "Encoded_Library", library, "Writing library", library)
 				if strings.HasPrefix(library, "encoded by TMPGEnc ") {
-					replaceCanonicalSeedLegacyFill(stream, "Encoded_Library_Name", "TMPGEnc", "", "")
-					replaceCanonicalSeedLegacyFill(stream, "Encoded_Library_Version", strings.TrimPrefix(library, "encoded by TMPGEnc "), "", "")
+					replaceCanonicalSeedFill(stream, "Encoded_Library_Name", "TMPGEnc", "", "")
+					replaceCanonicalSeedFill(stream, "Encoded_Library_Version", strings.TrimPrefix(library, "encoded by TMPGEnc "), "", "")
 				}
 			}
 		}
@@ -2045,24 +2041,24 @@ func applyMatroskaVideoProbes(info *MatroskaInfo, probes map[uint64]*matroskaVid
 			if strings.HasPrefix(encodedLibrary, "x265 ") && !strings.HasPrefix(encodedLibrary, "x265 - ") {
 				encodedLibrary = "x265 - " + strings.TrimPrefix(encodedLibrary, "x265 ")
 			}
-			replaceCanonicalSeedLegacyFill(stream, "Encoded_Library", encodedLibrary, "Writing library", probe.hdrInfo.x265Library)
-			replaceCanonicalSeedLegacyFill(stream, "Encoded_Library_Name", "x265", "", "")
+			replaceCanonicalSeedFill(stream, "Encoded_Library", encodedLibrary, "Writing library", probe.hdrInfo.x265Library)
+			replaceCanonicalSeedFill(stream, "Encoded_Library_Name", "x265", "", "")
 			if _, version := splitEncodedLibrary(encodedLibrary); version != "" {
-				replaceCanonicalSeedLegacyFill(stream, "Encoded_Library_Version", version, "", "")
+				replaceCanonicalSeedFill(stream, "Encoded_Library_Version", version, "", "")
 			} else {
 				clearCanonicalSeedField(stream, "Encoded_Library_Version", "")
 			}
 			if probe.hdrInfo.x265Settings != "" {
-				replaceCanonicalSeedLegacyFill(stream, "Encoded_Library_Settings", probe.hdrInfo.x265Settings, "Encoding settings", probe.hdrInfo.x265Settings)
+				replaceCanonicalSeedFill(stream, "Encoded_Library_Settings", probe.hdrInfo.x265Settings, "Encoding settings", probe.hdrInfo.x265Settings)
 			}
 		}
 		if probe.codec == "HEVC" && probe.hdrInfo.x265Library == "" && probe.hdrInfo.encoderLibrary != "" {
-			replaceCanonicalSeedLegacyFill(stream, "Encoded_Library", probe.hdrInfo.encoderLibrary, "Writing library", probe.hdrInfo.encoderLibrary)
-			replaceCanonicalSeedLegacyFill(stream, "Encoded_Library_Name", probe.hdrInfo.encoderName, "", "")
-			replaceCanonicalSeedLegacyFill(stream, "Encoded_Library_Version", probe.hdrInfo.encoderVersion, "", "")
+			replaceCanonicalSeedFill(stream, "Encoded_Library", probe.hdrInfo.encoderLibrary, "Writing library", probe.hdrInfo.encoderLibrary)
+			replaceCanonicalSeedFill(stream, "Encoded_Library_Name", probe.hdrInfo.encoderName, "", "")
+			replaceCanonicalSeedFill(stream, "Encoded_Library_Version", probe.hdrInfo.encoderVersion, "", "")
 		}
 		if probe.codec == "HEVC" && probe.hdrInfo.timeCode != "" {
-			replaceCanonicalSeedLegacyFill(stream, "TimeCode_FirstFrame", probe.hdrInfo.timeCode, "Time code of first frame", probe.hdrInfo.timeCode)
+			replaceCanonicalSeedFill(stream, "TimeCode_FirstFrame", probe.hdrInfo.timeCode, "Time code of first frame", probe.hdrInfo.timeCode)
 		}
 		hdr := probe.hdrInfo
 		if hdr.masteringPrimaries != "" {
@@ -2072,25 +2068,25 @@ func applyMatroskaVideoProbes(info *MatroskaInfo, probes map[uint64]*matroskaVid
 				primaries = containerPrimaries
 				primariesSource = "Container"
 			}
-			replaceCanonicalSeedLegacyFill(stream, "MasteringDisplay_ColorPrimaries", primaries, "Mastering display color primaries", primaries)
-			replaceCanonicalSeedLegacyFill(stream, "MasteringDisplay_ColorPrimaries_Source", primariesSource, "", "")
+			replaceCanonicalSeedFill(stream, "MasteringDisplay_ColorPrimaries", primaries, "Mastering display color primaries", primaries)
+			replaceCanonicalSeedFill(stream, "MasteringDisplay_ColorPrimaries_Source", primariesSource, "", "")
 		}
 		if hdr.hasMastering && hdr.masteringLuminanceMin >= 0 && hdr.masteringLuminanceMax > 0 {
 			lum := formatMasteringLuminance(hdr.masteringLuminanceMin, hdr.masteringLuminanceMax)
-			replaceCanonicalSeedLegacyFill(stream, "MasteringDisplay_Luminance", lum, "Mastering display luminance", lum)
-			replaceCanonicalSeedLegacyFill(stream, "MasteringDisplay_Luminance_Min", formatHDRLuminance(hdr.masteringLuminanceMin), "", "")
-			replaceCanonicalSeedLegacyFill(stream, "MasteringDisplay_Luminance_Max", formatHDRLuminanceMaximum(hdr.masteringLuminanceMax), "", "")
-			replaceCanonicalSeedLegacyFill(stream, "MasteringDisplay_Luminance_Source", "Stream", "", "")
+			replaceCanonicalSeedFill(stream, "MasteringDisplay_Luminance", lum, "Mastering display luminance", lum)
+			replaceCanonicalSeedFill(stream, "MasteringDisplay_Luminance_Min", formatHDRLuminance(hdr.masteringLuminanceMin), "", "")
+			replaceCanonicalSeedFill(stream, "MasteringDisplay_Luminance_Max", formatHDRLuminanceMaximum(hdr.masteringLuminanceMax), "", "")
+			replaceCanonicalSeedFill(stream, "MasteringDisplay_Luminance_Source", "Stream", "", "")
 		}
 		if hdr.maxCLL > 0 {
 			maxCLL := fmt.Sprintf("%d cd/m2", hdr.maxCLL)
-			replaceCanonicalSeedLegacyFill(stream, "MaxCLL", strconv.FormatUint(hdr.maxCLL, 10), "Maximum Content Light Level", maxCLL)
-			replaceCanonicalSeedLegacyFill(stream, "MaxCLL_Source", "Stream", "", "")
+			replaceCanonicalSeedFill(stream, "MaxCLL", strconv.FormatUint(hdr.maxCLL, 10), "Maximum Content Light Level", maxCLL)
+			replaceCanonicalSeedFill(stream, "MaxCLL_Source", "Stream", "", "")
 		}
 		if hdr.maxFALL > 0 {
 			maxFALL := fmt.Sprintf("%d cd/m2", hdr.maxFALL)
-			replaceCanonicalSeedLegacyFill(stream, "MaxFALL", strconv.FormatUint(hdr.maxFALL, 10), "Maximum Frame-Average Light Level", maxFALL)
-			replaceCanonicalSeedLegacyFill(stream, "MaxFALL_Source", "Stream", "", "")
+			replaceCanonicalSeedFill(stream, "MaxFALL", strconv.FormatUint(hdr.maxFALL, 10), "Maximum Frame-Average Light Level", maxFALL)
+			replaceCanonicalSeedFill(stream, "MaxFALL_Source", "Stream", "", "")
 		}
 		if hdr.hdr10Plus {
 			hdrText := formatHDR10Plus(hdr)
@@ -2121,16 +2117,16 @@ func applyMatroskaVideoProbes(info *MatroskaInfo, probes map[uint64]*matroskaVid
 					level := fmt.Sprintf("%02d", stream.mkvDolbyVision.level)
 					settings := dolbyVisionLayers(stream.mkvDolbyVision)
 					if hasSecondaryHDR {
-						replaceCanonicalSeedLegacyFill(stream, "HDR_Format_Profile", profile+" / ", "", "")
-						replaceCanonicalSeedLegacyFill(stream, "HDR_Format_Level", level+" / ", "", "")
+						replaceCanonicalSeedFill(stream, "HDR_Format_Profile", profile+" / ", "", "")
+						replaceCanonicalSeedFill(stream, "HDR_Format_Level", level+" / ", "", "")
 						if settings != "" {
-							replaceCanonicalSeedLegacyFill(stream, "HDR_Format_Settings", settings+" / ", "", "")
+							replaceCanonicalSeedFill(stream, "HDR_Format_Settings", settings+" / ", "", "")
 						}
 					} else {
-						replaceCanonicalSeedLegacyFill(stream, "HDR_Format_Profile", profile, "", "")
-						replaceCanonicalSeedLegacyFill(stream, "HDR_Format_Level", level, "", "")
+						replaceCanonicalSeedFill(stream, "HDR_Format_Profile", profile, "", "")
+						replaceCanonicalSeedFill(stream, "HDR_Format_Level", level, "", "")
 						if settings != "" {
-							replaceCanonicalSeedLegacyFill(stream, "HDR_Format_Settings", settings, "", "")
+							replaceCanonicalSeedFill(stream, "HDR_Format_Settings", settings, "", "")
 						}
 					}
 				}
@@ -2152,18 +2148,18 @@ func applyMatroskaVideoProbes(info *MatroskaInfo, probes map[uint64]*matroskaVid
 			}
 			if len(parts) > 0 {
 				value := strings.Join(parts, " / ")
-				replaceCanonicalSeedLegacyFill(stream, "HDR_Format", value, "", "")
+				replaceCanonicalSeedFill(stream, "HDR_Format", value, "", "")
 			}
 			if len(versions) > 1 || len(versions) == 1 && versions[0] != "" {
 				value := strings.Join(versions, " / ")
-				replaceCanonicalSeedLegacyFill(stream, "HDR_Format_Version", value, "", "")
+				replaceCanonicalSeedFill(stream, "HDR_Format_Version", value, "", "")
 			}
 			if len(compat) > 0 {
 				value := strings.Join(compat, " / ")
-				replaceCanonicalSeedLegacyFill(stream, "HDR_Format_Compatibility", value, "", "")
+				replaceCanonicalSeedFill(stream, "HDR_Format_Compatibility", value, "", "")
 			}
 			if stream.mkvHasDolbyVision && hasSecondaryHDR {
-				replaceCanonicalSeedLegacyFill(stream, "HDR_Format_Compression", "None / ", "", "")
+				replaceCanonicalSeedFill(stream, "HDR_Format_Compression", "None / ", "", "")
 			}
 		}
 		if stream.mkvHasDolbyVision && stream.mkvDolbyVision.profile == 5 {
@@ -2173,7 +2169,7 @@ func applyMatroskaVideoProbes(info *MatroskaInfo, probes map[uint64]*matroskaVid
 				"transfer_characteristics": "PQ", "transfer_characteristics_Source": "Container", "transfer_characteristics_Original_Source": "Stream",
 				"matrix_coefficients": "IPT-PQ-C2", "matrix_coefficients_Source": "Container", "matrix_coefficients_Original_Source": "Stream",
 			} {
-				replaceCanonicalSeedLegacyFill(stream, name, value, "", "")
+				replaceCanonicalSeedFill(stream, name, value, "", "")
 			}
 			setCanonicalSeedXMLVisibility(stream, "colour_description_present", true)
 			setCanonicalSeedXMLVisibility(stream, "colour_description_present_Source", true)
@@ -2188,7 +2184,7 @@ func applyMatroskaVideoProbes(info *MatroskaInfo, probes map[uint64]*matroskaVid
 				"colour_range": "Limited", "colour_range_Source": "Stream", "colour_primaries_Source": "Container / Stream",
 				"matrix_coefficients": "BT.2020 non-constant", "matrix_coefficients_Source": "Container / Stream",
 			} {
-				replaceCanonicalSeedLegacyFill(stream, name, value, "", "")
+				replaceCanonicalSeedFill(stream, name, value, "", "")
 			}
 			replaceCanonicalSeedFill(stream, "Standard", "Component", "Standard", "Component")
 		}
@@ -2243,7 +2239,7 @@ func applyMatroskaMPEG2Probe(stream *Stream, parser *mpeg2VideoParser) {
 		profile, level, _ := strings.Cut(parsed.Profile, "@")
 		replaceCanonicalSeedFill(stream, "Format_Profile", profile, "Format profile", parsed.Profile)
 		if level != "" {
-			replaceCanonicalSeedLegacyFill(stream, "Format_Level", level, "", "")
+			replaceCanonicalSeedFill(stream, "Format_Level", level, "", "")
 		}
 	}
 	if parsed.BVOP != nil {
@@ -2272,12 +2268,12 @@ func applyMatroskaMPEG2Probe(stream *Stream, parser *mpeg2VideoParser) {
 				display := map[string]string{"4:3": "1.333", "16:9": "1.778", "2.21:1": "2.210"}[parsed.AspectRatio]
 				pixel := formatJSONFloat(ratio / (float64(width) / float64(height)))
 				replaceCanonicalSeedFill(stream, "DisplayAspectRatio", display, "Display aspect ratio", parsed.AspectRatio)
-				replaceCanonicalSeedLegacyFill(stream, "PixelAspectRatio", pixel, "", "")
+				replaceCanonicalSeedFill(stream, "PixelAspectRatio", pixel, "", "")
 			}
 		}
 	}
 	if parsed.MaxBitRateKbps > 0 {
-		replaceCanonicalSeedLegacyFill(stream, "BitRate_Mode", "VBR", "Bit rate mode", "Variable")
+		replaceCanonicalSeedFill(stream, "BitRate_Mode", "VBR", "Bit rate mode", "Variable")
 		replaceCanonicalSeedFill(stream, "BitRate_Maximum", strconv.FormatInt(parsed.MaxBitRateKbps*1000, 10), "Maximum bit rate", formatBitrateKbps(parsed.MaxBitRateKbps))
 	}
 	if parsed.ColorSpace != "" {
@@ -2298,34 +2294,33 @@ func applyMatroskaMPEG2Probe(stream *Stream, parser *mpeg2VideoParser) {
 	replaceCanonicalSeedFill(stream, "Compression_Mode", "Lossy", "Compression mode", "Lossy")
 	if parsed.TimeCode != "" {
 		replaceCanonicalSeedFill(stream, "TimeCode_FirstFrame", parsed.TimeCode, "Time code of first frame", parsed.TimeCode)
-		replaceCanonicalSeedLegacyFill(stream, "TimeCode_Source", parsed.TimeCodeSource, "", "")
+		replaceCanonicalSeedFill(stream, "TimeCode_Source", parsed.TimeCodeSource, "", "")
 		if delay, ok := mpeg2TimeCodeSeconds(parsed.TimeCode, parsed.FrameRate); ok {
 			delayText := fmt.Sprintf("%.3f", delay)
 			dropFrame := "No"
 			if parsed.GOPDropFrame != nil && *parsed.GOPDropFrame {
 				dropFrame = "Yes"
 			}
-			replaceCanonicalSeedLegacyFill(stream, "Delay_Original", delayText, "", "")
-			replaceCanonicalSeedLegacyFill(stream, "Delay_Original_DropFrame", dropFrame, "", "")
-			replaceCanonicalSeedLegacyFill(stream, "Delay_Original_Source", "Stream", "", "")
+			replaceCanonicalSeedFill(stream, "Delay_Original", delayText, "", "")
+			replaceCanonicalSeedFill(stream, "Delay_Original_DropFrame", dropFrame, "", "")
+			replaceCanonicalSeedFill(stream, "Delay_Original_Source", "Stream", "", "")
 		}
 	}
 	if parsed.GOPOpenClosed != "" {
-		replaceCanonicalSeedLegacyFill(stream, "Gop_OpenClosed", parsed.GOPOpenClosed, "", "")
+		replaceCanonicalSeedFill(stream, "Gop_OpenClosed", parsed.GOPOpenClosed, "", "")
 	}
 	if parsed.GOPFirstClosed != "" && parsed.GOPFirstClosed != parsed.GOPOpenClosed {
-		replaceCanonicalSeedLegacyFill(stream, "Gop_OpenClosed_FirstFrame", parsed.GOPFirstClosed, "", "")
+		replaceCanonicalSeedFill(stream, "Gop_OpenClosed_FirstFrame", parsed.GOPFirstClosed, "", "")
 	}
 	if parsed.MatrixData != "" {
-		replaceCanonicalSeedLegacyFill(stream, "Format_Settings_Matrix_Data", parsed.MatrixData, "", "")
+		replaceCanonicalSeedFill(stream, "Format_Settings_Matrix_Data", parsed.MatrixData, "", "")
 	}
 	if parsed.BufferSize > 0 {
 		value := strconv.FormatInt(parsed.BufferSize, 10)
-		replaceCanonicalSeedLegacyFill(stream, "BufferSize", value, "", "")
+		replaceCanonicalSeedFill(stream, "BufferSize", value, "", "")
 	}
 	if parsed.IntraDCPrecision > 0 {
 		appendCanonicalSeedObjectMembers(stream, "extra", []structuredMember{{Key: "intra_dc_precision", Value: structuredNode{Kind: structuredString, Text: strconv.Itoa(parsed.IntraDCPrecision)}}})
-		setCanonicalSeedLegacyObject(stream, "extra")
 	}
 	if parsed.ColourDescriptionPresent {
 		if parsed.ColourPrimaries == "BT.470 BG" {
@@ -2337,19 +2332,19 @@ func applyMatroskaMPEG2Probe(stream *Stream, parser *mpeg2VideoParser) {
 		if parsed.MatrixCoefficients == "BT.470 BG" {
 			parsed.MatrixCoefficients = "BT.470 System B/G"
 		}
-		replaceCanonicalSeedLegacyFill(stream, "colour_description_present", "Yes", "", "")
-		replaceCanonicalSeedLegacyFill(stream, "colour_description_present_Source", "Stream", "", "")
+		replaceCanonicalSeedFill(stream, "colour_description_present", "Yes", "", "")
+		replaceCanonicalSeedFill(stream, "colour_description_present_Source", "Stream", "", "")
 		if parsed.ColourPrimaries != "" {
-			replaceCanonicalSeedLegacyFill(stream, "colour_primaries", parsed.ColourPrimaries, "", "")
-			replaceCanonicalSeedLegacyFill(stream, "colour_primaries_Source", "Stream", "", "")
+			replaceCanonicalSeedFill(stream, "colour_primaries", parsed.ColourPrimaries, "", "")
+			replaceCanonicalSeedFill(stream, "colour_primaries_Source", "Stream", "", "")
 		}
 		if parsed.TransferCharacteristics != "" {
-			replaceCanonicalSeedLegacyFill(stream, "transfer_characteristics", parsed.TransferCharacteristics, "", "")
-			replaceCanonicalSeedLegacyFill(stream, "transfer_characteristics_Source", "Stream", "", "")
+			replaceCanonicalSeedFill(stream, "transfer_characteristics", parsed.TransferCharacteristics, "", "")
+			replaceCanonicalSeedFill(stream, "transfer_characteristics_Source", "Stream", "", "")
 		}
 		if parsed.MatrixCoefficients != "" {
-			replaceCanonicalSeedLegacyFill(stream, "matrix_coefficients", parsed.MatrixCoefficients, "", "")
-			replaceCanonicalSeedLegacyFill(stream, "matrix_coefficients_Source", "Stream", "", "")
+			replaceCanonicalSeedFill(stream, "matrix_coefficients", parsed.MatrixCoefficients, "", "")
+			replaceCanonicalSeedFill(stream, "matrix_coefficients_Source", "Stream", "", "")
 		}
 	}
 	if parsed.Width > 720 {
@@ -2829,7 +2824,7 @@ func applyMatroskaMPEG4VisualProbe(stream *Stream, parsed mpeg4VisualInfo) {
 		profile, level, _ := strings.Cut(parsed.Profile, "@L")
 		replaceCanonicalSeedFill(stream, "Format_Profile", profile, "Format profile", parsed.Profile)
 		if level != "" {
-			replaceCanonicalSeedLegacyFill(stream, "Format_Level", level, "", "")
+			replaceCanonicalSeedFill(stream, "Format_Level", level, "", "")
 		}
 	}
 	if parsed.BVOP != nil {
@@ -2866,10 +2861,10 @@ func applyMatroskaMPEG4VisualProbe(stream *Stream, parsed mpeg4VisualInfo) {
 	if parsed.WritingLibrary != "" {
 		replaceCanonicalSeedFill(stream, "Encoded_Library", parsed.WritingLibrary, "Writing library", parsed.WritingLibrary)
 		if version, date, ok := xvidLibraryVersionDate(parsed.WritingLibrary); ok {
-			replaceCanonicalSeedLegacyFill(stream, "Encoded_Library_Name", "XviD", "", "")
-			replaceCanonicalSeedLegacyFill(stream, "Encoded_Library_Version", version, "", "")
+			replaceCanonicalSeedFill(stream, "Encoded_Library_Name", "XviD", "", "")
+			replaceCanonicalSeedFill(stream, "Encoded_Library_Version", version, "", "")
 			if date != "" {
-				replaceCanonicalSeedLegacyFill(stream, "Encoded_Library_Date", date, "", "")
+				replaceCanonicalSeedFill(stream, "Encoded_Library_Date", date, "", "")
 			}
 		}
 	}

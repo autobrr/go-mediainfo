@@ -80,7 +80,7 @@ func TestParseEAC3FrameWithOptionsPreservesHDCDConversionMetadata(t *testing.T) 
 		canonicalSeed: matroskaAC3CanonicalSeed(matroskaAC3CanonicalFacts{format: "E-AC-3", trackNumber: 1}),
 	}}}
 	applyMatroskaAudioProbes(&info, map[uint64]*matroskaAudioProbe{1: {format: "E-AC-3", ok: true, info: frame}})
-	refreshCanonicalLegacySnapshot(&info.Tracks[0])
+	refreshCanonicalCompatibilitySnapshot(&info.Tracks[0])
 	if extra := info.Tracks[0].JSONRaw["extra"]; !strings.Contains(extra, `"adconvtyp":"HDCD"`) {
 		t.Fatalf("rendered extra missing HDCD adconvtyp: %s", extra)
 	}
@@ -102,7 +102,7 @@ func TestMergeEAC3DependentDualMonoPreservesZeroACModAndLFE(t *testing.T) {
 		canonicalSeed: matroskaAC3CanonicalSeed(matroskaAC3CanonicalFacts{format: "E-AC-3", trackNumber: 1}),
 	}}}
 	applyMatroskaAudioProbes(&container, map[uint64]*matroskaAudioProbe{1: {format: "E-AC-3", ok: true, info: info}})
-	refreshCanonicalLegacySnapshot(&container.Tracks[0])
+	refreshCanonicalCompatibilitySnapshot(&container.Tracks[0])
 	extra := container.Tracks[0].JSONRaw["extra"]
 	if !strings.Contains(extra, `"acmod":"2 / 0"`) || !strings.Contains(extra, `"lfeon":"0 / 1"`) {
 		t.Fatalf("dependent metadata not rendered: %s", extra)

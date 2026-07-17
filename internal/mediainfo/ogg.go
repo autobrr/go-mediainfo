@@ -377,7 +377,6 @@ func canonicalOggAudioStream(stream *oggLogicalStream, duration float64, multipl
 		samplingCount := durationMilliseconds * int64(stream.sampleRate) / 1000
 		value := strconv.FormatInt(samplingCount, 10)
 		fillGeneratedStructured(store, ref, "SamplingCount", value)
-		store.MarkLegacyJSON(ref, "SamplingCount", value, false)
 	}
 	store.Fill(ref, "Compression_Mode", "Lossy", fillReplace)
 	if multiplexed && stream.payloadBytes > 0 {

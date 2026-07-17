@@ -29,11 +29,12 @@ type fieldEntry struct {
 	TextLabel     string
 	StructuredKey string
 	Node          *structuredNode
-	Projected     bool
-	DeriveString  bool
-	LegacyJSON    bool
-	LegacyJSONRaw bool
-	LegacyValue   string
+	// StructuredOverride retains an exact serializer representation without
+	// replacing the parser-owned canonical value or node.
+	StructuredOverride *structuredNode
+	Projected          bool
+	Generated          bool
+	DeriveString       bool
 	// StructuredDecimals preserves evidenced fixed precision for measured decimal fields.
 	StructuredDecimals uint8
 }
@@ -47,8 +48,9 @@ type canonicalStreamPolicy struct {
 	HideTypeOrderXML bool
 }
 
-// MarkLegacyJSON records the legacy JSON snapshot value for an existing structured field.
-func (s *fieldStore) MarkLegacyJSON(ref streamRef, name fieldName, value string, raw bool) {
+// OverrideStructured records an exact structured representation for an
+// existing canonical field without mutating its source value.
+func (s *fieldStore) OverrideStructured(ref streamRef, name fieldName, value string, raw bool) {
 	stream := s.stream(ref)
 	if stream == nil {
 		return
@@ -59,9 +61,15 @@ func (s *fieldStore) MarkLegacyJSON(ref streamRef, name fieldName, value string,
 		if key != string(name) || !entry.Options.ShowStructured {
 			continue
 		}
-		entry.LegacyJSON = !raw
-		entry.LegacyJSONRaw = raw
-		entry.LegacyValue = value
+		node := structuredNode{Kind: structuredString, Text: value}
+		if raw {
+			parsed, err := parseStructuredNode(value)
+			if err != nil {
+				parsed = structuredNode{Kind: structuredRaw, Text: value}
+			}
+			node = parsed
+		}
+		entry.StructuredOverride = &node
 		return
 	}
 }
@@ -76,196 +84,23 @@ func canonicalStreamSnapshot(store *fieldStore, ref streamRef, policy canonicalS
 	store.streams[ref].HideTypeOrderXML = policy.HideTypeOrderXML
 	finalizeFieldStore(store)
 	projection := projectTextStore(store, "")
-	stream := Stream{
-		Kind:                store.streams[ref].Kind,
-		JSONSkipStreamOrder: policy.SkipStreamOrder,
-		JSONSkipComputed:    policy.SkipComputed,
-		canonicalPolicy:     policy,
-	}
+	stream := Stream{Kind: store.streams[ref].Kind, canonicalPolicy: policy}
 	for _, projected := range projection.Streams {
 		if projected.Kind == stream.Kind {
 			stream.Fields = append([]Field(nil), projected.Fields...)
 			break
 		}
 	}
+	stream.canonicalSeed = make([]fieldEntry, 0, len(store.streams[ref].Fields))
 	for _, entry := range store.streams[ref].Fields {
 		key := firstNonEmpty(entry.StructuredKey, string(entry.Name))
-		if entry.LegacyJSON {
-			if stream.JSON == nil {
-				stream.JSON = make(map[string]string)
-			}
-			stream.JSON[key] = entry.LegacyValue
+		if entry.Generated && (key == "@type" || key == "@typeorder" || key == "StreamOrder") {
+			continue
 		}
-		if entry.LegacyJSONRaw {
-			if stream.JSONRaw == nil {
-				stream.JSONRaw = make(map[string]string)
-			}
-			stream.JSONRaw[key] = entry.LegacyValue
-		}
+		stream.canonicalSeed = append(stream.canonicalSeed, entry)
 	}
-	stream.canonicalSeed = append([]fieldEntry(nil), store.streams[ref].Fields...)
+	stream = publishCanonicalStreamCompatibilitySnapshot(stream, store)
 	return stream
-}
-
-// refreshCanonicalLegacySnapshot regenerates one direct stream's public legacy
-// fields and override maps from its canonical seed without changing media facts.
-func refreshCanonicalLegacySnapshot(stream *Stream) {
-	if stream == nil || len(stream.canonicalSeed) == 0 {
-		return
-	}
-	legacyJSON := stream.JSON
-	legacyJSONRaw := stream.JSONRaw
-	compatibilityDeletes := append([]fieldName(nil), stream.compatibilityDeletes...)
-	markCanonicalSeedLegacySnapshot(stream)
-	store := &fieldStore{}
-	ref := store.Prepare(stream.Kind)
-	appendCanonicalSeed(store, ref, stream.canonicalSeed)
-	snapshot := canonicalStreamSnapshot(store, ref, canonicalStreamPolicy{
-		SkipStreamOrder:  stream.canonicalPolicy.SkipStreamOrder || stream.JSONSkipStreamOrder,
-		SkipComputed:     stream.canonicalPolicy.SkipComputed || stream.JSONSkipComputed,
-		HideTypeOrderXML: stream.canonicalPolicy.HideTypeOrderXML,
-	})
-	stream.Fields = snapshot.Fields
-	stream.JSON = snapshot.JSON
-	stream.JSONRaw = snapshot.JSONRaw
-	for _, key := range compatibilityDeletes {
-		delete(stream.JSON, string(key))
-	}
-	if legacyJSON != nil && stream.JSON == nil {
-		stream.JSON = map[string]string{}
-	}
-	if streamOrder := legacyJSON["StreamOrder"]; streamOrder != "" {
-		stream.JSON["StreamOrder"] = streamOrder
-	}
-	if legacyJSONRaw != nil && stream.JSONRaw == nil {
-		stream.JSONRaw = map[string]string{}
-	}
-	stream.JSONSkipStreamOrder = snapshot.JSONSkipStreamOrder
-	stream.JSONSkipComputed = snapshot.JSONSkipComputed
-	stream.canonicalPolicy = snapshot.canonicalPolicy
-	stream.compatibilityDeletes = compatibilityDeletes
-	stream.canonicalSeed = snapshot.canonicalSeed
-}
-
-// markCanonicalSeedLegacySnapshot records which direct entries belong in the
-// exported compatibility override maps and their exact historical values.
-func markCanonicalSeedLegacySnapshot(stream *Stream) {
-	for key, value := range stream.JSON {
-		markCanonicalSeedLegacyValue(stream, key, value, false)
-	}
-	for key, value := range stream.JSONRaw {
-		markCanonicalSeedLegacyValue(stream, key, value, true)
-	}
-}
-
-// markCanonicalSeedLegacyValue attaches one compatibility-map value to its
-// canonical structured entry when that entry exists.
-func markCanonicalSeedLegacyValue(stream *Stream, key, value string, raw bool) {
-	if key == "" || value == "" {
-		return
-	}
-	for index := range slices.Backward(stream.canonicalSeed) {
-		entry := &stream.canonicalSeed[index]
-		structuredKey := firstNonEmpty(entry.StructuredKey, string(entry.Name))
-		if !entry.Options.ShowStructured || structuredKey != key {
-			continue
-		}
-		if entry.LegacyJSON || entry.LegacyJSONRaw {
-			return
-		}
-		entry.LegacyJSON = !raw
-		entry.LegacyJSONRaw = raw
-		entry.LegacyValue = value
-		return
-	}
-}
-
-// setCanonicalSeedLegacyValue replaces one exported compatibility-map value
-// after parser logic has moved its authoritative value into the canonical seed.
-func setCanonicalSeedLegacyValue(stream *Stream, key fieldName, value string, raw bool) {
-	if stream == nil || key == "" || value == "" {
-		return
-	}
-	for index := range slices.Backward(stream.canonicalSeed) {
-		entry := &stream.canonicalSeed[index]
-		structuredKey := firstNonEmpty(entry.StructuredKey, string(entry.Name))
-		if !entry.Options.ShowStructured || structuredKey != string(key) {
-			continue
-		}
-		entry.LegacyJSON = !raw
-		entry.LegacyJSONRaw = raw
-		entry.LegacyValue = value
-		return
-	}
-}
-
-// clearCanonicalSeedLegacyValue removes one exported scalar compatibility
-// marker while retaining its authoritative canonical fact.
-func clearCanonicalSeedLegacyValue(stream *Stream, key fieldName) {
-	if stream == nil || key == "" {
-		return
-	}
-	for index := range stream.canonicalSeed {
-		entry := &stream.canonicalSeed[index]
-		structuredKey := firstNonEmpty(entry.StructuredKey, string(entry.Name))
-		if !entry.Options.ShowStructured || structuredKey != string(key) {
-			continue
-		}
-		entry.LegacyJSON = false
-		entry.LegacyJSONRaw = false
-		entry.LegacyValue = ""
-	}
-}
-
-// canonicalSeedLegacyJSONValue returns an explicitly migrated scalar retained
-// for the exported JSON compatibility snapshot.
-func canonicalSeedLegacyJSONValue(stream Stream, key fieldName) (string, bool) {
-	for index := range slices.Backward(stream.canonicalSeed) {
-		entry := stream.canonicalSeed[index]
-		structuredKey := firstNonEmpty(entry.StructuredKey, string(entry.Name))
-		if entry.LegacyJSON && structuredKey == string(key) {
-			return entry.LegacyValue, true
-		}
-	}
-	return "", false
-}
-
-// markCanonicalCompatibilityDeletion records a scalar to remove when the
-// parser's partial public compatibility snapshot is next refreshed.
-func markCanonicalCompatibilityDeletion(stream *Stream, key fieldName) {
-	if stream == nil || key == "" {
-		return
-	}
-	if slices.Contains(stream.compatibilityDeletes, key) {
-		return
-	}
-	stream.compatibilityDeletes = append(stream.compatibilityDeletes, key)
-}
-
-// refreshCanonicalLegacyMaps projects explicitly migrated compatibility-map
-// entries without replacing a partially migrated stream's legacy text fields.
-func refreshCanonicalLegacyMaps(stream *Stream) {
-	if stream == nil {
-		return
-	}
-	for _, entry := range stream.canonicalSeed {
-		key := firstNonEmpty(entry.StructuredKey, string(entry.Name))
-		if entry.LegacyJSON {
-			if stream.JSON == nil {
-				stream.JSON = map[string]string{}
-			}
-			stream.JSON[key] = entry.LegacyValue
-		}
-		if entry.LegacyJSONRaw {
-			if stream.JSONRaw == nil {
-				stream.JSONRaw = map[string]string{}
-			}
-			stream.JSONRaw[key] = entry.LegacyValue
-		}
-	}
-	for _, key := range stream.compatibilityDeletes {
-		delete(stream.JSON, string(key))
-	}
 }
 
 // storedStream owns one stream's canonical entries and projection ordering metadata.

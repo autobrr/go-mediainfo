@@ -16,9 +16,6 @@ func newMP4StructuredFacts(seed []fieldEntry) *mp4StructuredFacts {
 		}
 		name := fieldName(firstNonEmpty(entry.StructuredKey, string(entry.Name)))
 		facts.SetCanonical(name, entry.Value.Text)
-		if entry.LegacyJSON && entry.LegacyValue != "" {
-			facts.canonicalStructuredFacts.Set(name, entry.Value.Text, entry.LegacyValue)
-		}
 	}
 	return facts
 }
@@ -36,5 +33,5 @@ func (f *mp4StructuredFacts) Get(name fieldName) string {
 	if f == nil {
 		return ""
 	}
-	return f.Legacy(name)
+	return f.Canonical(name)
 }

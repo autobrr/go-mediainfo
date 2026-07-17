@@ -200,14 +200,14 @@ func parseDVDVideo(path string, file *os.File, size int64, opts AnalyzeOptions) 
 		generalFields = setFieldValue(generalFields, "Duration", formatDVDDuration(ifoDurationSeconds))
 		for i := range streams {
 			streams[i].Fields = setFieldValue(streams[i].Fields, "Duration", formatDVDDuration(ifoDurationSeconds))
-			replaceCanonicalSeedLegacyProjection(
+			replaceCanonicalSeedProjection(
 				&streams[i],
 				"Duration",
 				strconv.FormatFloat(ifoDurationSeconds*1000, 'f', -1, 64),
 				formatJSONSeconds(ifoDurationSeconds),
 				"Duration",
-				formatDVDDuration(ifoDurationSeconds),
-			)
+				formatDVDDuration(ifoDurationSeconds))
+
 		}
 	}
 
@@ -437,10 +437,11 @@ func parseDVDVideo(path string, file *os.File, size int64, opts AnalyzeOptions) 
 	if menuStream != nil {
 		if aggregateMode {
 			if source := dvdTitleSetSource(base); source != "" {
-				appendCanonicalSeedLegacyObjectMembers(menuStream, "extra", []structuredMember{{
+				appendCanonicalSeedObjectMembers(menuStream, "extra", []structuredMember{{
 					Key:   "Source",
 					Value: structuredNode{Kind: structuredString, Text: source},
 				}})
+
 			}
 		}
 		streams = append(streams, *menuStream)
@@ -560,7 +561,6 @@ func buildCanonicalDVDMenuStream(fields []Field, facts *dvdStructuredFacts, extr
 	}
 	facts.Apply(builder)
 	builder.OverrideStructuredNode("extra", extra)
-	builder.MarkLegacyJSONRaw("extra", structuredNodeText(extra))
 	return builder.Snapshot(canonicalStreamPolicy{SkipStreamOrder: true, SkipComputed: true})
 }
 
@@ -1101,7 +1101,7 @@ func mergeDVDTitleSetStreams(streams []Stream, source string) []Stream {
 			continue
 		}
 		if stream.Kind == StreamAudio {
-			replaceCanonicalSeedLegacyFill(&stream, "StreamOrder", strconv.Itoa(audioIndex), "", "")
+			replaceCanonicalSeedFill(&stream, "StreamOrder", strconv.Itoa(audioIndex), "", "")
 			audioIndex++
 		}
 		if stream.Kind == StreamVideo && hasAudio {
@@ -1112,10 +1112,11 @@ func mergeDVDTitleSetStreams(streams []Stream, source string) []Stream {
 		}
 		if source != "" {
 			replaceCanonicalSeedText(&stream, "Source", source)
-			appendCanonicalSeedLegacyObjectMembers(&stream, "extra", []structuredMember{{
+			appendCanonicalSeedObjectMembers(&stream, "extra", []structuredMember{{
 				Key:   "Source",
 				Value: structuredNode{Kind: structuredString, Text: source},
 			}})
+
 		}
 		out = append(out, stream)
 	}

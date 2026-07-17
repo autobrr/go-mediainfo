@@ -1,6 +1,7 @@
 package mediainfo
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -55,6 +56,43 @@ func TestRawTextExtraProjectionVisibilityAndFormatting(t *testing.T) {
 		}
 		if got := rawTextExtraValue(test.key, test.value); got != test.want {
 			t.Fatalf("rawTextExtraValue(%q, %q) = %q, want %q", test.key, test.value, got, test.want)
+		}
+	}
+}
+
+func TestRawTextProjectionRegistryNormalizesAliasesAndDeduplicatesCanonicalRows(t *testing.T) {
+	builder := newCanonicalStreamBuilder(StreamGeneral)
+	builder.Fill("LawRating", "TV-14", "Law rating", "TV-14")
+	builder.Text("Recorded location", "Studio A")
+	builder.Text("Terms of use", "Editorial")
+	builder.Text("GOP, Open/Closed", "Open")
+	builder.Text("GOP, Open/Closed", "Closed")
+	report := Report{Ref: "registry.mkv", General: builder.Snapshot(canonicalStreamPolicy{})}
+	attachCanonicalStore(&report)
+
+	raw := RenderTextWithOptions([]Report{report}, TextRenderOptions{Language: "raw"})
+	for _, row := range []string{
+		"LawRating                        : TV-14",
+		"Recorded/Location                : Studio A",
+		"TermsOfUse                       : Editorial",
+		"Gop_OpenClosed/String            : Open",
+	} {
+		if !strings.Contains(raw, row) {
+			t.Fatalf("raw output missing %q:\n%s", row, raw)
+		}
+	}
+	if strings.Contains(raw, "Gop_OpenClosed/String            : Closed") {
+		t.Fatalf("raw output retained duplicate canonical GOP row:\n%s", raw)
+	}
+}
+
+func TestRawTextProjectionRegistryHidesStructuredComponents(t *testing.T) {
+	for _, name := range []fieldName{
+		"format_identifier", "OverallBitRate_Precision_Min", "Encoded_Library_Name", "Format_Settings_SliceCount",
+	} {
+		rule, ok := rawTextCanonicalFieldRules[name]
+		if !ok || rule.Visible {
+			t.Errorf("%s raw policy = %#v, %v; want registered hidden field", name, rule, ok)
 		}
 	}
 }
@@ -238,13 +276,23 @@ func TestRawTextSliceCountKeepsNumericExtensionSeparate(t *testing.T) {
 	} {
 		got := ""
 		for _, field := range rawTextStructuredDerivations(StreamVideo, map[string]string{"Format_Settings_SliceCount": test.count}, 0) {
-			if field.Label == "Format_Settings_SliceCount/Strin" {
+			if field.Label == "Format_Settings_SliceCount/String" {
 				got = field.Value
 			}
 		}
 		if got != test.want {
 			t.Errorf("count %s formatted sibling = %q, want %q", test.count, got, test.want)
 		}
+	}
+}
+
+func TestWriteRawTextFieldsSeparatesFullWidthLabel(t *testing.T) {
+	var buffer bytes.Buffer
+	writeRawTextFields(&buffer, "Video", []rawTextFieldProjection{{
+		Label: "Format_Settings_SliceCount/String", Value: "4 slice per frame",
+	}})
+	if got := buffer.String(); !strings.Contains(got, "Format_Settings_SliceCount/String : 4 slice per frame") {
+		t.Fatalf("raw text = %q; want a separator after the full-width label", got)
 	}
 }
 

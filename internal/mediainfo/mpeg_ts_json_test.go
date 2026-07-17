@@ -7,25 +7,25 @@ func TestSetEAC3CommercialJSON_JOCGatesBDAVMetadata(t *testing.T) {
 
 	tsExtras := &mpegTSStructuredFacts{}
 	setEAC3CommercialFacts(tsExtras, info, false)
-	if got := tsExtras.Legacy("Format_Commercial_IfAny"); got != "Dolby Digital Plus with Dolby Atmos" {
+	if got := tsExtras.Projection("Format_Commercial_IfAny"); got != "Dolby Digital Plus with Dolby Atmos" {
 		t.Fatalf("non-BDAV commercial label = %q", got)
 	}
-	if got := tsExtras.Legacy("Format_Profile"); got != "" {
+	if got := tsExtras.Projection("Format_Profile"); got != "" {
 		t.Fatal("non-BDAV JOC must not set Format_Profile")
 	}
-	if got := tsExtras.Legacy("MuxingMode"); got != "" {
+	if got := tsExtras.Projection("MuxingMode"); got != "" {
 		t.Fatal("non-BDAV JOC must not set MuxingMode")
 	}
 
 	bdavExtras := &mpegTSStructuredFacts{}
 	setEAC3CommercialFacts(bdavExtras, info, true)
-	if got := bdavExtras.Legacy("Format_Commercial_IfAny"); got != "Dolby Digital Plus with Dolby Atmos" {
+	if got := bdavExtras.Projection("Format_Commercial_IfAny"); got != "Dolby Digital Plus with Dolby Atmos" {
 		t.Fatalf("BDAV commercial label = %q", got)
 	}
-	if got := bdavExtras.Legacy("Format_Profile"); got != "Blu-ray Disc" {
+	if got := bdavExtras.Projection("Format_Profile"); got != "Blu-ray Disc" {
 		t.Fatalf("BDAV Format_Profile = %q", got)
 	}
-	if got := bdavExtras.Legacy("MuxingMode"); got != "Stream extension" {
+	if got := bdavExtras.Projection("MuxingMode"); got != "Stream extension" {
 		t.Fatalf("BDAV MuxingMode = %q", got)
 	}
 }
@@ -34,7 +34,7 @@ func TestSetEAC3CommercialJSON_NonJOCUsesDolbyDigitalPlus(t *testing.T) {
 	extras := &mpegTSStructuredFacts{}
 	setEAC3CommercialFacts(extras, ac3Info{}, false)
 
-	if got := extras.Legacy("Format_Commercial_IfAny"); got != "Dolby Digital Plus" {
+	if got := extras.Projection("Format_Commercial_IfAny"); got != "Dolby Digital Plus" {
 		t.Fatalf("commercial label = %q", got)
 	}
 }

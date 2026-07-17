@@ -2577,7 +2577,7 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 				if st.ac3Info.hasLorosurmixlev {
 					fields = append(fields, Field{Name: "lorosurmixlev", Value: fmt.Sprintf("%.1f dB", st.ac3Info.lorosurmixlevDB)})
 				}
-				if !partialScan && !isBDAV && hasMPEGVideo && st.audioFrames > 0 && st.hasAC3 && streamFacts.Legacy("FrameCount") == "" {
+				if !partialScan && !isBDAV && hasMPEGVideo && st.audioFrames > 0 && st.hasAC3 && streamFacts.Projection("FrameCount") == "" {
 					streamFacts.Set("FrameCount", strconv.FormatUint(st.audioFrames, 10))
 				}
 				if isTrueHD {

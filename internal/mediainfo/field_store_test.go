@@ -215,39 +215,36 @@ func TestReplaceCanonicalSeedFillRestoresXMLVisibility(t *testing.T) {
 	}
 }
 
-// TestCanonicalLegacyMarkerOverridesStaleSnapshot verifies migrated parser
-// values remain authoritative over compatibility maps captured before probing.
-func TestCanonicalLegacyMarkerOverridesStaleSnapshot(t *testing.T) {
+// TestCanonicalAdapterPublishesUpdatedScalar verifies canonical parser values
+// are materialized only when the public compatibility snapshot is attached.
+func TestCanonicalAdapterPublishesUpdatedScalar(t *testing.T) {
 	builder := newCanonicalStreamBuilder(StreamAudio)
 	builder.Fill("Format", "TrueHD", "Format", "TrueHD")
 	stream := builder.Snapshot(canonicalStreamPolicy{})
-	stream.JSON = map[string]string{"Format": "TrueHD"}
+	replaceCanonicalSeedFill(&stream, "Format", "MLP FBA", "Format", "MLP FBA")
+	report := Report{Ref: "scalar.mkv", General: Stream{Kind: StreamGeneral}, Streams: []Stream{stream}}
+	attachCanonicalStore(&report)
 
-	replaceCanonicalSeedLegacyFill(&stream, "Format", "MLP FBA", "Format", "MLP FBA")
-	refreshCanonicalLegacySnapshot(&stream)
-
-	if got := stream.JSON["Format"]; got != "MLP FBA" {
+	if got := report.Streams[0].JSON["Format"]; got != "MLP FBA" {
 		t.Fatalf("compatibility Format = %q, want MLP FBA", got)
 	}
 }
 
-// TestCanonicalLegacyRawMarkerTracksObjectMutation verifies later canonical
-// object updates also update the exported raw compatibility snapshot.
-func TestCanonicalLegacyRawMarkerTracksObjectMutation(t *testing.T) {
+// TestCanonicalAdapterPublishesUpdatedObject verifies canonical node mutation
+// is materialized at the public compatibility seam.
+func TestCanonicalAdapterPublishesUpdatedObject(t *testing.T) {
 	builder := newCanonicalStreamBuilder(StreamAudio)
 	builder.StructuredNode("extra", structuredNode{Kind: structuredObject, Object: []structuredMember{{
 		Key: "First", Value: structuredNode{Kind: structuredString, Text: "one"},
 	}}})
 	stream := builder.Snapshot(canonicalStreamPolicy{})
-	stream.JSONRaw = map[string]string{"extra": `{"First":"stale"}`}
-	setCanonicalSeedLegacyValue(&stream, "extra", `{"First":"one"}`, true)
 	appendCanonicalSeedObjectMembers(&stream, "extra", []structuredMember{{
 		Key: "Second", Value: structuredNode{Kind: structuredString, Text: "two"},
 	}})
+	report := Report{Ref: "node.mkv", General: Stream{Kind: StreamGeneral}, Streams: []Stream{stream}}
+	attachCanonicalStore(&report)
 
-	refreshCanonicalLegacySnapshot(&stream)
-
-	if got := stream.JSONRaw["extra"]; got != `{"First":"one","Second":"two"}` {
+	if got := report.Streams[0].JSONRaw["extra"]; got != `{"First":"one","Second":"two"}` {
 		t.Fatalf("compatibility extra = %s", got)
 	}
 }
@@ -258,7 +255,7 @@ func TestPartialGeneralCanonicalSeedReplacesLegacyScalarProjection(t *testing.T)
 		Fields: []Field{{Name: "Title", Value: "Canonical title"}},
 		JSON:   map[string]string{"Title": "Canonical title"},
 	}
-	replaceCanonicalSeedLegacyFill(&general, "Title", "Canonical title", "", "")
+	replaceCanonicalSeedFill(&general, "Title", "Canonical title", "", "")
 	report := Report{Ref: "partial-general.mkv", General: general}
 	attachCanonicalStore(&report)
 
@@ -270,14 +267,13 @@ func TestPartialGeneralCanonicalSeedReplacesLegacyScalarProjection(t *testing.T)
 	}
 }
 
-func TestRefreshCanonicalLegacyMapsAppliesDeletionTombstone(t *testing.T) {
-	stream := Stream{
-		Kind: StreamGeneral,
-		JSON: map[string]string{"FrameCount": "100", "Format": "Matroska"},
-	}
-	markCanonicalCompatibilityDeletion(&stream, "FrameCount")
+func TestRefreshCanonicalCompatibilitySnapshotDropsStalePublicValues(t *testing.T) {
+	builder := newCanonicalStreamBuilder(StreamGeneral)
+	builder.DirectStructured("Format", "Matroska")
+	stream := builder.Snapshot(canonicalStreamPolicy{})
+	stream.JSON["FrameCount"] = "100"
 
-	refreshCanonicalLegacyMaps(&stream)
+	refreshCanonicalCompatibilitySnapshot(&stream)
 
 	if _, exists := stream.JSON["FrameCount"]; exists {
 		t.Fatalf("FrameCount survived canonical deletion: %#v", stream.JSON)

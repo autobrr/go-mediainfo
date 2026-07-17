@@ -41,9 +41,6 @@ func finalizeFieldStore(store *fieldStore) {
 
 // finalizeGeneratedReportFields adds cross-stream counts, file metadata, and stream ordering.
 func finalizeGeneratedReportFields(store *fieldStore) {
-	if store.legacyGeneral != nil {
-		return
-	}
 	counts := make(map[StreamKind]int)
 	var generalRef streamRef = -1
 	for index, stream := range store.streams {
@@ -147,6 +144,7 @@ func fillGeneratedStructured(store *fieldStore, ref streamRef, name fieldName, v
 		Dynamic:       !known,
 		Options:       fieldOptions{ShowStructured: true, ShowXML: true, ValueType: spec.Options.ValueType},
 		StructuredKey: string(name),
+		Generated:     true,
 	})
 }
 
