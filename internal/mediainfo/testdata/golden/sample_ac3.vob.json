@@ -80,5 +80,5 @@
 "Video_Delay":"-0.005",
 "StreamSize":"96000",
 "ServiceKind":"CM",
-"extra":{"bsid":"8","dialnorm":"-31","acmod":"2","dsurmod":"0","lfeon":"0","dialnorm_Average":"-31","dialnorm_Minimum":"-31"}}]}
+"extra":{"bsid":"8","dialnorm":"-31","dsurmod":"0","acmod":"2","lfeon":"0","dialnorm_Average":"-31","dialnorm_Minimum":"-31"}}]}
 }

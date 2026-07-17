@@ -85,6 +85,7 @@ type mpeg2VideoInfo struct {
 	GOPMDominant             int
 	GOPNDominant             int
 	GOPLengthFirst           int
+	GOPSamples               int
 	GOPOpenClosed            string
 	GOPFirstClosed           string
 	GOPDropFrame             *bool
@@ -102,6 +103,7 @@ type mpeg2VideoInfo struct {
 	ScanType                 string
 	ScanOrder                string
 	PictureStructure         string
+	Standard                 string
 	MatrixData               string
 	BufferSize               int64
 	IntraDCPrecision         int
@@ -124,6 +126,7 @@ type mpeg2VideoParser struct {
 	lastIntraDCOk      bool
 	lastIntraDC        int
 	currentGOPCount    int
+	finalGOPRecorded   bool
 	sawGOP             bool
 	gopLength          int
 	gopLengthCounts    map[int]int
@@ -154,6 +157,23 @@ type mpeg2VideoParser struct {
 	intraDCCounts      map[int]int
 	pictureStructures  map[int]int
 	sequenceAspectCode uint64
+	vbvDelaySeen       bool
+	vbvDelayVariable   bool
+}
+
+// startSegment drops elementary-stream carry and cross-GOP counters at a
+// bounded-read jump while retaining codec evidence accumulated so far.
+func (p *mpeg2VideoParser) startSegment() {
+	p.carry = nil
+	p.rescanFromZero = false
+	p.expectPictureExt = false
+	p.currentGOPCount = 0
+	p.finalGOPRecorded = false
+	p.sawGOP = false
+	p.framesSinceI = 0
+	p.framesSinceAnchor = 0
+	p.lastISeen = false
+	p.lastAnchorSeen = false
 }
 
 func (p *mpeg2VideoParser) recordGOPMCount() {
@@ -410,7 +430,10 @@ func (p *mpeg2VideoParser) parseExtension(data []byte) {
 		// ISO/IEC 13818-2: video_format (3), colour_description (1),
 		// colour_primaries (8), transfer_characteristics (8), matrix_coefficients (8)
 		// then display sizes. We only need the color description values for parity.
-		_ = br.readBitsValue(3) // video_format
+		videoFormat := br.readBitsValue(3)
+		if videoFormat != ^uint64(0) && p.info.Standard == "" {
+			p.info.Standard = mapMPEG2VideoFormat(byte(videoFormat))
+		}
 		colourDesc := br.readBitsValue(1)
 		if colourDesc == ^uint64(0) {
 			return
@@ -547,22 +570,27 @@ func (p *mpeg2VideoParser) parseGOPHeader(data []byte) {
 		if p.gopLength == 0 {
 			p.gopLength = p.currentGOPCount
 		}
-		if p.gopLengthCounts == nil {
-			p.gopLengthCounts = map[int]int{}
-		}
-		p.gopLengthCounts[p.currentGOPCount]++
 	}
 	p.currentGOPCount = 0
+	p.finalGOPRecorded = false
 	p.sawGOP = true
 }
 
 func (p *mpeg2VideoParser) parsePictureHeader(data []byte) {
-	if len(data) < 2 {
+	if len(data) < 4 {
 		return
 	}
 	br := newBitReader(data)
 	_ = br.readBitsValue(10)
 	codingType := br.readBitsValue(3)
+	vbvDelay := br.readBitsValue(16)
+	if vbvDelay == ^uint64(0) {
+		return
+	}
+	p.vbvDelaySeen = true
+	if vbvDelay == 0xFFFF {
+		p.vbvDelayVariable = true
+	}
 	if codingType == 3 {
 		val := true
 		p.info.BVOP = &val
@@ -604,7 +632,7 @@ func (p *mpeg2VideoParser) parsePictureHeader(data []byte) {
 
 func (p *mpeg2VideoParser) finalize() mpeg2VideoInfo {
 	// Record the final GOP length if the stream ends without a following GOP header.
-	if p.sawGOP && p.currentGOPCount > 0 {
+	if p.sawGOP && p.currentGOPCount > 0 && !p.finalGOPRecorded {
 		if p.gopLength == 0 {
 			p.gopLength = p.currentGOPCount
 		}
@@ -612,6 +640,7 @@ func (p *mpeg2VideoParser) finalize() mpeg2VideoInfo {
 			p.gopLengthCounts = map[int]int{}
 		}
 		p.gopLengthCounts[p.currentGOPCount]++
+		p.finalGOPRecorded = true
 	}
 	if len(p.gopLengthCounts) > 0 {
 		mode, variable := modeValue(p.gopLengthCounts)
@@ -623,6 +652,7 @@ func (p *mpeg2VideoParser) finalize() mpeg2VideoInfo {
 				modeCount = count
 			}
 		}
+		p.info.GOPSamples = total
 		// MediaInfo tends to report the dominant GOP length instead of "Variable" if most GOPs match.
 		if !variable || (total > 0 && float64(modeCount)/float64(total) >= 0.50) {
 			p.info.GOPLength = mode
@@ -673,6 +703,13 @@ func (p *mpeg2VideoParser) finalize() mpeg2VideoInfo {
 	if p.info.BVOP == nil {
 		val := false
 		p.info.BVOP = &val
+	}
+	if p.vbvDelaySeen {
+		if p.vbvDelayVariable {
+			p.info.BitRateMode = "Variable"
+		} else {
+			p.info.BitRateMode = "Constant"
+		}
 	}
 	if p.info.GOPOpenClosed == "" {
 		if p.anyOpenGOP {
@@ -829,6 +866,25 @@ func mapMPEG2Standard(frameRate float64) string {
 		return "NTSC"
 	case frameRate > 0 && math.Abs(frameRate-25.0) < 0.01:
 		return "PAL"
+	default:
+		return ""
+	}
+}
+
+// mapMPEG2VideoFormat maps sequence-display video_format codes to the raw
+// MediaInfo Standard vocabulary.
+func mapMPEG2VideoFormat(code byte) string {
+	switch code {
+	case 0:
+		return "Component"
+	case 1:
+		return "PAL"
+	case 2:
+		return "NTSC"
+	case 3:
+		return "SECAM"
+	case 4:
+		return "MAC"
 	default:
 		return ""
 	}

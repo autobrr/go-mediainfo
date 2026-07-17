@@ -18,6 +18,7 @@ type psStreamParser struct {
 	quickAC3     bool
 	quickAC3Max  uint64
 	sampled      bool
+	section      int
 }
 
 type psPending struct {
@@ -41,6 +42,42 @@ func newPSStreamParser(opts mpegPSOptions) *psStreamParser {
 		videoParsers: map[uint16]*mpeg2VideoParser{},
 		quickAC3:     parseSpeed < 1 && !opts.dvdExtras,
 		quickAC3Max:  128,
+	}
+}
+
+// beginSection resets only state that cannot cross a bounded-read jump and
+// starts a new timing section for per-stream frame-clock reconstruction.
+func (p *psStreamParser) beginSection() {
+	p.section++
+	for key, entry := range p.streams {
+		entry.audioBuffer = nil
+		entry.videoHeaderCarry = nil
+		entry.videoFrameCarry = nil
+		entry.videoCCCarry = nil
+		entry.videoBuffer = nil
+		entry.clockHasPTS = false
+		entry.sampleSection = p.section
+		if parser := p.videoParsers[key]; parser != nil {
+			parser.startSegment()
+		}
+	}
+}
+
+// recordPTS retains container PTS history and the latest timestamp/frame clock
+// in each sampled section. Elementary parsers advance from that anchor.
+func (p *psStreamParser) recordPTS(entry *psStream, currentPTS uint64) {
+	if entry.sampleSection != p.section {
+		entry.sampleSection = p.section
+		entry.clockHasPTS = false
+	}
+	entry.clockPTS = currentPTS
+	entry.clockAudioStart = entry.audioFrames
+	entry.clockVideoStart = entry.videoFrameCount
+	entry.clockHasPTS = true
+	p.anyPTS.add(currentPTS)
+	entry.pts.add(currentPTS)
+	if entry.kind == StreamVideo {
+		p.videoPTS.add(currentPTS)
 	}
 }
 
@@ -239,6 +276,14 @@ func (p *psStreamParser) parseReader(r io.Reader) bool {
 			pos = payloadEnd
 			compact()
 			continue
+		case 0xB9:
+			for _, entry := range p.streams {
+				entry.programEndSeen = true
+			}
+			pos += 4
+			found = true
+			compact()
+			continue
 		}
 
 		if pos+7 > len(buf) {
@@ -373,11 +418,7 @@ func (p *psStreamParser) parseReader(r io.Reader) bool {
 					p.packetOrder++
 				}
 				if hasPTS {
-					p.anyPTS.add(currentPTS)
-					entry.pts.add(currentPTS)
-					if entry.kind == StreamVideo {
-						p.videoPTS.add(currentPTS)
-					}
+					p.recordPTS(entry, currentPTS)
 				}
 				if payloadOffset < len(payload) {
 					p.consumePayload(entry, psStreamKey(streamID, subID), flags, currentPTS, hasPTS, payload[payloadOffset:])
@@ -418,11 +459,7 @@ func (p *psStreamParser) parseReader(r io.Reader) bool {
 			p.packetOrder++
 		}
 		if hasPTS {
-			p.anyPTS.add(currentPTS)
-			entry.pts.add(currentPTS)
-			if entry.kind == StreamVideo {
-				p.videoPTS.add(currentPTS)
-			}
+			p.recordPTS(entry, currentPTS)
 		}
 		pending = &psPending{
 			entry:      entry,

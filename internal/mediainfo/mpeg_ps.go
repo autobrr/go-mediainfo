@@ -12,6 +12,15 @@ import (
 const psSubstreamNone = 0xFF
 const dvdHeaderStreamScale = 1.13503156
 
+// MediaInfoLib validates 128 MPEG Audio frames at ParseSpeed 0.5. Its terminal
+// program-stream accounting retains a 57-frame validation interval and a
+// 2.5 ms clock quantization adjustment.
+const (
+	mpegAudioValidationThreshold      = 128
+	mpegAudioTerminalValidationFrames = 57
+	mpegAudioTerminalClockAdjustment  = 0.0025
+)
+
 // psStreamKey combines a PES stream ID and private substream ID into a stable
 // parser-state key.
 func psStreamKey(id, subID byte) uint16 {
@@ -41,14 +50,18 @@ func ParseMPEGPSWithOptions(file io.ReadSeeker, size int64, opts mpegPSOptions) 
 			if parseSpeed > 0 && parseSpeed < 1 {
 				sampleSize = max(int64(float64(sampleSize)*parseSpeed), 4<<20)
 			}
-			if opts.dvdParsing && sampleSize < 8<<20 {
-				sampleSize = 8 << 20
+			if opts.dvdParsing {
+				if sampleSize < 8<<20 {
+					sampleSize = 8 << 20
+				}
+			} else {
+				sampleSize = mpegPSBoundedWindow(readerAt, size)
 			}
 			opts2 := opts
-			opts2.sampled = size > sampleSize
+			opts2.sampled = size > sampleSize*2
 			opts2.sampledBytes = 0
 			parsedAny := false
-			if size <= sampleSize {
+			if size <= sampleSize*2 {
 				if _, err := file.Seek(0, io.SeekStart); err == nil {
 					if reader(file) {
 						parsedAny = true
@@ -60,30 +73,16 @@ func ParseMPEGPSWithOptions(file io.ReadSeeker, size int64, opts mpegPSOptions) 
 				if reader(first) {
 					parsedAny = true
 				}
-				if size > sampleSize*2 {
-					tailSample := sampleSize
-					if opts.dvdParsing && parseSpeed < 1 {
-						tailSample = min(tailSample, int64(8<<20))
-					}
-					mid := (size - sampleSize) / 2
-					midSample := sampleSize
-					if opts.dvdParsing && parseSpeed < 1 {
-						midSample = min(midSample, int64(4<<20))
-						mid = (size - midSample) / 2
-					}
-					if !opts.dvdParsing {
-						middle := io.NewSectionReader(readerAt, mid, midSample)
-						opts2.sampledBytes += midSample
-						if reader(middle) {
-							parsedAny = true
-						}
-					}
-					start := size - tailSample
-					last := io.NewSectionReader(readerAt, start, tailSample)
-					opts2.sampledBytes += tailSample
-					if reader(last) {
-						parsedAny = true
-					}
+				tailSample := sampleSize
+				if opts.dvdParsing && parseSpeed < 1 {
+					tailSample = min(tailSample, int64(8<<20))
+				}
+				parser.beginSection()
+				start := size - tailSample
+				last := io.NewSectionReader(readerAt, start, tailSample)
+				opts2.sampledBytes += tailSample
+				if reader(last) {
+					parsedAny = true
 				}
 			}
 			if parsedAny {
@@ -114,6 +113,46 @@ type mpegPSOptions struct {
 	sampledBytes int64
 }
 
+// mpegPSBoundedWindow derives MediaInfo's program-stream analysis window from
+// pack mux-rate evidence and the system-header cap.
+func mpegPSBoundedWindow(reader io.ReaderAt, size int64) int64 {
+	const (
+		minimum = int64(2 << 20)
+		initial = int64(8 << 20)
+		maximum = int64(16 << 20)
+	)
+	probeSize := min(size, int64(64<<10))
+	if probeSize <= 0 {
+		return initial
+	}
+	probe := make([]byte, probeSize)
+	n, _ := reader.ReadAt(probe, 0)
+	probe = probe[:n]
+	window := initial
+	for offset := 0; offset+4 <= len(probe); offset++ {
+		if probe[offset] != 0 || probe[offset+1] != 0 || probe[offset+2] != 1 {
+			continue
+		}
+		switch probe[offset+3] {
+		case 0xBA:
+			muxRate := uint64(0)
+			switch {
+			case offset+13 <= len(probe) && probe[offset+4]&0xC0 == 0x40:
+				muxRate = uint64(probe[offset+10])<<14 | uint64(probe[offset+11])<<6 | uint64(probe[offset+12]>>2)
+			case offset+12 <= len(probe) && probe[offset+4]&0xF0 == 0x20:
+				muxRate = uint64(probe[offset+9])<<14 | uint64(probe[offset+10])<<6 | uint64(probe[offset+11]>>2)
+			}
+			if muxRate > 0 {
+				window = int64(muxRate) * 50 * 4
+				window = min(max(window, minimum), maximum)
+			}
+		case 0xBB:
+			window = min(window, initial)
+		}
+	}
+	return window
+}
+
 // ptsDurationPS selects a positive PTS duration, using sampled-span accounting
 // when bounded program-stream parsing skipped file regions.
 func ptsDurationPS(tracker ptsTracker, opts mpegPSOptions) float64 {
@@ -134,6 +173,32 @@ func ptsDurationPS(tracker ptsTracker, opts mpegPSOptions) float64 {
 	return tracker.duration()
 }
 
+// sampledFrameClockDurationPS reconstructs the skipped interval from the first
+// PTS and the elementary parser's frame clock in the final bounded section.
+func sampledFrameClockDurationPS(st *psStream, opts mpegPSOptions, rate float64, samplesPerFrame int, video bool) (float64, bool) {
+	if st == nil || !opts.sampled || st.sampleSection == 0 || !st.clockHasPTS || !st.pts.has() || rate <= 0 || samplesPerFrame <= 0 {
+		return 0, false
+	}
+	frames := uint64(0)
+	if video {
+		if st.videoFrameCount <= st.clockVideoStart {
+			return 0, false
+		}
+		frames = uint64(st.videoFrameCount - st.clockVideoStart)
+	} else {
+		if st.audioFrames <= st.clockAudioStart {
+			return 0, false
+		}
+		frames = st.audioFrames - st.clockAudioStart
+		if frames > 0 && math.Mod(90000*float64(samplesPerFrame), rate) != 0 {
+			frames--
+		}
+	}
+	duration := float64(ptsDelta(st.pts.first, st.clockPTS)) / 90000.0
+	duration += float64(frames) * float64(samplesPerFrame) / rate
+	return duration, duration > 0
+}
+
 // audioDurationPS selects the best program-stream audio duration from PTS,
 // sample counts, or complete AC-3 frames according to sampling mode.
 func audioDurationPS(st *psStream, opts mpegPSOptions) float64 {
@@ -149,6 +214,9 @@ func audioDurationPS(st *psStream, opts mpegPSOptions) float64 {
 		rate := st.audioRate
 		spf := mpegAudioSamplesPerFrame(st.mpegAudioVersion, st.mpegAudioLayer)
 		if rate > 0 && spf > 0 {
+			if sampled, ok := sampledFrameClockDurationPS(st, opts, rate, spf, false); ok {
+				duration = sampled
+			}
 			derived := (float64(st.audioFrames) * float64(spf)) / rate
 			threshold := (float64(spf) / rate) / 2.0
 			if duration == 0 || (!opts.sampled && math.Abs(derived-duration) > threshold) {
@@ -176,7 +244,59 @@ func audioDurationPS(st *psStream, opts mpegPSOptions) float64 {
 			duration = derived
 		}
 	}
+	if hasTerminalMPEGAudioSyncLoss(st) && st.audioRate > 0 && st.mpegAudioLayer != 0 {
+		spf := mpegAudioSamplesPerFrame(st.mpegAudioVersion, st.mpegAudioLayer)
+		if spf > 0 {
+			duration -= float64(mpegAudioTerminalValidationFrames*spf) / st.audioRate
+			// MediaInfo's terminal sync diagnostic is emitted after its MPEG Audio
+			// validation clock has advanced; retain its millisecond quantization.
+			duration += mpegAudioTerminalClockAdjustment
+		}
+	}
 	return duration
+}
+
+// hasTerminalMPEGAudioSyncLoss identifies a program-end marker followed by the
+// single zero byte that MediaInfo reports as terminal MPEG Audio sync loss.
+func hasTerminalMPEGAudioSyncLoss(st *psStream) bool {
+	return st != nil && st.mpegAudioLayer != 0 && st.audioFrames >= mpegAudioValidationThreshold && st.programEndSeen && len(st.audioBuffer) == 1 && st.audioBuffer[0] == 0
+}
+
+// mpegAudioConformanceExtra builds MediaInfo's structured terminal sync-loss
+// diagnostic from parser evidence and the final stream accounting values.
+func mpegAudioConformanceExtra(st *psStream, size int64, duration float64) *structuredNode {
+	if !hasTerminalMPEGAudioSyncLoss(st) || size <= 0 || duration <= 0 || st.audioRate <= 0 {
+		return nil
+	}
+	spf := mpegAudioSamplesPerFrame(st.mpegAudioVersion, st.mpegAudioLayer)
+	if spf <= 0 {
+		return nil
+	}
+	percent := float64(len(st.audioBuffer)) * 100 / float64(size)
+	validationLead := float64((mpegAudioTerminalValidationFrames-1)*spf)/st.audioRate - mpegAudioTerminalClockAdjustment
+	timeValue := formatMPEGPSClock(duration + validationLead)
+	message := fmt.Sprintf(
+		"Bitstream synchronisation is lost, zeroed bytes at the end (count %d %.7f%%, time %s, offset 0x%X)",
+		len(st.audioBuffer), percent, timeValue, size-1,
+	)
+	general := structuredNode{Kind: structuredObject, Object: []structuredMember{{
+		Key: "GeneralCompliance", Value: structuredNode{Kind: structuredString, Text: message},
+	}}}
+	mpegAudio := structuredNode{Kind: structuredArray, Array: []structuredNode{general}}
+	group := structuredNode{Kind: structuredObject, Object: []structuredMember{{Key: "MPEGAudio", Value: mpegAudio}}}
+	infos := structuredNode{Kind: structuredArray, Array: []structuredNode{group}}
+	extra := structuredNode{Kind: structuredObject, Object: []structuredMember{{Key: "ConformanceInfos", Value: infos}}}
+	return &extra
+}
+
+// formatMPEGPSClock formats a program-stream analysis clock as HH:MM:SS.mmm.
+func formatMPEGPSClock(seconds float64) string {
+	totalMs := int64(math.Round(seconds * 1000))
+	hours := totalMs / 3_600_000
+	totalMs %= 3_600_000
+	minutes := totalMs / 60_000
+	totalMs %= 60_000
+	return fmt.Sprintf("%02d:%02d:%02d.%03d", hours, minutes, totalMs/1000, totalMs%1000)
 }
 
 // estimatedMPEGPSStreamBytes expands bounded-scan payload counts to the full
@@ -190,6 +310,7 @@ func estimatedMPEGPSStreamBytes(st *psStream, size int64, opts mpegPSOptions) in
 	}
 	if st.kind == StreamAudio {
 		duration := audioDurationPS(st, opts)
+		duration = math.Round(duration*1000) / 1000
 		switch {
 		case st.hasAC3 && st.ac3Info.bitRateKbps > 0 && duration > 0:
 			return int64(math.Round(float64(st.ac3Info.bitRateKbps*1000) * duration / 8.0))
@@ -209,7 +330,9 @@ func delayRelativeToVideoMs(audio ptsTracker, video ptsTracker, videoIsH264 bool
 	if !audio.has() || !video.has() {
 		return 0, false
 	}
-	delay := float64(int64(audio.first)-int64(video.first)) * 1000 / 90000.0
+	audioMs := math.Round(float64(audio.first) * 1000 / 90000.0)
+	videoMs := math.Round(float64(video.first) * 1000 / 90000.0)
+	delay := audioMs - videoMs
 	if videoIsH264 && videoFrameRate > 0 {
 		delay -= (3.0 / videoFrameRate) * 1000.0
 	}
@@ -274,6 +397,7 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 	nonVideoBytes := int64(0)
 	observedPayloadBytes := int64(0)
 	videoCount := 0
+	hasMenuStream := false
 	for _, st := range streams {
 		if st == nil {
 			continue
@@ -283,6 +407,7 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 			videoCount++
 			observedPayloadBytes += int64(st.bytes)
 		case StreamMenu:
+			hasMenuStream = true
 			if st.packetCount > 0 || st.bytes > 0 {
 				menuOverheadBytes += int64(st.bytes) + int64(st.packetCount)*6
 			}
@@ -492,20 +617,32 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 					fields = append(fields, Field{Name: "Format settings, Matrix", Value: info.Matrix})
 					builder.Fill("Format_Settings_Matrix", info.Matrix, "Format settings, Matrix", info.Matrix)
 				}
+				showGOPDetails := !opts.sampled || info.GOPSamples >= 8
 				switch {
-				case info.GOPM > 0 && info.GOPN > 0 && info.BVOP != nil && *info.BVOP:
+				case showGOPDetails && info.GOPM > 0 && info.GOPN > 0 && info.BVOP != nil && *info.BVOP:
 					value := fmt.Sprintf("M=%d, N=%d", info.GOPM, info.GOPN)
 					fields = append(fields, Field{Name: "Format settings, GOP", Value: value})
 					builder.Fill("Format_Settings_GOP", value, "Format settings, GOP", value)
-				case info.GOPLength > 1:
+				case showGOPDetails && info.GOPLength > 1:
 					value := fmt.Sprintf("N=%d", info.GOPLength)
 					fields = append(fields, Field{Name: "Format settings, GOP", Value: value})
 					builder.Fill("Format_Settings_GOP", value, "Format settings, GOP", value)
-				case info.GOPVariable:
+				case showGOPDetails && info.GOPVariable:
 					fields = append(fields, Field{Name: "Format settings, GOP", Value: "Variable"})
 					builder.Fill("Format_Settings_GOP", "Variable", "Format settings, GOP", "Variable")
 				}
+				if info.ScanType == "Interlaced" && info.PictureStructure != "" {
+					fields = append(fields, Field{Name: "Format settings, Picture structure", Value: info.PictureStructure})
+					builder.Fill("Format_Settings_PictureStructure", info.PictureStructure, "Format settings, Picture structure", info.PictureStructure)
+				}
 				duration := ptsDurationPS(st.pts, opts)
+				durationFromSampleClock := false
+				if sync.duration > 0 {
+					if sampled, ok := sampledFrameClockDurationPS(st, opts, frameRateRounded, 1, true); ok {
+						duration = sampled
+						durationFromSampleClock = true
+					}
+				}
 				zeroSegment := false
 				if !opts.dvdParsing && st.pts.hasResets() && st.pts.segmentStart == st.pts.last {
 					duration = 0
@@ -515,7 +652,7 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 					duration = ptsDurationPS(videoPTS, opts)
 				}
 				fromGOP := false
-				durationFromFrames := false
+				durationFromFrames := durationFromSampleClock
 				syncApplied := false
 				if duration == 0 && !zeroSegment {
 					if frameRateRounded > 0 && info.GOPLength > 0 {
@@ -661,15 +798,6 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 				if mode == "" {
 					mode = "Variable"
 				}
-				estimatedBitRate := 0.0
-				if bitrateDuration > 0 && effectiveBytes > 0 {
-					estimatedBitRate = float64(effectiveBytes) * 8 / bitrateDuration
-				}
-				mpeg1Constant := info.Version == "Version 1" && info.MaxBitRateKbps > 0 &&
-					estimatedBitRate > 0 && estimatedBitRate <= float64(info.BitRate)
-				if mpeg1Constant {
-					mode = "Constant"
-				}
 				if fromGOP && !opts.dvdParsing {
 					mode = "Constant"
 				}
@@ -677,15 +805,21 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 				fields = append(fields, Field{Name: "Bit rate mode", Value: mode})
 				builder.Fill("BitRate_Mode", mode, "Bit rate mode", mode)
 				bitrate := 0.0
+				accountingBitrate := 0.0
 				kbps := int64(0)
 				if headerOnly && opts.dvdParsing && headerFrameBytes > 0 && frameRateRounded > 0 && frameCountForBitrate > 0 {
 					bitrate = float64(headerFrameBytes) * 8 * frameRateRounded / float64(frameCountForBitrate)
+					accountingBitrate = bitrate
 					kbps = int64(bitrate / 1000.0)
 					if value := formatBitrate(bitrate); value != "" {
 						fields = appendFieldUnique(fields, Field{Name: "Bit rate", Value: value})
 					}
 				} else if bitrateDuration > 0 && effectiveBytes > 0 {
 					bitrate = (float64(effectiveBytes) * 8) / bitrateDuration
+					accountingBitrate = bitrate
+					if mode == "Constant" && info.BitRate > 0 {
+						bitrate = float64(info.BitRate)
+					}
 					switch {
 					case bitrate >= 10_000_000:
 						if value := formatBitrate(bitrate); value != "" {
@@ -702,7 +836,7 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 						}
 					}
 				}
-				if info.MaxBitRateKbps > 0 && !mpeg1Constant {
+				if info.MaxBitRateKbps > 0 && mode != "Constant" && showGOPDetails {
 					if value := formatBitrateKbps(info.MaxBitRateKbps); value != "" {
 						fields = append(fields, Field{Name: "Maximum bit rate", Value: value})
 						builder.Fill("BitRate_Maximum", strconv.FormatInt(info.MaxBitRateKbps*1000, 10), "Maximum bit rate", value)
@@ -717,9 +851,19 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 					builder.Fill("Height", strconv.FormatUint(info.Height, 10), "Height", formatPixels(info.Height))
 				}
 				if info.AspectRatio != "" {
-					fields = append(fields, Field{Name: "Display aspect ratio", Value: info.AspectRatio})
+					aspectDisplay := info.AspectRatio
+					if info.Version == "Version 1" {
+						if ratio, ok := parseRatioFloat(info.AspectRatio); ok && math.Abs(ratio-4.0/3.0) < 0.05 {
+							aspectDisplay = "4:3"
+						}
+					}
+					fields = append(fields, Field{Name: "Display aspect ratio", Value: aspectDisplay})
 					if ratio, ok := parseRatioFloat(info.AspectRatio); ok {
-						builder.Fill("DisplayAspectRatio", formatJSONFloat(ratio), "Display aspect ratio", info.AspectRatio)
+						builder.Fill("DisplayAspectRatio", formatJSONFloat(ratio), "Display aspect ratio", aspectDisplay)
+						if info.Version == "Version 2" && info.Width > 0 && info.Height > 0 {
+							pixelAspect := ratio / (float64(info.Width) / float64(info.Height))
+							builder.DirectStructured("PixelAspectRatio", fmt.Sprintf("%.3f", math.Floor(pixelAspect*1000)/1000))
+						}
 					}
 				} else if info.Width > 0 && info.Height > 0 {
 					// Square pixels: MediaInfo reports display aspect ratio derived from stored dimensions.
@@ -732,6 +876,9 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 				}
 				if info.FrameRateNumer > 0 && info.FrameRateDenom > 0 {
 					display := formatFrameRateRatio(info.FrameRateNumer, info.FrameRateDenom)
+					if info.FrameRateDenom == 1 {
+						display = formatFrameRate(info.FrameRate)
+					}
 					fields = append(fields, Field{Name: "Frame rate", Value: display})
 					builder.Fill("FrameRate", formatJSONFloat(info.FrameRate), "Frame rate", display)
 					builder.DirectStructured("FrameRate_Num", strconv.FormatUint(uint64(info.FrameRateNumer), 10))
@@ -740,7 +887,11 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 					fields = append(fields, Field{Name: "Frame rate", Value: formatFrameRate(info.FrameRate)})
 					builder.Fill("FrameRate", formatJSONFloat(info.FrameRate), "Frame rate", formatFrameRate(info.FrameRate))
 				}
-				if standard := mapMPEG2Standard(info.FrameRate); standard != "" {
+				standard := info.Standard
+				if standard == "" && (info.Version == "Version 1" || !opts.sampled) {
+					standard = mapMPEG2Standard(info.FrameRate)
+				}
+				if standard != "" {
 					fields = append(fields, Field{Name: "Standard", Value: standard})
 					builder.Fill("Standard", standard, "Standard", standard)
 				}
@@ -779,7 +930,7 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 					fields = append(fields, Field{Name: "Time code source", Value: info.TimeCodeSource})
 					builder.Fill("TimeCode_Source", info.TimeCodeSource, "Time code source", info.TimeCodeSource)
 				}
-				if info.GOPLength > 1 {
+				if showGOPDetails && info.GOPLength > 1 {
 					if info.GOPOpenClosed != "" {
 						fields = append(fields, Field{Name: "GOP, Open/Closed", Value: info.GOPOpenClosed})
 						builder.Fill("Gop_OpenClosed", info.GOPOpenClosed, "GOP, Open/Closed", info.GOPOpenClosed)
@@ -799,10 +950,10 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 				switch {
 				case headerOnly && headerStreamBytes > 0:
 					chosenStreamBytes = headerStreamBytes
-				case headerOnly && bitrate > 0 && duration > 0:
-					chosenStreamBytes = int64((bitrate*duration)/8.0 + 0.5)
-				case bitrate > 0 && duration > 0:
-					chosenStreamBytes = int64((bitrate*duration)/8.0 + 0.5)
+				case headerOnly && accountingBitrate > 0 && duration > 0:
+					chosenStreamBytes = int64((accountingBitrate*duration)/8.0 + 0.5)
+				case accountingBitrate > 0 && duration > 0:
+					chosenStreamBytes = int64((accountingBitrate*duration)/8.0 + 0.5)
 				case effectiveBytes > 0:
 					chosenStreamBytes = int64(effectiveBytes)
 				}
@@ -847,6 +998,10 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 				switch {
 				case headerOnly && opts.dvdParsing && headerFrameBytes > 0 && bitrate > 0:
 					facts.Set("BitRate", strconv.FormatInt(int64(math.Round(bitrate)), 10))
+				case mode == "Constant" && info.BitRate > 0:
+					facts.Set("BitRate", strconv.FormatInt(info.BitRate, 10))
+				case !showGOPDetails && info.BitRate > 0:
+					facts.Set("BitRate", strconv.FormatInt(info.BitRate, 10))
 				case jsonBitrateDuration > 0 && chosenStreamBytes > 0:
 					jsonBitrate := (float64(chosenStreamBytes) * 8) / jsonBitrateDuration
 					facts.Set("BitRate", strconv.FormatInt(int64(math.Round(jsonBitrate)), 10))
@@ -1001,6 +1156,9 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 						frameRate = st.audioRate / float64(spf)
 					}
 
+					if st.mpegAudioChannelMode == 1 {
+						facts.Set("Format_Settings_Mode", "Joint stereo")
+					}
 					brMode := "Variable"
 					brModeJSON := "VBR"
 					if st.mpegAudioBitrateMin > 0 && st.mpegAudioBitrateMin == st.mpegAudioBitrateMax {
@@ -1063,8 +1221,9 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 					}
 					if st.audioFrames > 0 && spf > 0 {
 						samplingCount := int64(st.audioFrames) * int64(spf)
-						if opts.sampled && duration > 0 && st.audioRate > 0 {
-							samplingCount = int64(math.Round(duration * st.audioRate))
+						if (opts.sampled || hasTerminalMPEGAudioSyncLoss(st)) && duration > 0 && st.audioRate > 0 {
+							frameCount := int64(math.Round(duration * st.audioRate / float64(spf)))
+							samplingCount = frameCount * int64(spf)
 						}
 						facts.Set("SamplingCount", strconv.FormatInt(samplingCount, 10))
 						facts.Set("FrameCount", strconv.FormatInt(int64(math.Round(float64(samplingCount)/float64(spf))), 10))
@@ -1163,11 +1322,11 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 						extraFields = append(extraFields, jsonKV{Key: "compr_String", Val: fmt.Sprintf("%.2f dB", st.ac3Info.comprDB)})
 					}
 				}
-				if st.ac3Info.acmod > 0 {
-					extraFields = append(extraFields, jsonKV{Key: "acmod", Val: strconv.Itoa(st.ac3Info.acmod)})
-				}
 				if st.ac3Info.hasDsurmod {
 					extraFields = append(extraFields, jsonKV{Key: "dsurmod", Val: strconv.Itoa(st.ac3Info.dsurmod)})
+				}
+				if st.ac3Info.acmod > 0 {
+					extraFields = append(extraFields, jsonKV{Key: "acmod", Val: strconv.Itoa(st.ac3Info.acmod)})
 				}
 				if st.ac3Info.lfeon >= 0 {
 					extraFields = append(extraFields, jsonKV{Key: "lfeon", Val: strconv.Itoa(st.ac3Info.lfeon)})
@@ -1228,6 +1387,11 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 					extraNode = &node
 				}
 			}
+			if st.format == "MPEG Audio" {
+				if conformance := mpegAudioConformanceExtra(st, size, duration); conformance != nil {
+					extraNode = conformance
+				}
+			}
 		case StreamText:
 			if st.pts.has() {
 				duration := float64(ptsDelta(st.pts.first, st.pts.last)) / 90000.0
@@ -1252,7 +1416,7 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 			}
 		}
 		if st.kind == StreamVideo && st.pts.has() {
-			delay := float64(st.pts.min) / 90000.0
+			delay := float64(st.pts.first) / 90000.0
 			facts.Set("Delay", fmt.Sprintf("%.9f", delay))
 			dropFrame := "No"
 			if info.GOPDropFrame != nil && *info.GOPDropFrame {
@@ -1265,11 +1429,13 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 			facts.Set("Delay_Original_Source", "Stream")
 		}
 		if st.kind == StreamAudio && st.pts.has() {
-			delay := float64(st.pts.min) / 90000.0
+			delay := float64(st.pts.first) / 90000.0
 			facts.Set("Delay", fmt.Sprintf("%.9f", delay))
 			facts.Set("Delay_Source", "Container")
 			if videoPTS.has() {
-				videoDelay := float64(int64(st.pts.min)-int64(videoPTS.min)) / 90000.0
+				audioMs := math.Round(float64(st.pts.first) * 1000 / 90000.0)
+				videoMs := math.Round(float64(videoPTS.first) * 1000 / 90000.0)
+				videoDelay := (audioMs - videoMs) / 1000.0
 				facts.Set("Video_Delay", fmt.Sprintf("%.3f", videoDelay))
 			}
 		}
@@ -1278,11 +1444,11 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 			facts.Set("Delay", fmt.Sprintf("%.9f", delay))
 			facts.Set("Delay_Source", "Container")
 			if videoPTS.has() {
-				videoDelay := float64(int64(st.pts.first)-int64(videoPTS.min)) / 90000.0
+				videoDelay := float64(int64(st.pts.first)-int64(videoPTS.first)) / 90000.0
 				facts.Set("Video_Delay", fmt.Sprintf("%.3f", videoDelay))
 			}
 		}
-		streamsOut = append(streamsOut, buildMPEGPSCanonicalSnapshot(builder, fields, facts, extraNode, canonicalStreamPolicy{}))
+		streamsOut = append(streamsOut, buildMPEGPSCanonicalSnapshot(builder, fields, facts, extraNode, canonicalStreamPolicy{SkipStreamOrder: hasMenuStream}))
 	}
 
 	info := ContainerInfo{}
@@ -1305,6 +1471,8 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 			}
 		case StreamAudio:
 			if st.hasAC3 {
+				mode = "Constant"
+			} else if st.mpegAudioBitrateMin > 0 && st.mpegAudioBitrateMin == st.mpegAudioBitrateMax {
 				mode = "Constant"
 			} else if st.audioRate > 0 {
 				mode = "Variable"
@@ -1462,7 +1630,7 @@ func nextPESStart(data []byte, start int) int {
 // private-stream payload parsed by this package.
 func isPESStreamID(streamID byte) bool {
 	switch {
-	case streamID == 0xBA || streamID == 0xBB || streamID == 0xBC || streamID == 0xBD:
+	case streamID == 0xB9 || streamID == 0xBA || streamID == 0xBB || streamID == 0xBC || streamID == 0xBD:
 		return true
 	case streamID == 0xBE || streamID == 0xBF:
 		return true
@@ -1693,6 +1861,7 @@ func consumeMPEGAudioPS(entry *psStream, payload []byte) {
 			entry.hasAudioInfo = true
 			entry.mpegAudioVersion = hdr.versionID
 			entry.mpegAudioLayer = hdr.layerID
+			entry.mpegAudioChannelMode = hdr.channelMode
 			entry.mpegAudioBitrateMin = hdr.bitrateKbps
 			entry.mpegAudioBitrateMax = hdr.bitrateKbps
 		} else {

@@ -220,6 +220,20 @@ func projectRawTextReport(report Report) rawTextReportProjection {
 					}
 					continue
 				}
+				if member.Key == "ConformanceInfos" {
+					for _, derived := range rawTextConformanceInfoFields(member.Value) {
+						if _, exists := seen[derived.Label]; exists {
+							continue
+						}
+						fields = append(fields, rawTextFieldProjection{
+							Label: derived.Label, Value: derived.Value,
+							Order: rawTextFieldOrder(stream.Kind, derived.Label), Sequence: sequence,
+						})
+						seen[derived.Label] = struct{}{}
+						sequence++
+					}
+					continue
+				}
 				value := structuredNodeText(member.Value)
 				if !rawTextExtraVisible(member.Key, value) {
 					continue
@@ -810,6 +824,41 @@ func rawTextConformanceFields(node structuredNode) []rawTextDerivedField {
 	return nil
 }
 
+// rawTextConformanceInfoFields flattens informational parser diagnostics into
+// MediaInfo's count, parser-group, and indented detail rows.
+func rawTextConformanceInfoFields(node structuredNode) []rawTextDerivedField {
+	if node.Kind != structuredArray || len(node.Array) == 0 {
+		return nil
+	}
+	fields := []rawTextDerivedField{{Label: "ConformanceInfos", Value: strconv.Itoa(len(node.Array))}}
+	for _, item := range node.Array {
+		if item.Kind != structuredObject {
+			continue
+		}
+		for _, group := range item.Object {
+			if group.Value.Kind != structuredArray {
+				continue
+			}
+			groupLabel := group.Key
+			if groupLabel == "MPEGAudio" {
+				groupLabel = "MPEG-Audio"
+			}
+			fields = append(fields, rawTextDerivedField{Label: " " + groupLabel, Value: "Yes"})
+			for _, groupItem := range group.Value.Array {
+				if groupItem.Kind != structuredObject {
+					continue
+				}
+				for _, detail := range groupItem.Object {
+					if detail.Value.Kind == structuredString {
+						fields = append(fields, rawTextDerivedField{Label: "  " + detail.Key, Value: detail.Value.Text})
+					}
+				}
+			}
+		}
+	}
+	return fields
+}
+
 // rawTextStructuredValues returns one preferred scalar per canonical key.
 func rawTextStructuredValues(stream *storedStream) map[string]string {
 	values := make(map[string]string, len(stream.Fields))
@@ -1284,8 +1333,8 @@ func formatRawTextLanguage(code, display string) string {
 	return fmt.Sprintf("%s (%s)", name, strings.Join(parts[1:], "-"))
 }
 
-// formatRawTextEncodedLibrary normalizes FLAC's canonical reference string to
-// the raw MediaInfo library/date spelling.
+// formatRawTextEncodedLibrary normalizes canonical encoder identifiers and
+// version strings to MediaInfo's raw library/date spelling.
 func formatRawTextEncodedLibrary(display string) string {
 	if suffix, ok := strings.CutPrefix(display, "x264 - "); ok {
 		return "x264 " + suffix
@@ -1315,7 +1364,11 @@ func formatRawTextEncodedLibrary(display string) string {
 		return strings.Replace(display, "libmakemkv v", "libmakemkv ", 1)
 	}
 	if strings.HasPrefix(display, "encoded by TMPGEnc ") {
-		return strings.TrimPrefix(display, "encoded by ")
+		value := strings.TrimPrefix(display, "encoded by ")
+		if version, ok := strings.CutPrefix(value, "TMPGEnc (ver. "); ok {
+			return "TMPGEnc " + strings.TrimSuffix(version, ")")
+		}
+		return value
 	}
 	if rest, ok := strings.CutPrefix(display, "Xiph.Org libVorbis I "); ok {
 		date := rest

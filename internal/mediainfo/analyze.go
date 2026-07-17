@@ -1802,7 +1802,12 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 								// then rounds the resulting byte count. This matters for 1:1 parity on MPEG-PS/VOB.
 								videoSS := int64(math.Round((videoBitRate / 8) * durationMs / 1000))
 								if videoBps > 0 && videoSS > 0 {
-									replaceCanonicalSeedLegacyFill(&streams[videoIndex], "BitRate", strconv.FormatInt(videoBps, 10), "Bit rate", formatBitrate(float64(videoBps)))
+									videoMode, _ := canonicalSeedValue(streams[videoIndex], "BitRate_Mode")
+									_, hasMaximum := canonicalSeedValue(streams[videoIndex], "BitRate_Maximum")
+									videoFormat, _ := canonicalSeedValue(streams[videoIndex], "Format")
+									if videoMode != "CBR" && videoMode != "Constant" && (videoFormat != "MPEG Video" || hasMaximum) {
+										replaceCanonicalSeedLegacyFill(&streams[videoIndex], "BitRate", strconv.FormatInt(videoBps, 10), "Bit rate", formatBitrate(float64(videoBps)))
+									}
 									if streamSize := formatStreamSize(videoSS, psSize); streamSize != "" {
 										replaceCanonicalSeedLegacyFill(&streams[videoIndex], "StreamSize", strconv.FormatInt(videoSS, 10), "Stream size", streamSize)
 									}

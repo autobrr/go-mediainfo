@@ -20,8 +20,15 @@ type psStream struct {
 	mpegAudioBitrateKbps int
 	mpegAudioBitrateMin  int
 	mpegAudioBitrateMax  int
+	mpegAudioChannelMode byte
 	audioFrames          uint64
 	audioBuffer          []byte
+	sampleSection        int
+	clockPTS             uint64
+	clockHasPTS          bool
+	clockAudioStart      uint64
+	clockVideoStart      int
+	programEndSeen       bool
 	ac3Info              ac3Info
 	hasAC3               bool
 	videoHeaderBytes     uint64

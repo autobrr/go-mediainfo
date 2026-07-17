@@ -167,7 +167,7 @@ var structuredVideoFieldOrder = map[string]int{
 	"Width": 24, "Height": 25, "Stored_Width": 26, "Stored_Height": 27, "Sampled_Width": 28, "Sampled_Height": 29,
 	"PixelAspectRatio": 30, "DisplayAspectRatio": 31, "Rotation": 32, "FrameRate_Mode": 33, "FrameRate_Mode_Original": 34,
 	"FrameRate": 35, "FrameRate_Num": 36, "FrameRate_Den": 37, "FrameCount": 38, "Standard": 39, "ColorSpace": 40,
-	"ChromaSubsampling": 41, "ChromaSubsampling_Position": 42, "BitDepth": 43, "ScanType": 44, "Compression_Mode": 45,
+	"ChromaSubsampling": 41, "ChromaSubsampling_Position": 42, "BitDepth": 43, "ScanType": 44, "ScanOrder": 45, "Compression_Mode": 46,
 	"Delay": 46, "Delay_Settings": 47, "Delay_DropFrame": 48, "Delay_Source": 49, "Delay_Original": 50,
 	"Delay_Original_DropFrame": 51, "Delay_Original_Source": 52, "TimeCode_FirstFrame": 53, "TimeCode_Source": 54,
 	"Gop_OpenClosed": 55, "Gop_OpenClosed_FirstFrame": 56, "StreamSize": 57, "Encoded_Library": 58,
@@ -182,7 +182,7 @@ var structuredVideoFieldOrder = map[string]int{
 var structuredAudioFieldOrder = map[string]int{
 	"@type": 0, "@typeorder": 1, "StreamOrder": 2, "FirstPacketOrder": 3, "ID": 4, "MenuID": 5, "UniqueID": 6,
 	"Format": 7, "Format_Commercial_IfAny": 8, "Format_Settings_Endianness": 9, "Format_Version": 10,
-	"Format_Profile": 11, "Format_Settings_SBR": 12, "Format_AdditionalFeatures": 13, "MuxingMode": 14, "CodecID": 15, "Duration": 16,
+	"Format_Profile": 11, "Format_Settings_Mode": 12, "Format_Settings_SBR": 12, "Format_AdditionalFeatures": 13, "MuxingMode": 14, "CodecID": 15, "Duration": 16,
 	"Source_Duration": 17, "Source_Duration_LastFrame": 18, "BitRate_Mode": 19, "BitRate": 20, "BitRate_Maximum": 21,
 	"Channels": 22, "ChannelPositions": 23, "ChannelLayout": 24, "SamplesPerFrame": 25, "SamplingRate": 26,
 	"SamplingCount": 27, "FrameRate": 28, "FrameCount": 29, "Source_FrameCount": 30, "Compression_Mode": 31,
