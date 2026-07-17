@@ -1256,7 +1256,11 @@ func formatRawTextHDR(display string, structured map[string]string) string {
 		}
 	}
 	if strings.Contains(format, "SMPTE ST 2094 App 4") {
-		const dynamic = "SMPTE ST 2094 App 4, Version HDR10+ Profile B, HDR10+ Profile B compatible"
+		profile := "HDR10+ Profile A"
+		if strings.Contains(structured["HDR_Format_Compatibility"], "HDR10+ Profile B") {
+			profile = "HDR10+ Profile B"
+		}
+		dynamic := fmt.Sprintf("SMPTE ST 2094 App 4, Version %s, %s compatible", profile, profile)
 		if prefix, _, ok := strings.Cut(display, " / SMPTE ST 2094 App 4"); ok {
 			return prefix + " / " + dynamic
 		}

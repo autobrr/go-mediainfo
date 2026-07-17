@@ -148,6 +148,10 @@ const matroskaEAC3QuickProbePackets = 300
 // matroskaAC3QuickProbePackets bounds core AC-3 compression-statistics sampling.
 const matroskaAC3QuickProbePackets = 300
 
+// matroskaAC3SingleStereoProbeFrames matches MediaInfo's bounded window for
+// one stereo AC-3 track interleaved with one video track.
+const matroskaAC3SingleStereoProbeFrames = 571
+
 // Bound the expensive JOC scan (full-block reads) separately; stats probing continues to PacketCount.
 const matroskaEAC3QuickProbePacketsJOC = 198
 const matroskaHEVCQuickProbePackets = 300

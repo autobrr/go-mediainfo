@@ -63,6 +63,7 @@ type matroskaAudioProbe struct {
 	collect          bool
 	targetFrames     int
 	targetPackets    int
+	stereoFrames     int
 	jocStopPackets   int
 	packetCount      int
 	parseJOC         bool
@@ -365,6 +366,16 @@ func scanMatroskaClusters(r io.ReaderAt, offset int64, size int64, timecodeScale
 	stats := map[uint64]*matroskaTrackStats{}
 	var globalFrames int64
 	var maxFrames int64
+	if parseSpeed < 1 && len(audioProbes) == 1 && trackCount == 2 {
+		for _, probe := range audioProbes {
+			if probe != nil && probe.format == "AC-3" {
+				probe.stereoFrames = matroskaAC3SingleStereoProbeFrames
+				if probe.targetPackets == 212 {
+					probe.targetFrames = matroskaAC3SingleStereoProbeFrames
+				}
+			}
+		}
+	}
 	if !applyScan && parseSpeed < 1 {
 		if trackCount < 1 {
 			trackCount = 1
@@ -948,6 +959,9 @@ func readMatroskaBlockHeader(er *ebmlReader, size int64, audioProbes map[uint64]
 					return 0, 0, 0, 0, err
 				}
 				skipAudioProbe := skipFrameProbe || (stopAfterThisPacket && maxLacesToProbe > 0 && i >= maxLacesToProbe)
+				if audioProbe != nil && audioProbe.targetFrames > 0 && audioProbe.info.framesMerged >= audioProbe.targetFrames {
+					skipAudioProbe = true
+				}
 				if needAudio && !skipAudioProbe {
 					audioPayload := applyMatroskaAudioHeaderStrip(payload, audioProbe)
 					effectiveSize := size
@@ -984,6 +998,9 @@ func readMatroskaBlockHeader(er *ebmlReader, size int64, audioProbes map[uint64]
 				}
 			}
 			if needAudio && audioProbe != nil && (audioProbe.format == "AC-3" || audioProbe.format == "E-AC-3") && audioProbe.targetPackets > 0 {
+				if audioProbe.targetFrames > 0 && audioProbe.info.framesMerged >= audioProbe.targetFrames {
+					audioProbe.collect = false
+				}
 				// Keep probing bounded; count per Matroska packet (Block/SimpleBlock).
 				audioProbe.packetCount++
 				if audioProbe.dependentStats && audioProbe.packetCount == 299 {
@@ -2512,6 +2529,7 @@ func probeMatroskaAudio(probes map[uint64]*matroskaAudioProbe, track uint64, pay
 	switch probe.format {
 	case "AC-3":
 		if info, frameSize, ok := parseAC3Frame(payload); ok {
+			applyMatroskaAC3StereoProbeLimit(probe, info)
 			if packetBytes > 0 {
 				if frameSize <= 0 {
 					return
@@ -2596,6 +2614,14 @@ func probeMatroskaAudio(probes map[uint64]*matroskaAudioProbe, track uint64, pay
 		if probe.targetFrames > 0 && probe.info.framesMerged >= probe.targetFrames {
 			probe.collect = false
 		}
+	}
+}
+
+// applyMatroskaAC3StereoProbeLimit selects the shorter bounded frame window
+// once bitstream evidence confirms stereo where TrackEntry omitted Channels.
+func applyMatroskaAC3StereoProbeLimit(probe *matroskaAudioProbe, frame ac3Info) {
+	if probe.stereoFrames > 0 && frame.channels == 2 && (probe.targetFrames == 0 || probe.stereoFrames < probe.targetFrames) {
+		probe.targetFrames = probe.stereoFrames
 	}
 }
 

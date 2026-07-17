@@ -137,6 +137,29 @@ func TestReadMatroskaBlockHeader_FrameLimitStopsMidLace(t *testing.T) {
 	}
 }
 
+func TestReadMatroskaBlockHeader_TargetFramesStopsMidLace(t *testing.T) {
+	block := []byte{0x81, 0x00, 0x00, 0x04, 0x03} // track 1, fixed lacing, 4 frames
+	for code := uint32(1); code <= 4; code++ {
+		block = append(block, makeEAC3Frame(t, 16, code)...)
+	}
+	probe := &matroskaAudioProbe{format: "E-AC-3", collect: true, targetFrames: 2, targetPackets: 10}
+	er := newEBMLReader(bytes.NewReader(block))
+
+	_, _, _, frames, err := readMatroskaBlockHeader(er, int64(len(block)), map[uint64]*matroskaAudioProbe{1: probe}, nil, 0)
+	if err != nil {
+		t.Fatalf("readMatroskaBlockHeader: %v", err)
+	}
+	if frames != 4 {
+		t.Fatalf("frames = %d, want 4 container frames", frames)
+	}
+	if got := probe.info.dialnormCount; got != 2 {
+		t.Fatalf("dialnormCount = %d, want 2 bounded probe frames", got)
+	}
+	if probe.collect {
+		t.Fatal("probe must stop collecting at target frame count")
+	}
+}
+
 func TestMatroskaBlockFrameLimitIncludesCrossingFrame(t *testing.T) {
 	globalFrames := int64(2560)
 	if got := matroskaBlockFrameLimit(&globalFrames, 2560); got != 1 {
@@ -402,6 +425,35 @@ func TestScanMatroskaClustersVideoProbeAggregateByteBudget(t *testing.T) {
 	}
 	if videoProbeNeedsSample(video) {
 		t.Fatal("aggregate byte budget exhaustion must stop video sampling")
+	}
+}
+
+func TestScanMatroskaClustersBoundsSingleStereoAC3WithVideo(t *testing.T) {
+	audio := map[uint64]*matroskaAudioProbe{
+		1: {format: "AC-3", collect: true, targetPackets: 212},
+	}
+
+	scanMatroskaClusters(bytes.NewReader([]byte{0}), 0, 1, 1000000, audio, nil, true, false, 0.5, 2, nil)
+
+	if got := audio[1].targetFrames; got != matroskaAC3SingleStereoProbeFrames {
+		t.Fatalf("stereo AC-3 frame limit = %d, want %d", got, matroskaAC3SingleStereoProbeFrames)
+	}
+}
+
+func TestApplyMatroskaAC3StereoProbeLimitUsesBitstreamChannels(t *testing.T) {
+	probe := &matroskaAudioProbe{
+		targetPackets: matroskaAC3QuickProbePackets,
+		stereoFrames:  matroskaAC3SingleStereoProbeFrames,
+	}
+	applyMatroskaAC3StereoProbeLimit(probe, ac3Info{channels: 2})
+	if got := probe.targetFrames; got != matroskaAC3SingleStereoProbeFrames {
+		t.Fatalf("stereo AC-3 frame limit = %d, want %d", got, matroskaAC3SingleStereoProbeFrames)
+	}
+
+	probe.targetFrames = 0
+	applyMatroskaAC3StereoProbeLimit(probe, ac3Info{channels: 6})
+	if got := probe.targetFrames; got != 0 {
+		t.Fatalf("multichannel AC-3 frame limit = %d, want 0", got)
 	}
 }
 

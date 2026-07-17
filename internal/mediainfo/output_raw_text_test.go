@@ -257,6 +257,25 @@ func TestFormatRawTextHDRAppendsMasteringComponent(t *testing.T) {
 	}
 }
 
+func TestFormatRawTextHDRUsesStructuredHDR10PlusProfile(t *testing.T) {
+	const dolby = "Dolby Vision, Version 1.0, Profile 8.1"
+	for _, test := range []struct {
+		profile string
+	}{
+		{profile: "HDR10+ Profile A"},
+		{profile: "HDR10+ Profile B"},
+	} {
+		structured := map[string]string{
+			"HDR_Format":               "Dolby Vision / SMPTE ST 2094 App 4",
+			"HDR_Format_Compatibility": "HDR10 / " + test.profile,
+		}
+		want := dolby + " / SMPTE ST 2094 App 4, Version " + test.profile + ", " + test.profile + " compatible"
+		if got := formatRawTextHDR(dolby, structured); got != want {
+			t.Errorf("formatRawTextHDR(%s) = %q, want %q", test.profile, got, want)
+		}
+	}
+}
+
 func TestFormatRawTextHDRDuplicatesContainerAndStreamDolbyVision(t *testing.T) {
 	structured := map[string]string{
 		"HDR_Format":         "Dolby Vision / Dolby Vision",
