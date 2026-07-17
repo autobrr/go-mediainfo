@@ -46,3 +46,26 @@ func TestBuildHEVCFieldsFromSPS_TierAndChromaLoc(t *testing.T) {
 		}
 	})
 }
+
+func TestMergeTSHEVCMasteringMetadataPreservesZeroLuminance(t *testing.T) {
+	destination := hevcHDRInfo{}
+	source := hevcHDRInfo{
+		masteringPrimaries:    "Display P3",
+		masteringLuminanceMin: 0,
+		masteringLuminanceMax: 0,
+		hasMastering:          true,
+	}
+	mergeTSHEVCMasteringMetadata(&destination, source)
+	if !destination.hasMastering {
+		t.Fatal("mastering metadata presence was lost")
+	}
+	if destination.masteringLuminanceMin != 0 || destination.masteringLuminanceMax != 0 {
+		t.Fatalf("luminance = %v/%v, want 0/0", destination.masteringLuminanceMin, destination.masteringLuminanceMax)
+	}
+	if destination.masteringPrimaries != source.masteringPrimaries {
+		t.Fatalf("primaries = %q, want %q", destination.masteringPrimaries, source.masteringPrimaries)
+	}
+	if got := formatMasteringLuminance(0, 0); got != "min: 0.0000 cd/m2, max: 0 cd/m2" {
+		t.Fatalf("formatted luminance = %q", got)
+	}
+}

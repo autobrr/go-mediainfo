@@ -103,6 +103,10 @@ type tsStream struct {
 	dtsHD               bool
 	dtsHDXLL            bool
 	dtsHDXBR            bool
+	dtsHDX              bool
+	dtsHDIMAX           bool
+	dtsHDMarkerWord     uint32
+	dtsHDMarkerWindow   int
 	hasTrueHD           bool
 	trueHDInfo          trueHDInfo
 	hasTrueHDInfo       bool
@@ -227,6 +231,15 @@ func normalizeBDAVContainerDuration(duration float64, size int64, overallBitrate
 	return duration
 }
 
+// normalizeBDAVTextDuration truncates PGS first-to-last PTS spans to whole
+// milliseconds, matching MediaInfo's timestamp-unit conversion.
+func normalizeBDAVTextDuration(duration float64, durationTicks uint64) float64 {
+	if durationTicks == 0 {
+		return duration
+	}
+	return math.Floor(float64(durationTicks)/90) / 1000
+}
+
 // recordH264SliceCount updates the dominant slices-per-picture value from one
 // complete AVC PES sample.
 func recordH264SliceCount(entry *tsStream, payload []byte) {
@@ -260,6 +273,27 @@ func setEAC3CommercialFacts(streamFacts *mpegTSStructuredFacts, info ac3Info, is
 		return
 	}
 	streamFacts.Set("Format_Commercial_IfAny", "Dolby Digital Plus")
+}
+
+// dtsHDFormatLabels returns MediaInfo's text format and structured commercial
+// labels for one DTS-HD extension profile.
+func dtsHDFormatLabels(stream *tsStream) (format, commercial, features string) {
+	format = "DTS"
+	if stream == nil || !stream.dtsHD {
+		return format, "", ""
+	}
+	switch {
+	case stream.dtsHDXLL && stream.dtsHDIMAX:
+		return "DTS XLL X IMAX", "DTS-HD MA + IMAX Enhanced", "XLL X IMAX"
+	case stream.dtsHDXLL && stream.dtsHDX:
+		return "DTS XLL X", "DTS-HD MA + DTS:X", "XLL X"
+	case stream.dtsHDXLL:
+		return "DTS XLL", "DTS-HD Master Audio", "XLL"
+	case stream.dtsHDXBR:
+		return "DTS XBR", "DTS-HD High Resolution Audio", "XBR"
+	default:
+		return format, "DTS-HD", ""
+	}
 }
 
 // ac3FormatSettingsMode maps AC-3 surround signalling to MediaInfo's mode label.
@@ -1245,6 +1279,8 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 					st.h264SEIPending = st.h264SEIPending[:0]
 					st.audioStarted = false
 					st.audioBuffer = st.audioBuffer[:0]
+					st.dtsHDMarkerWord = 0
+					st.dtsHDMarkerWindow = 0
 					st.videoStarted = false
 					st.mpeg2Parser = nil
 					st.videoCCCarry = st.videoCCCarry[:0]
@@ -1520,11 +1556,7 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 				}
 			}
 			if d > 0 {
-				jsonDuration := d
-				if durationTicks > 0 && d >= 120 {
-					// MediaInfo truncates long BDAV subtitle timelines to milliseconds.
-					jsonDuration = math.Floor(float64(durationTicks)/90) / 1000
-				}
+				jsonDuration := normalizeBDAVTextDuration(d, durationTicks)
 				streamFacts.Set("Duration", fmt.Sprintf("%.3f", jsonDuration))
 			}
 		}
@@ -1626,12 +1658,12 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 					streamFacts.Set("MasteringDisplay_ColorPrimaries", hdr.masteringPrimaries)
 					streamFacts.Set("MasteringDisplay_ColorPrimaries_Source", "Stream")
 				}
-				if hdr.masteringLuminanceMin > 0 && hdr.masteringLuminanceMax > 0 {
+				if hdr.hasMastering {
 					lum := formatMasteringLuminance(hdr.masteringLuminanceMin, hdr.masteringLuminanceMax)
 					streamFacts.Set("MasteringDisplay_Luminance", lum)
 					streamFacts.Set("MasteringDisplay_Luminance_Source", "Stream")
 					streamFacts.Set("MasteringDisplay_Luminance_Min", formatHDRLuminance(hdr.masteringLuminanceMin))
-					streamFacts.Set("MasteringDisplay_Luminance_Max", formatHDRLuminance(hdr.masteringLuminanceMax))
+					streamFacts.Set("MasteringDisplay_Luminance_Max", formatHDRLuminanceMaximum(hdr.masteringLuminanceMax))
 				}
 				if hdr.maxCLL > 0 {
 					streamFacts.Set("MaxCLL", strconv.FormatUint(hdr.maxCLL, 10))
@@ -1655,6 +1687,8 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 			format = "MLP FBA"
 		} else if dependentEAC3 {
 			format = "AC-3"
+		} else if isBDAV && st.format == "DTS" && st.dtsHD {
+			format, _, _ = dtsHDFormatLabels(st)
 		} else if st.kind == StreamAudio && st.format == "E-AC-3" && ac3HasJOCInfo(st.ac3Info) {
 			format = "E-AC-3 JOC"
 		} else if st.kind == StreamAudio && st.audioProfile != "" {
@@ -2235,7 +2269,7 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 						channels = 8
 					}
 				}
-				if isBDAV && st.format == "DTS" && channels > 6 {
+				if isBDAV && st.format == "DTS" && !st.dtsHDX && channels > 6 {
 					channels = 6
 				}
 				fields = append(fields, Field{Name: "Channel(s)", Value: formatChannels(channels)})
@@ -2266,8 +2300,12 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 					// When DTS-HD ExSS speaker mask is present, MediaInfo outputs layout/positions from it.
 					// If the mask isn't present, it omits layout/positions.
 					if st.hasDTSSpeakerMask {
-						layout = dtsHDSpeakerActivityMaskChannelLayout(st.dtsSpeakerMask)
+						layout = normalizeDTSHDChannelLayout(dtsHDSpeakerActivityMaskChannelLayout(st.dtsSpeakerMask))
 						positions = dtsHDSpeakerActivityMask(st.dtsSpeakerMask)
+						if st.dtsHDX {
+							layout = dtsXChannelLayout(layout)
+							positions += ", Objects"
+						}
 					} else {
 						layout = ""
 					}
@@ -2563,14 +2601,10 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 				streamFacts.Set("Format_Settings_Mode", "16")
 				streamFacts.Set("Format_Settings_Endianness", "Big")
 				if st.dtsHD {
-					if st.dtsHDXLL {
-						streamFacts.Set("Format_Commercial_IfAny", "DTS-HD Master Audio")
-						streamFacts.Set("Format_AdditionalFeatures", "XLL")
-					} else if st.dtsHDXBR {
-						streamFacts.Set("Format_Commercial_IfAny", "DTS-HD High Resolution Audio")
-						streamFacts.Set("Format_AdditionalFeatures", "XBR")
-					} else {
-						streamFacts.Set("Format_Commercial_IfAny", "DTS-HD")
+					_, commercial, features := dtsHDFormatLabels(st)
+					streamFacts.Set("Format_Commercial_IfAny", commercial)
+					if features != "" {
+						streamFacts.Set("Format_AdditionalFeatures", features)
 					}
 					streamFacts.Set("MuxingMode", "Stream extension")
 					streamFacts.Set("BitRate_Mode", "VBR")
@@ -2578,7 +2612,7 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 					streamFacts.Set("BitRate_Mode", "CBR")
 				}
 				channels := st.audioChannels
-				if channels > 6 {
+				if !st.dtsHDX && channels > 6 {
 					channels = 6
 				}
 				streamFacts.Set("Channels", strconv.FormatUint(channels, 10))
@@ -3297,15 +3331,7 @@ func processPES(entry *tsStream) {
 	}
 	if entry.kind == StreamVideo && entry.format == "HEVC" && len(entry.pesData) > 0 {
 		fields, sps, hdr, ok := parseHEVCAnnexBMeta(entry.pesData)
-		if entry.hevcHDR.masteringPrimaries == "" && hdr.masteringPrimaries != "" {
-			entry.hevcHDR.masteringPrimaries = hdr.masteringPrimaries
-		}
-		if entry.hevcHDR.masteringLuminanceMin == 0 && hdr.masteringLuminanceMin > 0 {
-			entry.hevcHDR.masteringLuminanceMin = hdr.masteringLuminanceMin
-		}
-		if entry.hevcHDR.masteringLuminanceMax == 0 && hdr.masteringLuminanceMax > 0 {
-			entry.hevcHDR.masteringLuminanceMax = hdr.masteringLuminanceMax
-		}
+		mergeTSHEVCMasteringMetadata(&entry.hevcHDR, hdr)
 		if entry.hevcHDR.maxCLL == 0 && hdr.maxCLL > 0 {
 			entry.hevcHDR.maxCLL = hdr.maxCLL
 		}
@@ -3448,6 +3474,23 @@ func processPES(entry *tsStream) {
 		consumeDVBSubtitle(entry, entry.pesData)
 	}
 	entry.pesData = entry.pesData[:0]
+}
+
+// mergeTSHEVCMasteringMetadata preserves SEI presence independently from its
+// luminance values, because valid mastering metadata may contain zero minima
+// or maxima.
+func mergeTSHEVCMasteringMetadata(destination *hevcHDRInfo, source hevcHDRInfo) {
+	if destination == nil {
+		return
+	}
+	if destination.masteringPrimaries == "" && source.masteringPrimaries != "" {
+		destination.masteringPrimaries = source.masteringPrimaries
+	}
+	if !destination.hasMastering && source.hasMastering {
+		destination.masteringLuminanceMin = source.masteringLuminanceMin
+		destination.masteringLuminanceMax = source.masteringLuminanceMax
+		destination.hasMastering = true
+	}
 }
 
 func consumeAudio(entry *tsStream, payload []byte, collectAC3Stats bool, ac3StatsHead bool, ac3StatsBounded bool) {
@@ -3603,22 +3646,20 @@ func consumeDTS(entry *tsStream, payload []byte) {
 	}
 	entry.audioBuffer = append(entry.audioBuffer, payload...)
 	if entry.hasAudioInfo {
+		wasDTSHD := entry.dtsHD
 		if !entry.dtsHD && hasDTSHDExtension(payload) {
 			entry.dtsHD = true
 			entry.audioBitRateKbps = 0
 			entry.audioBitRateMode = "Variable"
 		}
-		// Keep scanning for XLL/XBR/ExSS even after dtsHD is set, since the
-		// extension subtype sync may arrive in a later payload chunk.
 		if entry.dtsHD {
-			entry.dtsHDXLL = entry.dtsHDXLL || hasDTSHDXLLSync(payload)
-			entry.dtsHDXBR = entry.dtsHDXBR || hasDTSHDXBRSync(payload)
-		}
-		// Keep scanning for XLL/XBR/ExSS even after dtsHD is set, since the
-		// extension subtype sync may arrive in a later payload chunk.
-		if entry.dtsHD {
-			entry.dtsHDXLL = entry.dtsHDXLL || hasDTSHDXLLSync(payload) || hasDTSHDXLLSync(entry.audioBuffer)
-			entry.dtsHDXBR = entry.dtsHDXBR || hasDTSHDXBRSync(payload) || hasDTSHDXBRSync(entry.audioBuffer)
+			if wasDTSHD {
+				updateDTSHDExtensionFlags(entry, payload)
+			} else {
+				// Include buffered bytes when the ExSS sync is first recognized so
+				// markers split across earlier TS payload boundaries are retained.
+				updateDTSHDExtensionFlags(entry, entry.audioBuffer)
+			}
 			bdXLL, okXLL := parseDTSHDXLLBitDepth(payload)
 			if okXLL && bdXLL > 0 {
 				entry.audioBitDepth = bdXLL
@@ -3683,8 +3724,7 @@ func consumeDTS(entry *tsStream, payload []byte) {
 		if entry.dtsHD {
 			entry.audioBitRateKbps = 0
 			entry.audioBitRateMode = "Variable"
-			entry.dtsHDXLL = hasDTSHDXLLSync(entry.audioBuffer[i:])
-			entry.dtsHDXBR = hasDTSHDXBRSync(entry.audioBuffer[i:])
+			updateDTSHDExtensionFlags(entry, entry.audioBuffer[i:])
 			bdXLL, okXLL := parseDTSHDXLLBitDepth(entry.audioBuffer[i:])
 			if okXLL && bdXLL > 0 {
 				entry.audioBitDepth = bdXLL
@@ -3715,6 +3755,36 @@ func consumeDTS(entry *tsStream, payload []byte) {
 	}
 	if len(entry.audioBuffer) > 8192 {
 		entry.audioBuffer = append(entry.audioBuffer[:0], entry.audioBuffer[len(entry.audioBuffer)-8192:]...)
+	}
+}
+
+// updateDTSHDExtensionFlags accumulates DTS-HD subtype and immersive markers
+// in one pass while retaining enough state to recognize split TS payloads.
+func updateDTSHDExtensionFlags(entry *tsStream, payload []byte) {
+	if entry == nil || len(payload) == 0 {
+		return
+	}
+	for _, value := range payload {
+		entry.dtsHDMarkerWord = entry.dtsHDMarkerWord<<8 | uint32(value)
+		switch entry.dtsHDMarkerWord {
+		case 0x41A29547:
+			entry.dtsHDXLL = true
+			// The bounded region includes the four-byte XLL sync word.
+			entry.dtsHDMarkerWindow = 512 - 4
+		case 0x655E315E:
+			entry.dtsHDXBR = true
+		}
+		if entry.dtsHDMarkerWindow <= 0 {
+			continue
+		}
+		if entry.dtsHDMarkerWord == 0x02000850 {
+			entry.dtsHDX = true
+		}
+		if entry.dtsHDMarkerWord&0xFFFFFFF0 == 0xF14000D0 {
+			entry.dtsHDIMAX = true
+			entry.dtsHDX = true
+		}
+		entry.dtsHDMarkerWindow--
 	}
 }
 

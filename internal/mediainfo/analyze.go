@@ -84,6 +84,61 @@ func overallBitRatePrecisionExtra(minimum, maximum int64) structuredNode {
 	})
 }
 
+// bdavIndexVersion returns the four-digit Blu-ray index version associated
+// with a stream path, or an empty string when the stream lacks disc context.
+func bdavIndexVersion(streamPath string) string {
+	streamDir := filepath.Dir(streamPath)
+	if !strings.EqualFold(filepath.Base(streamDir), "STREAM") {
+		return ""
+	}
+	bdmvDir := filepath.Dir(streamDir)
+	if !strings.EqualFold(filepath.Base(bdmvDir), "BDMV") {
+		return ""
+	}
+	root, err := os.OpenRoot(bdmvDir)
+	if err != nil {
+		return ""
+	}
+	defer root.Close()
+	index, err := root.Open("index.bdmv")
+	if err != nil {
+		return ""
+	}
+	defer index.Close()
+
+	var signature [8]byte
+	if _, err := io.ReadFull(index, signature[:]); err != nil || string(signature[:4]) != "INDX" {
+		return ""
+	}
+	return string(signature[4:])
+}
+
+// bdavOverallBitRateMaximum returns MediaInfo's Blu-ray mux-rate ceiling.
+// Disc index version is authoritative; stream-shape heuristics remain only for
+// standalone M2TS files that have no BDMV/index.bdmv context.
+func bdavOverallBitRateMaximum(streamPath string, hasHEVC, hasPCM bool, videoStreams, audioStreams, textStreams int) string {
+	switch bdavIndexVersion(streamPath) {
+	case "0300":
+		return "109000000"
+	case "0200":
+		return "48000000"
+	}
+	if hasHEVC {
+		if hasPCM || (videoStreams == 1 && audioStreams == 1 && textStreams == 0) {
+			return "127900000"
+		}
+		return "109000000"
+	}
+	return "48000000"
+}
+
+// shouldApplyBDAVSizing reports whether MediaInfo derives BDAV stream sizes
+// from the container bitrate. Video-only HEVC clips are eligible without audio
+// sizing; HEVC clips with audio require every audio stream to be sized.
+func shouldApplyBDAVSizing(primaryVideoFormat string, audioCount, audioSizedCount int) bool {
+	return primaryVideoFormat != "HEVC" || audioCount == 0 || audioSizedCount == audioCount
+}
+
 // AnalyzeFileWithOptions analyzes one local media file with opts and returns filesystem or open errors.
 func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 	opts = normalizeAnalyzeOptions(opts)
@@ -1096,18 +1151,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 					textStreams++
 				}
 			}
-			// Blu-ray max mux rate (per MediaInfo output).
-			// UHD BD: MediaInfo reports 109 Mb/s, but can report 127.9 Mb/s for simple single-A/V
-			// streams (and when LPCM is present).
-			if hasHEVC {
-				if hasPCM || (videoStreams == 1 && audioStreams == 1 && textStreams == 0) {
-					generalFacts.SetSame("OverallBitRate_Maximum", "127900000")
-				} else {
-					generalFacts.SetSame("OverallBitRate_Maximum", "109000000")
-				}
-			} else {
-				generalFacts.SetSame("OverallBitRate_Maximum", "48000000")
-			}
+			generalFacts.SetSame("OverallBitRate_Maximum", bdavOverallBitRateMaximum(path, hasHEVC, hasPCM, videoStreams, audioStreams, textStreams))
 			// MediaInfo uses a PCR-derived estimate for BDAV overall bitrate.
 			if info.OverallBitrateMin > 0 && info.OverallBitrateMax > 0 {
 				mid := (info.OverallBitrateMin + info.OverallBitrateMax) / 2
@@ -1283,7 +1327,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			// MediaInfo BDAV behavior: derive StreamSize (and sometimes BitRate) when audio StreamSize is
 			// available for all audio streams. UHD/HEVC BDAV often omits these fields (subtitles present,
 			// or unsized audio at default ParseSpeed).
-			applyBDAVSizing := primaryVideoFormat != "HEVC" || (audioCount > 0 && audioSizedCount == audioCount)
+			applyBDAVSizing := shouldApplyBDAVSizing(primaryVideoFormat, audioCount, audioSizedCount)
 			if applyBDAVSizing {
 				// MediaInfo BDAV behavior: derive video bitrate/size from overall bitrate,
 				// subtracting audio + text overhead, then set General StreamSize as the remainder.

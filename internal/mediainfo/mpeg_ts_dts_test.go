@@ -103,15 +103,52 @@ func TestConsumeDTSCoreAndHDExtension(t *testing.T) {
 		t.Fatalf("unexpected core bitrate mode: mode=%q bitrate=%d", entry.audioBitRateMode, entry.audioBitRateKbps)
 	}
 
-	consumeDTS(&entry, []byte{0x00, 0x64, 0x58, 0x20, 0x25, 0x00, 0x41, 0xA2, 0x95, 0x47})
+	consumeDTS(&entry, []byte{
+		0x00, 0x64, 0x58, 0x20, 0x25,
+		0x00, 0x41, 0xA2, 0x95, 0x47,
+		0x00, 0x02, 0x00, 0x08, 0x50,
+		0x00, 0xF1, 0x40, 0x00, 0xD7,
+	})
 	if !entry.dtsHD {
 		t.Fatalf("expected DTS-HD extension sync to set dtsHD=true")
 	}
 	if !entry.dtsHDXLL {
 		t.Fatalf("expected DTS-HD XLL sync to set dtsHDXLL=true")
 	}
+	if !entry.dtsHDX || !entry.dtsHDIMAX {
+		t.Fatalf("expected immersive flags, got dtsHDX=%v dtsHDIMAX=%v", entry.dtsHDX, entry.dtsHDIMAX)
+	}
 	if entry.audioBitRateMode != "Variable" || entry.audioBitRateKbps != 0 {
 		t.Fatalf("expected DTS-HD mode switch, got mode=%q bitrate=%d", entry.audioBitRateMode, entry.audioBitRateKbps)
+	}
+}
+
+func TestDTSHDFormatLabelsIMAX(t *testing.T) {
+	entry := &tsStream{dtsHD: true, dtsHDXLL: true, dtsHDX: true, dtsHDIMAX: true}
+	format, commercial, features := dtsHDFormatLabels(entry)
+	if format != "DTS XLL X IMAX" || commercial != "DTS-HD MA + IMAX Enhanced" || features != "XLL X IMAX" {
+		t.Fatalf("labels = %q, %q, %q", format, commercial, features)
+	}
+}
+
+func TestUpdateDTSHDExtensionFlagsRejectsDistantImmersiveMarkers(t *testing.T) {
+	payload := append([]byte{0x41, 0xA2, 0x95, 0x47}, make([]byte, 512)...)
+	payload = append(payload, 0x02, 0x00, 0x08, 0x50, 0xF1, 0x40, 0x00, 0xD7)
+	entry := &tsStream{}
+	updateDTSHDExtensionFlags(entry, payload)
+	if entry.dtsHDX || entry.dtsHDIMAX {
+		t.Fatalf("distant markers accepted: dtsHDX=%v dtsHDIMAX=%v", entry.dtsHDX, entry.dtsHDIMAX)
+	}
+}
+
+func TestUpdateDTSHDExtensionFlagsRecognizesSplitMarkers(t *testing.T) {
+	entry := &tsStream{}
+	updateDTSHDExtensionFlags(entry, []byte{0x41, 0xA2, 0x95})
+	updateDTSHDExtensionFlags(entry, []byte{0x47, 0x00, 0x02, 0x00})
+	updateDTSHDExtensionFlags(entry, []byte{0x08, 0x50, 0x00, 0xF1, 0x40})
+	updateDTSHDExtensionFlags(entry, []byte{0x00, 0xD7})
+	if !entry.dtsHDXLL || !entry.dtsHDX || !entry.dtsHDIMAX {
+		t.Fatalf("split markers not recognized: XLL=%v X=%v IMAX=%v", entry.dtsHDXLL, entry.dtsHDX, entry.dtsHDIMAX)
 	}
 }
 

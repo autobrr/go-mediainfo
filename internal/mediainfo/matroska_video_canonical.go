@@ -667,7 +667,7 @@ func applyMatroskaVideoContainerHDR(builder *canonicalStreamBuilder, facts matro
 			luminance := formatMasteringLuminance(video.masteringLuminanceMin, video.masteringLuminanceMax)
 			builder.Fill("MasteringDisplay_Luminance", luminance, "Mastering display luminance", luminance)
 			builder.Structured("MasteringDisplay_Luminance_Min", formatHDRLuminance(video.masteringLuminanceMin))
-			builder.Structured("MasteringDisplay_Luminance_Max", formatHDRLuminance(video.masteringLuminanceMax))
+			builder.Structured("MasteringDisplay_Luminance_Max", formatHDRLuminanceMaximum(video.masteringLuminanceMax))
 			builder.Structured("MasteringDisplay_Luminance_Source", "Container")
 		}
 	}

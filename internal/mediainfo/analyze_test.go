@@ -1,6 +1,50 @@
 package mediainfo
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+func TestBDAVOverallBitRateMaximumUsesDiscIndexVersion(t *testing.T) {
+	bdmv := filepath.Join(t.TempDir(), "BDMV")
+	streamDir := filepath.Join(bdmv, "STREAM")
+	if err := os.MkdirAll(streamDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	streamPath := filepath.Join(streamDir, "00001.m2ts")
+	if err := os.WriteFile(filepath.Join(bdmv, "index.bdmv"), []byte("INDX0300"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := bdavOverallBitRateMaximum(streamPath, false, false, 1, 1, 1); got != "109000000" {
+		t.Fatalf("UHD maximum = %q, want 109000000", got)
+	}
+	if err := os.WriteFile(filepath.Join(bdmv, "index.bdmv"), []byte("INDX0200"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := bdavOverallBitRateMaximum(streamPath, true, true, 1, 1, 0); got != "48000000" {
+		t.Fatalf("HD maximum = %q, want 48000000", got)
+	}
+}
+
+func TestShouldApplyBDAVSizingAllowsVideoOnlyHEVC(t *testing.T) {
+	if !shouldApplyBDAVSizing("HEVC", 0, 0) {
+		t.Fatal("video-only HEVC should be sized")
+	}
+	if shouldApplyBDAVSizing("HEVC", 2, 1) {
+		t.Fatal("HEVC with partially sized audio should not be sized")
+	}
+	if !shouldApplyBDAVSizing("HEVC", 2, 2) {
+		t.Fatal("HEVC with fully sized audio should be sized")
+	}
+}
+
+func TestNormalizeBDAVTextDurationTruncatesMilliseconds(t *testing.T) {
+	const ticks = uint64(2_649_959)
+	if got := normalizeBDAVTextDuration(float64(ticks)/90000, ticks); got != 29.443 {
+		t.Fatalf("duration = %.3f, want 29.443", got)
+	}
+}
 
 func TestOverallBitRateValueUsesIntegerMilliseconds(t *testing.T) {
 	got, ok := overallBitRateValue(1000, 0.3336)

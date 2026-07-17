@@ -2062,7 +2062,7 @@ func applyMatroskaVideoProbes(info *MatroskaInfo, probes map[uint64]*matroskaVid
 			lum := formatMasteringLuminance(hdr.masteringLuminanceMin, hdr.masteringLuminanceMax)
 			replaceCanonicalSeedLegacyFill(stream, "MasteringDisplay_Luminance", lum, "Mastering display luminance", lum)
 			replaceCanonicalSeedLegacyFill(stream, "MasteringDisplay_Luminance_Min", formatHDRLuminance(hdr.masteringLuminanceMin), "", "")
-			replaceCanonicalSeedLegacyFill(stream, "MasteringDisplay_Luminance_Max", formatHDRLuminance(hdr.masteringLuminanceMax), "", "")
+			replaceCanonicalSeedLegacyFill(stream, "MasteringDisplay_Luminance_Max", formatHDRLuminanceMaximum(hdr.masteringLuminanceMax), "", "")
 			replaceCanonicalSeedLegacyFill(stream, "MasteringDisplay_Luminance_Source", "Stream", "", "")
 		}
 		if hdr.maxCLL > 0 {

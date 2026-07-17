@@ -3384,7 +3384,7 @@ func matroskaMatrixName(value uint64) string {
 }
 
 func formatMasteringLuminance(minVal, maxVal float64) string {
-	return fmt.Sprintf("min: %s cd/m2, max: %s cd/m2", formatHDRLuminance(minVal), formatHDRLuminance(maxVal))
+	return fmt.Sprintf("min: %s cd/m2, max: %s cd/m2", formatHDRLuminance(minVal), formatHDRLuminanceMaximum(maxVal))
 }
 
 func formatHDRLuminance(value float64) string {
@@ -3398,6 +3398,15 @@ func formatHDRLuminance(value float64) string {
 	default:
 		return fmt.Sprintf("%.4f", value)
 	}
+}
+
+// formatHDRLuminanceMaximum preserves MediaInfo's integer representation for
+// a zero mastering-display maximum while retaining normal HDR precision rules.
+func formatHDRLuminanceMaximum(value float64) string {
+	if value == 0 {
+		return "0"
+	}
+	return formatHDRLuminance(value)
 }
 
 func matroskaErrorDetectionType(value uint64) string {
