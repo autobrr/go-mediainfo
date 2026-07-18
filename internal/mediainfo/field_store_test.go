@@ -1,6 +1,9 @@
 package mediainfo
 
 import (
+	"encoding/json"
+	"encoding/xml"
+	"fmt"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -33,16 +36,57 @@ func TestCanonicalProjectionsCanRenderConcurrently(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AnalyzeFile: %v", err)
 	}
+	renderers := []struct {
+		name     string
+		render   func() string
+		validate func(string) error
+		want     string
+	}{
+		{
+			name:   "JSON",
+			render: func() string { return RenderJSON([]Report{report}) },
+			validate: func(output string) error {
+				if !json.Valid([]byte(output)) {
+					return fmt.Errorf("invalid JSON")
+				}
+				return nil
+			},
+		},
+		{
+			name:   "XML",
+			render: func() string { return RenderXML([]Report{report}) },
+			validate: func(output string) error {
+				return xml.Unmarshal([]byte(output), &struct{}{})
+			},
+		},
+		{
+			name:   "text",
+			render: func() string { return RenderText([]Report{report}) },
+			validate: func(output string) error {
+				if !strings.Contains(output, "Format                                   : Matroska") {
+					return fmt.Errorf("missing Matroska format field")
+				}
+				return nil
+			},
+		},
+	}
+	for index := range renderers {
+		renderers[index].want = renderers[index].render()
+		if err := renderers[index].validate(renderers[index].want); err != nil {
+			t.Fatalf("baseline %s output: %v", renderers[index].name, err)
+		}
+	}
+
 	var wait sync.WaitGroup
 	for index := range 12 {
 		wait.Go(func() {
-			switch index % 3 {
-			case 0:
-				_ = RenderJSON([]Report{report})
-			case 1:
-				_ = RenderXML([]Report{report})
-			case 2:
-				_ = RenderText([]Report{report})
+			renderer := renderers[index%len(renderers)]
+			output := renderer.render()
+			if output != renderer.want {
+				t.Errorf("concurrent %s output differs from baseline", renderer.name)
+			}
+			if err := renderer.validate(output); err != nil {
+				t.Errorf("concurrent %s output: %v", renderer.name, err)
 			}
 		})
 	}
