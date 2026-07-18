@@ -41,9 +41,16 @@ func buildCCTextStream(entry *psStream, videoDelay float64, videoDuration float6
 	commandOffset := 0.0
 	displayOffset := 0.0
 	if ccRate > 0 {
-		commandOffset = 1.0 / ccRate
-		if firstType == "PopOn" {
-			displayOffset = 4.0 / ccRate
+		if service == "CC3" {
+			commandOffset = 3.0 / ccRate
+			if firstType == "PopOn" {
+				displayOffset = 3.0 / ccRate
+			}
+		} else {
+			commandOffset = 1.0 / ccRate
+			if firstType == "PopOn" {
+				displayOffset = 4.0 / ccRate
+			}
 		}
 	}
 	if start > 0 && displayOffset > 0 {
@@ -54,6 +61,9 @@ func buildCCTextStream(entry *psStream, videoDelay float64, videoDuration float6
 	}
 	if end > 0 && displayOffset > 0 {
 		end -= displayOffset
+		if service == "CC3" {
+			end -= 1.0 / 15000.0
+		}
 		if end < 0 {
 			end = 0
 		}

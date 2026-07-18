@@ -216,6 +216,9 @@ func reportToFieldStore(report Report, useCanonicalSeeds bool) *fieldStore {
 			stored.SkipComputed = stream.canonicalPolicy.SkipComputed
 			stored.HideTypeOrderXML = stream.canonicalPolicy.HideTypeOrderXML
 			stored.StructuredOrder = structuredFieldOrderForContainer(stream.Kind, containerFormat)
+			if stream.canonicalPolicy.DVDOrder {
+				stored.StructuredOrder = structuredDVDFieldOrderPolicy(stream.Kind)
+			}
 			appendCanonicalSeed(store, ref, stream.canonicalSeed)
 		} else {
 			appendLegacyTextFields(store, ref, stream.Fields)

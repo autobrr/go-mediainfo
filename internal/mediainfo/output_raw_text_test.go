@@ -38,6 +38,36 @@ func TestRenderTextWithOptionsUsesRawProjection(t *testing.T) {
 	}
 }
 
+func TestRenderTextWithOptionsDVDProjectionOmitsStringSuffix(t *testing.T) {
+	builder := newCanonicalStreamBuilder(StreamGeneral)
+	builder.Fill("Format", "DVD Video", "Format", "DVD Video")
+	builder.Fill("Duration", "3661000", "Duration", "1 h 1 min 1 s")
+	report := Report{Ref: "VTS_01_0.IFO", General: builder.Snapshot(canonicalStreamPolicy{DVDOrder: true})}
+	attachCanonicalStore(&report)
+
+	projected := projectRawTextReport(report)
+	if len(projected.Streams) != 1 {
+		t.Fatalf("DVD raw stream count = %d, want 1", len(projected.Streams))
+	}
+	labels := make(map[string]bool, len(projected.Streams[0].Fields))
+	for _, field := range projected.Streams[0].Fields {
+		if strings.HasSuffix(field.Label, "/String") {
+			t.Fatalf("DVD raw label retained /String suffix: %q", field.Label)
+		}
+		labels[field.Label] = true
+	}
+	for _, label := range []string{"Format", "Duration"} {
+		if !labels[label] {
+			t.Errorf("DVD raw projection missing %q: %#v", label, projected.Streams[0].Fields)
+		}
+	}
+
+	raw := RenderTextWithOptions([]Report{report}, TextRenderOptions{Language: "raw"})
+	if strings.Contains(raw, "/String") {
+		t.Fatalf("DVD raw output retained /String suffix:\n%s", raw)
+	}
+}
+
 func TestRawTextExtraProjectionVisibilityAndFormatting(t *testing.T) {
 	for _, test := range []struct {
 		key, value, want string

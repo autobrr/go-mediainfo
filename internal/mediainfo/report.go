@@ -56,11 +56,14 @@ type Stream struct {
 	// x265 writing library / encoding settings extracted from the HEVC
 	// DecoderConfigurationRecord (hvcC) SEI, when the muxer placed the x265
 	// user-data SEI in CodecPrivate rather than in frame data.
-	mkvHEVCX265Library  string
-	mkvHEVCX265Settings string
-	mkvTrackOffsetNs    int64
-	mkvStereoMode       uint64
-	mkvTagFrameCount    bool
+	mkvHEVCX265Library   string
+	mkvHEVCX265Settings  string
+	mkvTrackOffsetNs     int64
+	mkvStereoMode        uint64
+	mkvTagFrameCount     bool
+	dvdMPEG2IntraDCFirst int
+	dvdMPEG2IntraDCLast  int
+	dvdMPEG2MaxBitRate   int64
 	// matroskaDeferredFacts holds fallback TrackEntry values until all parser
 	// refinements have updated the canonical seed.
 	matroskaDeferredFacts *matroskaDeferredFacts

@@ -43,6 +43,7 @@ type fieldEntry struct {
 type canonicalStreamPolicy struct {
 	SkipStreamOrder bool
 	SkipComputed    bool
+	DVDOrder        bool
 	// HideTypeOrderXML retains generated JSON type order while omitting the
 	// redundant XML child used only by direct canonical streams.
 	HideTypeOrderXML bool

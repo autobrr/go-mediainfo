@@ -144,7 +144,9 @@ func shouldApplyBDAVSizing(primaryVideoFormat string, audioCount, audioSizedCoun
 	return primaryVideoFormat != "HEVC" || textCount == 0 && (audioCount == 0 || audioSizedCount == audioCount)
 }
 
-// AnalyzeFileWithOptions analyzes one local media file with opts and returns filesystem or open errors.
+// AnalyzeFileWithOptions analyzes one local media file with opts and returns
+// filesystem or open errors. A numbered title VOB inside VIDEO_TS is analyzed
+// with its matching title-set members as one logical input.
 func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 	opts = normalizeAnalyzeOptions(opts)
 	stat, err := os.Stat(path)
@@ -172,6 +174,14 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 		if set, ok := detectContinuousFileSet(path); ok {
 			completeNameLast = set.LastPath
 			fileSize = set.TotalSize
+		}
+	}
+	var dvdVOBPaths []string
+	if format == "MPEG-PS" && isDVDTitleVOBPath(path) {
+		if paths, total := dvdTitleSetVOBs(path); len(paths) > 1 && total > 0 {
+			dvdVOBPaths = paths
+			fileSize = total
+			completeNameLast = paths[len(paths)-1]
 		}
 	}
 
@@ -1658,37 +1668,38 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			generalFacts.ApplyToStream(&general)
 		}
 	case "MPEG-PS":
-		psSize := stat.Size()
+		psSize := fileSize
 		psPaths := []string{path}
-		var completeNameLast string
+		dvdTitleSequence := isDVDTitleVOBPath(path)
+		dvdMenu := isDVDMenuVOBPath(path)
+		dvdParsing := dvdTitleSequence || dvdMenu
 		dvdExtras := false
-		dvdParsing := false
-		if strings.EqualFold(filepath.Ext(path), ".vob") && strings.EqualFold(filepath.Base(filepath.Dir(path)), "VIDEO_TS") {
-			// Keep VOB-as-file behavior aligned with official mediainfo: treat it as plain MPEG-PS.
-			// DVD title-set aggregation is handled when parsing IFOs.
-			_ = completeNameLast
+		if len(dvdVOBPaths) > 1 {
+			psPaths = dvdVOBPaths
 		}
 		parseSpeed := opts.ParseSpeed
-		// MediaInfo CLI reports full/accurate DVD VOB stats even at default ParseSpeed (0.5).
-		// For parity, avoid MPEG-PS sampling for standalone .vob files.
-		if strings.EqualFold(filepath.Ext(path), ".vob") && parseSpeed > 0 && parseSpeed < 1 {
-			parseSpeed = 1
-		}
-		if dvdParsing && parseSpeed < 1 {
-			// DVD-Video VOB aggregation needs full parsing for stable duration/stream stats.
-			parseSpeed = 1
-		}
 		var parsedInfo ContainerInfo
 		var parsedStreams []Stream
 		var ok bool
-		if len(psPaths) > 1 {
-			parsedInfo, parsedStreams, ok = ParseMPEGPSFiles(psPaths, psSize, mpegPSOptions{dvdExtras: dvdExtras, dvdParsing: dvdParsing, parseSpeed: parseSpeed})
+		if len(psPaths) > 1 || dvdMenu {
+			parsedInfo, parsedStreams, ok = ParseMPEGPSFiles(psPaths, psSize, mpegPSOptions{dvdExtras: dvdExtras, dvdParsing: dvdParsing, dvdMenu: dvdMenu, parseSpeed: parseSpeed})
 		} else {
 			parsedInfo, parsedStreams, ok = ParseMPEGPSWithOptions(file, psSize, mpegPSOptions{dvdExtras: dvdExtras, dvdParsing: dvdParsing, parseSpeed: parseSpeed})
 		}
 		if ok {
 			info = parsedInfo
 			streams = parsedStreams
+			if dvdTitleSequence {
+				normalizeDVDVOBStreams(streams)
+				if duration := dvdPayloadCanonicalDuration(streams); duration > 0 {
+					info.DurationSeconds = duration
+				}
+			} else if isDVDMenuVOBPath(path) {
+				normalizeDVDMenuVOBStreams(streams)
+				if duration := dvdPayloadCanonicalDuration(streams); duration > 0 {
+					info.DurationSeconds = duration
+				}
+			}
 			generalFacts := &canonicalStructuredFacts{}
 			if info.DurationSeconds > 0 {
 				jsonDuration := math.Round(info.DurationSeconds*1000) / 1000
@@ -1740,6 +1751,9 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 						bitratesOK = false
 					}
 				case StreamText:
+					if dvdTitleSequence || dvdMenu {
+						continue
+					}
 					if raw, found := canonicalSeedValue(streams[i], "BitRate"); found {
 						bps, err := strconv.ParseInt(raw, 10, 64)
 						if err == nil && bps > 0 {
@@ -1801,7 +1815,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 									videoMode, _ := canonicalSeedValue(streams[videoIndex], "BitRate_Mode")
 									_, hasMaximum := canonicalSeedValue(streams[videoIndex], "BitRate_Maximum")
 									videoFormat, _ := canonicalSeedValue(streams[videoIndex], "Format")
-									if videoMode != "CBR" && videoMode != "Constant" && (videoFormat != "MPEG Video" || hasMaximum) {
+									if videoMode != "CBR" && videoMode != "Constant" && (videoFormat != "MPEG Video" || hasMaximum || dvdMenu) {
 										replaceCanonicalSeedFill(&streams[videoIndex], "BitRate", strconv.FormatInt(videoBps, 10), "Bit rate", formatBitrate(float64(videoBps)))
 									}
 									if streamSize := formatStreamSize(videoSS, psSize); streamSize != "" {
@@ -1819,6 +1833,9 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			canComputeOverhead := true
 			for i := range streams {
 				if streams[i].Kind == StreamMenu {
+					continue
+				}
+				if (dvdTitleSequence || dvdMenu) && streams[i].Kind == StreamText {
 					continue
 				}
 				_, canonicalSize := canonicalSeedValue(streams[i], "StreamSize")

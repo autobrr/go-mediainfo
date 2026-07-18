@@ -22,6 +22,7 @@ type psStream struct {
 	mpegAudioBitrateMax  int
 	mpegAudioChannelMode byte
 	audioFrames          uint64
+	pcmBitDepth          int
 	audioBuffer          []byte
 	sampleSection        int
 	clockPTS             uint64
@@ -65,6 +66,7 @@ type psStream struct {
 	videoFrameCount      int
 	derivedDuration      float64
 	ccFound              bool
+	ccHeaderFound        bool
 	ccOdd                ccTrack
 	ccEven               ccTrack
 	firstPacketOrder     int

@@ -7,6 +7,7 @@ import (
 	"math"
 	"slices"
 	"strconv"
+	"strings"
 )
 
 const psSubstreamNone = 0xFF
@@ -106,11 +107,14 @@ func ParseMPEGPSWithOptions(file io.ReadSeeker, size int64, opts mpegPSOptions) 
 // mpegPSOptions controls bounded program-stream parsing and DVD-specific
 // canonical metadata.
 type mpegPSOptions struct {
-	dvdExtras    bool
-	dvdParsing   bool
-	parseSpeed   float64
-	sampled      bool
-	sampledBytes int64
+	dvdExtras            bool
+	dvdParsing           bool
+	dvdWideWindow        bool
+	dvdCaptionHeaderOnly bool
+	dvdMenu              bool
+	parseSpeed           float64
+	sampled              bool
+	sampledBytes         int64
 }
 
 // mpegPSBoundedWindow derives MediaInfo's program-stream analysis window from
@@ -200,7 +204,7 @@ func sampledFrameClockDurationPS(st *psStream, opts mpegPSOptions, rate float64,
 		}
 	}
 	anchor := st.pts.first
-	if st.pts.hasResets() {
+	if st.pts.hasResets() && (video || !opts.dvdParsing) {
 		anchor = st.pts.segmentStart
 	}
 	duration := float64(ptsDelta(anchor, st.clockPTS)) / 90000.0
@@ -225,6 +229,9 @@ func audioDurationPS(st *psStream, opts mpegPSOptions) float64 {
 		if rate > 0 && spf > 0 {
 			if sampled, ok := sampledFrameClockDurationPS(st, opts, rate, spf, false); ok {
 				duration = sampled
+				if opts.dvdParsing {
+					duration -= float64(spf) / rate
+				}
 			}
 			derived := (float64(st.audioFrames) * float64(spf)) / rate
 			threshold := (float64(spf) / rate) / 2.0
@@ -245,12 +252,29 @@ func audioDurationPS(st *psStream, opts mpegPSOptions) float64 {
 		}
 	}
 	if st.hasAC3 && st.ac3Info.sampleRate > 0 && st.ac3Info.spf > 0 && st.audioFrames > 0 {
-		derived := float64(st.audioFrames*uint64(st.ac3Info.spf)) / st.ac3Info.sampleRate
 		frameDur := float64(st.ac3Info.spf) / st.ac3Info.sampleRate
+		if !opts.dvdCaptionHeaderOnly && !opts.dvdWideWindow && duration >= 60 {
+			if sampled, ok := sampledFrameClockDurationPS(st, opts, st.ac3Info.sampleRate, st.ac3Info.spf, false); ok && sampled > frameDur {
+				// The PTS names the first complete frame in the terminal PES.
+				// Extend through subsequent parsed frames, excluding that anchor.
+				candidate := sampled - frameDur
+				if opts.dvdParsing && st.pts.hasResets() {
+					duration = candidate
+				} else {
+					duration = max(duration, candidate)
+				}
+			}
+		}
+		derived := float64(st.audioFrames*uint64(st.ac3Info.spf)) / st.ac3Info.sampleRate
 		if !opts.sampled {
 			duration = derived
 		} else if duration == 0 || math.Abs(derived-duration) <= frameDur {
 			duration = derived
+		}
+		if opts.dvdCaptionHeaderOnly && opts.sampled && duration > 0.025 {
+			// MediaInfo retains the partial AC-3 payload at a DVD caption-header
+			// validation boundary instead of rounding up to the next full frame.
+			duration -= 0.025
 		}
 	}
 	if hasTerminalMPEGAudioSyncLoss(st) && st.audioRate > 0 && st.mpegAudioLayer != 0 {
@@ -405,7 +429,7 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 	var sync audioSync
 	for _, key := range streamOrder {
 		st := streams[key]
-		if st == nil || st.kind != StreamAudio || !st.hasAC3 || !st.pts.has() {
+		if st == nil || st.kind != StreamAudio || !st.pts.has() || (!st.hasAC3 && (!opts.dvdParsing || st.mpegAudioLayer == 0)) {
 			continue
 		}
 		duration := audioDurationPS(st, opts)
@@ -472,12 +496,23 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 			}
 		}
 		info := mpeg2VideoInfo{}
+		clockGOPLength := 0
 		if st.kind == StreamVideo && !st.videoIsH264 {
 			if parser := videoParsers[key]; parser != nil {
 				if parser.pictureCount > 0 && st.videoFrameCount == 0 {
 					st.videoFrameCount = parser.pictureCount
 				}
 				info = parser.finalize()
+				clockGOPLength = info.GOPLength
+				if opts.dvdParsing && (opts.dvdMenu || info.ScanType == "Progressive") && dvdMPEG2GOPIsVariable(parser.gopLengthCounts) {
+					info.GOPVariable = true
+					info.GOPLength = 0
+					if !opts.dvdMenu {
+						if _, matrix, ok := strings.Cut(info.MatrixData, " / "); ok {
+							info.MatrixData = matrix
+						}
+					}
+				}
 			}
 			if !st.pts.has() && info.Width == 0 && info.Height == 0 && info.FrameRate == 0 && info.FrameRateNumer == 0 {
 				continue
@@ -521,6 +556,9 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 				fields = append(fields, Field{Name: "Commercial name", Value: "Dolby Digital"})
 				fields = append(fields, Field{Name: "Muxing mode", Value: "DVD-Video"})
 				builder.Fill("Format_Commercial_IfAny", "Dolby Digital", "Commercial name", "Dolby Digital")
+				builder.Fill("MuxingMode", "DVD-Video", "Muxing mode", "DVD-Video")
+			case format == "PCM":
+				fields = append(fields, Field{Name: "Muxing mode", Value: "DVD-Video"})
 				builder.Fill("MuxingMode", "DVD-Video", "Muxing mode", "DVD-Video")
 			case st.audioProfile == "LC":
 				fields = append(fields, Field{Name: "Format/Info", Value: "Advanced Audio Codec Low Complexity"})
@@ -643,7 +681,11 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 					builder.Fill("Format_Settings_Matrix", info.Matrix, "Format settings, Matrix", info.Matrix)
 				}
 				showGOPDetails := !opts.sampled || info.GOPSamples >= 8
+				resetDVDClock := opts.dvdParsing && (st.pts.hasResets() || anyPTS.hasResets())
 				switch {
+				case showGOPDetails && resetDVDClock && !opts.dvdCaptionHeaderOnly:
+					fields = append(fields, Field{Name: "Format settings, GOP", Value: "Variable"})
+					builder.Fill("Format_Settings_GOP", "Variable", "Format settings, GOP", "Variable")
 				case showGOPDetails && info.GOPM > 0 && info.GOPN > 0 && info.BVOP != nil && *info.BVOP:
 					value := fmt.Sprintf("M=%d, N=%d", info.GOPM, info.GOPN)
 					fields = append(fields, Field{Name: "Format settings, GOP", Value: value})
@@ -666,6 +708,27 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 					if sampled, ok := sampledFrameClockDurationPS(st, opts, frameRateRounded, 1, true); ok {
 						duration = sampled
 						durationFromSampleClock = true
+					}
+				}
+				if opts.dvdParsing && durationFromSampleClock && frameRateRounded > 0 {
+					gopFrames := info.GOPN
+					if gopFrames == 0 {
+						gopFrames = info.GOPLength
+					}
+					if gopFrames == 0 {
+						gopFrames = info.GOPNDominant
+					}
+					if gopFrames == 0 {
+						gopFrames = clockGOPLength
+					}
+					firstGOPDelta := gopFrames - info.GOPLengthFirst
+					trimTerminalGOP := info.GOPLengthFirst > 0 && firstGOPDelta > 0 && firstGOPDelta <= 4
+					programDelayCorrection := sync.delayMs < 0 && math.Abs(math.Abs(sync.delayMs)/1000-2/frameRateRounded) < 0.002 && duration*frameRateRounded < 10000
+					if (resetDVDClock || trimTerminalGOP) && !programDelayCorrection {
+						duration -= 2 / frameRateRounded
+					}
+					if resetDVDClock && info.ScanOrder == "2:3 Pulldown" {
+						duration -= 4 / frameRateRounded
 					}
 				}
 				zeroSegment := false
@@ -693,10 +756,16 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 				headerOnly := false
 				headerFrameCount := 0
 				headerDurationRate := frameRateRounded
+				if opts.dvdParsing && resetDVDClock && durationFromSampleClock && duration <= 0 && frameRateRounded > 0 {
+					duration = 1 / frameRateRounded
+					durationFromFrames = true
+					headerOnly = true
+					headerFrameCount = 1
+				}
 				if frameRateRounded > 0 && info.GOPLengthFirst > 0 {
 					gopDuration := float64(info.GOPLengthFirst) / frameRateRounded
 					if opts.dvdParsing {
-						if duration == 0 || (st.pts.hasResets() && duration > gopDuration*10) {
+						if duration == 0 || (st.videoFrameCount <= 2 && st.pts.hasResets() && duration > gopDuration*10) {
 							headerFrameCount = info.GOPLengthFirst
 							if info.GOPVariable || headerFrameCount == 0 {
 								headerFrameCount = 2
@@ -741,10 +810,17 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 						durationFromFrames = true
 					}
 				}
-				if duration > 0 && frameRateRounded > 0 && !fromGOP && !durationFromFrames {
+				if opts.dvdMenu && frameRateRounded > 0 {
+					duration = 1 / frameRateRounded
+					durationFromFrames = true
+					headerOnly = true
+					headerFrameCount = 1
+					fromGOP = false
+				}
+				if duration > 0 && frameRateRounded > 0 && !fromGOP && !durationFromFrames && !resetDVDClock {
 					duration += 1.0 / frameRateRounded
 				}
-				if sync.duration > 0 && !headerOnly && !durationFromFrames {
+				if sync.duration > 0 && !headerOnly && !durationFromFrames && !resetDVDClock {
 					candidate := sync.duration + (sync.durationDelayMs / 1000.0)
 					if candidate > 0 {
 						threshold := 0.05
@@ -861,7 +937,7 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 						}
 					}
 				}
-				if info.MaxBitRateKbps > 0 && mode != "Constant" && showGOPDetails {
+				if info.MaxBitRateKbps > 0 && mode != "Constant" && showGOPDetails && (!opts.dvdParsing || info.MaxBitRateKbps%100 == 0) {
 					if value := formatBitrateKbps(info.MaxBitRateKbps); value != "" {
 						fields = append(fields, Field{Name: "Maximum bit rate", Value: value})
 						builder.Fill("BitRate_Maximum", strconv.FormatInt(info.MaxBitRateKbps*1000, 10), "Maximum bit rate", value)
@@ -955,7 +1031,7 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 					fields = append(fields, Field{Name: "Time code source", Value: info.TimeCodeSource})
 					builder.Fill("TimeCode_Source", info.TimeCodeSource, "Time code source", info.TimeCodeSource)
 				}
-				if showGOPDetails && info.GOPLength > 1 {
+				if showGOPDetails && info.GOPLength > 1 && (!resetDVDClock || info.ScanType == "Interlaced") {
 					if info.GOPOpenClosed != "" {
 						fields = append(fields, Field{Name: "GOP, Open/Closed", Value: info.GOPOpenClosed})
 						builder.Fill("Gop_OpenClosed", info.GOPOpenClosed, "GOP, Open/Closed", info.GOPOpenClosed)
@@ -1067,7 +1143,33 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 				fields = addStreamDuration(fields, duration)
 				builder.Fill("Duration", strconv.FormatInt(int64(math.Round(duration*1000)), 10), "Duration", formatDuration(duration))
 			}
-			if st.hasAC3 {
+			// Keep codec-specific construction linear; each branch publishes a
+			// distinct canonical schema and shares the trailing language policy.
+			if st.format == "PCM" && st.hasAudioInfo { //nolint:gocritic // clearer than a condition-only switch
+				bitRate := int64(math.Round(st.audioRate * float64(st.audioChannels) * float64(st.pcmBitDepth)))
+				fields = append(fields, Field{Name: "Bit rate mode", Value: "Constant"})
+				builder.Fill("BitRate_Mode", "Constant", "Bit rate mode", "Constant")
+				fields = append(fields, Field{Name: "Bit rate", Value: formatBitrate(float64(bitRate))})
+				builder.Fill("BitRate", strconv.FormatInt(bitRate, 10), "Bit rate", formatBitrate(float64(bitRate)))
+				fields = append(fields, Field{Name: "Channel(s)", Value: formatChannels(st.audioChannels)})
+				builder.Fill("Channels", strconv.FormatUint(st.audioChannels, 10), "Channel(s)", formatChannels(st.audioChannels))
+				fields = append(fields, Field{Name: "Sampling rate", Value: formatSampleRate(st.audioRate)})
+				builder.Fill("SamplingRate", strconv.FormatInt(int64(st.audioRate), 10), "Sampling rate", formatSampleRate(st.audioRate))
+				fields = append(fields, Field{Name: "Bit depth", Value: fmt.Sprintf("%d bits", st.pcmBitDepth)})
+				builder.Fill("BitDepth", strconv.Itoa(st.pcmBitDepth), "Bit depth", fmt.Sprintf("%d bits", st.pcmBitDepth))
+				builder.DirectStructured("Format_Settings_Endianness", "Big")
+				builder.DirectStructured("Format_Settings_Sign", "Signed")
+				if duration > 0 {
+					pcmDuration := math.Round(duration*1000) / 1000
+					samplingCount := int64(math.Round(pcmDuration * st.audioRate))
+					facts.Set("SamplingCount", strconv.FormatInt(samplingCount, 10))
+					streamSize := int64(math.Round(float64(bitRate) * pcmDuration / 8))
+					facts.Set("StreamSize", strconv.FormatInt(streamSize, 10))
+					if display := formatStreamSize(streamSize, size); display != "" {
+						fields = append(fields, Field{Name: "Stream size", Value: display})
+					}
+				}
+			} else if st.hasAC3 {
 				fields = append(fields, Field{Name: "Bit rate mode", Value: "Constant"})
 				builder.Fill("BitRate_Mode", "Constant", "Bit rate mode", "Constant")
 				if st.ac3Info.bitRateKbps > 0 {
@@ -1081,8 +1183,12 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 					builder.DirectStructured("ChannelPositions", channelPositionsFromCount(strconv.FormatUint(st.ac3Info.channels, 10)))
 				}
 				if st.ac3Info.layout != "" {
-					fields = append(fields, Field{Name: "Channel layout", Value: st.ac3Info.layout})
-					builder.Fill("ChannelLayout", st.ac3Info.layout, "Channel layout", st.ac3Info.layout)
+					layout := st.ac3Info.layout
+					if st.ac3Info.channels == 1 {
+						layout = "M"
+					}
+					fields = append(fields, Field{Name: "Channel layout", Value: layout})
+					builder.Fill("ChannelLayout", layout, "Channel layout", layout)
 				}
 				if st.ac3Info.sampleRate > 0 {
 					fields = append(fields, Field{Name: "Sampling rate", Value: formatSampleRate(st.ac3Info.sampleRate)})
@@ -1143,10 +1249,25 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 				if st.ac3Info.hasSurmixlev {
 					fields = append(fields, Field{Name: "surmixlev", Value: fmt.Sprintf("%.0f dB", st.ac3Info.surmixlevDB)})
 				}
-				if st.ac3Info.hasMixlevel {
+				if st.ac3Info.hasDmixmod {
+					fields = append(fields, Field{Name: "dmixmod", Value: st.ac3Info.dmixmod})
+				}
+				if st.ac3Info.bsid > 0 && st.ac3Info.bsid <= 6 && st.ac3Info.hasLtrtcmixlev {
+					fields = append(fields, Field{Name: "ltrtcmixlev", Value: fmt.Sprintf("%.1f dB", st.ac3Info.ltrtcmixlevDB)})
+				}
+				if st.ac3Info.bsid > 0 && st.ac3Info.bsid <= 6 && st.ac3Info.hasLtrtsurmixlev {
+					fields = append(fields, Field{Name: "ltrtsurmixlev", Value: fmt.Sprintf("%.1f dB", st.ac3Info.ltrtsurmixlevDB)})
+				}
+				if st.ac3Info.bsid > 0 && st.ac3Info.bsid <= 6 && st.ac3Info.hasLorocmixlev {
+					fields = append(fields, Field{Name: "lorocmixlev", Value: fmt.Sprintf("%.1f dB", st.ac3Info.lorocmixlevDB)})
+				}
+				if st.ac3Info.bsid > 0 && st.ac3Info.bsid <= 6 && st.ac3Info.hasLorosurmixlev {
+					fields = append(fields, Field{Name: "lorosurmixlev", Value: fmt.Sprintf("%.1f dB", st.ac3Info.lorosurmixlevDB)})
+				}
+				if st.ac3Info.hasMixlevel && st.ac3Info.mixlevelFirst {
 					fields = append(fields, Field{Name: "mixlevel", Value: strconv.Itoa(st.ac3Info.mixlevel) + " dB"})
 				}
-				if st.ac3Info.hasRoomtyp {
+				if st.ac3Info.hasRoomtyp && st.ac3Info.roomtypFirst {
 					fields = append(fields, Field{Name: "roomtyp", Value: st.ac3Info.roomtyp})
 				}
 				if avg, minVal, maxVal, ok := st.ac3Info.dialnormStats(); ok {
@@ -1298,8 +1419,13 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 				}
 			}
 			if st.hasAC3 {
-				if duration > 0 {
-					facts.Set("Duration", fmt.Sprintf("%.3f", duration))
+				if mode := ac3FormatSettingsMode(st.ac3Info, true); mode != "" {
+					builder.Fill("Format_Settings_Mode", mode, "Format settings, Mode", mode)
+				}
+				publishedDuration := duration
+				if publishedDuration > 0 {
+					publishedDuration = math.Round(publishedDuration*1000) / 1000
+					facts.Set("Duration", fmt.Sprintf("%.3f", publishedDuration))
 				}
 				if st.ac3Info.spf > 0 {
 					facts.Set("SamplesPerFrame", strconv.Itoa(st.ac3Info.spf))
@@ -1310,8 +1436,8 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 						samplingCount := int64(st.audioFrames) * int64(st.ac3Info.spf)
 						facts.Set("SamplingCount", strconv.FormatInt(samplingCount, 10))
 						facts.Set("FrameCount", strconv.FormatUint(st.audioFrames, 10))
-					} else if duration > 0 {
-						samplingCount := int64(math.Round(duration * st.ac3Info.sampleRate))
+					} else if publishedDuration > 0 {
+						samplingCount := int64(math.Round(publishedDuration * st.ac3Info.sampleRate))
 						facts.Set("SamplingCount", strconv.FormatInt(samplingCount, 10))
 						if st.ac3Info.spf > 0 {
 							frameCount := int64(math.Round(float64(samplingCount) / float64(st.ac3Info.spf)))
@@ -1319,8 +1445,8 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 						}
 					}
 				}
-				if st.ac3Info.bitRateKbps > 0 && duration > 0 {
-					streamSizeBytes := int64(math.Round(float64(st.ac3Info.bitRateKbps*1000) * duration / 8.0))
+				if st.ac3Info.bitRateKbps > 0 && publishedDuration > 0 {
+					streamSizeBytes := int64(math.Round(float64(st.ac3Info.bitRateKbps*1000) * publishedDuration / 8.0))
 					if streamSizeBytes > 0 {
 						facts.Set("StreamSize", strconv.FormatInt(streamSizeBytes, 10))
 					}
@@ -1347,8 +1473,21 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 						extraFields = append(extraFields, jsonKV{Key: "compr_String", Val: fmt.Sprintf("%.2f dB", st.ac3Info.comprDB)})
 					}
 				}
+				if st.ac3Info.hasDynrng {
+					extraFields = append(extraFields, jsonKV{Key: "dynrng", Val: fmt.Sprintf("%.2f", st.ac3Info.dynrngDB)})
+					if opts.dvdExtras {
+						extraFields = append(extraFields, jsonKV{Key: "dynrng_String", Val: fmt.Sprintf("%.2f dB", st.ac3Info.dynrngDB)})
+					}
+				}
 				if st.ac3Info.hasDsurmod {
 					extraFields = append(extraFields, jsonKV{Key: "dsurmod", Val: strconv.Itoa(st.ac3Info.dsurmod)})
+					if opts.dvdExtras && st.ac3Info.dsurmod != 0 {
+						description := "Not Dolby Surround encoded"
+						if st.ac3Info.dsurmod == 2 {
+							description = "Dolby Surround encoded"
+						}
+						extraFields = append(extraFields, jsonKV{Key: "dsurmod_String", Val: description})
+					}
 				}
 				if st.ac3Info.acmod > 0 {
 					extraFields = append(extraFields, jsonKV{Key: "acmod", Val: strconv.Itoa(st.ac3Info.acmod)})
@@ -1369,42 +1508,89 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 						extraFields = append(extraFields, jsonKV{Key: "surmixlev_String", Val: surmix})
 					}
 				}
-				if st.ac3Info.hasMixlevel {
-					extraFields = append(extraFields, jsonKV{Key: "mixlevel", Val: strconv.Itoa(st.ac3Info.mixlevel)})
+				if st.ac3Info.hasDmixmod {
+					extraFields = append(extraFields, jsonKV{Key: "dmixmod", Val: st.ac3Info.dmixmod})
 				}
-				if st.ac3Info.hasRoomtyp {
+				if st.ac3Info.bsid > 0 && st.ac3Info.bsid <= 6 && st.ac3Info.hasLtrtcmixlev {
+					extraFields = append(extraFields, jsonKV{Key: "ltrtcmixlev", Val: fmt.Sprintf("%.1f", st.ac3Info.ltrtcmixlevDB)})
+					if opts.dvdExtras {
+						extraFields = append(extraFields, jsonKV{Key: "ltrtcmixlev_String", Val: fmt.Sprintf("%.1f dB", st.ac3Info.ltrtcmixlevDB)})
+					}
+				}
+				if st.ac3Info.bsid > 0 && st.ac3Info.bsid <= 6 && st.ac3Info.hasLtrtsurmixlev {
+					extraFields = append(extraFields, jsonKV{Key: "ltrtsurmixlev", Val: fmt.Sprintf("%.1f", st.ac3Info.ltrtsurmixlevDB)})
+					if opts.dvdExtras {
+						extraFields = append(extraFields, jsonKV{Key: "ltrtsurmixlev_String", Val: fmt.Sprintf("%.1f dB", st.ac3Info.ltrtsurmixlevDB)})
+					}
+				}
+				if st.ac3Info.bsid > 0 && st.ac3Info.bsid <= 6 && st.ac3Info.hasLorocmixlev {
+					extraFields = append(extraFields, jsonKV{Key: "lorocmixlev", Val: fmt.Sprintf("%.1f", st.ac3Info.lorocmixlevDB)})
+					if opts.dvdExtras {
+						extraFields = append(extraFields, jsonKV{Key: "lorocmixlev_String", Val: fmt.Sprintf("%.1f dB", st.ac3Info.lorocmixlevDB)})
+					}
+				}
+				if st.ac3Info.bsid > 0 && st.ac3Info.bsid <= 6 && st.ac3Info.hasLorosurmixlev {
+					extraFields = append(extraFields, jsonKV{Key: "lorosurmixlev", Val: fmt.Sprintf("%.1f", st.ac3Info.lorosurmixlevDB)})
+					if opts.dvdExtras {
+						extraFields = append(extraFields, jsonKV{Key: "lorosurmixlev_String", Val: fmt.Sprintf("%.1f dB", st.ac3Info.lorosurmixlevDB)})
+					}
+				}
+				if st.ac3Info.hasMixlevel && st.ac3Info.mixlevelFirst {
+					extraFields = append(extraFields, jsonKV{Key: "mixlevel", Val: strconv.Itoa(st.ac3Info.mixlevel)})
+					if opts.dvdExtras {
+						extraFields = append(extraFields, jsonKV{Key: "mixlevel_String", Val: strconv.Itoa(st.ac3Info.mixlevel) + " dB"})
+					}
+				}
+				if st.ac3Info.hasRoomtyp && st.ac3Info.roomtypFirst {
 					extraFields = append(extraFields, jsonKV{Key: "roomtyp", Val: st.ac3Info.roomtyp})
 				}
 				if avg, minVal, maxVal, ok := st.ac3Info.dialnormStats(); ok {
 					extraFields = append(extraFields, jsonKV{Key: "dialnorm_Average", Val: strconv.Itoa(avg)})
-					extraFields = append(extraFields, jsonKV{Key: "dialnorm_Minimum", Val: strconv.Itoa(minVal)})
-					if maxVal != minVal || opts.dvdExtras {
-						extraFields = append(extraFields, jsonKV{Key: "dialnorm_Maximum", Val: strconv.Itoa(maxVal)})
-					}
 					if opts.dvdExtras {
 						extraFields = append(extraFields, jsonKV{Key: "dialnorm_Average_String", Val: strconv.Itoa(avg) + " dB"})
+					}
+					extraFields = append(extraFields, jsonKV{Key: "dialnorm_Minimum", Val: strconv.Itoa(minVal)})
+					if opts.dvdExtras {
 						extraFields = append(extraFields, jsonKV{Key: "dialnorm_Minimum_String", Val: strconv.Itoa(minVal) + " dB"})
-						extraFields = append(extraFields, jsonKV{Key: "dialnorm_Maximum_String", Val: strconv.Itoa(maxVal) + " dB"})
-						if st.ac3Info.dialnormCount > 0 {
-							extraFields = append(extraFields, jsonKV{Key: "dialnorm_Count", Val: strconv.Itoa(st.ac3Info.dialnormCount)})
+					}
+					if maxVal != minVal || opts.dvdExtras {
+						extraFields = append(extraFields, jsonKV{Key: "dialnorm_Maximum", Val: strconv.Itoa(maxVal)})
+						if opts.dvdExtras {
+							extraFields = append(extraFields, jsonKV{Key: "dialnorm_Maximum_String", Val: strconv.Itoa(maxVal) + " dB"})
 						}
+					}
+					if opts.dvdExtras && st.ac3Info.dialnormCount > 0 {
+						extraFields = append(extraFields, jsonKV{Key: "dialnorm_Count", Val: strconv.Itoa(st.ac3Info.dialnormCount)})
 					}
 				}
 				if avg, minVal, maxVal, count, ok := st.ac3Info.comprStats(); ok {
 					extraFields = append(extraFields, jsonKV{Key: "compr_Average", Val: fmt.Sprintf("%.2f", avg)})
-					extraFields = append(extraFields, jsonKV{Key: "compr_Minimum", Val: fmt.Sprintf("%.2f", minVal)})
-					extraFields = append(extraFields, jsonKV{Key: "compr_Maximum", Val: fmt.Sprintf("%.2f", maxVal)})
-					extraFields = append(extraFields, jsonKV{Key: "compr_Count", Val: strconv.Itoa(count)})
 					if opts.dvdExtras {
 						extraFields = append(extraFields, jsonKV{Key: "compr_Average_String", Val: fmt.Sprintf("%.2f dB", avg)})
+					}
+					extraFields = append(extraFields, jsonKV{Key: "compr_Minimum", Val: fmt.Sprintf("%.2f", minVal)})
+					if opts.dvdExtras {
 						extraFields = append(extraFields, jsonKV{Key: "compr_Minimum_String", Val: fmt.Sprintf("%.2f dB", minVal)})
+					}
+					extraFields = append(extraFields, jsonKV{Key: "compr_Maximum", Val: fmt.Sprintf("%.2f", maxVal)})
+					if opts.dvdExtras {
 						extraFields = append(extraFields, jsonKV{Key: "compr_Maximum_String", Val: fmt.Sprintf("%.2f dB", maxVal)})
 					}
+					extraFields = append(extraFields, jsonKV{Key: "compr_Count", Val: strconv.Itoa(count)})
 				}
 				if avg, minVal, maxVal, count, ok := st.ac3Info.dynrngStats(); ok {
 					extraFields = append(extraFields, jsonKV{Key: "dynrng_Average", Val: fmt.Sprintf("%.2f", avg)})
+					if opts.dvdExtras {
+						extraFields = append(extraFields, jsonKV{Key: "dynrng_Average_String", Val: fmt.Sprintf("%.2f dB", avg)})
+					}
 					extraFields = append(extraFields, jsonKV{Key: "dynrng_Minimum", Val: fmt.Sprintf("%.2f", minVal)})
+					if opts.dvdExtras {
+						extraFields = append(extraFields, jsonKV{Key: "dynrng_Minimum_String", Val: fmt.Sprintf("%.2f dB", minVal)})
+					}
 					extraFields = append(extraFields, jsonKV{Key: "dynrng_Maximum", Val: fmt.Sprintf("%.2f", maxVal)})
+					if opts.dvdExtras {
+						extraFields = append(extraFields, jsonKV{Key: "dynrng_Maximum_String", Val: fmt.Sprintf("%.2f dB", maxVal)})
+					}
 					extraFields = append(extraFields, jsonKV{Key: "dynrng_Count", Val: strconv.Itoa(count)})
 				}
 				if len(extraFields) > 0 {
@@ -1470,10 +1656,19 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 			facts.Set("Delay_Source", "Container")
 			if videoPTS.has() {
 				videoDelay := float64(int64(st.pts.first)-int64(videoPTS.first)) / 90000.0
+				if opts.dvdParsing && videoDelay < 0 {
+					videoDelay = math.Floor(videoDelay*1000) / 1000
+				}
 				facts.Set("Video_Delay", fmt.Sprintf("%.3f", videoDelay))
 			}
 		}
-		streamsOut = append(streamsOut, buildMPEGPSCanonicalSnapshot(builder, fields, facts, extraNode, canonicalStreamPolicy{SkipStreamOrder: hasMenuStream}))
+		snapshot := buildMPEGPSCanonicalSnapshot(builder, fields, facts, extraNode, canonicalStreamPolicy{SkipStreamOrder: hasMenuStream})
+		if st.kind == StreamVideo {
+			snapshot.dvdMPEG2IntraDCFirst = info.IntraDCPrecisionFirst
+			snapshot.dvdMPEG2IntraDCLast = info.IntraDCPrecisionLast
+			snapshot.dvdMPEG2MaxBitRate = info.MaxBitRateKbps * 1000
+		}
+		streamsOut = append(streamsOut, snapshot)
 	}
 
 	info := ContainerInfo{}
@@ -1583,7 +1778,13 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 		if videoPTS.has() {
 			videoDelay = float64(videoPTS.min) / 90000.0
 		}
-		if ccStream := buildCCTextStream(ccEntry, videoDelay, videoDuration, videoFrameRate); ccStream != nil {
+		ccVideoDuration := videoDuration
+		if opts.dvdParsing && videoPTS.hasResets() && videoFrameRate > 0 {
+			if duration := ptsDurationPS(videoPTS, opts) - 2/videoFrameRate; duration > 0 {
+				ccVideoDuration = duration
+			}
+		}
+		if ccStream := buildCCTextStream(ccEntry, videoDelay, ccVideoDuration, videoFrameRate); ccStream != nil {
 			insertAt := -1
 			for i := len(streamsOut) - 1; i >= 0; i-- {
 				if streamsOut[i].Kind == StreamAudio {
@@ -1610,6 +1811,21 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 	}
 
 	return info, streamsOut, true
+}
+
+// dvdMPEG2GOPIsVariable reports variable GOP length when no observed length
+// accounts for at least 90 percent of DVD MPEG-2 GOPs.
+func dvdMPEG2GOPIsVariable(counts map[int]int) bool {
+	if len(counts) < 2 {
+		return false
+	}
+	total := 0
+	dominant := 0
+	for _, count := range counts {
+		total += count
+		dominant = max(dominant, count)
+	}
+	return total > 0 && float64(dominant)/float64(total) < 0.90
 }
 
 // consumeMPEG2StartCodeStats incrementally counts MPEG-2 picture start codes,

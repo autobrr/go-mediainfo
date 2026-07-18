@@ -2321,7 +2321,10 @@ func applyMatroskaMPEG2Probe(stream *Stream, parser *mpeg2VideoParser) {
 	if gop != "" {
 		replaceCanonicalSeedFill(stream, "Format_Settings_GOP", gop, "Format settings, GOP", gop)
 	}
-	if parsed.ScanType == "Interlaced" && parsed.PictureStructure != "" {
+	// Preserve Matroska's established projection: a probe containing any
+	// progressive picture does not expose the otherwise dominant picture
+	// structure. DVD-Video uses the stricter finalized classification directly.
+	if parsed.ScanType == "Interlaced" && parsed.PictureStructure != "" && parser.progressiveFrames == 0 {
 		replaceCanonicalSeedFill(stream, "Format_Settings_PictureStructure", parsed.PictureStructure, "Format settings, Picture structure", parsed.PictureStructure)
 		insertCanonicalSeedTextBefore(stream, "Format settings, Picture structure", parsed.PictureStructure, "Source", "Original source medium")
 	}

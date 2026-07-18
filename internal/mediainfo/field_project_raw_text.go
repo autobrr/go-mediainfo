@@ -102,6 +102,7 @@ var rawTextLabelAliases = map[string]string{
 	"Sampling rate":                      "SamplingRate/String",
 	"Count of elements":                  "ElementCount",
 	"Language":                           "Language/String",
+	"Language, more info":                "Language_More",
 	"Service kind":                       "ServiceKind/String",
 	"Writing application":                "Encoded_Application/String",
 	"Writing library":                    "Encoded_Library/String",
@@ -189,6 +190,7 @@ func projectRawTextReport(report Report) rawTextReportProjection {
 	defer store.projectionMu.RUnlock()
 
 	projected := rawTextReportProjection{Ref: store.ref, Streams: make([]rawTextStreamProjection, 0, len(store.streams))}
+	dvd, dvdAggregate := rawTextDVDContext(store)
 	totalFileSize := int64(0)
 	streamIndexes := make([]int, len(store.streams))
 	for index := range store.streams {
@@ -307,6 +309,9 @@ func projectRawTextReport(report Report) rawTextReportProjection {
 				}
 			}
 		}
+		if dvd {
+			fields = normalizeDVDRawTextFields(stream, fields, structured, dvdAggregate)
+		}
 		sort.SliceStable(fields, func(left, right int) bool {
 			if fields[left].Order != fields[right].Order {
 				return fields[left].Order < fields[right].Order
@@ -316,6 +321,343 @@ func projectRawTextReport(report Report) rawTextReportProjection {
 		projected.Streams = append(projected.Streams, rawTextStreamProjection{Kind: stream.TextKind, Fields: fields})
 	}
 	return projected
+}
+
+// rawTextDVDContext identifies DVD projections from canonical container facts.
+// Aggregate IFO reports are distinguished by payload-stream provenance, not by
+// input path or sample identity.
+func rawTextDVDContext(store *fieldStore) (dvd, aggregate bool) {
+	if store == nil {
+		return false, false
+	}
+	generalFormat := ""
+	for index := range store.streams {
+		stream := &store.streams[index]
+		structured := rawTextStructuredValues(stream)
+		if stream.Kind == StreamGeneral {
+			generalFormat = structured["Format"]
+			if generalFormat == "DVD Video" {
+				dvd = true
+			}
+		}
+		if stream.Kind == StreamMenu && structured["Format"] == "DVD-Video" {
+			dvd = true
+		}
+	}
+	if generalFormat != "DVD Video" {
+		return dvd, false
+	}
+	for index := range store.streams {
+		stream := &store.streams[index]
+		if stream.Kind == StreamGeneral || stream.Kind == StreamMenu {
+			continue
+		}
+		extra, ok := rawTextExtraNode(stream)
+		if !ok {
+			continue
+		}
+		for _, member := range extra.Object {
+			if member.Key == "Source" && structuredNodeText(member.Value) != "" {
+				return true, true
+			}
+		}
+	}
+	return dvd, false
+}
+
+// normalizeDVDRawTextFields projects DVD raw text from the same canonical
+// values that already back JSON. Legacy friendly fields can contain the
+// pre-aggregation IFO values, so canonical values and the ordered extra object
+// are authoritative here. Projected DVD labels omit the raw /String suffix.
+func normalizeDVDRawTextFields(stream *storedStream, fields []rawTextFieldProjection, structured map[string]string, aggregate bool) []rawTextFieldProjection {
+	if stream == nil {
+		return fields
+	}
+
+	extra, hasExtra := rawTextExtraNode(stream)
+	extraAliases := make(map[string]struct{})
+	if hasExtra && stream.Kind != StreamGeneral {
+		for _, member := range extra.Object {
+			for _, label := range []string{member.Key, rawTextLabel(member.Key), rawTextDVDExtraLabel(member.Key)} {
+				if label != "" {
+					extraAliases[label] = struct{}{}
+				}
+			}
+			for _, label := range rawTextDVDLegacyExtraLabels(member.Key) {
+				extraAliases[label] = struct{}{}
+			}
+		}
+	}
+	if stream.Kind == StreamMenu {
+		for _, key := range []string{"List_Audio", "List_Subtitles_4_3", "List_Subtitles_Wide", "List_Subtitles_Letterbox", "List_Subtitles_PanScan"} {
+			for _, label := range append([]string{key, rawTextLabel(key), rawTextDVDExtraLabel(key)}, rawTextDVDLegacyExtraLabels(key)...) {
+				extraAliases[label] = struct{}{}
+			}
+		}
+	}
+
+	normalized := make([]rawTextFieldProjection, 0, len(fields)+len(extra.Object))
+	seen := make(map[string]struct{}, len(fields)+len(extra.Object))
+	for _, field := range fields {
+		if _, fromExtra := extraAliases[field.Label]; fromExtra {
+			continue
+		}
+		if rawTextDVDFieldHidden(stream.Kind, field.Label) {
+			continue
+		}
+		if field.Label == "Language, more info" {
+			field.Label = "Language_More"
+		}
+		switch field.Label {
+		case "Conformance warnings":
+			field.Label = "ConformanceWarnings"
+		case " General compliance":
+			field.Label = " GeneralCompliance"
+		case "Caption service name":
+			field.Label = "CaptionServiceName"
+		}
+		switch field.Label {
+		case "FileSize/String":
+			if size, err := strconv.ParseInt(structured["FileSize"], 10, 64); err == nil {
+				field.Value = formatRawTextByteUnits(stream.Kind, formatBytes(size), structured["ElementCount"])
+			}
+		case "OverallBitRate/String":
+			if value := formatDVDRawTextBitRate(structured["OverallBitRate"]); value != "" {
+				field.Value = value
+			}
+		case "BitRate/String", "BitRate_Nominal/String", "BitRate_Maximum/String":
+			key := strings.TrimSuffix(field.Label, "/String")
+			if value := formatDVDRawTextBitRate(structured[key]); value != "" {
+				field.Value = value
+			}
+		case "Bits-(Pixel*Frame)":
+			if value := structured["Bits-(Pixel*Frame)"]; value != "" {
+				field.Value = value
+			} else if bitRate, err := strconv.ParseFloat(structured["BitRate"], 64); err == nil && bitRate >= 10_000_000_000 {
+				width, _ := strconv.ParseFloat(structured["Width"], 64)
+				height, _ := strconv.ParseFloat(structured["Height"], 64)
+				frameRate, _ := strconv.ParseFloat(structured["FrameRate"], 64)
+				if width > 0 && height > 0 && frameRate > 0 {
+					value := bitRate / (width * height * frameRate)
+					field.Value = fmt.Sprintf("%.3f", math.Ceil(value*1000)/1000)
+				}
+			}
+		case "ScanOrder/String":
+			if value := structured["ScanOrder"]; value != "" {
+				field.Value = value
+			}
+		case "Duration/String":
+			field.Value = strings.TrimPrefix(field.Value, "0s ")
+		}
+		if _, exists := seen[field.Label]; exists {
+			continue
+		}
+		field.Order = rawTextDVDFieldOrder(stream.Kind, field.Label)
+		normalized = append(normalized, field)
+		seen[field.Label] = struct{}{}
+	}
+
+	sequence := uint32(len(stream.Fields))
+	if stream.Kind == StreamAudio || stream.Kind == StreamText {
+		if value := formatRawTextDelay(structured["Video_Delay"]); value != "" {
+			label := "Video_Delay/String"
+			if _, exists := seen[label]; !exists {
+				normalized = append(normalized, rawTextFieldProjection{
+					Label: label, Value: value, Order: rawTextDVDFieldOrder(stream.Kind, label), Sequence: sequence,
+				})
+				seen[label] = struct{}{}
+				sequence++
+			}
+		}
+	}
+
+	if hasExtra && stream.Kind != StreamGeneral {
+		for _, member := range extra.Object {
+			value := structuredNodeText(member.Value)
+			if !rawTextDVDExtraVisible(stream.Kind, member.Key, value, aggregate) {
+				continue
+			}
+			label := rawTextDVDExtraLabel(member.Key)
+			if label == "" {
+				continue
+			}
+			if !aggregate || stream.Kind == StreamText || stream.Kind == StreamMenu {
+				value = rawTextExtraValue(member.Key, value)
+			}
+			normalized = append(normalized, rawTextFieldProjection{
+				Label: label, Value: value, Order: rawTextDVDFieldOrder(stream.Kind, label), Sequence: sequence,
+			})
+			sequence++
+		}
+	}
+	for index := range normalized {
+		normalized[index].Label = strings.TrimSuffix(normalized[index].Label, "/String")
+	}
+	return normalized
+}
+
+// rawTextDVDFieldHidden reports whether a legacy field label is suppressed from
+// the DVD raw-text projection for the given stream kind.
+func rawTextDVDFieldHidden(kind StreamKind, label string) bool {
+	switch label {
+	case "Delay relative to video", "Original delay", "Format settings, Mode":
+		return true
+	}
+	switch kind {
+	case StreamVideo:
+		return label == "Video_Delay/String" || label == "Delay"
+	case StreamAudio:
+		return label == "Video_Delay/String" || label == "Delay"
+	case StreamMenu:
+		return label == "Delay" || label == "Frame count" || label == "FrameCount" || label == "FrameRate/String"
+	case StreamGeneral, StreamText, StreamImage:
+		return false
+	}
+	return false
+}
+
+// rawTextDVDExtraVisible applies DVD-specific visibility rules before falling
+// back to the shared raw-text extra policy.
+func rawTextDVDExtraVisible(kind StreamKind, key, value string, aggregate bool) bool {
+	if kind == StreamMenu {
+		return value != ""
+	}
+	if aggregate && kind == StreamText && key == "CaptionServiceName" {
+		return value != ""
+	}
+	if aggregate && kind == StreamAudio {
+		switch key {
+		case "IsTruncated", "format_identifier", "OverallBitRate_Precision_Min", "OverallBitRate_Precision_Max",
+			"CaptionServiceName", "CaptionServiceContent_IsPresent", "CaptionServiceDescriptor_IsPresent":
+			return false
+		default:
+			return value != ""
+		}
+	}
+	if aggregate && kind == StreamVideo && (key == "intra_dc_precision" || key == "Source") {
+		return value != ""
+	}
+	return rawTextExtraVisible(key, value)
+}
+
+// rawTextDVDExtraLabel converts a canonical DVD extra key to its raw-text label.
+func rawTextDVDExtraLabel(key string) string {
+	if trimmed, ok := strings.CutSuffix(key, "_String"); ok {
+		return trimmed
+	}
+	switch key {
+	case "List_Audio":
+		return "List (Audio)"
+	case "List_Subtitles_4_3":
+		return "List (Subtitles 4/3)"
+	case "List_Subtitles_Wide":
+		return "  Wide)"
+	case "List_Subtitles_Letterbox":
+		return "  Letterbox)"
+	case "List_Subtitles_PanScan":
+		return "  Pan&Scan)"
+	}
+	if len(key) == len("_00_00_00_000") && key[0] == '_' {
+		parts := strings.Split(key[1:], "_")
+		if len(parts) == 4 {
+			return parts[0] + ":" + parts[1] + ":" + parts[2] + "." + parts[3]
+		}
+	}
+	return rawTextLabel(key)
+}
+
+// rawTextDVDLegacyExtraLabels returns legacy labels that may duplicate a
+// canonical DVD extra during raw-text projection.
+func rawTextDVDLegacyExtraLabels(key string) []string {
+	switch key {
+	case "List_Audio":
+		return []string{"List (Audio)"}
+	case "List_Subtitles_4_3":
+		return []string{"List (Subtitles 4/3)"}
+	case "List_Subtitles_Wide":
+		return []string{"List (Subtitles Wide)"}
+	case "List_Subtitles_Letterbox":
+		return []string{"List (Subtitles Letterbox)"}
+	case "List_Subtitles_PanScan":
+		return []string{"List (Subtitles Pan&Scan)"}
+	case "CaptionServiceName":
+		return []string{"Caption service name"}
+	default:
+		return nil
+	}
+}
+
+// formatDVDRawTextBitRate formats DVD raw bitrates, including values at or
+// above ten gigabits per second that require a Gbps representation.
+func formatDVDRawTextBitRate(value string) string {
+	bitRate, err := strconv.ParseFloat(value, 64)
+	if err != nil || bitRate <= 0 {
+		return ""
+	}
+	if bitRate >= 10_000_000_000 {
+		return fmt.Sprintf("%.1f Gbps", bitRate/1_000_000_000)
+	}
+	return formatRawTextDerivedBitRate(value)
+}
+
+// rawTextDVDFieldOrder returns a DVD raw-text field's order, placing unknown
+// labels after all registered labels.
+func rawTextDVDFieldOrder(kind StreamKind, label string) int {
+	if order, ok := rawTextDVDFieldOrderPolicy(kind)[label]; ok {
+		return order
+	}
+	return 1 << 20
+}
+
+// DVD raw-text field-order registries mirror MediaInfo's per-kind projection.
+var (
+	rawTextDVDVideoFieldOrder = makeStructuredFieldOrder(
+		"ID/String", "MenuID/String", "UniqueID/String", "Format/String", "Format/Info", "Format_Commercial_IfAny", "Format_Version", "Format_Profile",
+		"Format_Settings", "Format_Settings_BVOP/String", "Format_Settings_QPel/String", "Format_Settings_GMC/String", "Format_Settings_Matrix/String",
+		"Format_Settings_CABAC/String", "Format_Settings_RefFrames/String", "Format_Settings_GOP", "Format_Settings_PictureStructure", "MuxingMode", "CodecID", "CodecID/Info",
+		"Duration/String", "BitRate_Mode/String", "BitRate/String", "BitRate_Nominal/String", "BitRate_Maximum/String", "Width/String", "Height/String",
+		"DisplayAspectRatio/String", "FrameRate_Mode/String", "FrameRate/String", "Standard", "ColorSpace", "ChromaSubsampling", "ChromaSubsampling/String",
+		"BitDepth/String", "ScanType/String", "ScanOrder/String", "Compression_Mode/String", "Bits-(Pixel*Frame)", "TimeCode_FirstFrame", "TimeCode_Source",
+		"Gop_OpenClosed/String", "Gop_OpenClosed_FirstFrame/String", "StreamSize/String", "colour_range", "colour_primaries", "transfer_characteristics", "matrix_coefficients",
+		"Language/String", "ServiceKind/String",
+	)
+	rawTextDVDAudioFieldOrder = makeStructuredFieldOrder(
+		"ID/String", "MenuID/String", "UniqueID/String", "Format/String", "Format/Info", "Format_Commercial_IfAny", "Format_Version", "Format_Profile",
+		"Format_Settings", "Format_Settings_Endianness", "Format_Settings_Sign", "MuxingMode", "CodecID", "CodecID/Info", "Duration/String", "Source_Duration/String",
+		"BitRate_Mode/String", "BitRate/String", "BitRate_Nominal/String", "BitRate_Maximum/String", "Channel(s)/String", "ChannelLayout", "SamplingRate/String",
+		"FrameRate/String", "BitDepth/String", "Compression_Mode/String", "Video_Delay/String", "StreamSize/String", "Language/String", "Language_More", "ServiceKind/String",
+	)
+	rawTextDVDTextFieldOrder = makeStructuredFieldOrder(
+		"ID/String", "MenuID/String", "UniqueID/String", "Format/String", "Format/Info", "MuxingMode", "MuxingMode_MoreInfo", "CodecID", "CodecID/Info",
+		"Duration/String", "Duration_Start2End/String", "Duration_Start/String", "Duration_End/String", "BitRate_Mode/String", "BitRate/String", "FrameRate/String",
+		"ElementCount", "Width/String", "Height/String", "BitDepth/String", "Compression_Mode/String", "Video_Delay/String", "StreamSize/String", "FirstDisplay_Delay_Frames", "FirstDisplay_Type",
+		"Language/String", "Language_More", "ServiceKind/String", "Default/String", "Forced/String",
+	)
+	rawTextDVDMenuFieldOrder = makeStructuredFieldOrder(
+		"ID/String", "MenuID/String", "UniqueID/String", "Format/String", "Format/Info", "MuxingMode", "Duration/String",
+	)
+	rawTextDVDGeneralFieldOrder = makeStructuredFieldOrder(
+		"ID/String", "UniqueID/String", "CompleteName", "CompleteName_Last", "Format/String", "Format/Info", "Format_Version", "Format_Profile",
+		"Format_Settings", "CodecID", "CodecID/String", "FileSize/String", "Duration/String", "OverallBitRate_Mode/String", "OverallBitRate/String",
+		"OverallBitRate_Maximum/String", "FrameRate/String", "Title", "Movie", "Encoded_Date", "Tagged_Date", "Encoded_Application/String", "Encoded_Library/String",
+	)
+)
+
+// rawTextDVDFieldOrderPolicy returns the DVD raw-text ordering registry for a stream kind.
+func rawTextDVDFieldOrderPolicy(kind StreamKind) map[string]int {
+	switch kind {
+	case StreamVideo, StreamImage:
+		return rawTextDVDVideoFieldOrder
+	case StreamAudio:
+		return rawTextDVDAudioFieldOrder
+	case StreamText:
+		return rawTextDVDTextFieldOrder
+	case StreamMenu:
+		return rawTextDVDMenuFieldOrder
+	case StreamGeneral:
+		return rawTextDVDGeneralFieldOrder
+	}
+	return rawTextDVDGeneralFieldOrder
 }
 
 // rawTextProjectionRule resolves one canonical or imported text entry to its
