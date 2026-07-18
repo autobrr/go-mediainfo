@@ -1,8 +1,11 @@
 package mediainfo
 
 import (
+	"encoding/binary"
+	"math"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 )
 
@@ -202,5 +205,86 @@ func TestOverlayDVDDeclaredLanguagesRejectsPositionalMatch(t *testing.T) {
 	}}, nil)
 	if got, found := canonicalSeedValue(streams[0], "Language"); found {
 		t.Fatalf("mismatched payload received positional language %q", got)
+	}
+}
+
+func TestDVDTitleSetBitRateDurationPrefersIFOTimeline(t *testing.T) {
+	if got, corrected := dvdTitleSetBitRateDuration(7_272_744_960, 8855, 8771.8, 83.3); got != 8855 || !corrected {
+		t.Fatalf("duration = %v, corrected = %v; want complete IFO PGC timeline correction", got, corrected)
+	}
+	if got, corrected := dvdTitleSetBitRateDuration(1_000_000_000, 8855, 8771.8, 1000); got != 1000 || corrected {
+		t.Fatalf("plausible duration = %v, corrected = %v; want bounded timing retained", got, corrected)
+	}
+	if got, corrected := dvdTitleSetBitRateDuration(7_272_744_960, 0, 8771.8, 83.3); got != 8771.8 || !corrected {
+		t.Fatalf("IFO fallback duration = %v, corrected = %v; want selected-program correction", got, corrected)
+	}
+	if got, corrected := dvdTitleSetBitRateDuration(7_272_744_960, 0, 0, 83.3); got != 83.3 || corrected {
+		t.Fatalf("payload fallback duration = %v, corrected = %v; want uncorrected payload timing", got, corrected)
+	}
+}
+
+func TestDVDPGCTimelineDurationDeduplicatesFirstSector(t *testing.T) {
+	const pgcOffset = 0x100
+	data := make([]byte, 0x1000)
+	binary.BigEndian.PutUint16(data[pgcOffset:], 3)
+	setPGC := func(index, relative int, duration [4]byte, firstSector, lastSector uint32) {
+		entry := pgcOffset + 8 + index*8
+		data[entry] = 0x80
+		binary.BigEndian.PutUint32(data[entry+4:], uint32(relative))
+		base := pgcOffset + relative
+		data[base+3] = 1
+		copy(data[base+4:base+8], duration[:])
+		binary.BigEndian.PutUint16(data[base+0xE8:], 0xF0)
+		cell := base + 0xF0
+		binary.BigEndian.PutUint32(data[cell+8:], firstSector)
+		binary.BigEndian.PutUint32(data[cell+20:], lastSector)
+	}
+	setPGC(0, 0x100, [4]byte{0x00, 0x01, 0x00, 0x40}, 100, 199)
+	setPGC(1, 0x300, [4]byte{0x00, 0x02, 0x00, 0x40}, 100, 199)
+	setPGC(2, 0x500, [4]byte{0x00, 0x00, 0x30, 0x40}, 200, 299)
+
+	if got := dvdPGCTimelineDuration(data, pgcOffset); got != 150 {
+		t.Fatalf("timeline duration = %v, want 150 seconds", got)
+	}
+	delays := dvdProgramStartDelays(data, pgcOffset, make([]dvdProgram, 3))
+	if delays[1] != 0 || delays[2] != 120 {
+		t.Fatalf("timeline delays = %v, want replacement at 0 and next PGC at 120", delays)
+	}
+}
+
+func TestDeriveDVDPSVideoBitRateAndSizeUsesLogicalDuration(t *testing.T) {
+	video := Stream{Kind: StreamVideo}
+	replaceCanonicalSeedFill(&video, "BitRate_Mode", "CBR", "Bit rate mode", "Constant")
+	replaceCanonicalSeedFill(&video, "BitRate", "6000000", "Bit rate", "6000 kb/s")
+	// The bounded VOB scan observed only 83 seconds, but the IFO timeline covers
+	// the main title plus a short PGC used for bitrate and size derivation.
+	replaceCanonicalSeedFill(&video, "Duration", "83300", "Duration", "1 min 23 s")
+
+	audio := Stream{Kind: StreamAudio}
+	replaceCanonicalSeedFill(&audio, "BitRate", "384000", "Bit rate", "384 kb/s")
+	streams := []Stream{video, audio}
+
+	const (
+		payloadSize    = int64(7272744960)
+		logicalSeconds = 8855
+	)
+	deriveDVDPSVideoBitRateAndSize(streams, payloadSize, logicalSeconds, true)
+
+	if got, _ := canonicalSeedValue(streams[0], "BitRate"); got != "6000000" {
+		t.Fatalf("video bit rate = %q, want plausible CBR header rate", got)
+	}
+	if got, _ := canonicalSeedValue(streams[0], "BitRate_Maximum"); got != "6000000" {
+		t.Fatalf("maximum video bit rate = %q, want retained sequence-header rate", got)
+	}
+	overall := math.Round(float64(payloadSize) * 8 / logicalSeconds)
+	derivedBitRate := (overall*0.99 - 384000/0.99) * 0.99
+	wantSize := int64(math.Round(derivedBitRate / 8 * logicalSeconds))
+	gotSizeValue, _ := canonicalSeedValue(streams[0], "StreamSize")
+	gotSize, err := strconv.ParseInt(gotSizeValue, 10, 64)
+	if err != nil {
+		t.Fatalf("parse StreamSize %q: %v", gotSizeValue, err)
+	}
+	if gotSize != wantSize {
+		t.Fatalf("video stream size = %d, want %d from logical duration", gotSize, wantSize)
 	}
 }

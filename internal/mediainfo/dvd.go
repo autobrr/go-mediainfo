@@ -14,7 +14,10 @@ import (
 	"strings"
 )
 
-const dvdSectorSize = 2048
+const (
+	dvdSectorSize    = 2048
+	dvdMaxMuxBitRate = 10_080_000
+)
 
 const (
 	dvdVideoAttrMenuOffset  = 0x0100
@@ -92,6 +95,11 @@ type dvdProgram struct {
 	firstSector uint32
 }
 
+type dvdPGCTimelineEntry struct {
+	pos      int
+	duration int64
+}
+
 // dvdBUPGeneralExtraNode builds the ordered extension warning emitted for a
 // backup IFO file parsed through the DVD-Video path.
 func dvdBUPGeneralExtraNode() structuredNode {
@@ -163,6 +171,7 @@ func parseDVDVideo(path string, file *os.File, size int64, opts AnalyzeOptions) 
 
 	var durationSeconds float64
 	var ifoDurationSeconds float64
+	var ifoBitRateDurationSeconds float64
 	var chapterStarts []int64
 	var menuStreams []Stream
 	var programs []dvdProgram
@@ -195,6 +204,7 @@ func parseDVDVideo(path string, file *os.File, size int64, opts AnalyzeOptions) 
 				}
 			}
 		}
+		ifoBitRateDurationSeconds = dvdPGCTimelineDuration(data, pgcOffset)
 		if durationSeconds > 0 {
 			info.Container.DurationSeconds = durationSeconds
 			ifoDurationSeconds = durationSeconds
@@ -215,6 +225,8 @@ func parseDVDVideo(path string, file *os.File, size int64, opts AnalyzeOptions) 
 	streams := []Stream{}
 	titleSetParsed := false
 	payloadDurationSeconds := 0.0
+	payloadBitRateDurationSeconds := 0.0
+	payloadBitRateCorrected := false
 	payloadFileSize := int64(0)
 	if aggregateMode {
 		if vobPaths, vobSize := dvdTitleSetVOBs(path); len(vobPaths) > 0 && vobSize > 0 {
@@ -238,7 +250,10 @@ func parseDVDVideo(path string, file *os.File, size int64, opts AnalyzeOptions) 
 					payloadDurationSeconds = ifoDurationSeconds
 				}
 				payloadFileSize = vobSize
-				deriveDVDPSVideoBitRateAndSize(streams, payloadFileSize, payloadDurationSeconds)
+				payloadBitRateDurationSeconds, payloadBitRateCorrected = dvdTitleSetBitRateDuration(
+					payloadFileSize, ifoBitRateDurationSeconds, ifoDurationSeconds, payloadDurationSeconds,
+				)
+				deriveDVDPSVideoBitRateAndSize(streams, payloadFileSize, payloadBitRateDurationSeconds, payloadBitRateCorrected)
 				titleSetParsed = len(streams) > 0
 				if parsedInfo.DurationSeconds > 0 {
 					info.Container.DurationSeconds = parsedInfo.DurationSeconds
@@ -318,9 +333,12 @@ func parseDVDVideo(path string, file *os.File, size int64, opts AnalyzeOptions) 
 	if info.Container.DurationSeconds > 0 && info.FileSize > 0 {
 		bitRateDuration := info.Container.DurationSeconds
 		bitRateSize := info.FileSize
-		if titleSetParsed && payloadDurationSeconds > 0 {
-			bitRateDuration = payloadDurationSeconds
+		if titleSetParsed && payloadBitRateDurationSeconds > 0 {
+			bitRateDuration = payloadBitRateDurationSeconds
 			bitRateSize = payloadFileSize
+			if payloadBitRateCorrected {
+				bitRateSize = info.FileSize
+			}
 		}
 		overall := (float64(bitRateSize) * 8) / bitRateDuration
 		generalFields = append(generalFields, Field{Name: "Overall bit rate", Value: formatBitrateSmall(overall)})
@@ -595,6 +613,23 @@ func parseDVDVideo(path string, file *os.File, size int64, opts AnalyzeOptions) 
 	}
 	info.Streams = streams
 	return info, true
+}
+
+// dvdTitleSetBitRateDuration retains bounded VOB timing while it yields a
+// physically possible DVD mux rate. Otherwise it returns the complete IFO PGC
+// timeline, then progressively weaker program and payload fallbacks. The
+// boolean reports that impossible bounded timing was corrected.
+func dvdTitleSetBitRateDuration(fileSize int64, ifoTimelineDuration, ifoDuration, payloadDuration float64) (float64, bool) {
+	if fileSize > 0 && payloadDuration > 0 && float64(fileSize)*8/payloadDuration <= dvdMaxMuxBitRate {
+		return payloadDuration, false
+	}
+	if ifoTimelineDuration > 0 {
+		return ifoTimelineDuration, true
+	}
+	if ifoDuration > 0 {
+		return ifoDuration, true
+	}
+	return payloadDuration, false
 }
 
 // dvdStructuredFacts stages IFO facts without exposing JSON-shaped state to
@@ -1276,18 +1311,14 @@ func parseDVDProgramEntries(data []byte, pgcOffset int, entries [][2]uint16) (dv
 	return dvdProgram{duration: duration, chapters: chapters, firstSector: firstSector}, duration > 0
 }
 
-// dvdProgramStartDelays derives program delays in seconds by ordering valid
-// PGCs by first playback sector and accumulating their 90 kHz durations.
-func dvdProgramStartDelays(data []byte, pgcOffset int, programs []dvdProgram) []float64 {
-	delays := make([]float64, len(programs))
-	if pgcOffset <= 0 || pgcOffset+8 > len(data) || len(programs) == 0 {
-		return delays
+// dvdPGCTimeline returns valid PGCs in playback-sector order. A later PGC with
+// the same first sector replaces the earlier entry, matching DVD menu-delay
+// accounting while avoiding duplicate branch/angle timelines.
+func dvdPGCTimeline(data []byte, pgcOffset int) []dvdPGCTimelineEntry {
+	if pgcOffset <= 0 || pgcOffset+8 > len(data) {
+		return nil
 	}
-	type dvdTitleOffset struct {
-		pos      int
-		duration int64
-	}
-	titles := map[uint32]dvdTitleOffset{}
+	titles := map[uint32]dvdPGCTimelineEntry{}
 	pgcCount := int(binary.BigEndian.Uint16(data[pgcOffset : pgcOffset+2]))
 	for pgc := range pgcCount {
 		entry := pgcOffset + 8 + pgc*8
@@ -1315,16 +1346,36 @@ func dvdProgramStartDelays(data []byte, pgcOffset int, programs []dvdProgram) []
 		}
 		// MediaInfo stores these in a sector-keyed map, so a later PGC with
 		// the same first sector replaces the earlier title-offset record.
-		titles[firstSector] = dvdTitleOffset{pos: pgc, duration: duration}
+		titles[firstSector] = dvdPGCTimelineEntry{pos: pgc, duration: duration}
 	}
 	sectors := make([]uint32, 0, len(titles))
 	for sector := range titles {
 		sectors = append(sectors, sector)
 	}
 	slices.Sort(sectors)
-	var elapsed int64
+	timeline := make([]dvdPGCTimelineEntry, 0, len(sectors))
 	for _, sector := range sectors {
-		title := titles[sector]
+		timeline = append(timeline, titles[sector])
+	}
+	return timeline
+}
+
+// dvdPGCTimelineDuration returns the complete unique PGC timeline in seconds.
+// It is the duration counterpart to aggregate title-VOB size accounting.
+func dvdPGCTimelineDuration(data []byte, pgcOffset int) float64 {
+	var total int64
+	for _, title := range dvdPGCTimeline(data, pgcOffset) {
+		total += title.duration
+	}
+	return float64(total) / 90000
+}
+
+// dvdProgramStartDelays derives program delays in seconds from the complete
+// sector-ordered PGC timeline.
+func dvdProgramStartDelays(data []byte, pgcOffset int, programs []dvdProgram) []float64 {
+	delays := make([]float64, len(programs))
+	var elapsed int64
+	for _, title := range dvdPGCTimeline(data, pgcOffset) {
 		// MediaInfo writes through the original pre-prune menu position.
 		// Positions beyond the retained menu slice are ignored by Fill().
 		if title.pos >= 0 && title.pos < len(delays) {
@@ -1857,8 +1908,9 @@ func markDVDProjectionOrder(streams []Stream) {
 }
 
 // deriveDVDPSVideoBitRateAndSize derives the sole video stream's bitrate and
-// size from aggregate file size, duration, and known audio bitrates.
-func deriveDVDPSVideoBitRateAndSize(streams []Stream, fileSize int64, duration float64) {
+// size from aggregate file size, authoritative logical duration, and known
+// audio bitrates.
+func deriveDVDPSVideoBitRateAndSize(streams []Stream, fileSize int64, duration float64, correctedDuration bool) {
 	if fileSize <= 0 || duration <= 0 {
 		return
 	}
@@ -1903,14 +1955,17 @@ func deriveDVDPSVideoBitRateAndSize(streams []Stream, fileSize int64, duration f
 			videoDuration = frameCount / frameRate
 		}
 	}
+	if correctedDuration {
+		videoDuration = duration
+	}
 	if videoDuration <= 0 {
 		return
 	}
 	streamSize := int64(math.Round(bitRate / 8 * videoDuration))
 	mode, _ := canonicalSeedValue(streams[videoIndex], "BitRate_Mode")
 	headerRate := dvdCanonicalNumber(streams[videoIndex], "BitRate")
-	shortConstantClock := (mode == "CBR" || mode == "Constant") && headerRate > 0 && bitRate > headerRate*2
-	if shortConstantClock {
+	correctedConstantClock := correctedDuration && (mode == "CBR" || mode == "Constant") && headerRate > 0
+	if correctedConstantClock {
 		if headerRateValue, ok := canonicalSeedValue(streams[videoIndex], "BitRate"); ok {
 			replaceCanonicalSeedFill(&streams[videoIndex], "BitRate_Maximum", headerRateValue, "Maximum bit rate", formatBitrate(headerRate))
 		}
@@ -1929,7 +1984,7 @@ func deriveDVDPSVideoBitRateAndSize(streams []Stream, fileSize int64, duration f
 			})
 		}
 	}
-	if mode != "CBR" && mode != "Constant" || shortConstantClock {
+	if mode != "CBR" && mode != "Constant" {
 		replaceCanonicalSeedFill(&streams[videoIndex], "BitRate", strconv.FormatInt(int64(math.Round(bitRate)), 10), "Bit rate", formatBitrate(bitRate))
 	}
 	replaceCanonicalSeedFill(&streams[videoIndex], "StreamSize", strconv.FormatInt(streamSize, 10), "Stream size", formatStreamSize(streamSize, fileSize))
