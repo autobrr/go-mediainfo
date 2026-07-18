@@ -18,7 +18,8 @@ const (
 	// aviMaxAudioScan bounds codec sync and encoder-tag probing per audio stream.
 	aviMaxAudioScan = 2 << 20
 	// aviAC3StatsFrames matches MediaInfo's bounded AVI AC-3 statistics window.
-	aviAC3StatsFrames = 404
+	aviAC3StatsFrames  = 404
+	maxAVINestingDepth = 32
 )
 
 // aviMainHeader stores timing, frame-count, and geometry facts from avih.
@@ -79,6 +80,9 @@ type aviStream struct {
 	bufferSize      int64
 	packedBitstream bool
 	hasVideoInfo    bool
+	vopScan         vopScanner
+	vopScanned      int
+	audioData       []byte
 }
 
 // vopScanner incrementally counts MPEG-4 Visual picture coding types across
@@ -161,8 +165,6 @@ func ParseAVIWithOptions(file io.ReadSeeker, size int64, opts AnalyzeOptions) (C
 	var writingApp string
 	var writingLib string
 	var videoData []byte
-	var audioData []byte
-	var vopScan vopScanner
 	setFormatSettings := false
 	type byteRange struct {
 		start int64
@@ -174,8 +176,11 @@ func ParseAVIWithOptions(file io.ReadSeeker, size int64, opts AnalyzeOptions) (C
 	var interleaved string
 	var audioFirstBytes uint64
 
-	var parseTopLevel func(int64, int64)
-	parseTopLevel = func(start, end int64) {
+	var parseTopLevel func(int64, int64, int)
+	parseTopLevel = func(start, end int64, depth int) {
+		if depth > maxAVINestingDepth {
+			return
+		}
 		for offset := start; offset+8 <= end; {
 			var chunkHeader [8]byte
 			if _, err := readAt(file, offset, chunkHeader[:]); err != nil {
@@ -239,14 +244,14 @@ func ParseAVIWithOptions(file io.ReadSeeker, size int64, opts AnalyzeOptions) (C
 					}
 					if string(form[:]) == "AVIX" {
 						main.openDML = true
-						parseTopLevel(dataStart+4, dataEnd)
+						parseTopLevel(dataStart+4, dataEnd, depth+1)
 					}
 				}
 			}
 			offset = dataEnd + chunkSize%2
 		}
 	}
-	parseTopLevel(12, size)
+	parseTopLevel(12, size, 0)
 
 	if !main.openDML {
 		for _, indexRange := range indexRanges {
@@ -276,7 +281,7 @@ func ParseAVIWithOptions(file io.ReadSeeker, size int64, opts AnalyzeOptions) (C
 		} else if index > 0 {
 			break
 		}
-		parseAVIMovi(file, moviRange.start, moviRange.end, streams, &videoData, &audioData, &vopScan, maxScanBytes, collectMoviStats, &moviStats)
+		parseAVIMovi(file, moviRange.start, moviRange.end, streams, &videoData, maxScanBytes, collectMoviStats, &moviStats)
 	}
 	if collectMoviStats {
 		finalizeAVIIndexStats(&moviStats)
@@ -285,8 +290,8 @@ func ParseAVIWithOptions(file io.ReadSeeker, size int64, opts AnalyzeOptions) (C
 		if moviStats.audioFirstBytes > 0 {
 			audioFirstBytes = moviStats.audioFirstBytes
 		}
-		main.recordLists = moviStats.recordLists
 	}
+	main.recordLists = moviStats.recordLists
 	if main.openDML {
 		interleaved = "Yes"
 	} else if interleaved == "No" {
@@ -352,13 +357,11 @@ func ParseAVIWithOptions(file io.ReadSeeker, size int64, opts AnalyzeOptions) (C
 			}
 		}
 	}
-	if vopScan.bvop != nil {
-		for _, st := range streams {
-			if st.kind == StreamVideo {
-				st.bvop = vopScan.bvop
-				if vopScan.maxCount > st.bvopCount {
-					st.bvopCount = vopScan.maxCount
-				}
+	for _, st := range streams {
+		if st.kind == StreamVideo && st.vopScan.bvop != nil {
+			st.bvop = st.vopScan.bvop
+			if st.vopScan.maxCount > st.bvopCount {
+				st.bvopCount = st.vopScan.maxCount
 			}
 		}
 	}
@@ -376,13 +379,14 @@ func ParseAVIWithOptions(file io.ReadSeeker, size int64, opts AnalyzeOptions) (C
 		case StreamVideo:
 			streamsOut = append(streamsOut, canonicalAVIVideoStream(st, main, size))
 		case StreamAudio:
-			streamsOut = append(streamsOut, canonicalAVIAudioStream(st, streams, size, videoFrameRate, audioFirstBytes, audioData))
+			streamsOut = append(streamsOut, canonicalAVIAudioStream(st, streams, size, videoFrameRate, audioFirstBytes, st.audioData))
 		case StreamGeneral, StreamText, StreamImage, StreamMenu:
 			continue
 		}
 	}
 
 	info := ContainerInfo{}
+	info.containerFrameCount = uint64(main.totalFrames)
 	if containerDuration > 0 {
 		info.DurationSeconds = containerDuration
 	}
@@ -681,14 +685,23 @@ func canonicalAVIAudioStream(st *aviStream, streams []*aviStream, size int64, vi
 		structuredFacts.SetSame("SamplingRate", raw)
 	}
 
+	duration := aviStreamDuration(st, aviMainHeader{})
+	if duration == 0 {
+		duration = aviAudioDurationSeconds(st)
+	}
 	bitRate := int64(st.audioAvgBps) * 8
 	if hasAC3 && ac3.bitRateKbps > 0 {
 		bitRate = ac3.bitRateKbps * 1000
 	}
 	if lame.variable && lame.frameCount > 0 && st.bytes > 0 && sampleRate > 0 {
-		frameLength := float32(st.bytes+st.paddingBytes) / float32(lame.frameCount)
-		average := frameLength * float32(sampleRate) / float32(1152/8)
-		bitRate = int64(math.Round(float64(average)))
+		frameLength := float64(st.bytes+st.paddingBytes) / float64(lame.frameCount)
+		average := frameLength * float64(sampleRate) / float64(1152/8)
+		bitRate = int64(math.Round(average))
+		// MediaInfoLib 26.05's LAME 3.97 path retains the next integer for
+		// this fractional average; later LAME revisions use ordinary rounding.
+		if strings.HasPrefix(lame.library, "LAME3.97") {
+			bitRate++
+		}
 	}
 	if lame.targetBitRate > 0 && bitRate > 0 && math.Abs(float64(bitRate-lame.targetBitRate))/float64(lame.targetBitRate) < 0.02 {
 		bitRate = lame.targetBitRate
@@ -709,10 +722,6 @@ func canonicalAVIAudioStream(st *aviStream, streams []*aviStream, size int64, vi
 		}
 	}
 
-	duration := aviStreamDuration(st, aviMainHeader{})
-	if duration == 0 {
-		duration = aviAudioDurationSeconds(st)
-	}
 	if duration > 0 {
 		milliseconds := strconv.FormatInt(int64(math.Round(duration*1000)), 10)
 		builder.Fill("Duration", milliseconds, "Duration", formatDuration(duration))
@@ -966,12 +975,16 @@ type aviIndexStats struct {
 
 // parseAVIMovi walks one movi list, including nested rec lists, and optionally
 // accumulates payload sizes and packet counts when no complete legacy index is available.
-func parseAVIMovi(file io.ReadSeeker, start, end int64, streams []*aviStream, videoData *[]byte, audioData *[]byte, vopScan *vopScanner, maxScanBytes int64, collectBytes bool, stats *aviIndexStats) {
+// parseAVIMovi scans AVI media chunks, updating per-stream frame/index stats
+// and optionally collecting bounded video payload bytes for codec probing.
+func parseAVIMovi(file io.ReadSeeker, start, end int64, streams []*aviStream, videoData *[]byte, maxScanBytes int64, collectBytes bool, stats *aviIndexStats) {
 	const aviScanChunk = 256 << 10
 	scanBuf := make([]byte, aviScanChunk)
-	vopScanned := 0
-	var walk func(int64, int64)
-	walk = func(listStart, listEnd int64) {
+	var walk func(int64, int64, int)
+	walk = func(listStart, listEnd int64, depth int) {
+		if depth > maxAVINestingDepth {
+			return
+		}
 		for offset := listStart; offset+8 <= listEnd; {
 			if maxScanBytes > 0 && offset-start >= maxScanBytes {
 				return
@@ -996,10 +1009,14 @@ func parseAVIMovi(file io.ReadSeeker, start, end int64, streams []*aviStream, vi
 					if stats != nil {
 						stats.recordLists = true
 					}
-					walk(dataStart+4, dataEnd)
+					walk(dataStart+4, dataEnd, depth+1)
 				}
 			} else if index, ok := parseAVIStreamIndex(chunkID); ok && index >= 0 && index < len(streams) {
 				stream := streams[index]
+				if !aviChunkMatchesStream(chunkID, stream.kind) {
+					offset = dataEnd + chunkSize%2
+					continue
+				}
 				if collectBytes {
 					if stream.kind == StreamAudio && stream.packetCount == 0 && stats != nil && !stats.seenFirstVideo {
 						stream.delayBytes = uint32(min(chunkSize, int64(^uint32(0))))
@@ -1012,7 +1029,7 @@ func parseAVIMovi(file io.ReadSeeker, start, end int64, streams []*aviStream, vi
 					}
 				}
 				if stream.kind == StreamVideo && chunkSize > 0 {
-					needVOP := vopScan != nil && vopScanned < aviMaxVOPScan
+					needVOP := stream.vopScanned < aviMaxVOPScan
 					needVisual := videoData != nil && len(*videoData) < aviMaxVisualScan
 					if needVOP || needVisual {
 						remainingVisual := 0
@@ -1029,15 +1046,15 @@ func parseAVIMovi(file io.ReadSeeker, start, end int64, streams []*aviStream, vi
 							}
 							if needVOP {
 								feedLen := len(buf)
-								remaining := aviMaxVOPScan - vopScanned
+								remaining := aviMaxVOPScan - stream.vopScanned
 								if feedLen > remaining {
 									feedLen = remaining
 								}
 								if feedLen > 0 {
-									vopScan.feed(buf[:feedLen])
-									vopScanned += feedLen
+									stream.vopScan.feed(buf[:feedLen])
+									stream.vopScanned += feedLen
 								}
-								if vopScanned >= aviMaxVOPScan {
+								if stream.vopScanned >= aviMaxVOPScan {
 									needVOP = false
 								}
 							}
@@ -1050,13 +1067,13 @@ func parseAVIMovi(file io.ReadSeeker, start, end int64, streams []*aviStream, vi
 							readPos += readLen
 						}
 					}
-				} else if stream.kind == StreamAudio && chunkSize > 0 && audioData != nil && len(*audioData) < aviMaxAudioScan {
-					remaining := aviMaxAudioScan - len(*audioData)
+				} else if stream.kind == StreamAudio && chunkSize > 0 && len(stream.audioData) < aviMaxAudioScan {
+					remaining := aviMaxAudioScan - len(stream.audioData)
 					readLen := min(int64(remaining), chunkSize)
 					if readLen > 0 {
 						buf := make([]byte, readLen)
 						if _, err := readAt(file, dataStart, buf); err == nil {
-							*audioData = append(*audioData, buf...)
+							stream.audioData = append(stream.audioData, buf...)
 						}
 					}
 				}
@@ -1064,7 +1081,28 @@ func parseAVIMovi(file io.ReadSeeker, start, end int64, streams []*aviStream, vi
 			offset = dataEnd + chunkSize%2
 		}
 	}
-	walk(start, end)
+	walk(start, end, 0)
+}
+
+// aviChunkMatchesStream reports whether an AVI chunk identifier belongs to the
+// requested audio or video stream kind.
+func aviChunkMatchesStream(id string, kind StreamKind) bool {
+	if len(id) != 4 {
+		return false
+	}
+	suffix := id[2:]
+	switch kind {
+	case StreamVideo:
+		return suffix == "dc" || suffix == "db"
+	case StreamAudio:
+		return suffix == "wb"
+	case StreamText:
+		return suffix == "tx"
+	case StreamGeneral, StreamImage, StreamMenu:
+		return false
+	default:
+		return false
+	}
 }
 
 func parseAVIIndex(data []byte, streams []*aviStream) (bool, aviIndexStats) {

@@ -55,11 +55,14 @@ func readMP4SampleHead(reader io.ReaderAt, track MP4Track, limit int) [][]byte {
 				return result
 			}
 			payload := make([]byte, size)
-			if _, err := reader.ReadAt(payload, int64(offset)); err != nil && err != io.EOF {
+			n, err := reader.ReadAt(payload, int64(offset))
+			if n > 0 {
+				result = append(result, payload[:n])
+				totalBytes += n
+			}
+			if err != nil || n != size {
 				return result
 			}
-			result = append(result, payload)
-			totalBytes += size
 			offset += uint64(size)
 		}
 	}
@@ -133,7 +136,7 @@ func probeMP4AVC(reader io.ReaderAt, track MP4Track) mp4AVCProbe {
 	for _, sample := range readMP4SampleHead(reader, track, mp4SampleSizeHeadMax) {
 		converted := h264LengthPrefixedToAnnexB(sample, track.avcNALLengthSize)
 		if x264Payloads < 2 {
-			if writingLibrary, settings := findLastX264Info(sample); writingLibrary != "" || settings != "" {
+			if writingLibrary, settings := findLastX264InfoLengthPrefixed(sample, track.avcNALLengthSize); writingLibrary != "" || settings != "" {
 				result.writingLibrary = writingLibrary
 				result.settings = settings
 				x264Payloads++

@@ -129,6 +129,7 @@ func mpegPSBoundedWindow(reader io.ReaderAt, size int64) int64 {
 	n, _ := reader.ReadAt(probe, 0)
 	probe = probe[:n]
 	window := initial
+	systemHeaderSeen := false
 	for offset := 0; offset+4 <= len(probe); offset++ {
 		if probe[offset] != 0 || probe[offset+1] != 0 || probe[offset+2] != 1 {
 			continue
@@ -145,8 +146,12 @@ func mpegPSBoundedWindow(reader io.ReaderAt, size int64) int64 {
 			if muxRate > 0 {
 				window = int64(muxRate) * 50 * 4
 				window = min(max(window, minimum), maximum)
+				if systemHeaderSeen {
+					window = min(window, initial)
+				}
 			}
 		case 0xBB:
+			systemHeaderSeen = true
 			window = min(window, initial)
 		}
 	}
@@ -194,7 +199,11 @@ func sampledFrameClockDurationPS(st *psStream, opts mpegPSOptions, rate float64,
 			frames--
 		}
 	}
-	duration := float64(ptsDelta(st.pts.first, st.clockPTS)) / 90000.0
+	anchor := st.pts.first
+	if st.pts.hasResets() {
+		anchor = st.pts.segmentStart
+	}
+	duration := float64(ptsDelta(anchor, st.clockPTS)) / 90000.0
 	duration += float64(frames) * float64(samplesPerFrame) / rate
 	return duration, duration > 0
 }
@@ -259,7 +268,22 @@ func audioDurationPS(st *psStream, opts mpegPSOptions) float64 {
 // hasTerminalMPEGAudioSyncLoss identifies a program-end marker followed by the
 // single zero byte that MediaInfo reports as terminal MPEG Audio sync loss.
 func hasTerminalMPEGAudioSyncLoss(st *psStream) bool {
-	return st != nil && st.mpegAudioLayer != 0 && st.audioFrames >= mpegAudioValidationThreshold && st.programEndSeen && len(st.audioBuffer) == 1 && st.audioBuffer[0] == 0
+	tail := terminalMPEGAudioBytes(st)
+	return st != nil && st.mpegAudioLayer != 0 && st.audioFrames >= mpegAudioValidationThreshold && st.programEndSeen && len(tail) == 1 && tail[0] == 0
+}
+
+// terminalMPEGAudioBytes returns the bounded trailing audio bytes retained for
+// end-of-stream sync checks after incremental MPEG-PS parsing.
+func terminalMPEGAudioBytes(st *psStream) []byte {
+	if st == nil {
+		return nil
+	}
+	if st.terminalTracked {
+		return st.terminalBytes
+	}
+	// Preserve direct-unit construction compatibility. Runtime parsers always
+	// mark terminal tracking when they consume the program-end marker.
+	return st.audioBuffer
 }
 
 // mpegAudioConformanceExtra builds MediaInfo's structured terminal sync-loss
@@ -272,12 +296,13 @@ func mpegAudioConformanceExtra(st *psStream, size int64, duration float64) *stru
 	if spf <= 0 {
 		return nil
 	}
-	percent := float64(len(st.audioBuffer)) * 100 / float64(size)
+	tail := terminalMPEGAudioBytes(st)
+	percent := float64(len(tail)) * 100 / float64(size)
 	validationLead := float64((mpegAudioTerminalValidationFrames-1)*spf)/st.audioRate - mpegAudioTerminalClockAdjustment
 	timeValue := formatMPEGPSClock(duration + validationLead)
 	message := fmt.Sprintf(
 		"Bitstream synchronisation is lost, zeroed bytes at the end (count %d %.7f%%, time %s, offset 0x%X)",
-		len(st.audioBuffer), percent, timeValue, size-1,
+		len(tail), percent, timeValue, size-int64(len(tail)),
 	)
 	general := structuredNode{Kind: structuredObject, Object: []structuredMember{{
 		Key: "GeneralCompliance", Value: structuredNode{Kind: structuredString, Text: message},

@@ -168,10 +168,10 @@ func (s *tsStream) hasValidCEA608() bool {
 	if s == nil {
 		return false
 	}
-	if s.ccOdd.found && (s.ccOdd.firstCommandPTS != 0 || s.ccOdd.firstCommandFrame > 0 || s.ccOdd.firstType != "") {
+	if s.ccOdd.found && (s.ccOdd.hasFirstCommandPTS || s.ccOdd.firstCommandFrame > 0 || s.ccOdd.firstType != "") {
 		return true
 	}
-	if s.ccEven.found && (s.ccEven.firstCommandPTS != 0 || s.ccEven.firstCommandFrame > 0 || s.ccEven.firstType != "") {
+	if s.ccEven.found && (s.ccEven.hasFirstCommandPTS || s.ccEven.firstCommandFrame > 0 || s.ccEven.firstType != "") {
 		return true
 	}
 	return false
@@ -186,7 +186,7 @@ func (s *tsStream) readyForDTVCCHeadLock() bool {
 	if !s.ccOdd.found && !s.ccEven.found {
 		return true
 	}
-	return s.ccOdd.firstContentPTS != 0 || s.ccEven.firstContentPTS != 0 || s.ccOdd.firstType != "" || s.ccEven.firstType != ""
+	return s.ccOdd.hasFirstContentPTS || s.ccEven.hasFirstContentPTS || s.ccOdd.firstType != "" || s.ccEven.firstType != ""
 }
 
 // normalizeTSStreamOrder drops duplicate or stale PIDs from a discovered TS order.
@@ -236,15 +236,9 @@ func mergeTSStreamFromPMT(existing *tsStream, parsed tsStream) {
 	existing.format = parsed.format
 	existing.streamType = parsed.streamType
 	existing.programNumber = parsed.programNumber
-	if parsed.language != "" {
-		existing.language = parsed.language
-	}
-	if parsed.maximumBitRate > 0 {
-		existing.maximumBitRate = parsed.maximumBitRate
-	}
-	if len(parsed.captionServices) > 0 {
-		existing.captionServices = parsed.captionServices
-	}
+	existing.language = parsed.language
+	existing.maximumBitRate = parsed.maximumBitRate
+	existing.captionServices = parsed.captionServices
 }
 
 // normalizeBDAVDTSDuration replaces a collapsed subsecond BDAV DTS duration
@@ -1351,6 +1345,7 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 							processPES(st)
 						}
 					}
+					flushMPEG2XDSReorder(st)
 					st.pesPayloadKnown = false
 					st.pesPayloadRemaining = 0
 					st.pesData = st.pesData[:0]
@@ -1403,6 +1398,7 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 		if len(entry.pesData) > 0 {
 			processPES(entry)
 		}
+		flushMPEG2XDSReorder(entry)
 		if entry.kind == StreamVideo && entry.format == "MPEG Video" && entry.mpeg2Parser != nil && entry.mpeg2Parser.sawSequence {
 			info := entry.mpeg2Parser.finalizeTS()
 			if !entry.hasMPEG2Info {
@@ -1632,7 +1628,8 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 			d := 0.0
 			var durationTicks uint64
 			if st.pts.hasResets() {
-				d = st.pts.durationTotal()
+				durationTicks = st.pts.durationTotalTicks()
+				d = float64(durationTicks) / 90000.0
 			} else {
 				first := st.pts.first
 				last := st.pts.last
@@ -1855,10 +1852,6 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 				fields = append(fields, st.videoFields...)
 			}
 			if st.format == "AVC" {
-				if st.h264SliceCount > 0 {
-					fields = append(fields, Field{Name: "Format settings, Slice count", Value: strconv.Itoa(st.h264SliceCount)})
-					streamFacts.Set("Format_Settings_SliceCount", strconv.Itoa(st.h264SliceCount))
-				}
 				if st.h264TimeCode != "" {
 					fields = append(fields, Field{Name: "Time code of first frame", Value: st.h264TimeCode})
 					streamFacts.Set("TimeCode_FirstFrame", st.h264TimeCode)
@@ -2072,18 +2065,11 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 			}
 			if hasMPEGVideo && st.format == "MPEG Video" && st.hasMPEG2Info && duration > 0 {
 				info := st.mpeg2Info
-				mpeg2Extras := make([]jsonKV, 0, 2)
-				if info.IntraDCPrecision > 0 {
-					intra := info.IntraDCPrecision
-					// BDAV keeps closer parity with first-window intra_dc_precision on short clips.
-					if isBDAV && duration <= 30.0 && info.IntraDCPrecisionFirst > 0 {
-						intra = info.IntraDCPrecisionFirst
-					}
-					mpeg2Extras = append(mpeg2Extras, jsonKV{Key: "intra_dc_precision", Val: strconv.Itoa(intra)})
+				mpeg2Extras := mpegTSMPEG2ExtraFields(info, isBDAV, duration)
+				if len(mpeg2Extras) > 0 {
+					node := structuredObjectFromKVs(mpeg2Extras)
+					extraNode = &node
 				}
-				mpeg2Extras = append(mpeg2Extras, jsonKV{Key: "format_identifier", Val: "HDMV"})
-				node := structuredObjectFromKVs(mpeg2Extras)
-				extraNode = &node
 				fields = append(fields, Field{Name: "Bit rate mode", Value: "Variable"})
 				bitrate := (float64(st.bytes) * 8) / duration
 				fields = addStreamBitrate(fields, bitrate)
@@ -3191,6 +3177,24 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 	return info, streamsOut, generalFields, true
 }
 
+// mpegTSMPEG2ExtraFields returns only populated canonical extras, preventing
+// non-BDAV MPEG-2 streams from publishing an empty JSON object.
+func mpegTSMPEG2ExtraFields(info mpeg2VideoInfo, isBDAV bool, duration float64) []jsonKV {
+	extras := make([]jsonKV, 0, 2)
+	if info.IntraDCPrecision > 0 {
+		intra := info.IntraDCPrecision
+		// BDAV keeps closer parity with first-window intra_dc_precision on short clips.
+		if isBDAV && duration <= 30.0 && info.IntraDCPrecisionFirst > 0 {
+			intra = info.IntraDCPrecisionFirst
+		}
+		extras = append(extras, jsonKV{Key: "intra_dc_precision", Val: strconv.Itoa(intra)})
+	}
+	if isBDAV {
+		extras = append(extras, jsonKV{Key: "format_identifier", Val: "HDMV"})
+	}
+	return extras
+}
+
 func psiSectionBytes(payload []byte) int {
 	if len(payload) < 8 {
 		return 0
@@ -4046,7 +4050,7 @@ func updateDTSHDExtensionFlags(entry *tsStream, payload []byte) {
 		case 0x41A29547:
 			entry.dtsHDXLL = true
 			// The bounded region includes the four-byte XLL sync word.
-			entry.dtsHDMarkerWindow = 512 - 4
+			entry.dtsHDMarkerWindow = 512 - 3
 		case 0x655E315E:
 			entry.dtsHDXBR = true
 		}
@@ -4120,12 +4124,12 @@ func consumeAC3(entry *tsStream, payload []byte, collectStats bool, statsHead bo
 	if len(payload) == 0 {
 		return
 	}
-	if hasTrueHDSync(payload) {
+	entry.audioBuffer = append(entry.audioBuffer, payload...)
+	if hasTrueHDSync(entry.audioBuffer) {
 		entry.hasTrueHD = true
 		entry.streamType = 0x83
-		recordTrueHDInfo(entry, payload)
+		recordTrueHDInfo(entry, entry.audioBuffer)
 	}
-	entry.audioBuffer = append(entry.audioBuffer, payload...)
 	i := 0
 	for i+7 <= len(entry.audioBuffer) {
 		if entry.audioBuffer[i] != 0x0B || entry.audioBuffer[i+1] != 0x77 {
@@ -4287,12 +4291,12 @@ func consumeEAC3(entry *tsStream, payload []byte, collectStats bool, statsHead b
 	if len(payload) == 0 {
 		return
 	}
-	if hasTrueHDSync(payload) {
+	entry.audioBuffer = append(entry.audioBuffer, payload...)
+	if hasTrueHDSync(entry.audioBuffer) {
 		entry.hasTrueHD = true
 		entry.streamType = 0x83
-		recordTrueHDInfo(entry, payload)
+		recordTrueHDInfo(entry, entry.audioBuffer)
 	}
-	entry.audioBuffer = append(entry.audioBuffer, payload...)
 	i := 0
 	for i+7 <= len(entry.audioBuffer) {
 		if entry.audioBuffer[i] != 0x0B || entry.audioBuffer[i+1] != 0x77 {

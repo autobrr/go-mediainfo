@@ -9,16 +9,17 @@ import (
 )
 
 type psStreamParser struct {
-	streams      map[uint16]*psStream
-	streamOrder  []uint16
-	videoParsers map[uint16]*mpeg2VideoParser
-	videoPTS     ptsTracker
-	anyPTS       ptsTracker
-	packetOrder  int
-	quickAC3     bool
-	quickAC3Max  uint64
-	sampled      bool
-	section      int
+	streams         map[uint16]*psStream
+	streamOrder     []uint16
+	videoParsers    map[uint16]*mpeg2VideoParser
+	videoPTS        ptsTracker
+	anyPTS          ptsTracker
+	packetOrder     int
+	quickAC3        bool
+	quickAC3Max     uint64
+	sampled         bool
+	section         int
+	afterProgramEnd bool
 }
 
 type psPending struct {
@@ -30,6 +31,8 @@ type psPending struct {
 	payloadPos int
 	skip       int
 }
+
+const mpegPSTerminalTailMax = 16
 
 func newPSStreamParser(opts mpegPSOptions) *psStreamParser {
 	parseSpeed := opts.parseSpeed
@@ -56,6 +59,9 @@ func (p *psStreamParser) beginSection() {
 		entry.videoCCCarry = nil
 		entry.videoBuffer = nil
 		entry.clockHasPTS = false
+		entry.programEndSeen = false
+		entry.terminalTracked = false
+		entry.terminalBytes = nil
 		entry.sampleSection = p.section
 		if parser := p.videoParsers[key]; parser != nil {
 			parser.startSegment()
@@ -117,6 +123,7 @@ func (p *psStreamParser) parseReader(r io.Reader) bool {
 		}
 	}
 
+parseLoop:
 	for {
 		if pending != nil {
 			if pending.payloadPos >= len(buf) {
@@ -172,16 +179,34 @@ func (p *psStreamParser) parseReader(r io.Reader) bool {
 		idx := findPESStart(buf, pos)
 		if idx < 0 {
 			if eof {
+				p.appendTerminalBytes(buf[pos:])
 				return found
 			}
 			if len(buf) > 2 {
-				buf = append(buf[:0], buf[len(buf)-2:]...)
-				pos = 0
+				safeEnd := len(buf) - 2
+				if pos < safeEnd {
+					p.appendTerminalBytes(buf[pos:safeEnd])
+					buf = append(buf[:0], buf[safeEnd:]...)
+					pos = 0
+				} else if pos > 0 {
+					buf = append(buf[:0], buf[pos:]...)
+					pos = 0
+				}
 			}
 			if !readMore() {
+				p.appendTerminalBytes(buf[pos:])
 				return found
 			}
 			continue
+		}
+		if p.afterProgramEnd {
+			p.appendTerminalBytes(buf[pos:idx])
+			p.afterProgramEnd = false
+			for _, entry := range p.streams {
+				entry.programEndSeen = false
+				entry.terminalTracked = false
+				entry.terminalBytes = nil
+			}
 		}
 		pos = idx
 		if pos+4 > len(buf) {
@@ -279,7 +304,17 @@ func (p *psStreamParser) parseReader(r io.Reader) bool {
 		case 0xB9:
 			for _, entry := range p.streams {
 				entry.programEndSeen = true
+				entry.terminalTracked = true
+				// MediaInfoLib treats a lone zero left by the final MPEG-audio
+				// payload as terminal sync loss at program_end_code. Snapshot it
+				// into lifecycle-owned state; later program data clears it.
+				if len(entry.audioBuffer) == 1 && entry.audioBuffer[0] == 0 {
+					entry.terminalBytes = []byte{0}
+				} else {
+					entry.terminalBytes = nil
+				}
 			}
+			p.afterProgramEnd = true
 			pos += 4
 			found = true
 			compact()
@@ -316,7 +351,16 @@ func (p *psStreamParser) parseReader(r io.Reader) bool {
 			// MPEG-1 PES optional headers use stuffing and marker bits instead of
 			// the MPEG-2 flags/header-length pair.
 			header := pos + 6
+			packetEnd := len(buf)
+			if pesLen > 0 {
+				packetEnd = pos + 6 + pesLen
+			}
+			stuffingBytes := 0
 			for {
+				if header >= packetEnd || stuffingBytes > 16 {
+					pos++
+					continue parseLoop
+				}
 				if header >= len(buf) {
 					if !readMore() {
 						return found
@@ -327,6 +371,7 @@ func (p *psStreamParser) parseReader(r io.Reader) bool {
 					break
 				}
 				header++
+				stuffingBytes++
 			}
 			if header >= len(buf) {
 				continue
@@ -509,6 +554,7 @@ func (p *psStreamParser) consumePayload(entry *psStream, key uint16, flags byte,
 			p.videoParsers[key] = parser
 		}
 		parser.consume(payload)
+		entry.videoFrameCount = parser.pictureCount
 		if parser.sawSequence {
 			entry.videoIsMPEG2 = true
 			entry.videoIsH264 = false
@@ -631,10 +677,26 @@ func parseMPEGPSFileSample(parser *psStreamParser, file *os.File, opts mpegPSOpt
 			tailSample = min(tailSample, int64(8<<20))
 		}
 		start := size - tailSample
+		parser.beginSection()
 		last := io.NewSectionReader(file, start, tailSample)
 		if reader(last) {
 			parsedAny = true
 		}
 	}
 	return parsedAny
+}
+
+// appendTerminalBytes retains only the bounded tail needed to detect a final
+// MPEG audio sync frame across parser input boundaries.
+func (p *psStreamParser) appendTerminalBytes(data []byte) {
+	if !p.afterProgramEnd || len(data) == 0 {
+		return
+	}
+	for _, entry := range p.streams {
+		remaining := mpegPSTerminalTailMax - len(entry.terminalBytes)
+		if remaining <= 0 {
+			continue
+		}
+		entry.terminalBytes = append(entry.terminalBytes, data[:min(len(data), remaining)]...)
+	}
 }

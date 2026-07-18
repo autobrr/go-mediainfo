@@ -893,6 +893,33 @@ func TestParseMatroskaTagStatsWithoutDate(t *testing.T) {
 	}
 }
 
+func TestParseMatroskaTagStatsBareDurationRequiresLavfAuthority(t *testing.T) {
+	bare, ok := parseMatroskaTagStats(map[string]string{
+		"DURATION": "00:42:01.080000000",
+	}, "")
+	if !ok || !bare.hasDuration || !bare.trusted || !bare.bareDuration {
+		t.Fatalf("bare DURATION not parsed: ok=%v stats=%+v", ok, bare)
+	}
+	if matroskaTagStatsAreAuthoritative(&MatroskaInfo{}, bare) {
+		t.Fatal("bare DURATION authoritative without Lavf provenance")
+	}
+	lavf := MatroskaInfo{General: []Field{{Name: "Writing library", Value: "Lavf62.3.100"}}}
+	if !matroskaTagStatsAreAuthoritative(&lavf, bare) {
+		t.Fatal("bare DURATION not authoritative for Lavf")
+	}
+
+	listed, ok := parseMatroskaTagStats(map[string]string{
+		"_STATISTICS_TAGS": "DURATION",
+		"DURATION":         "00:42:01.080000000",
+	}, "")
+	if !ok || !listed.trusted || listed.bareDuration || !listed.hasDuration || listed.durationSeconds <= 0 {
+		t.Fatalf("listed DURATION did not produce trusted statistics: ok=%v stats=%+v", ok, listed)
+	}
+	if !matroskaTagStatsAreAuthoritative(&MatroskaInfo{}, listed) {
+		t.Fatal("listed statistics were not authoritative")
+	}
+}
+
 func TestParseMatroskaTrackEntryHeaderStripping(t *testing.T) {
 	compression := buildMatroskaElement(mkvIDContentCompression,
 		append(

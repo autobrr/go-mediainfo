@@ -73,7 +73,7 @@ func TestRecordH264SliceCountPreservesDominantValue(t *testing.T) {
 	}
 }
 
-func TestMergeTSStreamFromPMTPreservesLanguageOnEmptyUpdate(t *testing.T) {
+func TestMergeTSStreamFromPMTClearsRemovedLanguage(t *testing.T) {
 	existing := &tsStream{
 		pid:      4611,
 		kind:     StreamText,
@@ -88,8 +88,8 @@ func TestMergeTSStreamFromPMTPreservesLanguageOnEmptyUpdate(t *testing.T) {
 		programNumber: 1,
 		language:      "",
 	})
-	if existing.language != "zho" {
-		t.Fatalf("mergeTSStreamFromPMT() language=%q, want %q", existing.language, "zho")
+	if existing.language != "" {
+		t.Fatalf("mergeTSStreamFromPMT() language=%q, want empty", existing.language)
 	}
 }
 

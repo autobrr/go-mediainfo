@@ -1,6 +1,9 @@
 package mediainfo
 
-import "testing"
+import (
+	"bytes"
+	"testing"
+)
 
 func TestNewPSStreamParserQuickAC3(t *testing.T) {
 	if !newPSStreamParser(mpegPSOptions{parseSpeed: 0.5}).quickAC3 {
@@ -11,6 +14,66 @@ func TestNewPSStreamParserQuickAC3(t *testing.T) {
 	}
 	if newPSStreamParser(mpegPSOptions{parseSpeed: 0.5, dvdExtras: true}).quickAC3 {
 		t.Fatalf("did not expect quickAC3 with dvd extras")
+	}
+}
+
+func TestPSStreamParserBeginSectionDropsDiscontinuousState(t *testing.T) {
+	parser := newPSStreamParser(mpegPSOptions{})
+	stream := parser.ensureStream(0xE0, psSubstreamNone, StreamVideo, "MPEG Video")
+	stream.audioBuffer = []byte{1}
+	stream.videoHeaderCarry = []byte{2}
+	stream.videoFrameCarry = []byte{3}
+	stream.videoCCCarry = []byte{4}
+	stream.videoBuffer = []byte{5}
+	stream.clockHasPTS = true
+	stream.programEndSeen = true
+	stream.terminalTracked = true
+	stream.terminalBytes = []byte{6}
+	videoParser := &mpeg2VideoParser{
+		carry:             []byte{7},
+		rescanFromZero:    true,
+		expectPictureExt:  true,
+		currentGOPCount:   8,
+		finalGOPRecorded:  true,
+		sawGOP:            true,
+		framesSinceI:      9,
+		framesSinceAnchor: 10,
+		lastISeen:         true,
+		lastAnchorSeen:    true,
+	}
+	parser.videoParsers[psStreamKey(0xE0, psSubstreamNone)] = videoParser
+
+	parser.beginSection()
+	if parser.section != 1 || stream.sampleSection != 1 {
+		t.Fatalf("section = %d, stream section = %d", parser.section, stream.sampleSection)
+	}
+	if stream.audioBuffer != nil || stream.videoHeaderCarry != nil || stream.videoFrameCarry != nil || stream.videoCCCarry != nil || stream.videoBuffer != nil {
+		t.Fatalf("stream carry survived section jump: %#v", stream)
+	}
+	if stream.clockHasPTS || stream.programEndSeen || stream.terminalTracked || stream.terminalBytes != nil {
+		t.Fatalf("stream lifecycle survived section jump: %#v", stream)
+	}
+	if videoParser.carry != nil || videoParser.rescanFromZero || videoParser.expectPictureExt || videoParser.currentGOPCount != 0 || videoParser.finalGOPRecorded || videoParser.sawGOP || videoParser.framesSinceI != 0 || videoParser.framesSinceAnchor != 0 || videoParser.lastISeen || videoParser.lastAnchorSeen {
+		t.Fatalf("video parser reconstruction survived section jump: %#v", videoParser)
+	}
+}
+
+func TestPSStreamParserBoundsProgramEndTailForEveryStream(t *testing.T) {
+	parser := newPSStreamParser(mpegPSOptions{parseSpeed: 1})
+	first := parser.ensureStream(0xC0, psSubstreamNone, StreamAudio, "MPEG Audio")
+	second := parser.ensureStream(0xE0, psSubstreamNone, StreamVideo, "MPEG Video")
+	tail := bytes.Repeat([]byte{0xA5}, mpegPSTerminalTailMax*8)
+	data := append([]byte{0, 0, 1, 0xB9}, tail...)
+	if !parser.parseReader(bytes.NewReader(data)) {
+		t.Fatal("parseReader() did not consume program end")
+	}
+	for name, stream := range map[string]*psStream{"audio": first, "video": second} {
+		if !stream.terminalTracked || len(stream.terminalBytes) != mpegPSTerminalTailMax {
+			t.Fatalf("%s terminal state = tracked %v, bytes %d", name, stream.terminalTracked, len(stream.terminalBytes))
+		}
+		if !bytes.Equal(stream.terminalBytes, tail[:mpegPSTerminalTailMax]) {
+			t.Fatalf("%s terminal bytes = %x", name, stream.terminalBytes)
+		}
 	}
 }
 

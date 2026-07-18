@@ -131,22 +131,81 @@ func isSignedMeasurement(value string) bool {
 	if len(parts) == 0 {
 		return false
 	}
-	number := strings.TrimSuffix(parts[0], "%")
-	if _, err := strconv.ParseFloat(number, 64); err != nil {
+	attachedPercent := strings.HasSuffix(parts[0], "%")
+	if !isCSVDisplayNumber(strings.TrimSuffix(parts[0], "%"), true) {
 		return false
 	}
-	for _, part := range parts[1:] {
-		for _, r := range part {
-			if unicode.IsLetter(r) || unicode.IsDigit(r) {
-				continue
-			}
-			switch r {
-			case '.', ',', '/', '%', '(', ')', '[', ']', '^':
-				continue
-			default:
-				return false
-			}
+	if len(parts) == 1 {
+		return true
+	}
+	if attachedPercent {
+		return false
+	}
+	for i := 1; i < len(parts); {
+		if !isCSVDisplayUnit(parts[i]) {
+			return false
+		}
+		i++
+		if i == len(parts) {
+			return true
+		}
+		if !isCSVDisplayNumber(parts[i], false) {
+			return false
+		}
+		i++
+		if i == len(parts) {
+			return false
 		}
 	}
 	return true
+}
+
+// isCSVDisplayNumber reports whether value is a signed or unsigned decimal
+// display number, optionally requiring an explicit sign.
+func isCSVDisplayNumber(value string, requireSign bool) bool {
+	if value == "" {
+		return false
+	}
+	if requireSign {
+		if value[0] != '+' && value[0] != '-' {
+			return false
+		}
+		value = value[1:]
+	}
+	if value == "" {
+		return false
+	}
+	hasDigit := false
+	for _, r := range value {
+		if unicode.IsDigit(r) {
+			hasDigit = true
+			continue
+		}
+		switch r {
+		case '.', 'e', 'E', '+', '-':
+		default:
+			return false
+		}
+	}
+	if !hasDigit {
+		return false
+	}
+	_, err := strconv.ParseFloat(value, 64)
+	return err == nil
+}
+
+// isCSVDisplayUnit reports whether value is a recognized human-readable CSV
+// unit suffix used by the output sanitizer.
+func isCSVDisplayUnit(value string) bool {
+	switch value {
+	case "%", "ns", "us", "µs", "ms", "s", "min", "h",
+		"dB", "dBFS", "LU", "LUFS",
+		"frame", "frames", "sample", "samples",
+		"fps", "FPS", "SPF", "Hz", "kHz", "MHz", "GHz",
+		"b/s", "kb/s", "Mb/s", "Gb/s", "bps", "Kbps", "Mbps", "Gbps",
+		"bit", "bits", "Byte", "Bytes", "pixel", "pixels", "channel", "channels", "cd/m2":
+		return true
+	default:
+		return false
+	}
 }

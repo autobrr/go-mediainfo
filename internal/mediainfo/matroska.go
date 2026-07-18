@@ -391,23 +391,7 @@ func parseMatroskaWithOptions(r io.ReaderAt, size int64, opts AnalyzeOptions, pu
 						tagEncoders = mergeMatroskaTagEncoders(tagEncoders, enc)
 						tagSettings = mergeMatroskaTagValues(tagSettings, settings)
 						tagLangs = mergeMatroskaTagValues(tagLangs, langs)
-						for uid, stat := range tailStats {
-							if tagStats == nil {
-								tagStats = map[uint64]matroskaTagStats{}
-							}
-							current, exists := tagStats[uid]
-							if (!exists || !current.trusted) && (stat.hasSource || stat.hasSourceID) {
-								tagStats[uid] = stat
-								continue
-							}
-							if !exists {
-								continue
-							}
-							// Preserve trusted head/SeekHead measurements; a tail window may
-							// contain an older duplicate Tags element with stale numeric stats.
-							mergeMatroskaTagStats(&current, matroskaTagStats{source: stat.source, hasSource: stat.hasSource, sourceID: stat.sourceID, hasSourceID: stat.hasSourceID, extras: stat.extras})
-							tagStats[uid] = current
-						}
+						tagStats = mergeMatroskaTailTagStats(tagStats, tailStats)
 						for name, value := range tailGeneralTags {
 							if generalTags == nil {
 								generalTags = map[string]string{}
@@ -552,6 +536,10 @@ func parseMatroskaWithOptions(r io.ReaderAt, size int64, opts AnalyzeOptions, pu
 					}
 					if format == "MPEG-4 Visual" {
 						videoProbes[id] = &matroskaVideoProbe{codec: format, targetPackets: 64}
+						continue
+					}
+					if format == "VP9" {
+						videoProbes[id] = &matroskaVideoProbe{codec: format, targetPackets: 8}
 					}
 				case StreamGeneral, StreamText, StreamImage, StreamMenu:
 					continue
@@ -1875,15 +1863,6 @@ func parseCanonicalMatroskaTrackEntry(buf []byte, segmentDuration float64, durat
 		}
 		fields = append(fields, Field{Name: "Bit depth", Value: fmt.Sprintf("%d bits", bitDepth)})
 	}
-	if kind == StreamVideo && codecID == "V_VP9" {
-		fields = append(fields,
-			Field{Name: "Format profile", Value: "0"},
-			Field{Name: "Color space", Value: "YUV"},
-			Field{Name: "Chroma subsampling", Value: "4:2:0"},
-			Field{Name: "Chroma subsampling position", Value: "Type 1"},
-			Field{Name: "Bit depth", Value: "8 bits"},
-		)
-	}
 	if kind == StreamVideo && format == "VC-1" {
 		profile := vc1Info.Profile
 		if profile == "" {
@@ -2730,7 +2709,7 @@ func parseCanonicalMatroskaTrackEntry(buf []byte, segmentDuration float64, durat
 			segmentDuration: segmentDuration, durationPrec: durationPrec,
 			defaultValue: defaultValue, forcedValue: forcedValue, serviceKinds: serviceKinds,
 		})
-	case kind == StreamVideo && (format == "VP8" || format == "VP9" || format == "AV1"):
+	case kind == StreamVideo && (format == "VP8" || format == "AV1"):
 		stream.canonicalSeed = matroskaStaticVideoCanonicalSeed(matroskaVideoCanonicalFacts{
 			format: format, codecID: codecID, codecName: codecName, codecPrivate: codecPrivate,
 			trackName: trackName, languageCode: languageCode, displayLanguage: displayLanguage,
@@ -3517,14 +3496,14 @@ func parseMatroskaTags(buf []byte, encodedDate string) (map[uint64]string, map[u
 			target, tags, fields, tagLanguage := parseMatroskaTag(buf[dataStart:dataEnd])
 			trackUID := target.trackUID
 			scopedTags.set(target, fields)
-			if target.present && target.blockAddID == 0 && trackUID == 0 {
+			if target.present && !target.nonTrack && target.blockAddID == 0 && trackUID == 0 {
 				for name, value := range tags {
 					if value = strings.TrimSpace(value); value != "" {
 						generalTags[name] = value
 					}
 				}
 			}
-			if !target.present || target.blockAddID != 0 {
+			if !target.present || target.nonTrack || target.blockAddID != 0 {
 				pos = dataEnd
 				continue
 			}
@@ -3718,6 +3697,7 @@ func matroskaEncoderScore(value string) int {
 type matroskaTagTarget struct {
 	trackUID   uint64
 	blockAddID uint64
+	nonTrack   bool
 	present    bool
 }
 
@@ -3782,6 +3762,8 @@ func parseMatroskaTagTargets(buf []byte) matroskaTagTarget {
 			if value, ok := readUnsigned(buf[dataStart:dataEnd]); ok {
 				target.blockAddID = value
 			}
+		case mkvIDTagEditionUID, mkvIDTagChapterUID, mkvIDTagAttachmentUID:
+			target.nonTrack = true
 		}
 		pos = dataEnd
 	}
@@ -4159,17 +4141,25 @@ func appendMatroskaAttachmentUnique(dst []matroskaAttachment, attachment matrosk
 		if !strings.EqualFold(existing.name, attachment.name) || existing.size != attachment.size {
 			continue
 		}
+		if existing.uid != 0 || attachment.uid != 0 {
+			if existing.uid == 0 || attachment.uid == 0 || existing.uid != attachment.uid {
+				continue
+			}
+		}
 		if bytes.Equal(existing.data, attachment.data) {
+			if !existing.complete && !attachment.complete && existing.uid == 0 {
+				continue
+			}
 			if attachment.complete && !existing.complete {
 				dst[i] = attachment
 			}
 			return dst
 		}
-		if !existing.complete && bytes.HasPrefix(attachment.data, existing.data) {
+		if !existing.complete && attachment.complete && bytes.HasPrefix(attachment.data, existing.data) {
 			dst[i] = attachment
 			return dst
 		}
-		if !attachment.complete && bytes.HasPrefix(existing.data, attachment.data) {
+		if existing.complete && !attachment.complete && bytes.HasPrefix(existing.data, attachment.data) {
 			return dst
 		}
 	}
@@ -4346,7 +4336,11 @@ func parseMatroskaSimpleTagTree(buf []byte, parent []string, tags map[string]str
 			*tagLanguage = language
 		}
 		if fields != nil {
-			*fields = append(*fields, normalizeMatroskaTag(path, value)...)
+			normalized := normalizeMatroskaTag(path, value)
+			*fields = append(*fields, normalized...)
+			if len(parent) == 0 && len(normalized) == 0 && matroskaTagSuppressesSubtree(path, value) {
+				return
+			}
 		}
 	}
 	childParent := parent
@@ -4365,7 +4359,10 @@ func parseMatroskaTagStats(tags map[string]string, encodedDate string) (matroska
 	list := strings.Fields(tags["_STATISTICS_TAGS"])
 	if len(list) == 0 {
 		if seconds, prec, ok := parseMatroskaStatisticsDuration(strings.TrimRight(tags["DURATION"], "\x00")); ok && seconds > 0 {
-			return matroskaTagStats{trusted: true, durationSeconds: seconds, durationPrec: prec, hasDuration: true}, true
+			return matroskaTagStats{
+				trusted: true, bareDuration: true,
+				durationSeconds: seconds, durationPrec: prec, hasDuration: true,
+			}, true
 		}
 		return matroskaTagStats{}, false
 	}
@@ -4551,6 +4548,9 @@ func mergeMatroskaTagStats(dst *matroskaTagStats, src matroskaTagStats) {
 	if src.trusted {
 		dst.trusted = true
 	}
+	if src.bareDuration {
+		dst.bareDuration = true
+	}
 	if src.hasSource {
 		dst.source = src.source
 		dst.hasSource = true
@@ -4605,6 +4605,38 @@ func mergeMatroskaTagStats(dst *matroskaTagStats, src matroskaTagStats) {
 			dst.hasDataBytes = true
 		}
 	}
+}
+
+// mergeMatroskaTailTagStats preserves MediaInfo's bounded tag-scan policy:
+// tail-only numeric measurements are not authoritative, while source metadata
+// can supplement an existing trusted head observation.
+func mergeMatroskaTailTagStats(head, tail map[uint64]matroskaTagStats) map[uint64]matroskaTagStats {
+	if len(tail) == 0 {
+		return head
+	}
+	if head == nil {
+		head = make(map[uint64]matroskaTagStats, len(tail))
+	}
+	for uid, stat := range tail {
+		current, exists := head[uid]
+		if !exists {
+			if stat.hasSource || stat.hasSourceID {
+				head[uid] = stat
+			}
+			continue
+		}
+		if !current.trusted && (stat.hasSource || stat.hasSourceID) {
+			head[uid] = stat
+			continue
+		}
+		mergeMatroskaTagStats(&current, matroskaTagStats{
+			source: stat.source, hasSource: stat.hasSource,
+			sourceID: stat.sourceID, hasSourceID: stat.hasSourceID,
+			extras: stat.extras,
+		})
+		head[uid] = current
+	}
+	return head
 }
 
 // applyMatroskaEncoders applies track-scoped encoder tags to compatible video
@@ -4696,7 +4728,7 @@ func applyMatroskaEncoders(streams []Stream, encodersByTrackUID map[uint64]strin
 				replaceCanonicalSeedFill(&streams[i], "Encoded_Library_Settings", settings, "Encoding settings", settings)
 			}
 		}
-		if streams[i].Kind == StreamText && enc != "" && !strings.HasPrefix(enc, "Lavf") {
+		if streams[i].Kind == StreamText && enc != "" && !strings.HasPrefix(strings.ToLower(enc), "lavf") {
 			streams[i].Fields = setFieldValue(streams[i].Fields, "Writing library", enc)
 			replaceCanonicalSeedFill(&streams[i], "Encoded_Library", canonicalEncodedLibrary(enc), "Writing library", enc)
 		}
@@ -4806,6 +4838,9 @@ func parseMatroskaAACProfile(payload []byte) (profile string, codecObjectType in
 	case 5, 29:
 		codecObjectType = signaledObjectType
 		sbrMode = "Yes (NBC)"
+		if signaledObjectType == 29 {
+			psMode = "Yes (NBC)"
+		}
 	default:
 		if sbrData {
 			if sbrPresent {

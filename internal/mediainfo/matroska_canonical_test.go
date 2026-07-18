@@ -1601,9 +1601,9 @@ func TestMatroskaOpusCanonicalSeedTracksCompatibilityOverrides(t *testing.T) {
 	}
 }
 
-// TestMatroskaStaticVideoCanonicalSeedTracksVP9Stats verifies direct VP9
-// TrackEntry, statistics, text-only density, JSON, text, and XML projections.
-func TestMatroskaStaticVideoCanonicalSeedTracksVP9Stats(t *testing.T) {
+// TestMatroskaVP9CanonicalSeedOmitsUnprovenCodecFacts verifies TrackEntry and
+// statistics projection without inventing codec properties absent bitstream data.
+func TestMatroskaVP9CanonicalSeedOmitsUnprovenCodecFacts(t *testing.T) {
 	video := buildMatroskaElement(mkvIDPixelWidth, encodeMatroskaUint(1920))
 	video = append(video, buildMatroskaElement(mkvIDPixelHeight, encodeMatroskaUint(1080))...)
 	payload := buildMatroskaElement(mkvIDTrackNumber, encodeMatroskaUint(1))
@@ -1628,18 +1628,22 @@ func TestMatroskaStaticVideoCanonicalSeedTracksVP9Stats(t *testing.T) {
 	sortFields(stream.Kind, stream.Fields)
 
 	for key, want := range map[fieldName]string{
-		"Format": "VP9", "ID": "1", "UniqueID": "231", "Format_Profile": "0",
+		"Format": "VP9", "ID": "1", "UniqueID": "231",
 		"CodecID": "V_VP9", "Duration": "2500", "BitRate": "1000000",
 		"Width": "1920", "Height": "1080", "Sampled_Width": "1920", "Sampled_Height": "1080",
 		"PixelAspectRatio": "1.000", "DisplayAspectRatio": "1.778", "FrameRate_Mode": "Constant",
 		"FrameRate": "23.976", "FrameRate_Num": "24000", "FrameRate_Den": "1001", "FrameCount": "60",
-		"ColorSpace": "YUV", "ChromaSubsampling": "4:2:0", "ChromaSubsampling_Position": "Type 1",
-		"BitDepth": "8", "Delay": "0.000", "Delay_Source": "Container", "StreamSize": "312500",
+		"Delay": "0.000", "Delay_Source": "Container", "StreamSize": "312500",
 		"Default": "Yes", "Forced": "No",
 	} {
 		got, found := canonicalSeedValue(stream, key)
 		if !found || got != want {
 			t.Fatalf("canonical %s = %q, %v; want %q", key, got, found, want)
+		}
+	}
+	for _, key := range []fieldName{"Format_Profile", "ColorSpace", "ChromaSubsampling", "ChromaSubsampling_Position", "BitDepth"} {
+		if got, found := canonicalSeedValue(stream, key); found {
+			t.Fatalf("unproven canonical %s = %q", key, got)
 		}
 	}
 	if got := matroskaCanonicalSeedText(stream, "Bits/(Pixel*Frame)"); got != "0.020" {

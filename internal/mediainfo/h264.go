@@ -885,7 +885,8 @@ func parseH264PicTimingTimeCode(payload []byte, sps h264SPSInfo) (string, bool) 
 		if _, ok := read(1); !ok { // nuit_field_based_flag
 			return "", false
 		}
-		if _, ok := read(5); !ok { // counting_type
+		countingType, ok := read(5)
+		if !ok {
 			return "", false
 		}
 		fullTimestamp, ok := read(1)
@@ -959,9 +960,10 @@ func parseH264PicTimingTimeCode(payload []byte, sps h264SPSInfo) (string, bool) 
 			return "", false
 		}
 		separator := ":"
-		if cntDropped == 1 {
+		if countingType == 4 {
 			separator = ";"
 		}
+		_ = cntDropped
 		return fmt.Sprintf("%02d:%02d:%02d%s%02d", hours, minutes, seconds, separator, frames), true
 	}
 	return "", false

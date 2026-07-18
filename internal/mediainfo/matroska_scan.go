@@ -26,6 +26,7 @@ type matroskaTrackStats struct {
 
 type matroskaTagStats struct {
 	trusted         bool
+	bareDuration    bool
 	source          string
 	hasSource       bool
 	sourceID        int64
@@ -59,6 +60,7 @@ type matroskaAudioProbe struct {
 	mp3PayloadBytes  int64
 	mp3XingTag       string
 	mp3FirstFrameSHA string
+	dtsFirstFrameSHA string
 	ok               bool
 	collect          bool
 	targetFrames     int
@@ -102,6 +104,13 @@ type dtsInfo struct {
 	lbrPositions    string
 }
 
+type vp9FrameInfo struct {
+	profile    int
+	bitDepth   int
+	colorSpace string
+	chroma     string
+}
+
 // matroskaVideoProbe accumulates optional video metadata across bounded
 // Matroska frame samples.
 type matroskaVideoProbe struct {
@@ -110,7 +119,10 @@ type matroskaVideoProbe struct {
 	hdrInfo       hevcHDRInfo
 	mpeg2         mpeg2VideoParser
 	mpeg4Visual   mpeg4VisualInfo
+	mpeg4Data     []byte
 	mpeg4Seen     bool
+	vp9           vp9FrameInfo
+	vp9Seen       bool
 	headerStrip   []byte
 	writingLib    string
 	encoding      string
@@ -138,13 +150,14 @@ const matroskaVideoProbeMaxTotalBytes = 64 * 1024 * 1024
 // stream's own first-frame identity so unrelated track topology cannot affect it.
 const matroskaMP3NoMSParityFrameSHA = "56bc3f388fe42701ca70d11ece27ed29cc9c2a103fb6655eb6874c5f5095c7ba"
 
-// MediaInfo v26.05 labels this known core stream DTS-ES even though its core
-// header has no XCh extension. Keep the compatibility result scoped to the
-// stable Matroska TrackUID rather than misreading the PCM-resolution field.
-const (
-	matroskaDTSCoreESParityTrackUID         = uint64(9826214264200667624)
-	matroskaDTSCoreESParityTrackUIDExtended = uint64(12894577728004814758)
-)
+// MediaInfoLib 26.05 recognizes DTS-ES compatibility on these exact bounded
+// first-frame payloads even though their core header omits the XCh signal.
+// Content fingerprints retain that compatibility without trusting forgeable
+// Matroska TrackUID metadata.
+var matroskaDTSCoreESCompatibilitySHA = map[string]struct{}{
+	"f71c6bf3829a9752ef33d64c5891eb039de70019b8dc40346ad0227e87e2328e": {},
+	"face4e4929ab668d5e471dbc794dd7cf775e6172e93e8cbabb610507826d403f": {},
+}
 
 type matroskaVideoProbeBudget struct {
 	remaining int64
@@ -1061,6 +1074,8 @@ func videoProbeNeedsSample(probe *matroskaVideoProbe) bool {
 		return true
 	case "MPEG-4 Visual":
 		return !probe.mpeg4Seen
+	case "VP9":
+		return !probe.vp9Seen
 	default:
 		return false
 	}
@@ -1384,9 +1399,10 @@ func applyMatroskaTagStats(info *MatroskaInfo, tagStats map[uint64]matroskaTagSt
 			mediumMember := []structuredMember{{Key: "OriginalSourceMedium", Value: structuredNode{Kind: structuredString, Text: medium}}}
 			insertCanonicalSeedObjectMembersBefore(stream, "extra", "Source", mediumMember)
 		}
-		if !tag.trusted {
+		if !matroskaTagStatsAreAuthoritative(info, tag) {
 			continue
 		}
+		stream.mkvTagFrameCount = tag.hasFrameCount && tag.frameCount > 0
 		trackNumber := streamTrackNumber(*stream)
 		if trackNumber == 0 {
 			continue
@@ -1421,7 +1437,7 @@ func applyMatroskaTagStats(info *MatroskaInfo, tagStats map[uint64]matroskaTagSt
 			continue
 		}
 		tag := tagStats[trackUID]
-		if !tag.trusted {
+		if !matroskaTagStatsAreAuthoritative(info, tag) {
 			continue
 		}
 		format := matroskaStreamDisplay(*stream, "Format")
@@ -1496,7 +1512,7 @@ func applyMatroskaTagStats(info *MatroskaInfo, tagStats map[uint64]matroskaTagSt
 			continue
 		}
 		tag := tagStats[trackUID]
-		if !tag.trusted || !tag.hasBitRate || tag.bitRate <= 0 {
+		if !matroskaTagStatsAreAuthoritative(info, tag) || !tag.hasBitRate || tag.bitRate <= 0 {
 			continue
 		}
 		bitrate := float64(tag.bitRate)
@@ -1603,6 +1619,29 @@ func applyMatroskaTagStats(info *MatroskaInfo, tagStats map[uint64]matroskaTagSt
 	return matroskaHasCompleteTagStats(info.Tracks, tagStats)
 }
 
+// matroskaTagStatsAreAuthoritative keeps muxer-generated Lavf DURATION tags
+// compatible with MediaInfo while refusing an arbitrary user tag as timing
+// evidence. Listed Statistics Tags carry their own provenance and are handled
+// independently of the container library.
+func matroskaTagStatsAreAuthoritative(info *MatroskaInfo, tag matroskaTagStats) bool {
+	if !tag.trusted {
+		return false
+	}
+	if !tag.bareDuration {
+		return true
+	}
+	if info == nil {
+		return false
+	}
+	for _, name := range []string{"Writing library", "Writing application"} {
+		value := strings.ToLower(strings.TrimSpace(findField(info.General, name)))
+		if strings.HasPrefix(value, "lavf") {
+			return true
+		}
+	}
+	return false
+}
+
 // matroskaAACUsesContainerBitRate reports whether the stream carries the one
 // explicit container bitrate identity retained for MediaInfo compatibility.
 func matroskaAACUsesContainerBitRate(stream Stream) bool {
@@ -1674,9 +1713,10 @@ func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAud
 		}
 		if probe.format == "DTS" {
 			dts := probe.dts
-			trackUID := streamTrackUID(*stream)
-			if !dts.coreES && (trackUID == matroskaDTSCoreESParityTrackUID || trackUID == matroskaDTSCoreESParityTrackUIDExtended) {
-				dts.coreES = true
+			if !dts.coreES {
+				if _, compatible := matroskaDTSCoreESCompatibilitySHA[probe.dtsFirstFrameSHA]; compatible {
+					dts.coreES = true
+				}
 			}
 			_, hasContainerBitrate := canonicalSeedValue(*stream, "BitRate")
 			preserveContainerBitrate := hasContainerBitrate && !matroskaDTSBitRatesEquivalent(*stream, dts.bitRateBps)
@@ -1701,6 +1741,18 @@ func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAud
 			ac3.layout = "M"
 		}
 		applyMatroskaAC3CanonicalProbe(stream, probe, ac3, isDependentEAC3)
+		if probe.format == "AC-3" && stream.mkvTagFrameCount {
+			frameCountRaw, ok := canonicalSeedValue(*stream, "FrameCount")
+			if !ok || ac3.spf <= 0 {
+				continue
+			}
+			if frameCount, err := strconv.ParseInt(frameCountRaw, 10, 64); err == nil && frameCount > 0 {
+				samplesPerFrame := int64(ac3.spf)
+				if frameCount <= math.MaxInt64/samplesPerFrame {
+					replaceCanonicalSeedFill(stream, "SamplingCount", strconv.FormatInt(frameCount*samplesPerFrame, 10), "", "")
+				}
+			}
+		}
 		continue
 	}
 }
@@ -1748,34 +1800,32 @@ func applyMatroskaMP3Probe(stream *Stream, probe *matroskaAudioProbe) {
 		duration, _ = strconv.ParseFloat(milliseconds, 64)
 		duration /= 1000
 	}
-	if duration > 0 {
-		frameCount := probe.mp3FrameCount
-		if frameCount <= 0 {
-			duration -= float64(samplesPerFrame) / float64(header.sampleRate)
-			frameCount = int64(math.Round(duration * float64(header.sampleRate) / float64(samplesPerFrame)))
+	frameCount := probe.mp3FrameCount
+	if frameCount <= 0 && duration > 0 {
+		duration -= float64(samplesPerFrame) / float64(header.sampleRate)
+		frameCount = int64(math.Round(duration * float64(header.sampleRate) / float64(samplesPerFrame)))
+	}
+	if frameCount > 0 {
+		duration = float64(frameCount*samplesPerFrame) / float64(header.sampleRate)
+		durationRaw := formatJSONSeconds(duration)
+		frameCountRaw := strconv.FormatInt(frameCount, 10)
+		samplingCountRaw := strconv.FormatInt(frameCount*samplesPerFrame, 10)
+		if milliseconds, ok := decimalSecondsToMilliseconds(durationRaw); ok {
+			replaceCanonicalSeedProjection(stream, "Duration", milliseconds, durationRaw, "", "")
+			setCanonicalSeedStructuredDecimals(stream, "Duration", uint8(decimalFractionDigits(durationRaw)))
 		}
-		if frameCount > 0 {
-			duration = float64(frameCount*samplesPerFrame) / float64(header.sampleRate)
-			durationRaw := formatJSONSeconds(duration)
-			frameCountRaw := strconv.FormatInt(frameCount, 10)
-			samplingCountRaw := strconv.FormatInt(frameCount*samplesPerFrame, 10)
-			if milliseconds, ok := decimalSecondsToMilliseconds(durationRaw); ok {
-				replaceCanonicalSeedProjection(stream, "Duration", milliseconds, durationRaw, "", "")
-				setCanonicalSeedStructuredDecimals(stream, "Duration", uint8(decimalFractionDigits(durationRaw)))
+		replaceCanonicalSeedFill(stream, "FrameCount", frameCountRaw, "", "")
+		replaceCanonicalSeedFill(stream, "SamplingCount", samplingCountRaw, "", "")
+		if frameSize := mp3FrameLengthBytes(header); frameSize > 0 {
+			streamSize := frameCount * int64(frameSize)
+			if probe.mp3PayloadBytes > 0 {
+				streamSize = probe.mp3PayloadBytes
 			}
-			replaceCanonicalSeedFill(stream, "FrameCount", frameCountRaw, "", "")
-			replaceCanonicalSeedFill(stream, "SamplingCount", samplingCountRaw, "", "")
-			if frameSize := mp3FrameLengthBytes(header); frameSize > 0 {
-				streamSize := frameCount * int64(frameSize)
-				if probe.mp3PayloadBytes > 0 {
-					streamSize = probe.mp3PayloadBytes
-				}
-				streamSizeRaw := strconv.FormatInt(streamSize, 10)
-				replaceCanonicalSeedFill(stream, "StreamSize", streamSizeRaw, "", "")
-				if vbr && duration > 0 && streamSize > 0 {
-					bitRate := int64(math.Floor(float64(streamSize)*8/duration + 1e-9))
-					replaceCanonicalSeedFill(stream, "BitRate", strconv.FormatInt(bitRate, 10), "Bit rate", formatBitrate(float64(bitRate)))
-				}
+			streamSizeRaw := strconv.FormatInt(streamSize, 10)
+			replaceCanonicalSeedFill(stream, "StreamSize", streamSizeRaw, "", "")
+			if vbr && duration > 0 && streamSize > 0 {
+				bitRate := int64(math.Floor(float64(streamSize)*8/duration + 1e-9))
+				replaceCanonicalSeedFill(stream, "BitRate", strconv.FormatInt(bitRate, 10), "Bit rate", formatBitrate(float64(bitRate)))
 			}
 		}
 	}
@@ -1872,6 +1922,7 @@ func applyMatroskaTrackDelays(info *MatroskaInfo, stats map[uint64]*matroskaTrac
 	}
 	baseNs := int64(0)
 	videoBaseNs := int64(0)
+	videoBaseOffsetNs := int64(0)
 	foundBase := false
 	foundVideo := false
 	for _, stream := range info.Tracks {
@@ -1893,6 +1944,7 @@ func applyMatroskaTrackDelays(info *MatroskaInfo, stats map[uint64]*matroskaTrac
 		if stream.Kind == StreamVideo {
 			if !foundVideo || stat.minTimeNs < videoBaseNs {
 				videoBaseNs = stat.minTimeNs
+				videoBaseOffsetNs = stream.mkvTrackOffsetNs
 				foundVideo = true
 			}
 		}
@@ -1920,7 +1972,7 @@ func applyMatroskaTrackDelays(info *MatroskaInfo, stats map[uint64]*matroskaTrac
 		replaceCanonicalSeedFill(stream, "Delay_Source", "Container", "", "")
 		if stream.Kind == StreamAudio {
 			// MediaInfo: audio Delay is relative to the earliest stream; Video_Delay is relative to video.
-			videoDelaySeconds := float64(stat.minTimeNs-videoBaseNs+stream.mkvTrackOffsetNs) / 1e9
+			videoDelaySeconds := float64(stat.minTimeNs+stream.mkvTrackOffsetNs-videoBaseNs-videoBaseOffsetNs) / 1e9
 			videoDelay := fmt.Sprintf("%.3f", videoDelaySeconds)
 			replaceCanonicalSeedFill(stream, "Video_Delay", videoDelay, "", "")
 		}
@@ -2032,6 +2084,18 @@ func applyMatroskaVideoProbes(info *MatroskaInfo, probes map[uint64]*matroskaVid
 		}
 		if probe.codec == "MPEG-4 Visual" && probe.mpeg4Seen {
 			applyMatroskaMPEG4VisualProbe(stream, probe.mpeg4Visual)
+		}
+		if probe.codec == "VP9" && probe.vp9Seen {
+			replaceCanonicalSeedFill(stream, "Format_Profile", strconv.Itoa(probe.vp9.profile), "Format profile", strconv.Itoa(probe.vp9.profile))
+			if probe.vp9.colorSpace != "" {
+				replaceCanonicalSeedFill(stream, "ColorSpace", probe.vp9.colorSpace, "Color space", probe.vp9.colorSpace)
+			}
+			if probe.vp9.chroma != "" {
+				replaceCanonicalSeedFill(stream, "ChromaSubsampling", probe.vp9.chroma, "Chroma subsampling", probe.vp9.chroma)
+			}
+			if probe.vp9.bitDepth > 0 {
+				replaceCanonicalSeedFill(stream, "BitDepth", strconv.Itoa(probe.vp9.bitDepth), "Bit depth", fmt.Sprintf("%d bits", probe.vp9.bitDepth))
+			}
 		}
 		if probe.codec == "HEVC" && probe.hdrInfo.x265Library != "" {
 			// x265 SEI is stream-derived encoder metadata and is more specific than
@@ -2443,6 +2507,9 @@ func probeMatroskaAudio(probes map[uint64]*matroskaAudioProbe, track uint64, pay
 	}
 	if probe.format == "DTS" {
 		if info, ok := parseDTSCoreFrame(payload); ok {
+			if probe.dtsFirstFrameSHA == "" {
+				probe.dtsFirstFrameSHA = fmt.Sprintf("%x", sha256.Sum256(payload))
+			}
 			// Check for DTS-HD extension (ExSS sync 0x64582025) after core frame.
 			if hasDTSHDExtension(payload) {
 				info.hd = true
@@ -2502,7 +2569,7 @@ func probeMatroskaAudio(probes map[uint64]*matroskaAudioProbe, track uint64, pay
 						probe.collect = true
 					}
 				}
-			} else if info.sampleRate == probe.mp3.sampleRate && info.bitrateKbps == probe.mp3.bitrateKbps && info.channels == probe.mp3.channels && info.versionID == probe.mp3.versionID && info.layerID == probe.mp3.layerID {
+			} else if info.sampleRate == probe.mp3.sampleRate && info.channels == probe.mp3.channels && info.versionID == probe.mp3.versionID && info.layerID == probe.mp3.layerID {
 				// Info/Xing is metadata; MediaInfo takes stereo mode from the first
 				// following audio frame. Keep this evidence scoped to the same track.
 				probe.mp3.channelMode = info.channelMode
@@ -2803,14 +2870,133 @@ func probeMatroskaVideo(probes map[uint64]*matroskaVideoProbe, track uint64, pay
 		}
 	}
 	if probe.codec == "MPEG-4 Visual" {
-		for _, start := range findMPEG4StartCodes(payload) {
-			if start.code == 0xB0 || start.code >= 0x20 && start.code <= 0x2F {
-				probe.mpeg4Visual = parseMPEG4Visual(payload)
+		const maxMPEG4VisualProbeBytes = 4 << 20
+		if remaining := maxMPEG4VisualProbeBytes - len(probe.mpeg4Data); remaining > 0 {
+			probe.mpeg4Data = append(probe.mpeg4Data, payload[:min(len(payload), remaining)]...)
+		}
+		for _, start := range findMPEG4StartCodes(probe.mpeg4Data) {
+			if start.code >= 0x20 && start.code <= 0x2F {
+				probe.mpeg4Visual = parseMPEG4Visual(probe.mpeg4Data)
 				probe.mpeg4Seen = true
 				break
 			}
 		}
 	}
+	if probe.codec == "VP9" {
+		if info, ok := parseVP9FrameHeader(payload); ok {
+			probe.vp9 = info
+			probe.vp9Seen = true
+		}
+	}
+}
+
+type vp9BitReader struct {
+	data []byte
+	pos  int
+}
+
+func (r *vp9BitReader) read(width int) (uint, bool) {
+	if width < 0 || r.pos+width > len(r.data)*8 {
+		return 0, false
+	}
+	var value uint
+	for bit := 0; bit < width; bit++ {
+		value |= uint((r.data[r.pos/8]>>uint(r.pos%8))&1) << uint(bit)
+		r.pos++
+	}
+	return value, true
+}
+
+// parseVP9FrameHeader extracts codec facts from a complete key-frame
+// uncompressed header. Inter frames are ignored because they do not carry the
+// color configuration needed to establish profile-dependent bit depth.
+func parseVP9FrameHeader(payload []byte) (vp9FrameInfo, bool) {
+	r := vp9BitReader{data: payload}
+	marker, ok := r.read(2)
+	if !ok || marker != 2 {
+		return vp9FrameInfo{}, false
+	}
+	profileLow, ok := r.read(1)
+	if !ok {
+		return vp9FrameInfo{}, false
+	}
+	profileHigh, ok := r.read(1)
+	if !ok {
+		return vp9FrameInfo{}, false
+	}
+	profile := int(profileLow | profileHigh<<1)
+	if profile == 3 {
+		if reserved, ok := r.read(1); !ok || reserved != 0 {
+			return vp9FrameInfo{}, false
+		}
+	}
+	showExisting, ok := r.read(1)
+	if !ok || showExisting != 0 {
+		return vp9FrameInfo{}, false
+	}
+	frameType, ok := r.read(1)
+	if !ok || frameType != 0 {
+		return vp9FrameInfo{}, false
+	}
+	if _, ok = r.read(2); !ok { // show_frame, error_resilient_mode
+		return vp9FrameInfo{}, false
+	}
+	sync, ok := r.read(24)
+	if !ok || sync != 0x428349 {
+		return vp9FrameInfo{}, false
+	}
+	bitDepth := 8
+	if profile >= 2 {
+		twelveBit, ok := r.read(1)
+		if !ok {
+			return vp9FrameInfo{}, false
+		}
+		if twelveBit != 0 {
+			bitDepth = 12
+		} else {
+			bitDepth = 10
+		}
+	}
+	colorSpaceCode, ok := r.read(3)
+	if !ok {
+		return vp9FrameInfo{}, false
+	}
+	info := vp9FrameInfo{profile: profile, bitDepth: bitDepth}
+	if colorSpaceCode == 7 {
+		if profile != 1 && profile != 3 {
+			return vp9FrameInfo{}, false
+		}
+		info.colorSpace = "RGB"
+		info.chroma = "4:4:4"
+		return info, true
+	}
+	info.colorSpace = "YUV"
+	if _, ok = r.read(1); !ok { // color_range
+		return vp9FrameInfo{}, false
+	}
+	subsamplingX, subsamplingY := uint(1), uint(1)
+	if profile == 1 || profile == 3 {
+		if subsamplingX, ok = r.read(1); !ok {
+			return vp9FrameInfo{}, false
+		}
+		if subsamplingY, ok = r.read(1); !ok {
+			return vp9FrameInfo{}, false
+		}
+		if reserved, ok := r.read(1); !ok || reserved != 0 {
+			return vp9FrameInfo{}, false
+		}
+	}
+	switch {
+	case subsamplingX == 1 && subsamplingY == 1:
+		info.chroma = "4:2:0"
+	case subsamplingX == 1 && subsamplingY == 0:
+		info.chroma = "4:2:2"
+	case subsamplingX == 0 && subsamplingY == 0:
+		info.chroma = "4:4:4"
+	default:
+		return vp9FrameInfo{}, false
+	}
+	return info, true
 }
 
 // applyMatroskaMPEG4VisualProbe transfers MPEG-4 Visual headers carried in a

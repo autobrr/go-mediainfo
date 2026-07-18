@@ -320,8 +320,9 @@ func updateCCTrackTS(entry *tsStream, ccType int, ccData1 byte, ccData2 byte, pt
 				}
 			}
 		}
-		if track.firstCommandPTS == 0 && isCCStartCommand(ccData1, ccData2) {
+		if !hasCCFirstCommandPTS(track) && isCCStartCommand(ccData1, ccData2) {
 			track.firstCommandPTS = pts
+			track.hasFirstCommandPTS = true
 			if framesBefore > 0 {
 				// Official mediainfo reports Duration_Start_Command aligned to a 0-based frame index:
 				// Delay + (frame_index / fps).
@@ -355,11 +356,12 @@ func updateCCTrackTS(entry *tsStream, ccType int, ccData1 byte, ccData2 byte, pt
 
 // recordCCDisplayChange applies File_Eia608::HasChanged timing semantics.
 func recordCCDisplayChange(track *ccTrack, pts uint64) {
-	if track == nil || pts == 0 {
+	if track == nil {
 		return
 	}
-	if track.firstContentPTS == 0 {
+	if !track.hasFirstContentPTS {
 		track.firstContentPTS = pts
+		track.hasFirstContentPTS = true
 	}
 	track.lastContentPTS = pts
 }

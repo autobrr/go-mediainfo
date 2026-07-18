@@ -18,7 +18,7 @@ type trueHDInfo struct {
 }
 
 // trueHDChannelCountPerBit maps each assignment-map bit to its channel count.
-var trueHDChannelCountPerBit = [...]int{2, 1, 1, 2, 2, 2, 2, 1, 1, 2, 2, 1, 1}
+var trueHDChannelCountPerBit = [...]int{1, 2, 1, 2, 2, 2, 2, 1, 1, 2, 2, 1, 1}
 
 // trueHDChannelLayoutPerBit maps each assignment-map bit to its layout token.
 var trueHDChannelLayoutPerBit = [...]string{

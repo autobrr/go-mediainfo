@@ -77,7 +77,6 @@ func TestParseMP4HEVCSampleEntry(t *testing.T) {
 		"Chroma subsampling":      "4:2:0",
 		"Bit depth":               "8 bits",
 		"Codec configuration box": "hvcC",
-		"Scan type":               "Progressive",
 		"Color space":             "YUV",
 		"Writing library":         "x265 9.9",
 		"Encoding settings":       "wpp / me=0",
@@ -86,6 +85,9 @@ func TestParseMP4HEVCSampleEntry(t *testing.T) {
 		if got := findField(fields, name); got != value {
 			t.Errorf("field %q = %q, want %q", name, got, value)
 		}
+	}
+	if got := findField(fields, "Scan type"); got != "" {
+		t.Errorf("Scan type = %q, want unset without HEVC field coding evidence", got)
 	}
 	// chroma_loc is not signaled in this SPS, so no position is reported.
 	if got := findField(fields, "Chroma subsampling position"); got != "" {

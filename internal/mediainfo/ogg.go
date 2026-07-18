@@ -31,6 +31,10 @@ type oggLogicalStream struct {
 	packet         []byte
 	vendor         string
 	tags           map[string]string
+	firstPage      int
+	lastPage       int
+	hasPage        bool
+	duration       float64
 }
 
 // parseOgg scans Ogg page headers and logical-stream headers, retaining exact
@@ -43,6 +47,7 @@ func parseOgg(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, []Field,
 	logical := make(map[uint32]*oggLogicalStream)
 	order := make([]uint32, 0, 2)
 	pageOverhead := int64(0)
+	pageIndex := 0
 	for {
 		var header [27]byte
 		if _, err := io.ReadFull(file, header[:]); err != nil {
@@ -70,6 +75,12 @@ func parseOgg(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, []Field,
 			logical[serial] = stream
 			order = append(order, serial)
 		}
+		if !stream.hasPage {
+			stream.firstPage = pageIndex
+			stream.hasPage = true
+		}
+		stream.lastPage = pageIndex
+		pageIndex++
 		var body []byte
 		if stream.packetIndex < 3 {
 			body = make([]byte, bodySize)
@@ -106,7 +117,6 @@ func parseOgg(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, []Field,
 			onlyVideo = stream
 		}
 	}
-	maxDuration := 0.0
 	for _, serial := range order {
 		stream := logical[serial]
 		if stream == nil {
@@ -116,26 +126,31 @@ func parseOgg(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, []Field,
 		case "Theora":
 			frameCount := oggTheoraFrameCount(stream.lastGranule, stream.granuleShift)
 			if frameCount > 0 && stream.frameRateNum > 0 && stream.frameRateDen > 0 {
-				maxDuration = max(maxDuration, float64(frameCount)*float64(stream.frameRateDen)/float64(stream.frameRateNum))
+				stream.duration = float64(frameCount) * float64(stream.frameRateDen) / float64(stream.frameRateNum)
 			}
 		case "Vorbis", "Opus":
+			if stream.lastGranule > 0 && stream.sampleRate > 0 {
+				stream.duration = float64(stream.lastGranule) / float64(stream.sampleRate)
+			}
 			if videoCount > 0 && stream.nominalBitRate > 0 && stream.lastGranule > 0 && stream.sampleRate > 0 {
-				duration := float64(stream.lastGranule) / float64(stream.sampleRate)
+				duration := stream.duration
 				durationMilliseconds := int64(math.Round(duration * 1000))
 				stream.payloadBytes = int64(math.Round(float64(stream.nominalBitRate) * float64(durationMilliseconds) / 8000))
-				maxDuration = max(maxDuration, duration)
 			}
 			audioBitRates = append(audioBitRates, stream.nominalBitRate)
 			derivedAudioBytes += stream.payloadBytes
 		}
 	}
+	maxDuration := oggTimelineDuration(logical, order)
 	if videoCount == 1 && onlyVideo != nil {
 		if bitRate, ok := estimateOggVideoBitRate(size, maxDuration, audioBitRates); ok {
 			onlyVideo.derivedBitRate = bitRate
 			frameCount := oggTheoraFrameCount(onlyVideo.lastGranule, onlyVideo.granuleShift)
 			if frameCount > 0 && onlyVideo.frameRateNum > 0 && onlyVideo.frameRateDen > 0 {
 				duration := float64(frameCount) * float64(onlyVideo.frameRateDen) / float64(onlyVideo.frameRateNum)
-				onlyVideo.payloadBytes = int64(math.Round(bitRate / 8 * duration))
+				reportedBitRate := math.Round(bitRate)
+				reportedDuration := math.Round(duration*1000) / 1000
+				onlyVideo.payloadBytes = int64(math.Round(reportedBitRate / 8 * reportedDuration))
 			}
 		}
 	}
@@ -154,14 +169,12 @@ func parseOgg(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, []Field,
 				duration = float64(frameCount) * float64(stream.frameRateDen) / float64(stream.frameRateNum)
 			}
 			streams = append(streams, canonicalOggVideoStream(stream, duration, frameCount))
-			maxDuration = max(maxDuration, duration)
 		case "Vorbis", "Opus":
 			duration := 0.0
 			if stream.lastGranule > 0 && stream.sampleRate > 0 {
 				duration = float64(stream.lastGranule) / float64(stream.sampleRate)
 			}
 			streams = append(streams, canonicalOggAudioStream(stream, duration, videoCount > 0))
-			maxDuration = max(maxDuration, duration)
 		}
 	}
 	if len(streams) == 0 {
@@ -182,6 +195,28 @@ func parseOgg(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, []Field,
 		generalFacts.SetSame("OverallBitRate_Mode", "VBR")
 	}
 	return info, streams, generalFields, generalFacts, generalExtra, true
+}
+
+// oggTimelineDuration sums consecutive chained logical-stream groups while
+// retaining the maximum duration of concurrently interleaved streams.
+func oggTimelineDuration(logical map[uint32]*oggLogicalStream, order []uint32) float64 {
+	total := 0.0
+	groupDuration := 0.0
+	groupEnd := -1
+	for _, serial := range order {
+		stream := logical[serial]
+		if stream == nil || !stream.hasPage || stream.duration <= 0 {
+			continue
+		}
+		if groupEnd >= 0 && stream.firstPage > groupEnd {
+			total += groupDuration
+			groupDuration = 0
+			groupEnd = -1
+		}
+		groupDuration = max(groupDuration, stream.duration)
+		groupEnd = max(groupEnd, stream.lastPage)
+	}
+	return total + groupDuration
 }
 
 // estimateOggVideoBitRate applies MediaInfoLib's default inter-stream ratios
@@ -436,6 +471,21 @@ func splitOggLibrary(format, vendor string) (name, version, date string) {
 	return name, version, date
 }
 
+func formatOggLibraryDisplay(format, vendor string) string {
+	name, version, date := splitOggLibrary(format, strings.TrimSpace(vendor))
+	if name == "" {
+		return strings.TrimSpace(vendor)
+	}
+	value := name
+	if version != "" {
+		value += " " + version
+	}
+	if date != "" {
+		value += " (" + date + ")"
+	}
+	return value
+}
+
 func oggGeneralMetadata(logical map[uint32]*oggLogicalStream, order []uint32) ([]Field, *canonicalStructuredFacts, *structuredNode) {
 	tags := make(map[string]string)
 	for _, serial := range order {
@@ -450,7 +500,7 @@ func oggGeneralMetadata(logical map[uint32]*oggLogicalStream, order []uint32) ([
 	if title := tags["TITLE"]; title != "" {
 		facts.SetSame("Title", title)
 		facts.SetSame("Movie", title)
-		fields = append(fields, Field{Name: "Title", Value: title}, Field{Name: "Movie name", Value: title})
+		fields = append(fields, Field{Name: "Title", Value: title})
 	}
 	if encoder := tags["ENCODER"]; encoder != "" {
 		facts.SetSame("Encoded_Application", encoder)

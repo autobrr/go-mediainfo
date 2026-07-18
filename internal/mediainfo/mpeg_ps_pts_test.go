@@ -1,6 +1,9 @@
 package mediainfo
 
-import "testing"
+import (
+	"math"
+	"testing"
+)
 
 func TestPtsDurationPS_Resets(t *testing.T) {
 	var tracker ptsTracker
@@ -29,4 +32,28 @@ func TestPtsDurationPS_Resets(t *testing.T) {
 			t.Fatalf("duration=%v, want 10", got)
 		}
 	})
+}
+
+func TestSampledFrameClockDurationPSUsesResetSegmentStart(t *testing.T) {
+	var tracker ptsTracker
+	tracker.add(9_000_000)
+	tracker.add(9_090_000)
+	tracker.add(90_000)
+	tracker.add(180_000)
+	if !tracker.hasResets() || tracker.segmentStart == tracker.first {
+		t.Fatalf("tracker did not establish distinct reset segment: %#v", tracker)
+	}
+	stream := &psStream{
+		pts:             tracker,
+		audioFrames:     12,
+		sampleSection:   2,
+		clockPTS:        270_000,
+		clockHasPTS:     true,
+		clockAudioStart: 10,
+	}
+	got, ok := sampledFrameClockDurationPS(stream, mpegPSOptions{sampled: true}, 48_000, 1152, false)
+	want := 2.0 + 2.0*1152.0/48_000.0
+	if !ok || math.Abs(got-want) > 1e-9 {
+		t.Fatalf("sampledFrameClockDurationPS() = %.9f, %v; want %.9f, true", got, ok, want)
+	}
 }

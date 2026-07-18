@@ -276,7 +276,7 @@ func TestRawTextSliceCountKeepsNumericExtensionSeparate(t *testing.T) {
 	} {
 		got := ""
 		for _, field := range rawTextStructuredDerivations(StreamVideo, map[string]string{"Format_Settings_SliceCount": test.count}, 0) {
-			if field.Label == "Format_Settings_SliceCount/String" {
+			if field.Label == "Format_Settings_SliceCount/Strin" {
 				got = field.Value
 			}
 		}
@@ -289,9 +289,9 @@ func TestRawTextSliceCountKeepsNumericExtensionSeparate(t *testing.T) {
 func TestWriteRawTextFieldsSeparatesFullWidthLabel(t *testing.T) {
 	var buffer bytes.Buffer
 	writeRawTextFields(&buffer, "Video", []rawTextFieldProjection{{
-		Label: "Format_Settings_SliceCount/String", Value: "4 slice per frame",
+		Label: "Format_Settings_SliceCount/Strin", Value: "4 slice per frame",
 	}})
-	if got := buffer.String(); !strings.Contains(got, "Format_Settings_SliceCount/String : 4 slice per frame") {
+	if got := buffer.String(); !strings.Contains(got, "Format_Settings_SliceCount/Strin : 4 slice per frame") {
 		t.Fatalf("raw text = %q; want a separator after the full-width label", got)
 	}
 }

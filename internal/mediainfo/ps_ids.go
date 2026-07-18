@@ -29,6 +29,8 @@ type psStream struct {
 	clockAudioStart      uint64
 	clockVideoStart      int
 	programEndSeen       bool
+	terminalTracked      bool
+	terminalBytes        []byte
 	ac3Info              ac3Info
 	hasAC3               bool
 	videoHeaderBytes     uint64
@@ -76,10 +78,12 @@ type ccTrack struct {
 	firstPTS                 uint64
 	lastPTS                  uint64
 	firstCommandPTS          uint64
+	hasFirstCommandPTS       bool
 	firstCommandFrame        int
 	firstDisplayPTS          uint64
 	firstDisplayFrame        int
 	firstContentPTS          uint64
+	hasFirstContentPTS       bool
 	lastCommandPTS           uint64
 	lastContentPTS           uint64
 	currentType              string

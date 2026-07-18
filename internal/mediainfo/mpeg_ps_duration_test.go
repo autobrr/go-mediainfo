@@ -29,6 +29,33 @@ func TestPSStreamParserAcceptsMPEG1PackAndPESHeaders(t *testing.T) {
 	}
 }
 
+func TestPSStreamParserRejectsMalformedMPEG1PESHeaders(t *testing.T) {
+	tests := []struct {
+		name string
+		data []byte
+	}{
+		{
+			name: "declared packet end exceeds input",
+			data: []byte{0, 0, 1, 0xE0, 0, 16, 0x0F, 0, 0, 1, 0xB3},
+		},
+		{
+			name: "more than sixteen stuffing bytes",
+			data: append(append([]byte{0, 0, 1, 0xE0, 0, 22}, bytes.Repeat([]byte{0xFF}, 17)...), 0x0F, 0, 0, 1, 0xB3),
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			parser := newPSStreamParser(mpegPSOptions{})
+			if parser.parseReader(bytes.NewReader(test.data)) {
+				t.Fatal("parseReader() accepted malformed MPEG-1 PES")
+			}
+			if len(parser.streams) != 0 || parser.anyPTS.has() {
+				t.Fatalf("malformed PES produced %d streams, PTS=%v", len(parser.streams), parser.anyPTS.has())
+			}
+		})
+	}
+}
+
 func TestMPEG1SequenceHeaderUsesMPEG1DisplaySemantics(t *testing.T) {
 	parser := &mpeg2VideoParser{}
 	header := append([]byte{0x16, 0x00, 0xF0, 0xC4, 0x02, 0x8A, 0xE0, 0x96}, make([]byte, 128)...)
@@ -53,6 +80,42 @@ func TestParseMPEGVideoWritingLibrary(t *testing.T) {
 	library, name, version = parseMPEGVideoWritingLibrary([]byte("(c)2004 Saar Software\x00"))
 	if library != "(c)2004 Saar Software" || name != library || version != "" {
 		t.Fatalf("Saar = %q, %q, %q", library, name, version)
+	}
+}
+
+func TestParseMPEGVideoWritingLibraryUsesFirstRecognizedRun(t *testing.T) {
+	tests := []struct {
+		name        string
+		data        string
+		wantLibrary string
+		wantName    string
+		wantVersion string
+	}{
+		{
+			name:        "TMPGEnc before longer unrelated run",
+			data:        "encoded by TMPGEnc (ver. 2.59.47.155)\x00this unrelated printable run is deliberately much longer than the encoder string",
+			wantLibrary: "encoded by TMPGEnc (ver. 2.59.47.155)",
+			wantName:    "TMPGEnc",
+			wantVersion: "2.59.47.155",
+		},
+		{
+			name:        "Saar before longer unrelated run",
+			data:        "(c)2004 Saar Software\x00this unrelated printable run is deliberately much longer than the encoder string",
+			wantLibrary: "(c)2004 Saar Software",
+			wantName:    "(c)2004 Saar Software",
+		},
+		{
+			name: "rejected runs only",
+			data: "unrelated encoder\x00another longer unrelated printable run",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			library, name, version := parseMPEGVideoWritingLibrary([]byte(test.data))
+			if library != test.wantLibrary || name != test.wantName || version != test.wantVersion {
+				t.Fatalf("library = %q, %q, %q; want %q, %q, %q", library, name, version, test.wantLibrary, test.wantName, test.wantVersion)
+			}
+		})
 	}
 }
 

@@ -213,6 +213,9 @@ func projectRawTextReport(report Report) rawTextReportProjection {
 			if !rule.Visible {
 				continue
 			}
+			if stream.Kind == StreamVideo && structured["Format"] == "Theora" && rule.Label == "FrameCount" {
+				continue
+			}
 			if _, exists := seen[rule.Label]; exists {
 				continue
 			}
@@ -290,6 +293,14 @@ func projectRawTextReport(report Report) rawTextReportProjection {
 		}
 		if _, exists := seen["dialnorm_Maximum"]; !exists {
 			for _, field := range fields {
+				if field.Label == "dialnorm" {
+					appendDerived("dialnorm_Maximum", field.Value)
+					break
+				}
+			}
+		}
+		if _, exists := seen["dialnorm_Maximum"]; !exists {
+			for _, field := range fields {
 				if field.Label == "dialnorm_Minimum" {
 					appendDerived("dialnorm_Maximum", field.Value)
 					break
@@ -342,7 +353,7 @@ func rawTextStructuredDerivations(kind StreamKind, structured map[string]string,
 	appendField("Format_Settings", formatRawTextSettings(structured))
 	appendField("Format_Settings_Floor", structured["Format_Settings_Floor"])
 	if count := structured["Format_Settings_SliceCount"]; count != "" && count != "1" {
-		appendField("Format_Settings_SliceCount/String", count+" slice per frame")
+		appendField("Format_Settings_SliceCount/Strin", count+" slice per frame")
 	}
 	appendField("BitRate_Mode/String", formatRawTextMode(structured["BitRate_Mode"], "CBR", "VBR"))
 	bitRateText := formatRawTextDerivedBitRate(structured["BitRate"])
@@ -426,7 +437,7 @@ func rawTextStructuredDerivations(kind StreamKind, structured map[string]string,
 		appendField("StreamSize/String", formatRawTextByteUnits(kind, formatStreamSize(size, totalFileSize), structured["ElementCount"]))
 	}
 	appendField("Encoded_Library_Settings", structured["Encoded_Library_Settings"])
-	appendField("Encoded_Library/String", formatRawTextEncodedLibrary(structured["Encoded_Library"]))
+	appendField("Encoded_Library/String", formatRawTextEncodedLibraryForStream(structured["Encoded_Library"], structured))
 	appendField("matrix_coefficients", structured["matrix_coefficients"])
 	appendField("colour_range", structured["colour_range"])
 	appendField("colour_primaries", structured["colour_primaries"])
@@ -974,6 +985,11 @@ func rawTextValue(kind StreamKind, label, display string, structured map[string]
 		if kind == StreamGeneral && structured["Format"] == "BDAV" {
 			return "0 (0x0)"
 		}
+		if format := structured["Format"]; structured["UniqueID"] == "" && structured["StreamOrder"] == "" && (format == "Theora" || format == "Vorbis" || format == "Opus") {
+			if id, err := strconv.ParseUint(structured["ID"], 10, 64); err == nil {
+				return fmt.Sprintf("%d (0x%X)", id, id)
+			}
+		}
 	case "Format/String":
 		if value := firstNonEmpty(structured["Format"], display); value != "" {
 			if structured["CodecID"] == "A_EAC3" {
@@ -1013,6 +1029,11 @@ func rawTextValue(kind StreamKind, label, display string, structured map[string]
 		}
 	case "OverallBitRate/String", "BitRate/String", "BitRate_Nominal/String", "BitRate_Maximum/String", "BitRate_Minimum/String":
 		key := strings.TrimSuffix(label, "/String")
+		if label == "BitRate/String" && kind == StreamVideo {
+			if target, ok := rawTextX264TargetBitRate(structured); ok {
+				return formatRawTextBitRate(strconv.FormatInt(int64(math.Round(target)), 10))
+			}
+		}
 		if label != "OverallBitRate/String" {
 			if kind == StreamAudio && structured["Format"] == "PCM" {
 				if value := formatRawTextPCMBitRate(structured[key]); value != "" {
@@ -1036,6 +1057,11 @@ func rawTextValue(kind StreamKind, label, display string, structured map[string]
 		}
 		return formatRawTextBitRate(structured[key])
 	case "FrameRate/String", "FrameRate_Original/String":
+		if label == "FrameRate/String" && (structured["Format"] == "Ogg" || structured["Format"] == "Theora") {
+			if rate, err := strconv.ParseFloat(structured["FrameRate"], 64); err == nil {
+				return fmt.Sprintf("%.3f fps", rate)
+			}
+		}
 		originalRate := strings.TrimSpace(strings.TrimSuffix(strings.TrimSuffix(display, " fps"), " FPS"))
 		if label == "FrameRate_Original/String" && rawTextAVIVisual(structured) {
 			return formatRawTextOriginalFrameRate(originalRate)
@@ -1085,7 +1111,7 @@ func rawTextValue(kind StreamKind, label, display string, structured map[string]
 		if value := structured["Encoded_Library"]; value != "" {
 			display = value
 		}
-		return formatRawTextEncodedLibrary(display)
+		return formatRawTextEncodedLibraryForStream(display, structured)
 	case "Encoded_Application/String":
 		if name, version := structured["Encoded_Application_Name"], structured["Encoded_Application_Version"]; name != "" && version != "" {
 			return name + " " + version
@@ -1166,6 +1192,9 @@ func rawTextValue(kind StreamKind, label, display string, structured map[string]
 	case "Bits-(Pixel*Frame)":
 		if kind == StreamVideo {
 			bitRate, _ := strconv.ParseFloat(firstNonEmpty(structured["BitRate"], structured["BitRate_Nominal"]), 64)
+			if target, ok := rawTextX264TargetBitRate(structured); ok {
+				bitRate = target
+			}
 			width, _ := strconv.ParseUint(structured["Width"], 10, 64)
 			height, _ := strconv.ParseUint(structured["Height"], 10, 64)
 			frameRate, _ := strconv.ParseFloat(structured["FrameRate"], 64)
@@ -1178,6 +1207,9 @@ func rawTextValue(kind StreamKind, label, display string, structured map[string]
 	case "Format_Profile":
 		return formatRawTextProfile(kind, structured, display)
 	case "DisplayAspectRatio/String":
+		if structured["Format"] == "Theora" {
+			return formatRawTextAspectRatio(structured["DisplayAspectRatio"])
+		}
 		// This immutable reference preserves a source ratio not derivable from
 		// the retained rounded display value.
 		if structured["UniqueID"] == "1337866033" {
@@ -1215,6 +1247,22 @@ func rawTextValue(kind StreamKind, label, display string, structured map[string]
 		}
 	}
 	return display
+}
+
+func rawTextX264TargetBitRate(structured map[string]string) (float64, bool) {
+	codecID := strings.ToLower(structured["CodecID"])
+	if structured["Format"] != "AVC" || structured["UniqueID"] != "" || (!strings.HasPrefix(codecID, "avc1") && !strings.HasPrefix(codecID, "avc3")) {
+		return 0, false
+	}
+	target, ok := findX264Bitrate(structured["Encoded_Library_Settings"])
+	if !ok || target <= 0 {
+		return 0, false
+	}
+	measured, err := strconv.ParseFloat(structured["BitRate"], 64)
+	if err != nil || measured <= 0 || math.Abs(measured-target)/target >= 0.05 {
+		return 0, false
+	}
+	return target, true
 }
 
 // formatRawTextOriginalFrameRate preserves MediaInfo's decimal-ratio form for
@@ -1487,6 +1535,16 @@ func formatRawTextEncodedLibrary(display string) string {
 	return display
 }
 
+func formatRawTextEncodedLibraryForStream(display string, structured map[string]string) string {
+	if structured["UniqueID"] == "" {
+		switch structured["Format"] {
+		case "Theora", "Vorbis":
+			return formatOggLibraryDisplay(structured["Format"], display)
+		}
+	}
+	return formatRawTextEncodedLibrary(display)
+}
+
 // rawTextFormatInfo returns the few compound audio descriptions whose raw
 // value must be composed from canonical format facts.
 func rawTextFormatInfo(kind StreamKind, structured map[string]string) string {
@@ -1574,7 +1632,7 @@ var (
 		"ID/String", "MenuID/String", "UniqueID/String", "OriginalSourceMedium_ID/String", "Format/String", "Format/Info",
 		"Format_Commercial_IfAny", "Format_Version", "Format_Profile", "MultiView_Count", "MultiView_Layout", "HDR_Format/String", "Format_Settings", "Format_Settings_Floor",
 		"Format_Settings_BVOP/String", "Format_Settings_QPel/String", "Format_Settings_GMC/String", "Format_Settings_Matrix/String",
-		"Format_Settings_CABAC/String", "Format_Settings_RefFrames/String", "Format_Settings_GOP", "Format_Settings_PictureStructure", "Format_Settings_SliceCount/String", "MuxingMode", "CodecID", "CodecID/Info", "CodecID/Hint",
+		"Format_Settings_CABAC/String", "Format_Settings_RefFrames/String", "Format_Settings_GOP", "Format_Settings_PictureStructure", "Format_Settings_SliceCount/Strin", "MuxingMode", "CodecID", "CodecID/Info", "CodecID/Hint",
 		"Duration/String", "Source_Duration/String", "Duration_FirstFrame/String", "Duration_LastFrame/String", "BitRate_Mode/String", "BitRate/String", "BitRate_Minimum/String", "BitRate_Nominal/String", "BitRate_Maximum/String",
 		"Width/String", "Height/String", "DisplayAspectRatio/String", "DisplayAspectRatio_Original/Stri", "ActiveFormatDescription/String", "Channel(s)/String", "ChannelLayout", "Channel(s)_Original/String", "ChannelLayout_Original", "SamplingRate/String",
 		"FrameRate_Mode/String", "FrameRate/String", "FrameRate_Minimum/String", "FrameRate_Maximum/String", "FrameRate_Original/String", "Standard", "ColorSpace", "ChromaSubsampling", "ChromaSubsampling/String", "BitDepth/String",

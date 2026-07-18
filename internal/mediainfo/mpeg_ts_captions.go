@@ -92,7 +92,7 @@ func shouldSuppressEarlyService2Only(video *tsStream, delay, fps float64) bool {
 		return false
 	}
 	start := 0.0
-	if fps > 0 && video.ccEven.firstCommandPTS != 0 {
+	if fps > 0 && hasCCFirstCommandPTS(&video.ccEven) {
 		ptsSec := float64(video.ccEven.firstCommandPTS) / 90000.0
 		frame := int64(math.Round((ptsSec-delay)*fps)) - 1
 		if frame < 0 {
@@ -111,7 +111,7 @@ func shouldEmitTSCC3(video *tsStream) bool {
 	if video == nil || !video.ccEven.found {
 		return false
 	}
-	if video.ccEven.firstCommandPTS != 0 || video.ccEven.firstCommandFrame > 0 {
+	if hasCCFirstCommandPTS(&video.ccEven) || video.ccEven.firstCommandFrame > 0 {
 		return true
 	}
 	// Without any DTVCC services, keep legacy CC3 fallback when a display type was detected.
@@ -127,7 +127,7 @@ func shouldEmitTSCC1(video *tsStream) bool {
 	if video == nil || !video.ccOdd.found {
 		return false
 	}
-	return video.ccOdd.firstCommandPTS != 0 || video.ccOdd.firstCommandFrame > 0
+	return hasCCFirstCommandPTS(&video.ccOdd) || video.ccOdd.firstCommandFrame > 0
 }
 
 // buildTSCaptionStream constructs one canonical caption stream from its
@@ -153,7 +153,7 @@ func buildTSCaptionStream(videoPID uint16, programNumber uint16, delaySeconds fl
 	)
 	streamFacts := &mpegTSStructuredFacts{}
 	startCommand := tsCaptionCommandStart(track, delaySeconds, fps)
-	if track != nil && track.firstContentPTS > 0 {
+	if track != nil && track.hasFirstContentPTS {
 		start := mediaInfoCaptionTimestamp(track.firstContentPTS, fps, -1)
 		end := mediaInfoCaptionTimestamp(track.lastContentPTS, fps, -1)
 		endCommandFrameOffset := 1
@@ -229,7 +229,6 @@ func buildTSCaptionStream(videoPID uint16, programNumber uint16, delaySeconds fl
 	}
 	extra := structuredObjectFromKVs([]jsonKV{
 		{Key: "CaptionServiceName", Val: service},
-		{Key: "CaptionServiceContent_IsPresent", Val: "Yes"},
 		{Key: "CaptionServiceDescriptor_IsPresent", Val: descriptorValue},
 	})
 	return buildCanonicalMPEGTSStream(StreamText, nil, fields, streamFacts, &extra, false)
@@ -241,13 +240,19 @@ func tsCaptionCommandStart(track *ccTrack, delay, fps float64) float64 {
 	if track == nil || fps <= 0 {
 		return 0
 	}
-	if track.firstCommandPTS != 0 {
+	if hasCCFirstCommandPTS(track) {
 		return mediaInfoCaptionTimestamp(track.firstCommandPTS, fps, -1)
 	}
 	if track.firstCommandFrame > 0 {
 		return delay + float64(track.firstCommandFrame)/fps
 	}
 	return 0
+}
+
+// hasCCFirstCommandPTS reports whether a caption track observed a command at
+// PTS zero; the explicit flag distinguishes that value from an unset PTS.
+func hasCCFirstCommandPTS(track *ccTrack) bool {
+	return track != nil && (track.hasFirstCommandPTS || track.firstCommandPTS != 0)
 }
 
 // mediaInfoCaptionTimestamp converts a GA94 picture PTS to the synthesized

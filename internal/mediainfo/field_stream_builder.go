@@ -459,6 +459,35 @@ func replaceCanonicalSeedObjectValues(stream *Stream, key fieldName, values map[
 	}
 }
 
+// removeCanonicalSeedObjectMember removes every matching member from one
+// direct structured object and removes the object itself when it becomes empty.
+func removeCanonicalSeedObjectMember(stream *Stream, key fieldName, memberKey string) {
+	if stream == nil || memberKey == "" {
+		return
+	}
+	for index := range stream.canonicalSeed {
+		entry := &stream.canonicalSeed[index]
+		structuredKey := firstNonEmpty(entry.StructuredKey, string(entry.Name))
+		if !entry.Options.ShowStructured || structuredKey != string(key) || entry.Node == nil || entry.Node.Kind != structuredObject {
+			continue
+		}
+		members := entry.Node.Object[:0]
+		for _, member := range entry.Node.Object {
+			if member.Key != memberKey {
+				members = append(members, member)
+			}
+		}
+		if len(members) == 0 {
+			stream.canonicalSeed = append(stream.canonicalSeed[:index], stream.canonicalSeed[index+1:]...)
+			return
+		}
+		entry.Node.Object = members
+		entry.Value.Text = structuredNodeText(*entry.Node)
+		entry.Projected = false
+		return
+	}
+}
+
 // prependCanonicalSeedObjectMembers places source members before an existing
 // direct structured object while preserving member and duplicate-key order.
 func prependCanonicalSeedObjectMembers(stream *Stream, key fieldName, members []structuredMember) {

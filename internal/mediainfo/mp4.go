@@ -755,12 +755,12 @@ func parseStcoHead(payload []byte, limit int) []uint64 {
 	if len(payload) < 8 || limit <= 0 {
 		return nil
 	}
-	count := int(binary.BigEndian.Uint32(payload[4:8]))
-	count = min(count, limit)
-	if count <= 0 || len(payload) < 8+count*4 {
+	rawCount := binary.BigEndian.Uint32(payload[4:8])
+	count := min(uint64(rawCount), uint64(limit))
+	if count == 0 || count > uint64((len(payload)-8)/4) {
 		return nil
 	}
-	result := make([]uint64, count)
+	result := make([]uint64, int(count))
 	for index := range result {
 		result[index] = uint64(binary.BigEndian.Uint32(payload[8+index*4 : 12+index*4]))
 	}
@@ -772,12 +772,12 @@ func parseCo64Head(payload []byte, limit int) []uint64 {
 	if len(payload) < 8 || limit <= 0 {
 		return nil
 	}
-	count := int(binary.BigEndian.Uint32(payload[4:8]))
-	count = min(count, limit)
-	if count <= 0 || len(payload) < 8+count*8 {
+	rawCount := binary.BigEndian.Uint32(payload[4:8])
+	count := min(uint64(rawCount), uint64(limit))
+	if count == 0 || count > uint64((len(payload)-8)/8) {
 		return nil
 	}
-	result := make([]uint64, count)
+	result := make([]uint64, int(count))
 	for index := range result {
 		result[index] = binary.BigEndian.Uint64(payload[8+index*8 : 16+index*8])
 	}
@@ -789,10 +789,11 @@ func parseStsc(payload []byte) []mp4SampleToChunkEntry {
 	if len(payload) < 8 {
 		return nil
 	}
-	count := int(binary.BigEndian.Uint32(payload[4:8]))
-	if count <= 0 || len(payload) < 8+count*12 {
+	rawCount := uint64(binary.BigEndian.Uint32(payload[4:8]))
+	if rawCount == 0 || rawCount > uint64((len(payload)-8)/12) {
 		return nil
 	}
+	count := int(rawCount)
 	result := make([]mp4SampleToChunkEntry, 0, count)
 	for index := range count {
 		pos := 8 + index*12

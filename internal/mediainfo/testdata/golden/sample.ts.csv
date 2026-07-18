@@ -17,7 +17,6 @@ Format profile,High@L3
 Format settings,CABAC / 4 Ref Frames
 Format settings, CABAC,Yes
 Format settings, Reference frames,4 frames
-Format settings, Slice count,1
 Codec ID,27
 Duration,3 s 971 ms
 Width,640 pixels
@@ -57,4 +56,3 @@ List,256 (0x100) (AVC) / 257 (0x101) (AAC)
 Service name,Service01
 Service provider,FFmpeg
 Service type,digital television
-

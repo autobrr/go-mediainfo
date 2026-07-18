@@ -244,7 +244,6 @@ func (p *mpeg2VideoParser) consume(data []byte) {
 }
 
 func parseMPEGVideoWritingLibrary(data []byte) (library, name, version string) {
-	longest := ""
 	for start := 0; start < len(data); {
 		for start < len(data) && (data[start] < 0x20 || data[start] > 0x7E) {
 			start++
@@ -253,25 +252,31 @@ func parseMPEGVideoWritingLibrary(data []byte) (library, name, version string) {
 		for end < len(data) && data[end] >= 0x20 && data[end] <= 0x7E {
 			end++
 		}
-		if end-start > len(longest) {
-			longest = string(data[start:end])
+		candidate := strings.TrimSpace(string(data[start:end]))
+		if library, name, version = classifyMPEGVideoWritingLibrary(candidate); library != "" {
+			return library, name, version
 		}
 		start = end + 1
 	}
-	longest = strings.TrimSpace(longest)
+	return "", "", ""
+}
+
+// classifyMPEGVideoWritingLibrary extracts the encoder family, display name,
+// and version from an MPEG video writing-library string.
+func classifyMPEGVideoWritingLibrary(value string) (library, name, version string) {
 	switch {
-	case strings.Contains(longest, "TMPGEnc"):
-		if start := strings.Index(longest, "encoded by "); start >= 0 {
-			longest = longest[start:]
+	case strings.Contains(value, "TMPGEnc"):
+		if start := strings.Index(value, "encoded by "); start >= 0 {
+			value = value[start:]
 		}
-		library = longest
+		library = value
 		name = "TMPGEnc"
-		if _, value, ok := strings.Cut(longest, "(ver. "); ok {
-			version = strings.TrimSuffix(value, ")")
+		if _, parsedVersion, ok := strings.Cut(value, "(ver. "); ok {
+			version = strings.TrimSuffix(parsedVersion, ")")
 		}
-	case strings.Contains(longest, "Saar Software"):
-		library = longest
-		name = longest
+	case strings.Contains(value, "Saar Software"):
+		library = value
+		name = value
 	}
 	return library, name, version
 }

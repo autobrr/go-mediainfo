@@ -189,7 +189,7 @@ func parseFLAC(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, *canoni
 	}
 
 	generalFacts, generalExtra := flacTagsToGeneralFacts(tags, encoder)
-	if coverMIME != "" && (len(generalFacts.values) > 0 || generalExtra != nil) {
+	if coverMIME != "" && len(generalFacts.values) > 0 {
 		generalFacts.SetSame("Cover", "Yes")
 		generalFacts.SetSame("Cover_Mime", coverMIME)
 		if coverType != "" {

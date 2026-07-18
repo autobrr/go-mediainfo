@@ -472,9 +472,18 @@ func parseMP4VP9SampleEntry(entry []byte, facts *mp4StructuredFacts, fields *[]F
 			facts.Set("BitDepth", strconv.Itoa(int(bitDepth)))
 			*fields = appendFieldUnique(*fields, Field{Name: "Bit depth", Value: formatBitDepth(bitDepth)})
 		}
-		if chroma <= 3 {
-			facts.Set("ChromaSubsampling", "4:2:0")
-			*fields = appendFieldUnique(*fields, Field{Name: "Chroma subsampling", Value: "4:2:0"})
+		chromaSubsampling := ""
+		switch chroma {
+		case 0, 1:
+			chromaSubsampling = "4:2:0"
+		case 2:
+			chromaSubsampling = "4:2:2"
+		case 3:
+			chromaSubsampling = "4:4:4"
+		}
+		if chromaSubsampling != "" {
+			facts.Set("ChromaSubsampling", chromaSubsampling)
+			*fields = appendFieldUnique(*fields, Field{Name: "Chroma subsampling", Value: chromaSubsampling})
 		}
 		facts.Set("ColorSpace", "YUV")
 		*fields = appendFieldUnique(*fields, Field{Name: "Color space", Value: "YUV"})
@@ -634,7 +643,7 @@ func mergeMP4ContainerColorFact(facts *mp4StructuredFacts, key, containerValue s
 
 // parseMP4HEVCSampleEntry parses the hvcC configuration box of an HEVC (hvc1/hev1)
 // MP4 visual sample entry. It returns the stream fields (Format profile / tier,
-// chroma subsampling, bit depth, codec configuration box, scan type, colour space,
+// chroma subsampling, bit depth, codec configuration box, colour space,
 // and the x265 writing library / encoding settings when present) plus the parsed
 // SPS. Colour facts use a "Stream" source: unlike the AVC path (which merges a
 // container colr atom and reports "Container / Stream"), HEVC MP4 streams here
@@ -657,8 +666,6 @@ func parseMP4HEVCSampleEntryDetails(entry []byte, width, height uint64, facts *m
 	_, hevcFields, configInfo, spsInfo := parseHEVCConfig(payload)
 	fields := append([]Field{}, hevcFields...)
 	fields = append(fields, Field{Name: "Codec configuration box", Value: "hvcC"})
-	// HEVC does not use field/interlaced coding in practice; MediaInfo reports Progressive.
-	fields = append(fields, Field{Name: "Scan type", Value: "Progressive"})
 	fields = append(fields, Field{Name: "Color space", Value: "YUV"})
 
 	// Stored (coded, pre-conformance-crop) dimensions are reported when they differ from

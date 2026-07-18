@@ -81,6 +81,66 @@ func TestTerminalMPEGAudioSyncLossAdjustsDuration(t *testing.T) {
 	}
 }
 
+func TestTerminalMPEGAudioSyncLossRequiresEveryPrerequisite(t *testing.T) {
+	base := psStream{
+		mpegAudioVersion: 3,
+		mpegAudioLayer:   2,
+		audioRate:        44_100,
+		audioFrames:      mpegAudioValidationThreshold,
+		programEndSeen:   true,
+		terminalTracked:  true,
+		terminalBytes:    []byte{0},
+	}
+	tests := []struct {
+		name   string
+		mutate func(*psStream)
+	}{
+		{name: "mpeg audio", mutate: func(stream *psStream) { stream.mpegAudioLayer = 0 }},
+		{name: "validation threshold", mutate: func(stream *psStream) { stream.audioFrames-- }},
+		{name: "program end", mutate: func(stream *psStream) { stream.programEndSeen = false }},
+		{name: "terminal tail", mutate: func(stream *psStream) { stream.terminalBytes = nil }},
+		{name: "single byte tail", mutate: func(stream *psStream) { stream.terminalBytes = []byte{0, 0} }},
+		{name: "zeroed tail", mutate: func(stream *psStream) { stream.terminalBytes = []byte{1} }},
+	}
+	if !hasTerminalMPEGAudioSyncLoss(&base) {
+		t.Fatal("complete evidence was rejected")
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			stream := base
+			test.mutate(&stream)
+			if hasTerminalMPEGAudioSyncLoss(&stream) {
+				t.Fatal("incomplete evidence was accepted")
+			}
+		})
+	}
+}
+
+func TestProgramEndCapturesTrackedMPEGAudioTerminalState(t *testing.T) {
+	parser := newPSStreamParser(mpegPSOptions{parseSpeed: 1})
+	stream := parser.ensureStream(0xC0, psSubstreamNone, StreamAudio, "MPEG Audio")
+	stream.mpegAudioVersion = 3
+	stream.mpegAudioLayer = 2
+	stream.audioRate = 44_100
+	stream.audioFrames = mpegAudioValidationThreshold
+	stream.audioBuffer = []byte{0}
+
+	if !parser.parseReader(bytes.NewReader([]byte{0, 0, 1, 0xB9})) {
+		t.Fatal("program end was not parsed")
+	}
+	if !stream.terminalTracked || !stream.programEndSeen || !reflect.DeepEqual(stream.terminalBytes, []byte{0}) {
+		t.Fatalf("terminal state = tracked %v, end %v, bytes %v", stream.terminalTracked, stream.programEndSeen, stream.terminalBytes)
+	}
+	stream.audioBuffer = []byte{1}
+	wantDuration := float64(stream.audioFrames*1152)/stream.audioRate - float64(mpegAudioTerminalValidationFrames*1152)/stream.audioRate + mpegAudioTerminalClockAdjustment
+	if got := audioDurationPS(stream, mpegPSOptions{}); math.Abs(got-wantDuration) > 1e-9 {
+		t.Fatalf("audioDurationPS() = %.9f, want %.9f", got, wantDuration)
+	}
+	if extra := mpegAudioConformanceExtra(stream, 100, wantDuration); extra == nil {
+		t.Fatal("tracked terminal state did not produce ConformanceInfos")
+	}
+}
+
 func TestMPEGAudioConformanceExtra(t *testing.T) {
 	stream := &psStream{
 		mpegAudioVersion: 3,

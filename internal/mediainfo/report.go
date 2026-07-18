@@ -60,6 +60,7 @@ type Stream struct {
 	mkvHEVCX265Settings string
 	mkvTrackOffsetNs    int64
 	mkvStereoMode       uint64
+	mkvTagFrameCount    bool
 	// matroskaDeferredFacts holds fallback TrackEntry values until all parser
 	// refinements have updated the canonical seed.
 	matroskaDeferredFacts *matroskaDeferredFacts

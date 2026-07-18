@@ -122,6 +122,12 @@ func renderXMLField(key, value string) string {
 }
 
 func xmlEscape(value string) string {
+	value = strings.Map(func(r rune) rune {
+		if r == '\t' || r == '\n' || r == '\r' || r >= 0x20 && r <= 0xD7FF || r >= 0xE000 && r <= 0xFFFD || r >= 0x10000 && r <= 0x10FFFF {
+			return r
+		}
+		return '\uFFFD'
+	}, value)
 	value = strings.ReplaceAll(value, "&", "&amp;")
 	value = strings.ReplaceAll(value, "<", "&lt;")
 	value = strings.ReplaceAll(value, ">", "&gt;")

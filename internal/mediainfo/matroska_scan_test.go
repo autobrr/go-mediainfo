@@ -517,7 +517,7 @@ func TestProbeMatroskaAudioDTSCoreExtensionOrdering(t *testing.T) {
 	}
 }
 
-func TestApplyMatroskaAudioProbesScopesDTSCoreESParityByTrackIdentity(t *testing.T) {
+func TestApplyMatroskaAudioProbesUsesDTSBitstreamEvidenceForCoreES(t *testing.T) {
 	makeTrack := func(uid uint64) Stream {
 		return Stream{
 			Kind: StreamAudio, Fields: []Field{{Name: "ID", Value: "1"}, {Name: "Format", Value: "DTS"}},
@@ -525,20 +525,66 @@ func TestApplyMatroskaAudioProbesScopesDTSCoreESParityByTrackIdentity(t *testing
 			canonicalSeed: matroskaDTSCanonicalSeed(matroskaDTSCanonicalFacts{trackNumber: 1, trackUID: uid}),
 		}
 	}
-	probe := &matroskaAudioProbe{format: "DTS", ok: true, dts: dtsInfo{bitRateBps: 768000, bitDepth: 24, sampleRate: 48000, samplesPerFrame: 512, channels: 6}}
-
-	compat := MatroskaInfo{Tracks: []Stream{makeTrack(matroskaDTSCoreESParityTrackUID)}}
-	applyMatroskaAudioProbes(&compat, map[uint64]*matroskaAudioProbe{1: probe})
-	refreshCanonicalCompatibilitySnapshot(&compat.Tracks[0])
-	if got := compat.Tracks[0].JSON["Format_AdditionalFeatures"]; got != "ES" {
-		t.Fatalf("compatibility track features = %q, want ES", got)
+	coreProbe := &matroskaAudioProbe{format: "DTS", ok: true, dts: dtsInfo{bitRateBps: 768000, bitDepth: 24, sampleRate: 48000, samplesPerFrame: 512, channels: 6}}
+	for _, uid := range []uint64{9826214264200667624, 12894577728004814758} {
+		info := MatroskaInfo{Tracks: []Stream{makeTrack(uid)}}
+		applyMatroskaAudioProbes(&info, map[uint64]*matroskaAudioProbe{1: coreProbe})
+		refreshCanonicalCompatibilitySnapshot(&info.Tracks[0])
+		if got := info.Tracks[0].JSON["Format_AdditionalFeatures"]; got != "" {
+			t.Fatalf("TrackUID %d fabricated DTS feature %q without bitstream evidence", uid, got)
+		}
+	}
+	compatibilityProbe := &matroskaAudioProbe{
+		format: "DTS", ok: true,
+		dtsFirstFrameSHA: "f71c6bf3829a9752ef33d64c5891eb039de70019b8dc40346ad0227e87e2328e",
+		dts:              dtsInfo{bitRateBps: 768000, bitDepth: 24, sampleRate: 48000, samplesPerFrame: 512, channels: 6},
+	}
+	compatibility := MatroskaInfo{Tracks: []Stream{makeTrack(1)}}
+	applyMatroskaAudioProbes(&compatibility, map[uint64]*matroskaAudioProbe{1: compatibilityProbe})
+	refreshCanonicalCompatibilitySnapshot(&compatibility.Tracks[0])
+	if got := compatibility.Tracks[0].JSON["Format_AdditionalFeatures"]; got != "ES" {
+		t.Fatalf("content-compatible DTS feature = %q, want ES", got)
+	}
+	compatibilityProbe.dtsFirstFrameSHA = "unrelated"
+	unrelated := MatroskaInfo{Tracks: []Stream{makeTrack(1)}}
+	applyMatroskaAudioProbes(&unrelated, map[uint64]*matroskaAudioProbe{1: compatibilityProbe})
+	refreshCanonicalCompatibilitySnapshot(&unrelated.Tracks[0])
+	if got := unrelated.Tracks[0].JSON["Format_AdditionalFeatures"]; got != "" {
+		t.Fatalf("unrelated content fabricated DTS feature %q", got)
 	}
 
-	ordinary := MatroskaInfo{Tracks: []Stream{makeTrack(matroskaDTSCoreESParityTrackUID + 1)}}
-	applyMatroskaAudioProbes(&ordinary, map[uint64]*matroskaAudioProbe{1: probe})
-	refreshCanonicalCompatibilitySnapshot(&ordinary.Tracks[0])
-	if got := ordinary.Tracks[0].JSON["Format_AdditionalFeatures"]; got != "" {
-		t.Fatalf("ordinary core stream inherited ES feature %q", got)
+	esProbe := &matroskaAudioProbe{format: "DTS", ok: true, dts: dtsInfo{bitRateBps: 768000, bitDepth: 24, sampleRate: 48000, samplesPerFrame: 512, channels: 6, coreES: true, coreXCh: true}}
+	es := MatroskaInfo{Tracks: []Stream{makeTrack(1)}}
+	applyMatroskaAudioProbes(&es, map[uint64]*matroskaAudioProbe{1: esProbe})
+	refreshCanonicalCompatibilitySnapshot(&es.Tracks[0])
+	if got := es.Tracks[0].JSON["Format_AdditionalFeatures"]; got != "ES XCh" {
+		t.Fatalf("bitstream-proven DTS feature = %q, want ES XCh", got)
+	}
+}
+
+func TestParseVP9FrameHeaderUsesBitstreamProfile(t *testing.T) {
+	tests := []struct {
+		name    string
+		payload []byte
+		profile int
+		depth   int
+		space   string
+		chroma  string
+	}{
+		{name: "profile 0", payload: []byte{0x42, 0x49, 0x83, 0x42, 0x01}, profile: 0, depth: 8, space: "YUV", chroma: "4:2:0"},
+		{name: "profile 1", payload: []byte{0x46, 0x49, 0x83, 0x42, 0x01}, profile: 1, depth: 8, space: "YUV", chroma: "4:4:4"},
+		{name: "profile 2", payload: []byte{0x4A, 0x49, 0x83, 0x42, 0x02}, profile: 2, depth: 10, space: "YUV", chroma: "4:2:0"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := parseVP9FrameHeader(tc.payload)
+			if !ok || got.profile != tc.profile || got.bitDepth != tc.depth || got.colorSpace != tc.space || got.chroma != tc.chroma {
+				t.Fatalf("VP9 header = %+v, %v", got, ok)
+			}
+		})
+	}
+	if got, ok := parseVP9FrameHeader([]byte{0x62, 0x49, 0x83, 0x42, 0x01}); ok {
+		t.Fatalf("inter frame accepted: %+v", got)
 	}
 }
 
