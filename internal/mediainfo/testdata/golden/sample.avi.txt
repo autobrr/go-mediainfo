@@ -45,5 +45,5 @@ Channel(s)                               : 1 channel
 Sampling rate                            : 48.0 kHz
 Stream size                              : 63.0 KiB (6%)
 
-ReportBy : go-mediainfo - dev
+ReportBy                                 : go-mediainfo - dev
 

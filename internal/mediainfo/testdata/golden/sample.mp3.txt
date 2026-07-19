@@ -13,5 +13,5 @@ Bit rate                                 : 128 kb/s
 Channel(s)                               : 1 channel
 Sampling rate                            : 48.0 kHz
 
-ReportBy : go-mediainfo - dev
+ReportBy                                 : go-mediainfo - dev
 

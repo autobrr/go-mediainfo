@@ -16,5 +16,5 @@ Channel layout                           : M
 Sampling rate                            : 48.0 kHz
 Bit depth                                : 16 bits
 
-ReportBy : go-mediainfo - dev
+ReportBy                                 : go-mediainfo - dev
 

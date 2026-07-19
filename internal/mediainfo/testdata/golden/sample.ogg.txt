@@ -16,5 +16,5 @@ Sampling rate                            : 48.0 kHz
 Compression mode                         : Lossy
 Writing library                          : Lavf62.3.100
 
-ReportBy : go-mediainfo - dev
+ReportBy                                 : go-mediainfo - dev
 

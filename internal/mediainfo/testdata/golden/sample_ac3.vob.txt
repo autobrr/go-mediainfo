@@ -58,5 +58,5 @@ dialnorm_Average                         : -31 dB
 dialnorm_Minimum                         : -31 dB
 dialnorm_Maximum                         : -31 dB
 
-ReportBy : go-mediainfo - dev
+ReportBy                                 : go-mediainfo - dev
 

@@ -6,6 +6,8 @@ import (
 	"strings"
 )
 
+const textLabelWidth = 41
+
 // TextRenderOptions configures text-specific projection behavior.
 type TextRenderOptions struct {
 	// Language selects MediaInfo raw labels and values for "raw". The zero value
@@ -47,15 +49,15 @@ func RenderTextWithOptions(reports []Report, options TextRenderOptions) string {
 			writeFields(&buf, title, stream.Fields)
 		}
 		buf.WriteString("\n")
-		buf.WriteString(reportByLine())
+		buf.WriteString(reportByLine(textLabelWidth))
 		buf.WriteString("\n")
 	}
 	output := strings.TrimRight(buf.String(), "\n")
 	return output + "\n\n"
 }
 
-func reportByLine() string {
-	return fmt.Sprintf("ReportBy : %s - %s", AppName, FormatVersion(AppVersion))
+func reportByLine(labelWidth int) string {
+	return fmt.Sprintf("%s: %s - %s", padRight("ReportBy", labelWidth), AppName, FormatVersion(AppVersion))
 }
 
 func writeStream(buf *bytes.Buffer, title string, stream Stream) {
@@ -67,7 +69,7 @@ func writeFields(buf *bytes.Buffer, title string, fields []Field) {
 	buf.WriteString(title)
 	buf.WriteString("\n")
 	for _, field := range fields {
-		buf.WriteString(padRight(field.Name, 41))
+		buf.WriteString(padRight(field.Name, textLabelWidth))
 		buf.WriteString(": ")
 		buf.WriteString(escapeOutputControls(field.Value))
 		buf.WriteString("\n")

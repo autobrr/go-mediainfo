@@ -2010,6 +2010,8 @@ func rawTextFieldOrderPolicy(kind StreamKind) map[string]int {
 
 // renderRawText serializes raw-language projections with MediaInfo's 33-column labels.
 func renderRawText(reports []Report) string {
+	const labelWidth = 33
+
 	var buffer bytes.Buffer
 	for reportIndex, report := range reports {
 		if reportIndex > 0 {
@@ -2031,11 +2033,12 @@ func renderRawText(reports []Report) string {
 			buffer.WriteByte('\n')
 			writeRawTextFields(&buffer, streamTitle(stream.Kind, kindIndexes[stream.Kind], counts[stream.Kind]), stream.Fields)
 		}
-		buffer.WriteString(reportByLine())
+		buffer.WriteByte('\n')
+		buffer.WriteString(reportByLine(labelWidth))
 		buffer.WriteByte('\n')
 	}
 	output := strings.TrimRight(buffer.String(), "\n")
-	return strings.ReplaceAll(output+"\n\n\n", "\n", "\r\n")
+	return strings.ReplaceAll(output+"\n\n", "\n", "\r\n")
 }
 
 // writeRawTextFields writes one raw stream section.

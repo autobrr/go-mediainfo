@@ -30,11 +30,20 @@ func TestRenderTextWithOptionsUsesRawProjection(t *testing.T) {
 	if strings.Contains(raw, "\n") && strings.Contains(strings.ReplaceAll(raw, "\r\n", ""), "\n") {
 		t.Fatalf("raw output contains bare LF line endings: %q", raw)
 	}
-	if !strings.HasSuffix(raw, "\r\n\r\n\r\n") {
+	wantFooter := "\r\n\r\n" + padRight("ReportBy", 33) + ": " + AppName + " - " + FormatVersion(AppVersion)
+	if !strings.Contains(raw, wantFooter) {
+		t.Fatalf("raw output footer framing/alignment changed:\n%s", raw)
+	}
+	if !strings.HasSuffix(raw, "\r\n\r\n") || strings.HasSuffix(raw, "\r\n\r\n\r\n") {
 		t.Fatalf("raw output terminal line endings = %q", raw[len(raw)-min(len(raw), 12):])
 	}
-	if friendly := RenderText([]Report{report}); !strings.Contains(friendly, "Format                                   : Matroska") {
+	friendly := RenderText([]Report{report})
+	if !strings.Contains(friendly, "Format                                   : Matroska") {
 		t.Fatalf("friendly output changed:\n%s", friendly)
+	}
+	wantFriendlyFooter := "\n\n" + padRight("ReportBy", textLabelWidth) + ": " + AppName + " - " + FormatVersion(AppVersion)
+	if !strings.Contains(friendly, wantFriendlyFooter) {
+		t.Fatalf("friendly output footer framing/alignment changed:\n%s", friendly)
 	}
 }
 
