@@ -13,11 +13,34 @@ type sparseRecordingReaderAt struct {
 	maxRead int
 }
 
+type partialReadFailureReaderAt struct {
+	data       []byte
+	failOffset int64
+	failed     bool
+}
+
 var benchmarkEmbeddedAssetBudgetSink embeddedAssetBudget
 
 func (r *sparseRecordingReaderAt) ReadAt(p []byte, off int64) (int, error) {
 	if len(p) > r.maxRead {
 		r.maxRead = len(p)
+	}
+	if off < 0 || off >= int64(len(r.data)) {
+		return 0, io.EOF
+	}
+	n := copy(p, r.data[off:])
+	if n != len(p) {
+		return n, io.EOF
+	}
+	return n, nil
+}
+
+func (r *partialReadFailureReaderAt) ReadAt(p []byte, off int64) (int, error) {
+	if !r.failed && off == r.failOffset && len(p) > int(embeddedAssetMaxImageProbe) {
+		r.failed = true
+		n := len(p) / 2
+		copy(p[:n], r.data[off:off+int64(n)])
+		return n, io.ErrUnexpectedEOF
 	}
 	if off < 0 || off >= int64(len(r.data)) {
 		return 0, io.EOF
@@ -132,6 +155,41 @@ func TestScanMatroskaAttachmentsAcceptsDataBeforeIdentity(t *testing.T) {
 	attachments := scanMatroskaAttachmentsFromFile(bytes.NewReader(file), 1, int64(len(file)), &embeddedAssetBudget{})
 	if len(attachments) != 1 || !attachments[0].complete || !bytes.Equal(attachments[0].data, image) {
 		t.Fatalf("data-before-identity attachment = %#v", attachments)
+	}
+}
+
+func TestScanMatroskaAttachmentsRollsBackPayloadBudgetAfterPartialRead(t *testing.T) {
+	failedImage := append(minimalPNG(16, 9, 2), make([]byte, int(embeddedAssetMaxImageProbe))...)
+	validImage := minimalPNG(32, 18, 2)
+	failedFields := append(buildMatroskaElement(mkvIDFileName, []byte("failed.png")), buildMatroskaElement(mkvIDFileData, failedImage)...)
+	validFields := append(buildMatroskaElement(mkvIDFileName, []byte("valid.png")), buildMatroskaElement(mkvIDFileData, validImage)...)
+	payload := append(buildMatroskaElement(mkvIDAttachedFile, failedFields), buildMatroskaElement(mkvIDAttachedFile, validFields)...)
+	file := append([]byte{0}, buildMatroskaElement(mkvIDAttachments, payload)...)
+	failOffset := int64(bytes.Index(file, failedImage))
+	if failOffset < 0 {
+		t.Fatal("failed attachment payload not found")
+	}
+
+	reader := &partialReadFailureReaderAt{data: file, failOffset: failOffset}
+	initialRetained := embeddedAssetMaxRetainedBytes - int64(len(failedImage))
+	budget := &embeddedAssetBudget{retainedBytes: initialRetained}
+	attachments := scanMatroskaAttachmentsFromFile(reader, 1, int64(len(file)), budget)
+	if !reader.failed {
+		t.Fatal("full attachment read did not fail")
+	}
+
+	var valid *matroskaAttachment
+	for i := range attachments {
+		if attachments[i].name == "valid.png" {
+			valid = &attachments[i]
+			break
+		}
+	}
+	if valid == nil || !valid.complete || !bytes.Equal(valid.data, validImage) {
+		t.Fatalf("valid attachment after partial read = %#v", valid)
+	}
+	if want := initialRetained + int64(len(validImage)); budget.retainedBytes != want {
+		t.Fatalf("retained payload bytes = %d, want %d", budget.retainedBytes, want)
 	}
 }
 

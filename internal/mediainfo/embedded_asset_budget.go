@@ -104,3 +104,12 @@ func (b *embeddedAssetBudget) reservePayload(size uint64, maximum int64) embedde
 	b.retainedBytes += int64(size)
 	return embeddedAssetAccepted
 }
+
+// releasePayload rolls back a successful payload reservation when the caller
+// cannot retain the payload. Invalid releases leave the counter unchanged.
+func (b *embeddedAssetBudget) releasePayload(size uint64) {
+	if b == nil || b.retainedBytes < 0 || size > uint64(b.retainedBytes) {
+		return
+	}
+	b.retainedBytes -= int64(size)
+}

@@ -4088,6 +4088,8 @@ outer:
 								if _, err := io.ReadFull(io.NewSectionReader(r, absoluteStart, pendingDataSize), data); err == nil {
 									attachment.data = data
 									attachment.complete = true
+								} else {
+									assetBudget.releasePayload(uint64(pendingDataSize))
 								}
 							} else if assetBudget.reservePayload(uint64(probeSize), embeddedAssetMaxImageProbe) == embeddedAssetAccepted {
 								attachment.data = probe
