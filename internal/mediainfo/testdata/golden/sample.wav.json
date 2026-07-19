@@ -1,6 +1,6 @@
 {
 "creatingLibrary":{"name":"go-mediainfo","version":"dev","url":"https://github.com/autobrr/go-mediainfo"},
-"media":{"@ref":"samples/sample.wav","track":[{"@type":"General","AudioCount":"1",
+"media":{"@ref":"sample.wav","track":[{"@type":"General","AudioCount":"1",
 "FileExtension":"wav",
 "Format":"Wave",
 "Format_Settings":"PcmWaveformat",

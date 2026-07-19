@@ -7,10 +7,13 @@ import (
 
 func TestRenderJSONSingle(t *testing.T) {
 	report := Report{
-		Ref: "file.mp4",
+		Ref: `C:\Media\Folder\movie.mp4`,
 		General: Stream{
-			Kind:   StreamGeneral,
-			Fields: []Field{{Name: "Format", Value: "MPEG-4"}},
+			Kind: StreamGeneral,
+			Fields: []Field{
+				{Name: "Format", Value: "MPEG-4"},
+			},
+			JSON: map[string]string{"CompleteName": `C:\Media\Folder\movie.mp4`},
 		},
 		Streams: []Stream{{Kind: StreamVideo, Fields: []Field{{Name: "Format", Value: "AVC"}}}},
 	}
@@ -19,7 +22,7 @@ func TestRenderJSONSingle(t *testing.T) {
 	if !strings.Contains(output, "\"creatingLibrary\"") {
 		t.Fatalf("missing creating library: %s", output)
 	}
-	if !strings.Contains(output, "\"@ref\":\"file.mp4\"") {
+	if !strings.Contains(output, "\"@ref\":\"movie.mp4\"") {
 		t.Fatalf("missing ref: %s", output)
 	}
 	if !strings.Contains(output, "\"@type\":\"General\"") {
@@ -27,6 +30,9 @@ func TestRenderJSONSingle(t *testing.T) {
 	}
 	if !strings.Contains(output, "\"@type\":\"Video\"") {
 		t.Fatalf("missing video type: %s", output)
+	}
+	if !strings.Contains(output, `"CompleteName":"movie.mp4"`) {
+		t.Fatalf("CompleteName retained path: %s", output)
 	}
 }
 

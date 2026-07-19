@@ -1,6 +1,6 @@
 {
 "creatingLibrary":{"name":"go-mediainfo","version":"dev","url":"https://github.com/autobrr/go-mediainfo"},
-"media":{"@ref":"samples/sample.flac","track":[{"@type":"General","AudioCount":"1",
+"media":{"@ref":"sample.flac","track":[{"@type":"General","AudioCount":"1",
 "FileExtension":"flac",
 "Format":"FLAC",
 "FileSize":"61033",

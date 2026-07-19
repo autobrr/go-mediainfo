@@ -1,6 +1,6 @@
 {
 "creatingLibrary":{"name":"go-mediainfo","version":"dev","url":"https://github.com/autobrr/go-mediainfo"},
-"media":{"@ref":"samples/sample.mkv","track":[{"@type":"General","UniqueID":"283375821708242077584460746322958837943",
+"media":{"@ref":"sample.mkv","track":[{"@type":"General","UniqueID":"283375821708242077584460746322958837943",
 "VideoCount":"1",
 "AudioCount":"1",
 "FileExtension":"mkv",
