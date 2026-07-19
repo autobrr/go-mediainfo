@@ -471,7 +471,7 @@ func (p *mpeg2VideoParser) parseExtension(data []byte) {
 		// MediaInfo keeps quant-matrix extensions only after a sequence header
 		// has established the matrix set. Pre-header extension residue from a
 		// bounded section is not promoted to stream metadata.
-		if p.intraMatrixData == "" && p.nonIntraMatrixData == "" {
+		if !p.sawSequence {
 			return
 		}
 		custom := false

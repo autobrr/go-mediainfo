@@ -39,7 +39,7 @@ func (r *partialReadFailureReaderAt) ReadAt(p []byte, off int64) (int, error) {
 	if !r.failed && off == r.failOffset && len(p) > int(embeddedAssetMaxImageProbe) {
 		r.failed = true
 		n := len(p) / 2
-		copy(p[:n], r.data[off:off+int64(n)])
+		copy(p[:n], r.data[off:])
 		return n, io.ErrUnexpectedEOF
 	}
 	if off < 0 || off >= int64(len(r.data)) {

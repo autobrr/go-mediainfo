@@ -201,6 +201,52 @@ func TestMPEG2SequenceDisplayStandard(t *testing.T) {
 	}
 }
 
+func TestMPEG2QuantMatrixExtensionRequiresSequenceHeader(t *testing.T) {
+	extension := makeMPEG2IntraMatrixExtension(1)
+	preHeader := &mpeg2VideoParser{}
+	preHeader.parseExtension(extension)
+	if preHeader.info.Matrix != "" || preHeader.info.MatrixData != "" {
+		t.Fatalf("pre-header matrix = %q, data = %q; want ignored", preHeader.info.Matrix, preHeader.info.MatrixData)
+	}
+
+	parser := &mpeg2VideoParser{}
+	parser.parseSequenceHeader(makeMPEG2SequenceHeaderWithoutCustomMatrices())
+	parser.parseExtension(extension)
+	if parser.info.Matrix != "Custom" || parser.info.MatrixData == "" {
+		t.Fatalf("post-header matrix = %q, data = %q; want custom matrix", parser.info.Matrix, parser.info.MatrixData)
+	}
+}
+
+func makeMPEG2SequenceHeaderWithoutCustomMatrices() []byte {
+	data := make([]byte, 8)
+	writer := bitWriter{b: data}
+	writer.writeBits(720, 12)
+	writer.writeBits(480, 12)
+	writer.writeBits(3, 4)
+	writer.writeBits(4, 4)
+	writer.writeBits(10_000, 18)
+	writer.writeBits(1, 1)
+	writer.writeBits(112, 10)
+	writer.writeBits(0, 1)
+	writer.writeBits(0, 1)
+	writer.writeBits(0, 1)
+	return data
+}
+
+func makeMPEG2IntraMatrixExtension(value uint32) []byte {
+	data := make([]byte, 65)
+	writer := bitWriter{b: data}
+	writer.writeBits(3, 4)
+	writer.writeBits(1, 1)
+	for range 64 {
+		writer.writeBits(value, 8)
+	}
+	writer.writeBits(0, 1)
+	writer.writeBits(0, 1)
+	writer.writeBits(0, 1)
+	return data
+}
+
 func TestMPEG2FinalizeRecordsLastGOPOnce(t *testing.T) {
 	parser := &mpeg2VideoParser{sawGOP: true, currentGOPCount: 12}
 	first := parser.finalize()

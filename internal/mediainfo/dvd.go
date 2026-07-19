@@ -237,7 +237,7 @@ func parseDVDVideo(path string, file *os.File, size int64, opts AnalyzeOptions) 
 				}
 			}
 			aggregateSize := vobSize
-			if ifoInfo, err := os.Stat(path); err == nil {
+			if ifoInfo, err := os.Stat(path); err == nil { //nolint:gosec // path is the caller-selected DVD analysis input; Stat only accounts its size
 				aggregateSize += ifoInfo.Size()
 			}
 			if parsedInfo, parsedStreams, ok := ParseMPEGPSFiles(vobPaths, aggregateSize, mpegPSOptions{dvdExtras: true, dvdParsing: true, parseSpeed: opts.ParseSpeed}); ok {
@@ -602,7 +602,6 @@ func parseDVDVideo(path string, file *os.File, size int64, opts AnalyzeOptions) 
 					Key:   "Source",
 					Value: structuredNode{Kind: structuredString, Text: source},
 				}})
-
 			}
 		}
 		streams = append(streams, menuStreams[i])
@@ -2584,7 +2583,7 @@ func expandDVDPrimaryAudioDuration(streams []Stream, addSources bool) {
 	samplingRate, _ := strconv.ParseInt(samplingRateValue, 10, 64)
 	bitRateValue, _ := canonicalSeedValue(streams[candidate], "BitRate")
 	bitRate, _ := strconv.ParseInt(bitRateValue, 10, 64)
-	replaceCanonicalSeedFill(&streams[candidate], "Duration", formatJSONSeconds(videoDuration), "Duration", formatDuration(videoDurationSeconds))
+	replaceCanonicalSeedFill(&streams[candidate], "Duration", strconv.FormatFloat(videoDuration, 'f', -1, 64), "Duration", formatDuration(videoDurationSeconds))
 	replaceCanonicalSeedFill(&streams[candidate], "Video_Delay", "0.000", "Delay relative to video", "0 ms")
 	clearCanonicalSeedField(&streams[candidate], "FrameCount", "")
 	if samplingRate > 0 {

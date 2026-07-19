@@ -288,3 +288,22 @@ func TestDeriveDVDPSVideoBitRateAndSizeUsesLogicalDuration(t *testing.T) {
 		t.Fatalf("video stream size = %d, want %d from logical duration", gotSize, wantSize)
 	}
 }
+
+func TestExpandDVDPrimaryAudioDurationUsesCanonicalMilliseconds(t *testing.T) {
+	video := Stream{Kind: StreamVideo}
+	replaceCanonicalSeedFill(&video, "Duration", "120000", "Duration", "2 min 0 s")
+	audio := Stream{Kind: StreamAudio}
+	replaceCanonicalSeedFill(&audio, "Duration", "1000", "Duration", "1 s 0 ms")
+	replaceCanonicalSeedFill(&audio, "SamplingRate", "48000", "Sampling rate", "48.0 kHz")
+	replaceCanonicalSeedFill(&audio, "SamplingCount", "48000", "", "")
+
+	streams := []Stream{video, audio}
+	expandDVDPrimaryAudioDuration(streams, false)
+
+	if got, _ := canonicalSeedValue(streams[1], "Duration"); got != "120000" {
+		t.Fatalf("canonical Duration = %q, want milliseconds", got)
+	}
+	if got, _ := projectedCanonicalSeedValue(streams[1], "Duration"); got != "120.000" {
+		t.Fatalf("projected Duration = %q, want seconds", got)
+	}
+}
