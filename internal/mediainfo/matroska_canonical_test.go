@@ -1547,7 +1547,7 @@ func TestMatroskaVP9CanonicalSeedProjectsBaselineCodecFacts(t *testing.T) {
 		"CodecID": "V_VP9", "Duration": "2500", "BitRate": "1000000",
 		"Width": "1920", "Height": "1080", "Sampled_Width": "1920", "Sampled_Height": "1080",
 		"PixelAspectRatio": "1.000", "DisplayAspectRatio": "1.778", "FrameRate_Mode": "Constant",
-		"FrameRate": "23.976", "FrameRate_Num": "24000", "FrameRate_Den": "1001", "FrameCount": "60",
+		"FrameRate": "24.000", "FrameRate_Num": "24", "FrameRate_Den": "1", "FrameCount": "60",
 		"Delay": "0.000", "Delay_Source": "Container", "StreamSize": "312500",
 		"Default": "Yes", "Forced": "No",
 	} {
@@ -1568,6 +1568,53 @@ func TestMatroskaVP9CanonicalSeedProjectsBaselineCodecFacts(t *testing.T) {
 		t.Fatalf("Bits/(Pixel*Frame) text = %q, want 0.020", got)
 	}
 	assertMatroskaDirectStreamMatchesLegacy(t, stream, "canonical-vp9-stats.mkv")
+}
+
+func TestMatroskaFrameRateRatioUsesExactFillSemantics(t *testing.T) {
+	tests := []struct {
+		name    string
+		rate    float64
+		wantNum int
+		wantDen int
+	}{
+		{name: "precise 1001", rate: 24000.0 / 1001.0, wantNum: 24000, wantDen: 1001},
+		{name: "precise default duration", rate: 1_000_000_000.0 / 41_708_333.0, wantNum: 24000, wantDen: 1001},
+		{name: "rounded 1000", rate: 1_000_000_000.0 / 41_708_375.0, wantNum: 23976, wantDen: 1000},
+		{name: "near integer is not integer", rate: 1_000_000_000.0 / 33_333_334.0},
+		{name: "integer", rate: 30, wantNum: 30, wantDen: 1},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			gotNum, gotDen := matroskaFrameRateRatio(test.rate)
+			if gotNum != test.wantNum || gotDen != test.wantDen {
+				t.Fatalf("matroskaFrameRateRatio(%0.12f) = %d/%d, want %d/%d", test.rate, gotNum, gotDen, test.wantNum, test.wantDen)
+			}
+		})
+	}
+}
+
+func TestMatroskaStatisticsFrameRateNormalizesTrustedTagPrecision(t *testing.T) {
+	tests := []struct {
+		name            string
+		frameCount      int64
+		duration        float64
+		defaultDuration uint64
+		wantRate        float64
+		wantRecognized  bool
+	}{
+		{name: "integer", frameCount: 126720, duration: 5280, defaultDuration: 41_666_666, wantRate: 24, wantRecognized: true},
+		{name: "precise 24000 over 1001", frameCount: 66753, duration: 2784.157, defaultDuration: 41_708_333, wantRate: 24000.0 / 1001.0, wantRecognized: true},
+		{name: "precise 30000 over 1001", frameCount: 57543, duration: 1920.017, defaultDuration: 33_366_666, wantRate: 30000.0 / 1001.0, wantRecognized: true},
+		{name: "unrecognized imprecise duration", frameCount: 18658, duration: 778.152, defaultDuration: 41_708_333, wantRate: 18658.0 / 778.152},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			gotRate, gotRecognized := matroskaStatisticsFrameRate(test.frameCount, test.duration, test.defaultDuration)
+			if math.Abs(gotRate-test.wantRate) > 1e-12 || gotRecognized != test.wantRecognized {
+				t.Fatalf("matroskaStatisticsFrameRate() = %.12f, %v; want %.12f, %v", gotRate, gotRecognized, test.wantRate, test.wantRecognized)
+			}
+		})
+	}
 }
 
 // TestMatroskaStaticVideoCanonicalSeedProjectsParsedAV1Facts verifies codec
@@ -1799,6 +1846,42 @@ func TestMatroskaAVCStereoProfileContainsLevelWithoutSeparateField(t *testing.T)
 	}
 	if got, found := canonicalSeedValue(stream, "Format_Level"); found {
 		t.Fatalf("stereoscopic profile duplicated level as %q", got)
+	}
+}
+
+func TestMatroskaAVCCanonicalAspectSourcesUseRationalRounding(t *testing.T) {
+	stream := Stream{Kind: StreamVideo, canonicalSeed: matroskaAVCCanonicalSeed(matroskaVideoCanonicalFacts{
+		format: "AVC", codecID: "V_MPEG4/ISO/AVC",
+		video: matroskaVideoInfo{
+			pixelWidth: 632, pixelHeight: 482, codedWidth: 640, codedHeight: 496,
+			displayWidth: 674, displayHeight: 482, hasDisplayWidth: true, hasDisplayHeight: true,
+		},
+		sps: h264SPSInfo{
+			Width: 632, Height: 482, CodedWidth: 640, CodedHeight: 496,
+			HasSAR: true, SARWidth: 16, SARHeight: 15,
+		},
+	})}
+	for key, want := range map[fieldName]string{
+		"PixelAspectRatio":            "1.066",
+		"PixelAspectRatio_Original":   "1.067",
+		"DisplayAspectRatio":          "1.398",
+		"DisplayAspectRatio_Original": "1.399",
+	} {
+		got, found := canonicalSeedValue(stream, key)
+		if !found || got != want {
+			t.Fatalf("%s = %q, %v; want %q", key, got, found, want)
+		}
+	}
+}
+
+func TestMatroskaAVCCanonicalSquarePixelDisplayRatioUsesRationalRounding(t *testing.T) {
+	stream := Stream{Kind: StreamVideo, canonicalSeed: matroskaAVCCanonicalSeed(matroskaVideoCanonicalFacts{
+		format: "AVC", codecID: "V_MPEG4/ISO/AVC",
+		video: matroskaVideoInfo{pixelWidth: 1918, pixelHeight: 800, codedWidth: 1920},
+		sps:   h264SPSInfo{Width: 1918, Height: 800, CodedWidth: 1920},
+	})}
+	if got, found := canonicalSeedValue(stream, "DisplayAspectRatio"); !found || got != "2.398" {
+		t.Fatalf("DisplayAspectRatio = %q, %v; want 2.398", got, found)
 	}
 }
 

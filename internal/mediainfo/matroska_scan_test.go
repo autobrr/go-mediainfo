@@ -420,7 +420,7 @@ func TestScanMatroskaClustersVideoProbeAggregateByteBudget(t *testing.T) {
 		2: {format: "E-AC-3", dependentEAC3: true},
 	}
 
-	scanMatroskaClusters(bytes.NewReader(cluster), 0, int64(len(cluster)), 1000000, audio, map[uint64]*matroskaVideoProbe{1: video}, false, false, 0.5, 2, nil)
+	scanMatroskaClusters(bytes.NewReader(cluster), 0, int64(len(cluster)), 1000000, audio, map[uint64]*matroskaVideoProbe{1: video}, false, false, 0.5, 2, nil, nil)
 
 	if budget.remaining != 0 {
 		t.Fatalf("video probe budget remaining = %d, want 0", budget.remaining)
@@ -433,35 +433,6 @@ func TestScanMatroskaClustersVideoProbeAggregateByteBudget(t *testing.T) {
 	}
 }
 
-func TestScanMatroskaClustersBoundsSingleStereoAC3WithVideo(t *testing.T) {
-	audio := map[uint64]*matroskaAudioProbe{
-		1: {format: "AC-3", collect: true, targetPackets: 212},
-	}
-
-	scanMatroskaClusters(bytes.NewReader([]byte{0}), 0, 1, 1000000, audio, nil, true, false, 0.5, 2, nil)
-
-	if got := audio[1].targetFrames; got != matroskaAC3SingleStereoProbeFrames {
-		t.Fatalf("stereo AC-3 frame limit = %d, want %d", got, matroskaAC3SingleStereoProbeFrames)
-	}
-}
-
-func TestApplyMatroskaAC3StereoProbeLimitUsesBitstreamChannels(t *testing.T) {
-	probe := &matroskaAudioProbe{
-		targetPackets: matroskaAC3QuickProbePackets,
-		stereoFrames:  matroskaAC3SingleStereoProbeFrames,
-	}
-	applyMatroskaAC3StereoProbeLimit(probe, ac3Info{channels: 2})
-	if got := probe.targetFrames; got != matroskaAC3SingleStereoProbeFrames {
-		t.Fatalf("stereo AC-3 frame limit = %d, want %d", got, matroskaAC3SingleStereoProbeFrames)
-	}
-
-	probe.targetFrames = 0
-	applyMatroskaAC3StereoProbeLimit(probe, ac3Info{channels: 6})
-	if got := probe.targetFrames; got != 0 {
-		t.Fatalf("multichannel AC-3 frame limit = %d, want 0", got)
-	}
-}
-
 func TestScanMatroskaClustersInitializesOneSharedVideoProbeBudget(t *testing.T) {
 	first := &matroskaVideoProbe{codec: "AVC", targetPackets: 2}
 	second := &matroskaVideoProbe{codec: "AVC", targetPackets: 2}
@@ -470,7 +441,7 @@ func TestScanMatroskaClustersInitializesOneSharedVideoProbeBudget(t *testing.T) 
 	block2[0] = 0x82
 	cluster := mkvClusterWithSimpleBlocks(block1, block2)
 
-	scanMatroskaClusters(bytes.NewReader(cluster), 0, int64(len(cluster)), 1000000, nil, map[uint64]*matroskaVideoProbe{1: first, 2: second}, false, false, 0.5, 2, nil)
+	scanMatroskaClusters(bytes.NewReader(cluster), 0, int64(len(cluster)), 1000000, nil, map[uint64]*matroskaVideoProbe{1: first, 2: second}, false, false, 0.5, 2, nil, nil)
 
 	if first.budget == nil || second.budget == nil || first.budget != second.budget {
 		t.Fatalf("video probes did not receive one shared initialized budget: first=%p second=%p", first.budget, second.budget)
@@ -649,7 +620,7 @@ func TestScanMatroskaClustersVideoProbeBudgetAllowsLateX265(t *testing.T) {
 		mkvBlockNoLace(buildHEVCX265LengthPrefixedSample(t)),
 	)
 
-	scanMatroskaClusters(bytes.NewReader(cluster), 0, int64(len(cluster)), 1000000, nil, map[uint64]*matroskaVideoProbe{1: video}, false, false, 0.5, 1, nil)
+	scanMatroskaClusters(bytes.NewReader(cluster), 0, int64(len(cluster)), 1000000, nil, map[uint64]*matroskaVideoProbe{1: video}, false, false, 0.5, 1, nil, nil)
 
 	if video.hdrInfo.x265Library != "x265 9.9" {
 		t.Fatalf("late x265 library = %q, want x265 9.9", video.hdrInfo.x265Library)

@@ -197,6 +197,44 @@ func ac3CoreFrameSize(payload []byte) (int, bool) {
 	return frameSize, frameSize > 0
 }
 
+// ac3FrameCRCValid implements the AC-3 CRC-16 check used by MediaInfoLib's
+// synchronization gate. Legacy AC-3 frames must also have a zero remainder at
+// the 5/8-frame boundary; the final two CRC bytes may be bitwise inverted when
+// the inversion flag in the preceding byte is set.
+func ac3FrameCRCValid(frame []byte, bsid int) bool {
+	if len(frame) < 6 {
+		return false
+	}
+	var table [256]uint16
+	for i := range table {
+		value := uint16(i) << 8
+		for bit := 0; bit < 8; bit++ {
+			if value&0x8000 != 0 {
+				value = value<<1 ^ 0x8005
+			} else {
+				value <<= 1
+			}
+		}
+		table[i] = value
+	}
+
+	legacy := bsid <= 9
+	fiveEighths := ((len(frame) >> 2) + (len(frame) >> 4)) << 1
+	invertTail := legacy && frame[len(frame)-3]&1 != 0
+	var crc uint16
+	for pos := 2; pos < len(frame); pos++ {
+		value := frame[pos]
+		if invertTail && pos >= len(frame)-2 {
+			value = ^value
+		}
+		crc = crc<<8 ^ table[byte(crc>>8)^value]
+		if legacy && pos+1 == fiveEighths && crc != 0 {
+			return false
+		}
+	}
+	return crc == 0
+}
+
 // parseAC3Frame parses one legacy AC-3 syncframe. It returns the declared frame
 // size and reports false for truncated, invalid, or unsupported headers.
 func parseAC3Frame(payload []byte) (ac3Info, int, bool) {

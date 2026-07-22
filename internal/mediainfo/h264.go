@@ -7,29 +7,31 @@ import (
 // h264SPSInfo contains H.264 SPS/VUI properties used to render AVC metadata and
 // interpret timing SEI messages.
 type h264SPSInfo struct {
-	ChromaFormat            string
-	BitDepth                int
-	RefFrames               int
-	Progressive             bool
-	MBAFF                   bool
-	HasScanType             bool
-	FrameMbsOnly            bool
-	Log2MaxFrameNumMinus4   int
-	SeparateColourPlane     bool
-	SARWidth                uint32
-	SARHeight               uint32
-	HasSAR                  bool
-	VideoFormat             int
-	HasVideoFmt             bool
-	ColorRange              string
-	HasColorRange           bool
-	ColorPrimaries          string
-	TransferCharacteristics string
-	MatrixCoefficients      string
-	HasColorDescription     bool
-	ProfileID               byte
-	ConstraintFlags         byte
-	LevelID                 byte
+	ChromaFormat             string
+	BitDepth                 int
+	RefFrames                int
+	Progressive              bool
+	MBAFF                    bool
+	HasScanType              bool
+	FrameMbsOnly             bool
+	Log2MaxFrameNumMinus4    int
+	PicOrderCntType          int
+	Log2MaxPicOrderCntMinus4 int
+	SeparateColourPlane      bool
+	SARWidth                 uint32
+	SARHeight                uint32
+	HasSAR                   bool
+	VideoFormat              int
+	HasVideoFmt              bool
+	ColorRange               string
+	HasColorRange            bool
+	ColorPrimaries           string
+	TransferCharacteristics  string
+	MatrixCoefficients       string
+	HasColorDescription      bool
+	ProfileID                byte
+	ConstraintFlags          byte
+	LevelID                  byte
 	// Chroma sample location from the SPS VUI, present only when
 	// chroma_loc_info_present_flag is set. MediaInfo reports it as "Type <ChromaSampleLoc>".
 	HasChromaLoc    bool
@@ -78,11 +80,14 @@ type h264HRDInfo struct {
 // avcConfigInfo contains AVCDecoderConfigurationRecord profile and PPS facts
 // needed by direct canonical stream builders.
 type avcConfigInfo struct {
-	profile       string
-	level         string
-	cabac         *bool
-	nalLengthSize int
-	parameterSets []byte
+	profile                  string
+	level                    string
+	containerProfile         string
+	containerLevel           string
+	containerProfileMismatch bool
+	cabac                    *bool
+	nalLengthSize            int
+	parameterSets            []byte
 }
 
 // parseAVCConfig preserves the legacy field-oriented codec helper contract.
@@ -101,6 +106,8 @@ func parseAVCConfigDetails(payload []byte) (string, []Field, h264SPSInfo, avcCon
 	levelID := payload[3]
 	profile := mapAVCProfile(profileID)
 	level := formatAVCLevel(levelID)
+	containerProfile := profile
+	containerLevel := level
 
 	spsCount := int(payload[5] & 0x1F)
 	offset := 6
@@ -153,11 +160,14 @@ func parseAVCConfigDetails(payload []byte) (string, []Field, h264SPSInfo, avcCon
 	})
 
 	return profile, fields, spsInfo, avcConfigInfo{
-		profile:       profile,
-		level:         level,
-		cabac:         ppsCABAC,
-		nalLengthSize: int(payload[4]&0x03) + 1,
-		parameterSets: parameterSets,
+		profile:                  profile,
+		level:                    level,
+		containerProfile:         containerProfile,
+		containerLevel:           containerLevel,
+		containerProfileMismatch: spsInfo.ProfileID != 0 && (profileID != spsInfo.ProfileID || levelID != spsInfo.LevelID),
+		cabac:                    ppsCABAC,
+		nalLengthSize:            int(payload[4]&0x03) + 1,
+		parameterSets:            parameterSets,
 	}
 }
 
@@ -329,9 +339,10 @@ func parseH264SPS(nal []byte) h264SPSInfo {
 
 	log2MaxFrameNumMinus4 := br.readUE()
 	pocType := br.readUE()
+	log2MaxPicOrderCntMinus4 := 0
 	switch pocType {
 	case 0:
-		_ = br.readUE()
+		log2MaxPicOrderCntMinus4 = br.readUE()
 	case 1:
 		_ = br.readBitsValue(1)
 		_ = br.readSE()
@@ -521,56 +532,58 @@ func parseH264SPS(nal []byte) h264SPSInfo {
 	}
 
 	info := h264SPSInfo{
-		BitDepth:                bitDepth,
-		RefFrames:               refFrames,
-		Progressive:             progressive,
-		MBAFF:                   mbaff,
-		HasScanType:             true,
-		FrameMbsOnly:            frameMbsOnly == 1,
-		Log2MaxFrameNumMinus4:   log2MaxFrameNumMinus4,
-		SeparateColourPlane:     separateColourPlaneFlag,
-		SARWidth:                sarWidth,
-		SARHeight:               sarHeight,
-		HasSAR:                  hasSAR,
-		VideoFormat:             videoFormat,
-		HasVideoFmt:             hasVideoFormat,
-		ColorRange:              colorRange,
-		HasColorRange:           hasColorRange,
-		ColorPrimaries:          colorPrimaries,
-		TransferCharacteristics: transferCharacteristics,
-		MatrixCoefficients:      matrixCoefficients,
-		HasColorDescription:     hasColorDescription,
-		ProfileID:               byte(profileID),
-		ConstraintFlags:         byte(constraintFlags),
-		LevelID:                 byte(levelID),
-		HasChromaLoc:            hasChromaLoc,
-		ChromaSampleLoc:         chromaSampleLoc,
-		Width:                   uint64(width),
-		Height:                  uint64(height),
-		CodedWidth:              uint64(codedWidth),
-		CodedHeight:             uint64(codedHeight),
-		FrameRate:               frameRate,
-		FixedFrameRate:          fixedFrameRate,
-		HasFixedFrameRate:       hasFixedFrameRate,
-		BitRate:                 bitRate,
-		HasBitRate:              hasBitRate,
-		BitRateNAL:              bitRateNAL,
-		HasBitRateNAL:           hasBitRateNAL,
-		BitRateVCL:              bitRateVCL,
-		HasBitRateVCL:           hasBitRateVCL,
-		BitRateCBR:              bitRateCBR,
-		HasBitRateCBR:           hasBitRateCBR,
-		BufferSize:              bufferSize,
-		HasBufferSize:           hasBufferSize,
-		BufferSizeNAL:           bufferSizeNAL,
-		HasBufferSizeNAL:        hasBufferSizeNAL,
-		BufferSizeVCL:           bufferSizeVCL,
-		HasBufferSizeVCL:        hasBufferSizeVCL,
-		CpbDpbDelaysPresent:     cpbDpbDelaysPresent,
-		CpbRemovalDelayLength:   cpbRemovalDelayLength,
-		DpbOutputDelayLength:    dpbOutputDelayLength,
-		PicStructPresent:        picStructPresent,
-		TimeOffsetLength:        timeOffsetLength,
+		BitDepth:                 bitDepth,
+		RefFrames:                refFrames,
+		Progressive:              progressive,
+		MBAFF:                    mbaff,
+		HasScanType:              true,
+		FrameMbsOnly:             frameMbsOnly == 1,
+		Log2MaxFrameNumMinus4:    log2MaxFrameNumMinus4,
+		PicOrderCntType:          pocType,
+		Log2MaxPicOrderCntMinus4: log2MaxPicOrderCntMinus4,
+		SeparateColourPlane:      separateColourPlaneFlag,
+		SARWidth:                 sarWidth,
+		SARHeight:                sarHeight,
+		HasSAR:                   hasSAR,
+		VideoFormat:              videoFormat,
+		HasVideoFmt:              hasVideoFormat,
+		ColorRange:               colorRange,
+		HasColorRange:            hasColorRange,
+		ColorPrimaries:           colorPrimaries,
+		TransferCharacteristics:  transferCharacteristics,
+		MatrixCoefficients:       matrixCoefficients,
+		HasColorDescription:      hasColorDescription,
+		ProfileID:                byte(profileID),
+		ConstraintFlags:          byte(constraintFlags),
+		LevelID:                  byte(levelID),
+		HasChromaLoc:             hasChromaLoc,
+		ChromaSampleLoc:          chromaSampleLoc,
+		Width:                    uint64(width),
+		Height:                   uint64(height),
+		CodedWidth:               uint64(codedWidth),
+		CodedHeight:              uint64(codedHeight),
+		FrameRate:                frameRate,
+		FixedFrameRate:           fixedFrameRate,
+		HasFixedFrameRate:        hasFixedFrameRate,
+		BitRate:                  bitRate,
+		HasBitRate:               hasBitRate,
+		BitRateNAL:               bitRateNAL,
+		HasBitRateNAL:            hasBitRateNAL,
+		BitRateVCL:               bitRateVCL,
+		HasBitRateVCL:            hasBitRateVCL,
+		BitRateCBR:               bitRateCBR,
+		HasBitRateCBR:            hasBitRateCBR,
+		BufferSize:               bufferSize,
+		HasBufferSize:            hasBufferSize,
+		BufferSizeNAL:            bufferSizeNAL,
+		HasBufferSizeNAL:         hasBufferSizeNAL,
+		BufferSizeVCL:            bufferSizeVCL,
+		HasBufferSizeVCL:         hasBufferSizeVCL,
+		CpbDpbDelaysPresent:      cpbDpbDelaysPresent,
+		CpbRemovalDelayLength:    cpbRemovalDelayLength,
+		DpbOutputDelayLength:     dpbOutputDelayLength,
+		PicStructPresent:         picStructPresent,
+		TimeOffsetLength:         timeOffsetLength,
 	}
 	info.ChromaFormat = chromaFormatString(chromaFormat)
 	return info

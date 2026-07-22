@@ -63,6 +63,7 @@ type matroskaAudioProbe struct {
 	mp3XingTag        string
 	ok                bool
 	collect           bool
+	exhausted         bool
 	targetFrames      int
 	targetPackets     int
 	stereoFrames      int
@@ -76,6 +77,80 @@ type matroskaAudioProbe struct {
 	dynrngAverage     float64
 	hasDynrngAverage  bool
 	headerStrip       []byte
+}
+
+// matroskaPayloadState models File_Mk's per-track Searching_Payload lifecycle.
+// Once a subparser finishes, File_Mk no longer expands that track's lacing for
+// its global first-pass Frame_Count; each later Block counts once.
+type matroskaPayloadState struct {
+	searching         bool
+	frames            int64
+	packets           int64
+	finishAfterFrames int64
+	finishAfterPacket int64
+}
+
+func newMatroskaPayloadStates(tracks []Stream, audioProbes map[uint64]*matroskaAudioProbe, videoProbes map[uint64]*matroskaVideoProbe) map[uint64]*matroskaPayloadState {
+	states := make(map[uint64]*matroskaPayloadState, len(tracks))
+	for _, stream := range tracks {
+		track := streamTrackNumber(stream)
+		if track == 0 {
+			continue
+		}
+		state := &matroskaPayloadState{}
+		if audioProbes[track] != nil || videoProbes[track] != nil {
+			state.searching = true
+			state.finishAfterPacket = 300
+		}
+		if stream.Kind == StreamAudio {
+			switch matroskaStreamScalar(stream, "Format") {
+			case "AAC":
+				state.searching = true
+				state.finishAfterFrames = 128
+				state.finishAfterPacket = 300
+			case "FLAC":
+				state.searching = true
+				state.finishAfterFrames = 1
+				state.finishAfterPacket = 300
+			case "PCM":
+				// File_Pcm fills after 16 frames but does not finish, so File_Mk
+				// keeps expanding laces until its 300-packet payload cap.
+				state.searching = true
+				state.finishAfterPacket = 300
+			case "Vorbis":
+				// CodecPrivate completes the inner Vorbis parser, but File_Ogg's
+				// Xiph-lacing wrapper finishes while consuming the first payload.
+				// File_Mk has already expanded that Block's laces at that point.
+				state.searching = true
+				state.finishAfterPacket = 1
+			}
+		}
+		states[track] = state
+	}
+	return states
+}
+
+func matroskaContainerFrameContribution(states map[uint64]*matroskaPayloadState, track uint64, frames int64, frameLimit int64) int64 {
+	if frames <= 0 {
+		return 0
+	}
+	if states == nil {
+		return frames
+	}
+	state := states[track]
+	if state == nil || !state.searching {
+		return 1
+	}
+	if frameLimit > 0 {
+		frames = min(frames, frameLimit)
+	}
+	state.frames += frames
+	state.packets++
+	if state.finishAfterFrames > 0 && state.frames >= state.finishAfterFrames ||
+		state.finishAfterPacket > 0 && state.packets >= state.finishAfterPacket {
+		state.searching = false
+	}
+	return frames
 }
 
 // dtsInfo contains DTS core and DTS-HD extension properties collected from one
@@ -148,6 +223,22 @@ type matroskaVideoProbe struct {
 	targetPackets int
 	exhausted     bool
 	budget        *matroskaVideoProbeBudget
+}
+
+// newMatroskaMPEG2VideoProbe seeds the elementary-stream parser with
+// CodecPrivate before cluster payloads. Matroska permits sequence headers in
+// CodecPrivate, and MediaInfo treats those initial facts as authoritative.
+func newMatroskaMPEG2VideoProbe(stream Stream) *matroskaVideoProbe {
+	probe := &matroskaVideoProbe{codec: "MPEG Video", targetPackets: 64}
+	if len(stream.mkvCodecPrivate) > 0 {
+		seed := append([]byte(nil), stream.mkvCodecPrivate...)
+		// consume() ordinarily waits for the next start code to delimit a
+		// payload. CodecPrivate has a known end, so add a sequence-end marker.
+		seed = append(seed, 0x00, 0x00, 0x01, 0xB7)
+		probe.mpeg2.consume(seed)
+		probe.mpeg2.startSegment()
+	}
+	return probe
 }
 
 // matroskaVideoProbeMaxBytes bounds the payload read for any one video block.
@@ -364,7 +455,7 @@ var errMatroskaScanLimit = errors.New("matroska scan limit reached")
 // scanMatroskaClusters performs a bounded Segment scan for track statistics and
 // codec probes. The boolean result reports whether any track statistics were
 // collected before completion or the scan limit.
-func scanMatroskaClusters(r io.ReaderAt, offset int64, size int64, timecodeScale uint64, audioProbes map[uint64]*matroskaAudioProbe, videoProbes map[uint64]*matroskaVideoProbe, applyScan bool, collectBytes bool, parseSpeed float64, trackCount int, needFirstTimes map[uint64]struct{}) (map[uint64]*matroskaTrackStats, bool) {
+func scanMatroskaClusters(r io.ReaderAt, offset int64, size int64, timecodeScale uint64, audioProbes map[uint64]*matroskaAudioProbe, videoProbes map[uint64]*matroskaVideoProbe, applyScan bool, collectBytes bool, parseSpeed float64, trackCount int, payloadStates map[uint64]*matroskaPayloadState, needFirstTimes map[uint64]struct{}) (map[uint64]*matroskaTrackStats, bool) {
 	if size <= 0 {
 		return nil, false
 	}
@@ -378,92 +469,16 @@ func scanMatroskaClusters(r io.ReaderAt, offset int64, size int64, timecodeScale
 	stats := map[uint64]*matroskaTrackStats{}
 	var globalFrames int64
 	var maxFrames int64
-	if parseSpeed < 1 && len(audioProbes) == 1 && trackCount == 2 {
-		for _, probe := range audioProbes {
-			if probe != nil && probe.format == "AC-3" {
-				probe.stereoFrames = matroskaAC3SingleStereoProbeFrames
-				if probe.targetPackets == 212 {
-					probe.targetFrames = matroskaAC3SingleStereoProbeFrames
-				}
-			}
-		}
-	}
-	if !applyScan && parseSpeed < 1 {
+	if parseSpeed < 1 {
 		if trackCount < 1 {
 			trackCount = 1
 		}
 		if parseSpeed == 0 {
 			maxFrames = int64(3 * trackCount)
 		} else {
-			framesPerTrack := int64(512)
-			hasTrueHD := false
-			hasHighRateTrueHD := false
-			hasDependentEAC3 := false
-			ac3Count := 0
-			dtsCount := 0
-			for _, probe := range audioProbes {
-				if probe == nil {
-					continue
-				}
-				hasDependentEAC3 = hasDependentEAC3 || probe.dependentEAC3
-				switch probe.format {
-				case "TrueHD":
-					hasTrueHD = true
-					hasHighRateTrueHD = hasHighRateTrueHD || probe.truehd.sampleRate >= 96000
-				case "AC-3":
-					ac3Count++
-				case "DTS":
-					dtsCount++
-				}
-			}
-			if len(audioProbes) > 1 {
-				for _, probe := range audioProbes {
-					if probe != nil && probe.format == "AC-3" && probe.targetPackets == 212 {
-						probe.targetPackets = matroskaAC3QuickProbePackets
-					}
-				}
-			}
-			if len(audioProbes) == 1 && ac3Count == 1 {
-				for _, probe := range audioProbes {
-					if probe.targetPackets == 212 {
-						if trackCount >= 3 {
-							framesPerTrack = 865
-							if trackCount == 3 {
-								probe.targetPackets = matroskaAC3QuickProbePackets
-							}
-						} else {
-							probe.targetPackets = matroskaAC3QuickProbePackets
-						}
-					} else if trackCount == 5 {
-						framesPerTrack = 900
-					}
-				}
-			}
-			if len(audioProbes) == 2 && ac3Count == 1 && dtsCount == 1 && trackCount >= 8 {
-				// Preserve the bounded interleaved-read horizon without mutating the
-				// AC-3 packet cap or its content-derived histogram count.
-				framesPerTrack = 621
-			}
-			if hasDependentEAC3 && !hasTrueHD {
-				framesPerTrack = 1130
-				for _, probe := range audioProbes {
-					if probe != nil && probe.dependentEAC3 {
-						probe.dependentStats = true
-						probe.targetPackets = 564
-					}
-				}
-			}
-			if hasTrueHD {
-				// TrueHD's 40-sample access units dominate interleaved block counts,
-				// so MediaInfo reaches its bounded read horizon sooner.
-				framesPerTrack = 512
-				if hasHighRateTrueHD {
-					// High-rate TrueHD carries twice as many samples per access unit and
-					// reaches MediaInfo's buffered companion-track horizon slightly later.
-					framesPerTrack = 520
-				}
-			}
-			maxFrames = framesPerTrack * int64(trackCount)
+			// File_Mk stops its first-pass cluster scan after Frame_Count exceeds
+			// 512 times the number of TrackEntry streams.
+			maxFrames = 512 * int64(trackCount)
 		}
 	}
 
@@ -474,7 +489,7 @@ func scanMatroskaClusters(r io.ReaderAt, offset int64, size int64, timecodeScale
 		}
 		switch id {
 		case mkvIDCluster:
-			if err := scanMatroskaCluster(er, int64(elemSize), int64(timecodeScale), stats, audioProbes, videoProbes, applyScan, collectBytes, &globalFrames, maxFrames, needFirstTimes); err != nil {
+			if err := scanMatroskaCluster(er, int64(elemSize), int64(timecodeScale), stats, audioProbes, videoProbes, applyScan, collectBytes, &globalFrames, maxFrames, payloadStates, needFirstTimes); err != nil {
 				if errors.Is(err, errMatroskaScanLimit) {
 					return stats, len(stats) > 0
 				}
@@ -530,6 +545,9 @@ func matroskaProbesComplete(audioProbes map[uint64]*matroskaAudioProbe, videoPro
 		if probe == nil {
 			continue
 		}
+		if probe.exhausted {
+			continue
+		}
 		if !probe.ok {
 			return false
 		}
@@ -545,7 +563,29 @@ func matroskaProbesComplete(audioProbes map[uint64]*matroskaAudioProbe, videoPro
 	return true
 }
 
-func scanMatroskaCluster(er *ebmlReader, size int64, timecodeScale int64, stats map[uint64]*matroskaTrackStats, audioProbes map[uint64]*matroskaAudioProbe, videoProbes map[uint64]*matroskaVideoProbe, applyScan bool, collectBytes bool, globalFrames *int64, maxFrames int64, needFirstTimes map[uint64]struct{}) error {
+// stopMatroskaPayloadProbes mirrors File_Mk clearing Searching_Payload after
+// the bounded first-pass Frame_Count limit. Container statistics may continue
+// to the end of a small file, but codec subparsers receive no more payloads.
+func stopMatroskaPayloadProbes(states map[uint64]*matroskaPayloadState, audioProbes map[uint64]*matroskaAudioProbe, videoProbes map[uint64]*matroskaVideoProbe) {
+	for _, state := range states {
+		if state != nil {
+			state.searching = false
+		}
+	}
+	for _, probe := range audioProbes {
+		if probe != nil {
+			probe.collect = false
+			probe.exhausted = true
+		}
+	}
+	for _, probe := range videoProbes {
+		if probe != nil {
+			probe.exhausted = true
+		}
+	}
+}
+
+func scanMatroskaCluster(er *ebmlReader, size int64, timecodeScale int64, stats map[uint64]*matroskaTrackStats, audioProbes map[uint64]*matroskaAudioProbe, videoProbes map[uint64]*matroskaVideoProbe, applyScan bool, collectBytes bool, globalFrames *int64, maxFrames int64, payloadStates map[uint64]*matroskaPayloadState, needFirstTimes map[uint64]struct{}) error {
 	start := er.pos
 	var clusterTimecode int64
 	for er.pos-start < size {
@@ -564,14 +604,17 @@ func scanMatroskaCluster(er *ebmlReader, size int64, timecodeScale int64, stats 
 			}
 		case mkvIDSimpleBlock:
 			frameLimit := matroskaBlockFrameLimit(globalFrames, maxFrames)
-			frames, err := scanMatroskaBlock(er, int64(elemSize), clusterTimecode, timecodeScale, stats, audioProbes, videoProbes, 0, collectBytes, frameLimit)
+			frames, err := scanMatroskaBlock(er, int64(elemSize), clusterTimecode, timecodeScale, stats, audioProbes, videoProbes, 0, collectBytes, frameLimit, payloadStates)
 			if err != nil {
 				return err
 			}
 			if globalFrames != nil && frames > 0 {
 				*globalFrames += frames
 				if maxFrames > 0 && *globalFrames > maxFrames {
-					return errMatroskaScanLimit
+					if !applyScan {
+						return errMatroskaScanLimit
+					}
+					stopMatroskaPayloadProbes(payloadStates, audioProbes, videoProbes)
 				}
 			}
 			if !applyScan && matroskaProbesComplete(audioProbes, videoProbes) && matroskaNeedFirstTimesComplete(stats, needFirstTimes) {
@@ -579,14 +622,17 @@ func scanMatroskaCluster(er *ebmlReader, size int64, timecodeScale int64, stats 
 			}
 		case mkvIDBlockGroup:
 			frameLimit := matroskaBlockFrameLimit(globalFrames, maxFrames)
-			frames, err := scanMatroskaBlockGroup(er, int64(elemSize), clusterTimecode, timecodeScale, stats, audioProbes, videoProbes, collectBytes, frameLimit)
+			frames, err := scanMatroskaBlockGroup(er, int64(elemSize), clusterTimecode, timecodeScale, stats, audioProbes, videoProbes, collectBytes, frameLimit, payloadStates)
 			if err != nil {
 				return err
 			}
 			if globalFrames != nil && frames > 0 {
 				*globalFrames += frames
 				if maxFrames > 0 && *globalFrames > maxFrames {
-					return errMatroskaScanLimit
+					if !applyScan {
+						return errMatroskaScanLimit
+					}
+					stopMatroskaPayloadProbes(payloadStates, audioProbes, videoProbes)
 				}
 			}
 			if !applyScan && matroskaProbesComplete(audioProbes, videoProbes) && matroskaNeedFirstTimesComplete(stats, needFirstTimes) {
@@ -607,12 +653,15 @@ func matroskaBlockFrameLimit(globalFrames *int64, maxFrames int64) int64 {
 	if globalFrames == nil || maxFrames <= 0 {
 		return 0
 	}
+	if *globalFrames > maxFrames {
+		return -1
+	}
 	return max(maxFrames-*globalFrames+1, 1)
 }
 
 // scanMatroskaBlockGroup consumes one BlockGroup, records its timing and size,
 // and returns the number of laced frames processed within frameLimit.
-func scanMatroskaBlockGroup(er *ebmlReader, size int64, clusterTimecode int64, timecodeScale int64, stats map[uint64]*matroskaTrackStats, audioProbes map[uint64]*matroskaAudioProbe, videoProbes map[uint64]*matroskaVideoProbe, collectBytes bool, frameLimit int64) (int64, error) {
+func scanMatroskaBlockGroup(er *ebmlReader, size int64, clusterTimecode int64, timecodeScale int64, stats map[uint64]*matroskaTrackStats, audioProbes map[uint64]*matroskaAudioProbe, videoProbes map[uint64]*matroskaVideoProbe, collectBytes bool, frameLimit int64, payloadStates map[uint64]*matroskaPayloadState) (int64, error) {
 	start := er.pos
 	var blockTrack uint64
 	var blockTimecode int16
@@ -661,12 +710,12 @@ func scanMatroskaBlockGroup(er *ebmlReader, size int64, clusterTimecode int64, t
 		}
 		statsForTrack(stats, blockTrack).addBlock(absTime, bytes, durationNs, blockFrames)
 	}
-	return blockFrames, nil
+	return matroskaContainerFrameContribution(payloadStates, blockTrack, blockFrames, frameLimit), nil
 }
 
 // scanMatroskaBlock consumes one Block or SimpleBlock, updates track statistics,
 // and returns the number of laced frames processed within frameLimit.
-func scanMatroskaBlock(er *ebmlReader, size int64, clusterTimecode int64, timecodeScale int64, stats map[uint64]*matroskaTrackStats, audioProbes map[uint64]*matroskaAudioProbe, videoProbes map[uint64]*matroskaVideoProbe, durationUnits uint64, collectBytes bool, frameLimit int64) (int64, error) {
+func scanMatroskaBlock(er *ebmlReader, size int64, clusterTimecode int64, timecodeScale int64, stats map[uint64]*matroskaTrackStats, audioProbes map[uint64]*matroskaAudioProbe, videoProbes map[uint64]*matroskaVideoProbe, durationUnits uint64, collectBytes bool, frameLimit int64, payloadStates map[uint64]*matroskaPayloadState) (int64, error) {
 	track, timecode, dataSize, frames, err := readMatroskaBlockHeader(er, size, audioProbes, videoProbes, frameLimit)
 	if err != nil {
 		return 0, err
@@ -678,7 +727,7 @@ func scanMatroskaBlock(er *ebmlReader, size int64, clusterTimecode int64, timeco
 		bytes = dataSize
 	}
 	statsForTrack(stats, track).addBlock(absTime, bytes, durationNs, frames)
-	return frames, nil
+	return matroskaContainerFrameContribution(payloadStates, track, frames, frameLimit), nil
 }
 
 // readMatroskaBlockHeader consumes a Block or SimpleBlock, returns its track,
@@ -733,7 +782,7 @@ func readMatroskaBlockHeader(er *ebmlReader, size int64, audioProbes map[uint64]
 	lacing := (flags >> 1) & 0x03
 	audioProbe := audioProbes[trackVal]
 	videoProbe := videoProbes[trackVal]
-	needAudio := audioProbe != nil && (!audioProbe.ok || audioProbe.collect)
+	needAudio := audioProbe != nil && !audioProbe.exhausted && (!audioProbe.ok || audioProbe.collect)
 	needVideo := videoProbeNeedsSample(videoProbe)
 	needProbePayload := needAudio || needVideo
 	var laceSizes []int64
@@ -885,7 +934,9 @@ func readMatroskaBlockHeader(er *ebmlReader, size int64, audioProbes map[uint64]
 	if dataSize > 0 || (needAudio && audioProbe != nil && len(audioProbe.headerStrip) > 0) || (needVideo && videoProbe != nil && len(videoProbe.headerStrip) > 0) {
 		if needProbePayload {
 			processedFrames := frameCount
-			if frameLimit > 0 {
+			if frameLimit < 0 {
+				processedFrames = 0
+			} else if frameLimit > 0 {
 				processedFrames = min(processedFrames, frameLimit)
 			}
 			// MediaInfoLib increments PacketCount per Block/SimpleBlock, then may stop searching
@@ -952,17 +1003,14 @@ func readMatroskaBlockHeader(er *ebmlReader, size int64, audioProbes map[uint64]
 					// DTS-HD extension substream (ExSS) follows the core frame, which can be several KB.
 					// Cap at 32 KB to avoid large allocations on oversized blocks.
 					peek = 32768
-				case needAudio && audioProbe != nil && audioProbe.format == "E-AC-3":
-					// In the final packet, skip probing additional laces to match official behavior.
+				case needAudio && audioProbe != nil && (audioProbe.format == "AC-3" || audioProbe.format == "E-AC-3"):
+					// File_Ac3 consumes complete packets. The cap bounds malformed blocks
+					// while covering valid AC-3/E-AC-3 frames and dependent substreams.
 					switch {
 					case stopAfterThisPacket && maxLacesToProbe > 0 && i >= maxLacesToProbe:
 						peek = 0
-					case audioProbe.parseJOC:
+					default:
 						peek = min(size, 32768)
-					case frameCount == 1:
-						// Non-laced packets may contain multiple E-AC-3 frames; read a bit more so we
-						// can stay in sync and match official compr stats.
-						peek = 8192
 					}
 				}
 				peek = min(size, peek)
@@ -1266,12 +1314,12 @@ func applyMatroskaStats(info *MatroskaInfo, stats map[uint64]*matroskaTrackStats
 			if dur > 0 {
 				// Match MediaInfo: truncate (not round) to integer b/s.
 				bps := int64(math.Floor((float64(stat.dataBytes)*8)/dur + 1e-9))
-				// Official MediaInfo quantizes Matroska AAC bitrates to 8 kb/s steps when derived.
+				// MediaInfo normalizes AAC rates against its well-known-rate table.
 				format := matroskaStreamDisplay(*stream, "Format")
 				codecID := matroskaStreamDisplay(*stream, "Codec ID")
 				isAAC := strings.Contains(format, "AAC") || strings.HasPrefix(codecID, "A_AAC")
-				if isAAC && bps >= 8000 {
-					bps = int64(math.Round(float64(bps)/8000) * 8000)
+				if isAAC {
+					bps = normalizeAACBitRate(bps)
 				}
 				if bps > 0 {
 					raw := strconv.FormatInt(bps, 10)
@@ -1293,9 +1341,19 @@ func applyMatroskaStats(info *MatroskaInfo, stats map[uint64]*matroskaTrackStats
 			}
 			if durationSeconds > 0 && stat.blockCount > 0 {
 				frameRate := float64(stat.blockCount) / durationSeconds
+				numerator, denominator := matroskaFrameRateRatio(frameRate)
 				display := formatFrameRate(frameRate)
-				raw := formatJSONFloat(frameRate)
+				if numerator > 0 && denominator > 0 {
+					display = formatFrameRateRatio(uint32(numerator), uint32(denominator))
+				}
+				raw := fmt.Sprintf("%.3f", frameRate)
 				replaceCanonicalSeedFill(stream, "FrameRate", raw, "Frame rate", display)
+				clearCanonicalSeedField(stream, "FrameRate_Num", "")
+				clearCanonicalSeedField(stream, "FrameRate_Den", "")
+				if numerator > 0 && denominator > 0 {
+					replaceCanonicalSeedFill(stream, "FrameRate_Num", strconv.Itoa(numerator), "", "")
+					replaceCanonicalSeedFill(stream, "FrameRate_Den", strconv.Itoa(denominator), "", "")
+				}
 			}
 			if durationSeconds > 0 && stat.dataBytes > 0 {
 				bitrate := (float64(stat.dataBytes) * 8) / durationSeconds
@@ -1316,25 +1374,17 @@ func applyMatroskaStats(info *MatroskaInfo, stats map[uint64]*matroskaTrackStats
 					bitrateDuration = value
 				}
 			}
-			hasBitRate := matroskaStreamScalar(*stream, "BitRate") != ""
-			if !hasBitRate {
-				// If x264 parsing provided a nominal bitrate, prefer it over derived StreamSize/Duration.
-				if nominal := matroskaStreamDisplay(*stream, "Nominal bit rate"); nominal != "" {
-					if bps, ok := parseInt(matroskaStreamScalar(*stream, "BitRate_Nominal")); ok && bps > 0 {
-						replaceCanonicalSeedFill(stream, "BitRate", strconv.FormatInt(bps, 10), "Bit rate", nominal)
-						hasBitRate = true
-					}
-				}
-			}
-			if bitrateDuration > 0 && stat.dataBytes > 0 && !hasBitRate {
+			if bitrateDuration > 0 && stat.dataBytes > 0 {
 				bitrate := (float64(stat.dataBytes) * 8) / bitrateDuration
-				display := formatBitrate(bitrate)
-				raw := strconv.FormatInt(int64(bitrate), 10)
-				replaceCanonicalSeedFill(stream, "BitRate", raw, "Bit rate", display)
+				applyMatroskaMeasuredVideoBitRate(stream, int64(bitrate))
 				width, _ := parsePixels(matroskaStreamScalar(*stream, "Width"))
 				height, _ := parsePixels(matroskaStreamScalar(*stream, "Height"))
 				fps, _ := matroskaCanonicalFrameRate(*stream)
-				if bits := formatBitsPerPixelFrame(bitrate, width, height, fps); bits != "" {
+				finalBitRate := bitrate
+				if parsed, ok := parseInt(matroskaStreamScalar(*stream, "BitRate")); ok && parsed > 0 {
+					finalBitRate = float64(parsed)
+				}
+				if bits := formatBitsPerPixelFrame(finalBitRate, width, height, fps); bits != "" {
 					replaceCanonicalSeedText(stream, "Bits/(Pixel*Frame)", bits)
 				}
 			}
@@ -1342,19 +1392,42 @@ func applyMatroskaStats(info *MatroskaInfo, stats map[uint64]*matroskaTrackStats
 		if stream.Kind == StreamAudio {
 			if durationSeconds > 0 && stat.dataBytes > 0 && matroskaStreamScalar(*stream, "BitRate") == "" {
 				bitrate := (float64(stat.dataBytes) * 8) / durationSeconds
-				// Official MediaInfo reports AAC bitrates quantized to 8 kb/s steps when derived
-				// from statistics (StreamSize/Duration).
+				// MediaInfo normalizes AAC rates against its well-known-rate table.
 				format := matroskaStreamDisplay(*stream, "Format")
 				codecID := matroskaStreamDisplay(*stream, "Codec ID")
 				isAAC := strings.Contains(format, "AAC") || strings.HasPrefix(codecID, "A_AAC")
-				if isAAC && bitrate >= 8000 {
-					bitrate = math.Round(bitrate/8000) * 8000
+				if isAAC {
+					bitrate = float64(normalizeAACBitRate(int64(bitrate)))
 				}
 				display := formatBitrate(bitrate)
 				// Official mediainfo truncates derived audio bitrate.
 				raw := strconv.FormatInt(int64(bitrate), 10)
 				replaceCanonicalSeedFill(stream, "BitRate", raw, "Bit rate", display)
 			}
+		}
+	}
+}
+
+// applyMatroskaCounts applies the bounded small-file counting pass without
+// promoting its partial byte/time observations to full Statistics fields.
+func applyMatroskaCounts(info *MatroskaInfo, stats map[uint64]*matroskaTrackStats) {
+	if info == nil {
+		return
+	}
+	for i := range info.Tracks {
+		stream := &info.Tracks[i]
+		if stream.Kind != StreamVideo && stream.Kind != StreamText {
+			continue
+		}
+		stat := stats[streamTrackNumber(*stream)]
+		if stat == nil || stat.blockCount <= 0 {
+			continue
+		}
+		count := strconv.FormatInt(stat.blockCount, 10)
+		replaceCanonicalSeedFill(stream, "FrameCount", count, "", "")
+		if stream.Kind == StreamText {
+			replaceCanonicalSeedFill(stream, "ElementCount", count, "", "")
+			replaceCanonicalSeedText(stream, "Count of elements", count)
 		}
 	}
 }
@@ -1407,6 +1480,8 @@ func applyMatroskaTagStats(info *MatroskaInfo, tagStats map[uint64]matroskaTagSt
 			continue
 		}
 		stream.mkvTagFrameCount = tag.hasFrameCount && tag.frameCount > 0
+		stream.mkvTagDuration = tag.hasDuration && tag.durationSeconds > 0
+		stream.mkvBareTagDuration = stream.mkvTagDuration && tag.bareDuration
 		trackNumber := streamTrackNumber(*stream)
 		if trackNumber == 0 {
 			continue
@@ -1467,6 +1542,30 @@ func applyMatroskaTagStats(info *MatroskaInfo, tagStats map[uint64]matroskaTagSt
 			replaceCanonicalSeedProjection(stream, "Duration", milliseconds, seconds, "", "")
 			setCanonicalSeedStructuredDecimals(stream, "Duration", uint8(decimalFractionDigits(seconds)))
 		}
+		if stream.Kind == StreamVideo && tag.hasFrameCount && tag.frameCount > 0 {
+			frameRate, recognized := matroskaStatisticsFrameRate(tag.frameCount, tag.durationSeconds, stream.mkvDefaultDuration)
+			if !recognized && format == "VP9" {
+				// File_Vp9 contributes only its rounded decimal. If imprecise
+				// Statistics Tags cannot identify a standard cadence, the merged
+				// parser value remains authoritative.
+				frameRate, _ = strconv.ParseFloat(matroskaStreamScalar(*stream, "FrameRate"), 64)
+				recognized = frameRate > 0
+			}
+			if recognized {
+				numerator, denominator := matroskaFrameRateRatio(frameRate)
+				display := formatFrameRate(frameRate)
+				if numerator > 0 && denominator > 0 {
+					display = formatFrameRateRatio(uint32(numerator), uint32(denominator))
+				}
+				replaceCanonicalSeedFill(stream, "FrameRate", fmt.Sprintf("%.3f", frameRate), "Frame rate", display)
+				clearCanonicalSeedField(stream, "FrameRate_Num", "")
+				clearCanonicalSeedField(stream, "FrameRate_Den", "")
+				if numerator > 0 && denominator > 0 {
+					replaceCanonicalSeedFill(stream, "FrameRate_Num", strconv.Itoa(numerator), "", "")
+					replaceCanonicalSeedFill(stream, "FrameRate_Den", strconv.Itoa(denominator), "", "")
+				}
+			}
+		}
 		if format == "FLAC" {
 			sampleRate, _ := strconv.ParseInt(matroskaStreamScalar(*stream, "SamplingRate"), 10, 64)
 			if sampleRate > 0 {
@@ -1509,6 +1608,10 @@ func applyMatroskaTagStats(info *MatroskaInfo, tagStats map[uint64]matroskaTagSt
 			}
 		}
 		if format == "MPEG Audio" || format == "PCM" {
+			if format == "PCM" && tag.hasFrameCount && tag.frameCount > 0 {
+				frameRate := float64(tag.frameCount) / tag.durationSeconds
+				replaceCanonicalSeedFill(stream, "FrameRate", fmt.Sprintf("%.3f", frameRate), "", "")
+			}
 			sampleRate, _ := strconv.ParseInt(matroskaStreamScalar(*stream, "SamplingRate"), 10, 64)
 			if sampleRate > 0 {
 				samplingCount := int64(math.RoundToEven(tag.durationSeconds * float64(sampleRate)))
@@ -1543,32 +1646,37 @@ func applyMatroskaTagStats(info *MatroskaInfo, tagStats map[uint64]matroskaTagSt
 			raw := strconv.FormatInt(tag.bitRate, 10)
 			replaceCanonicalSeedFill(stream, "BitRate", raw, "Bit rate", display)
 		case StreamVideo:
-			// A distinct header/container rate is nominal when Statistics Tags
-			// provide the measured payload rate.
-			if existing, ok := parseInt(matroskaStreamScalar(*stream, "BitRate")); ok && existing > 0 {
-				delta := math.Abs(float64(existing-tag.bitRate)) / float64(existing)
-				if delta >= 0.04 {
-					replaceCanonicalSeedFill(stream, "BitRate_Nominal", strconv.FormatInt(existing, 10), "Nominal bit rate", formatBitrate(float64(existing)))
-					replaceCanonicalSeedFill(stream, "BitRate", strconv.FormatInt(tag.bitRate, 10), "Bit rate", formatBitrate(bitrate))
-					continue
-				}
-				continue
-			}
-			if matroskaStreamScalar(*stream, "BitRate") != "" || matroskaStreamScalar(*stream, "BitRate_Nominal") != "" {
-				continue
-			}
-			replaceCanonicalSeedFill(stream, "BitRate", strconv.FormatInt(tag.bitRate, 10), "Bit rate", formatBitrate(bitrate))
+			applyMatroskaMeasuredVideoBitRate(stream, tag.bitRate)
 			width, _ := parsePixels(matroskaStreamScalar(*stream, "Width"))
 			height, _ := parsePixels(matroskaStreamScalar(*stream, "Height"))
 			fps, _ := matroskaCanonicalFrameRate(*stream)
-			if bits := formatBitsPerPixelFrame(bitrate, width, height, fps); bits != "" {
+			finalBitRate := bitrate
+			if parsed, ok := parseInt(matroskaStreamScalar(*stream, "BitRate")); ok && parsed > 0 {
+				finalBitRate = float64(parsed)
+			}
+			if bits := formatBitsPerPixelFrame(finalBitRate, width, height, fps); bits != "" {
 				replaceCanonicalSeedText(stream, "Bits/(Pixel*Frame)", bits)
 			}
 		case StreamAudio:
 			format := matroskaStreamDisplay(*stream, "Format")
-			if strings.HasPrefix(format, "AAC") {
+			if format == "TrueHD" || strings.HasPrefix(format, "MLP FBA") {
 				raw := strconv.FormatInt(tag.bitRate, 10)
-				display := formatBitrate(float64(tag.bitRate))
+				replaceCanonicalSeedFill(stream, "BitRate", raw, "Bit rate", formatBitrate(float64(tag.bitRate)))
+				continue
+			}
+			if strings.HasPrefix(format, "AAC") {
+				bitRate := tag.bitRate
+				// A Matroska TrackEntry BitRate is the muxer's declared AAC rate.
+				// MediaInfo retains it over measured Statistics Tags BPS; when the
+				// element is absent, the measured tag remains authoritative.
+				if declared := stream.matroskaDeferredFacts.Value("BitRate"); declared != "" {
+					if parsed, err := strconv.ParseInt(declared, 10, 64); err == nil && parsed > 0 {
+						bitRate = parsed
+					}
+				}
+				bitRate = normalizeAACBitRate(bitRate)
+				raw := strconv.FormatInt(bitRate, 10)
+				display := formatBitrate(float64(bitRate))
 				replaceCanonicalSeedFill(stream, "BitRate", raw, "Bit rate", display)
 				continue
 			}
@@ -1591,12 +1699,12 @@ func applyMatroskaTagStats(info *MatroskaInfo, tagStats map[uint64]matroskaTagSt
 				if dur, err := strconv.ParseFloat(matroskaProjectedDuration(*stream), 64); err == nil && dur > 0 {
 					bps := int64(math.Floor((float64(bytes)*8)/dur + 1e-9))
 					if bps > 0 {
-						// Official MediaInfo quantizes Matroska AAC bitrates to 8 kb/s steps when derived.
+						// MediaInfo normalizes AAC rates against its well-known-rate table.
 						format := matroskaStreamDisplay(*stream, "Format")
 						codecID := matroskaStreamDisplay(*stream, "Codec ID")
 						isAAC := strings.Contains(format, "AAC") || strings.HasPrefix(codecID, "A_AAC")
-						if isAAC && bps >= 8000 {
-							bps = int64(math.Round(float64(bps)/8000) * 8000)
+						if isAAC {
+							bps = normalizeAACBitRate(bps)
 						}
 						raw := strconv.FormatInt(bps, 10)
 						display := formatBitrate(float64(bps))
@@ -1610,13 +1718,13 @@ func applyMatroskaTagStats(info *MatroskaInfo, tagStats map[uint64]matroskaTagSt
 				replaceCanonicalSeedFill(stream, "BitRate", strconv.FormatInt(bps, 10), "Bit rate", display)
 				continue
 			}
-			// Official MediaInfo quantizes AAC bitrates to 8 kb/s steps.
+			// MediaInfo normalizes AAC rates against its well-known-rate table.
 			audioBps := tag.bitRate
 			format = matroskaStreamDisplay(*stream, "Format")
 			codecID := matroskaStreamDisplay(*stream, "Codec ID")
 			isAAC := strings.Contains(format, "AAC") || strings.HasPrefix(codecID, "A_AAC")
-			if isAAC && audioBps >= 8000 {
-				audioBps = int64(math.Round(float64(audioBps)/8000) * 8000)
+			if isAAC {
+				audioBps = normalizeAACBitRate(audioBps)
 			}
 			bitrate = float64(audioBps)
 			// Match official JSON: when Statistics Tags provide BPS for audio, emit BitRate even if
@@ -1628,27 +1736,83 @@ func applyMatroskaTagStats(info *MatroskaInfo, tagStats map[uint64]matroskaTagSt
 	return matroskaHasCompleteTagStats(info.Tracks, tagStats)
 }
 
-// matroskaTagStatsAreAuthoritative keeps muxer-generated Lavf DURATION tags
-// compatible with MediaInfo while refusing an arbitrary user tag as timing
-// evidence. Listed Statistics Tags carry their own provenance and are handled
-// independently of the container library.
-func matroskaTagStatsAreAuthoritative(info *MatroskaInfo, tag matroskaTagStats) bool {
-	if !tag.trusted {
+// matroskaNominalBitRateMerges mirrors File__Analyze's strict nominal-rate
+// merge window. Rates within five percent collapse to the nominal value.
+func matroskaNominalBitRateMerges(measured, nominal int64) bool {
+	if measured <= 0 || nominal <= 0 {
 		return false
 	}
-	if !tag.bareDuration {
-		return true
+	return float64(nominal) > float64(measured)*0.95 && float64(nominal) < float64(measured)*1.05
+}
+
+// applyMatroskaMeasuredVideoBitRate combines a measured container/statistics
+// rate with an existing coded/HRD rate using MediaInfo's nominal merge rule.
+func applyMatroskaMeasuredVideoBitRate(stream *Stream, measured int64) {
+	if stream == nil || measured <= 0 {
+		return
 	}
-	if info == nil {
-		return false
+	nominal, _ := parseInt(matroskaStreamScalar(*stream, "BitRate_Nominal"))
+	if nominal <= 0 && streamBitRateMode(*stream) == "Constant" {
+		nominal, _ = parseInt(matroskaStreamScalar(*stream, "BitRate"))
 	}
-	for _, name := range []string{"Writing library", "Writing application"} {
-		value := strings.ToLower(strings.TrimSpace(findField(info.General, name)))
-		if strings.HasPrefix(value, "lavf") {
-			return true
+	if matroskaNominalBitRateMerges(measured, nominal) {
+		replaceCanonicalSeedFill(stream, "BitRate", strconv.FormatInt(nominal, 10), "Bit rate", formatBitrate(float64(nominal)))
+		clearCanonicalSeedField(stream, "BitRate_Nominal", "Nominal bit rate")
+		return
+	}
+	replaceCanonicalSeedFill(stream, "BitRate", strconv.FormatInt(measured, 10), "Bit rate", formatBitrate(float64(measured)))
+	if nominal > 0 && nominal != measured {
+		replaceCanonicalSeedFill(stream, "BitRate_Nominal", strconv.FormatInt(nominal, 10), "Nominal bit rate", formatBitrate(float64(nominal)))
+	}
+}
+
+// matroskaStatisticsFrameRate ports File_Mk's normalization of millisecond-
+// precision Statistics Tags. It reports recognized only for integer or 1.001
+// cadences; callers can retain a stronger elementary-parser rate otherwise.
+func matroskaStatisticsFrameRate(frameCount int64, durationSeconds float64, defaultDuration uint64) (float64, bool) {
+	if frameCount <= 0 || durationSeconds <= 0 {
+		return 0, false
+	}
+	rate := float64(frameCount) / durationSeconds
+	rounded := math.Round(rate)
+	if rate == math.Trunc(rate) {
+		return rate, true
+	}
+	delta := rounded - rate*1.001
+	if delta <= -0.0001 || delta >= 0.0001 {
+		return rate, false
+	}
+	duration1001 := float64(frameCount) / rounded * 1.001000
+	duration1000 := float64(frameCount) / rounded * 1.001001
+	canBe1001, canBe1000 := false, false
+	if math.Abs((duration1000-duration1001)*10000) >= 15 {
+		duration := fmt.Sprintf("%.3f", durationSeconds)
+		canBe1001 = duration == fmt.Sprintf("%.3f", duration1001)
+		canBe1000 = duration == fmt.Sprintf("%.3f", duration1000)
+		if canBe1001 && !canBe1000 {
+			rate = rounded / 1.001
+		}
+		if canBe1000 && !canBe1001 {
+			rate = rounded / 1.001001
 		}
 	}
-	return false
+	if canBe1000 == canBe1001 && defaultDuration > 0 {
+		fromDefault := 1_000_000_000.0 / float64(defaultDuration)
+		if delta := math.Round(fromDefault) - fromDefault*1.001000; delta > -0.000002 && delta < 0.000002 {
+			rate = rounded / 1.001
+		}
+		if delta := math.Round(fromDefault) - fromDefault*1.001001; delta > -0.000002 && delta < 0.000002 {
+			rate = rounded / 1.001001
+		}
+	}
+	return rate, true
+}
+
+// matroskaTagStatsAreAuthoritative accepts syntactically valid per-track
+// duration tags and verified Statistics Tags, matching File_Mk tag handling.
+func matroskaTagStatsAreAuthoritative(info *MatroskaInfo, tag matroskaTagStats) bool {
+	_ = info
+	return tag.trusted
 }
 
 func matroskaHasCompleteTagStats(streams []Stream, tagStats map[uint64]matroskaTagStats) bool {
@@ -2016,14 +2180,13 @@ func applyMatroskaVideoProbes(info *MatroskaInfo, probes map[uint64]*matroskaVid
 				effectiveSPS = streamSPS
 				scanConflict := probe.h264SPS.HasScanType && probe.h264SPS.MBAFF != streamSPS.MBAFF
 				applyMatroskaInBandH264SPS(stream, streamSPS, scanConflict)
+				if probe.timeCode == "" {
+					probe.timeCode = h264TimeCodeFromAnnexB(probe.avcAnnexB, streamSPS)
+				}
 			}
 			if order, ok := h264FirstFieldOrder(probe.avcAnnexB, effectiveSPS); ok {
 				replaceCanonicalSeedFill(stream, "ScanOrder", order, "Scan order", order)
-				frameRate, frameRateErr := strconv.ParseFloat(matroskaStreamScalar(*stream, "FrameRate"), 64)
-				if frameRateErr == nil && effectiveSPS.FrameRate > 0 && math.Abs(frameRate-2*effectiveSPS.FrameRate) < 0.001 {
-					replaceCanonicalSeedFill(stream, "FrameRate_Mode", "VFR", "Frame rate mode", "Variable")
-					replaceCanonicalSeedFill(stream, "FrameRate_Original", fmt.Sprintf("%.3f", effectiveSPS.FrameRate), "", "")
-				}
+				applyMatroskaAVCFieldCadence(stream, effectiveSPS)
 			}
 			if probe.activeFormat > 0 {
 				activeFormat := strconv.Itoa(probe.activeFormat)
@@ -2059,9 +2222,20 @@ func applyMatroskaVideoProbes(info *MatroskaInfo, probes map[uint64]*matroskaVid
 				sliceCount := strconv.Itoa(probe.sliceCount)
 				replaceCanonicalSeedFill(stream, "Format_Settings_SliceCount", sliceCount, "", "")
 			}
-			if m, n, ok := inferH264GOP(probe.avcAnnexB); ok && (probe.timeCode != "" || stream.mkvStereoMode == 13) && matroskaStreamDisplay(*stream, "Scan type") != "MBAFF" && standardMatroskaH264GOPLength(n) && matroskaH264GOPNeedsExplicitRate(*stream, n) {
-				gop := fmt.Sprintf("M=%d, N=%d", m, n)
-				replaceCanonicalSeedFill(stream, "Format_Settings_GOP", gop, "Format settings, GOP", gop)
+			if m, n, ok := inferH264GOP(probe.avcAnnexB, effectiveSPS); ok {
+				// File_Mk stops feeding each subparser after 300 packets at bounded
+				// parse speeds. Leave room for AVC reorder delay plus the first/last
+				// GOP cleanup performed by GOP_Detect.
+				if probe.targetPackets > 0 && n > 0 && n*5 >= probe.packetCount {
+					ok = false
+				}
+				if ok {
+					gop := fmt.Sprintf("M=%d, N=%d", m, n)
+					if m == 0 {
+						gop = fmt.Sprintf("N=%d", n)
+					}
+					replaceCanonicalSeedFill(stream, "Format_Settings_GOP", gop, "Format settings, GOP", gop)
+				}
 			}
 			if probe.timeCode != "" && stream.mkvStereoMode != 13 {
 				replaceCanonicalSeedFill(stream, "TimeCode_FirstFrame", probe.timeCode, "Time code of first frame", probe.timeCode)
@@ -2307,6 +2481,25 @@ func applyMatroskaVideoProbes(info *MatroskaInfo, probes map[uint64]*matroskaVid
 	}
 }
 
+// applyMatroskaAVCFieldCadence preserves a container-observed field cadence as
+// the primary rate while retaining the SPS frame cadence as the original rate.
+func applyMatroskaAVCFieldCadence(stream *Stream, sps h264SPSInfo) {
+	if stream == nil || sps.FrameRate <= 0 {
+		return
+	}
+	frameRate, err := strconv.ParseFloat(matroskaStreamScalar(*stream, "FrameRate"), 64)
+	if err != nil || math.Abs(frameRate-2*sps.FrameRate) >= 0.001 {
+		return
+	}
+	replaceCanonicalSeedFill(stream, "FrameRate_Mode", "VFR", "Frame rate mode", "Variable")
+	replaceCanonicalSeedFill(stream, "FrameRate", formatJSONFloat(frameRate), "Frame rate", formatFrameRate(frameRate))
+	replaceCanonicalSeedFill(stream, "FrameRate_Original", fmt.Sprintf("%.3f", sps.FrameRate), "", "")
+	if numerator, denominator := matroskaFrameRateRatio(frameRate); numerator > 0 && denominator > 0 {
+		replaceCanonicalSeedFill(stream, "FrameRate_Num", strconv.Itoa(numerator), "", "")
+		replaceCanonicalSeedFill(stream, "FrameRate_Den", strconv.Itoa(denominator), "", "")
+	}
+}
+
 func repeatMatroskaValue(value string, count int) string {
 	if count <= 1 {
 		return value
@@ -2324,6 +2517,7 @@ func applyMatroskaInBandH264SPS(stream *Stream, sps h264SPSInfo, scanConflict bo
 	if stream == nil || !sps.HasScanType {
 		return
 	}
+	applyMatroskaInBandH264HRD(stream, sps)
 	scanType := "Interlaced"
 	if sps.Progressive {
 		scanType = "Progressive"
@@ -2349,6 +2543,40 @@ func applyMatroskaInBandH264SPS(stream *Stream, sps h264SPSInfo, scanConflict bo
 	replaceCanonicalSeedFill(stream, "FrameRate_Original", fmt.Sprintf("%.3f", sps.FrameRate), "", "")
 }
 
+// applyMatroskaInBandH264HRD projects HRD parameters from an SPS carried in
+// actual frame data. Some legacy avcC records contain an older SPS without VUI
+// timing while the first access unit carries the authoritative NAL/VCL HRD.
+func applyMatroskaInBandH264HRD(stream *Stream, sps h264SPSInfo) {
+	if stream == nil {
+		return
+	}
+	if sps.HasBitRateCBR {
+		mode, display := "VBR", "Variable"
+		if sps.BitRateCBR {
+			mode, display = "CBR", "Constant"
+		}
+		replaceCanonicalSeedFill(stream, "BitRate_Mode", mode, "Bit rate mode", display)
+	}
+	if sps.HasBufferSize && sps.BufferSize > 0 {
+		value := strconv.FormatInt(sps.BufferSize, 10)
+		if sps.HasBufferSizeNAL && sps.HasBufferSizeVCL {
+			value = strconv.FormatInt(sps.BufferSizeNAL, 10) + " / " + strconv.FormatInt(sps.BufferSizeVCL, 10)
+		}
+		replaceCanonicalSeedFill(stream, "BufferSize", value, "", "")
+	}
+	if !sps.HasBitRate || sps.BitRate <= 0 || sps.HasBitRateNAL && sps.HasBitRateVCL && sps.BitRateNAL != sps.BitRateVCL {
+		return
+	}
+	value := strconv.FormatInt(sps.BitRate, 10)
+	if sps.HasBitRateCBR && sps.BitRateCBR {
+		if matroskaStreamScalar(*stream, "BitRate") == "" {
+			replaceCanonicalSeedFill(stream, "BitRate", value, "Bit rate", formatBitrate(float64(sps.BitRate)))
+		}
+		return
+	}
+	replaceCanonicalSeedFill(stream, "BitRate_Maximum", value, "Maximum bit rate", formatBitrate(float64(sps.BitRate)))
+}
+
 // matroskaAFD8MatchesCinemaGeometry limits the legacy AFD=8 parity override to
 // streams whose coded or already-declared display geometry is actually 2.35:1.
 func matroskaAFD8MatchesCinemaGeometry(stream Stream) bool {
@@ -2367,6 +2595,21 @@ func applyMatroskaMPEG2Probe(stream *Stream, parser *mpeg2VideoParser) {
 		return
 	}
 	parsed := parser.finalize()
+	// Matroska cluster probing may stop before the generic MPEG parser's
+	// confidence window. Apply MediaInfo's strict fill gates here without
+	// weakening MPEG-PS/DVD projections that use different scan windows.
+	progressivePictures := parser.pictureCount > 0 && (parser.progressiveFrames == parser.pictureCount || parser.progressiveFrames == parser.pictureCount+1)
+	if parser.progressiveFrames > 0 && !progressivePictures {
+		parsed.ScanType = ""
+		parsed.ScanOrder = ""
+	}
+	gopCount := parser.closedGOPCount + parser.openGOPCount
+	firstClosed := parser.firstGOPClosed != nil && *parser.firstGOPClosed
+	coherentGOP := (firstClosed && parser.closedGOPCount == 1) || parser.closedGOPCount == 0 || parser.openGOPCount == 0
+	if gopCount < 4 || !coherentGOP {
+		parsed.GOPOpenClosed = ""
+		parsed.GOPFirstClosed = ""
+	}
 	if parsed.Version == "" && parsed.Profile == "" && parsed.Width == 0 {
 		return
 	}
@@ -2682,6 +2925,9 @@ func probeMatroskaAudio(probes map[uint64]*matroskaAudioProbe, track uint64, pay
 					return
 				}
 			}
+			if len(payload) >= frameSize && !ac3FrameCRCValid(payload[:frameSize], info.bsid) {
+				return
+			}
 			probe.info.mergeFrame(info)
 			probe.ok = true
 		}
@@ -2710,10 +2956,10 @@ func probeMatroskaAudio(probes map[uint64]*matroskaAudioProbe, track uint64, pay
 				return
 			}
 		}
-		// A Matroska packet may contain an independent syncframe followed by one or
-		// more dependent substreams, including when the packet itself is a lace.
+		// A Matroska packet may contain an independent syncframe followed by any
+		// number of dependent substreams. File_Ac3 consumes the complete packet.
 		offset := 0
-		for framesParsed := 0; framesParsed < 8 && offset+7 <= len(payload); framesParsed++ {
+		for offset+7 <= len(payload) {
 			sub := payload[offset:]
 			if sub[0] != 0x0B || sub[1] != 0x77 {
 				if !probe.parseJOC {
@@ -2724,7 +2970,6 @@ func probeMatroskaAudio(probes map[uint64]*matroskaAudioProbe, track uint64, pay
 					break
 				}
 				offset += sync + 2
-				framesParsed--
 				continue
 			}
 			frame, frameSize, ok := parseEAC3FrameWithOptions(sub, probe.parseJOC)
@@ -2733,7 +2978,6 @@ func probeMatroskaAudio(probes map[uint64]*matroskaAudioProbe, track uint64, pay
 			}
 			if !ok && probe.parseJOC {
 				offset += 2
-				framesParsed--
 				continue
 			}
 			if !ok || frameSize <= 0 || frameSize > len(sub) || packetBytes > 0 && int64(frameSize) > packetBytes {
@@ -2748,12 +2992,6 @@ func probeMatroskaAudio(probes map[uint64]*matroskaAudioProbe, track uint64, pay
 				probe.parseJOC = false
 			}
 			offset += frameSize
-			if probe.targetFrames > 0 && probe.info.framesMerged >= probe.targetFrames {
-				break
-			}
-		}
-		if probe.targetFrames > 0 && probe.info.framesMerged >= probe.targetFrames {
-			probe.collect = false
 		}
 	}
 }
@@ -2904,9 +3142,9 @@ func probeMatroskaVideo(probes map[uint64]*matroskaVideoProbe, track uint64, pay
 		return
 	}
 	if probe.codec == "AVC" {
-		// Cheap x264 metadata extraction: SEI user_data_unregistered carries ASCII settings.
-		// We can match official output without a full stream parse.
-		if writingLib, enc := findX264Info(payload); writingLib != "" || enc != "" {
+		// x264 metadata is valid only in a framed user_data_unregistered SEI with
+		// the x264/eavc UUID; arbitrary ASCII in a sample is not codec metadata.
+		if writingLib, enc := findLastX264InfoLengthPrefixed(payload, probe.nalLengthSize); writingLib != "" || enc != "" {
 			if probe.writingLib == "" && writingLib != "" {
 				probe.writingLib = writingLib
 			}

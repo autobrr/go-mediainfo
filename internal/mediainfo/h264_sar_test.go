@@ -33,3 +33,24 @@ func TestParseAVCConfig_StandardSAR(t *testing.T) {
 		t.Fatalf("SAR=%d:%d (present=%v), want 8:9", info.SARWidth, info.SARHeight, info.HasSAR)
 	}
 }
+
+func TestParseH264SPS_DualHRD(t *testing.T) {
+	sps := []byte{
+		0x67, 0x64, 0x00, 0x29, 0xac, 0x1b, 0x1a, 0x50, 0x1e, 0x00,
+		0x89, 0xf9, 0x70, 0x11, 0x00, 0x00, 0x03, 0x03, 0xe9, 0x00,
+		0x00, 0xbb, 0x80, 0xe2, 0x60, 0x00, 0x04, 0x69, 0x26, 0x00,
+		0x00, 0x72, 0x70, 0xe8, 0xc4, 0xb8, 0xc4, 0xc0, 0x00, 0x08,
+		0xd2, 0x4c, 0x00, 0x00, 0xe4, 0xe1, 0xd1, 0x89, 0x70, 0xf8,
+		0xe1, 0x85, 0x2c,
+	}
+	info := parseH264SPS(sps)
+	if !info.HasBitRateNAL || !info.HasBitRateVCL || info.BitRateNAL != 36_999_936 || info.BitRateVCL != 36_999_936 {
+		t.Fatalf("HRD bitrates = %d/%d (present %v/%v)", info.BitRateNAL, info.BitRateVCL, info.HasBitRateNAL, info.HasBitRateVCL)
+	}
+	if !info.HasBufferSizeNAL || !info.HasBufferSizeVCL || info.BufferSizeNAL != 30_000_000 || info.BufferSizeVCL != 30_000_000 {
+		t.Fatalf("HRD buffers = %d/%d (present %v/%v)", info.BufferSizeNAL, info.BufferSizeVCL, info.HasBufferSizeNAL, info.HasBufferSizeVCL)
+	}
+	if info.BitRateCBR || !info.HasBitRateCBR {
+		t.Fatalf("HRD mode CBR=%v present=%v; want explicit VBR", info.BitRateCBR, info.HasBitRateCBR)
+	}
+}

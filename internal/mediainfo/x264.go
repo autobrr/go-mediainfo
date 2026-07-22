@@ -1,8 +1,14 @@
 package mediainfo
 
 import (
+	"bytes"
 	"strconv"
 	"strings"
+)
+
+var (
+	x264SEIUUIDHigh = [8]byte{0xDC, 0x45, 0xE9, 0xBD, 0xE6, 0xD9, 0x48, 0xB7}
+	eavcSEIUUIDHigh = [8]byte{0xFB, 0x57, 0x4A, 0x60, 0xAC, 0x92, 0x4E, 0x68}
 )
 
 func findX264Info(data []byte) (string, string) {
@@ -38,6 +44,61 @@ func findX264Info(data []byte) (string, string) {
 	return writingLib, encoding
 }
 
+// findX264InfoSEIPayload validates the unregistered-SEI UUID and text payload
+// exactly as File_Avc does before exposing x264/eavc encoder metadata.
+func findX264InfoSEIPayload(payload []byte) (string, string) {
+	if len(payload) <= 16 {
+		return "", ""
+	}
+	var uuidHigh [8]byte
+	copy(uuidHigh[:], payload[:8])
+	if uuidHigh != x264SEIUUIDHigh && uuidHigh != eavcSEIUUIDHigh {
+		return "", ""
+	}
+	text := payload[16:]
+	if null := bytes.IndexByte(text, 0); null >= 0 {
+		if null != len(text)-1 {
+			return "", ""
+		}
+		text = text[:null]
+	}
+	if library, settings := findX264Info(text); library != "" || settings != "" {
+		return library, settings
+	}
+	return findAVCEncoderInfo(text)
+}
+
+// findAVCEncoderInfo mirrors File_Avc's handling of recognized x264/eavc UUID
+// payloads whose encoder name is not itself x264 (for example a transcoding
+// service name). The UUID and complete text boundary are validated by the
+// caller before this generic encoder string is accepted.
+func findAVCEncoderInfo(text []byte) (string, string) {
+	value := string(text)
+	parts := strings.Split(value, " - ")
+	if len(parts) == 0 {
+		return "", ""
+	}
+	library := strings.TrimFunc(parts[0], func(r rune) bool { return r < '0' })
+	if library == "" {
+		return "", ""
+	}
+	settings := ""
+	for _, part := range parts[1:] {
+		if options, ok := strings.CutPrefix(part, "options: "); ok {
+			settings = strings.Join(strings.Fields(options), " / ")
+			break
+		}
+	}
+	return library, settings
+}
+
+func trimH264NALTrailingZeroes(nal []byte) []byte {
+	for len(nal) > 1 && nal[len(nal)-1] == 0 {
+		nal = nal[:len(nal)-1]
+	}
+	return nal
+}
+
 // findX264InfoAnnexB extracts x264's unregistered SEI payload without mixing
 // adjacent encoded bytes into the null-terminated options string.
 func findX264InfoAnnexB(data []byte) (string, string) {
@@ -46,7 +107,7 @@ func findX264InfoAnnexB(data []byte) (string, string) {
 		if len(nal) == 0 || nal[0]&0x1F != 6 {
 			return true
 		}
-		rbsp := nalToRBSP(nal)
+		rbsp := nalToRBSP(trimH264NALTrailingZeroes(nal))
 		for pos := 0; pos < len(rbsp); {
 			payloadType := 0
 			for pos < len(rbsp) && rbsp[pos] == 0xFF {
@@ -73,7 +134,7 @@ func findX264InfoAnnexB(data []byte) (string, string) {
 				break
 			}
 			if payloadType == 5 && payloadSize > 16 {
-				writingLibrary, encoding = findX264Info(rbsp[pos+16 : pos+payloadSize])
+				writingLibrary, encoding = findX264InfoSEIPayload(rbsp[pos : pos+payloadSize])
 				if writingLibrary != "" {
 					return false
 				}
@@ -93,7 +154,7 @@ func findLastX264Info(data []byte) (string, string) {
 		if len(nal) == 0 || nal[0]&0x1F != 6 {
 			return true
 		}
-		rbsp := nalToRBSP(nal)
+		rbsp := nalToRBSP(trimH264NALTrailingZeroes(nal))
 		for pos := 0; pos < len(rbsp); {
 			payloadType := 0
 			for pos < len(rbsp) && rbsp[pos] == 0xFF {
@@ -119,7 +180,7 @@ func findLastX264Info(data []byte) (string, string) {
 				break
 			}
 			if payloadType == 5 && payloadSize > 16 {
-				if library, settings := findX264Info(rbsp[pos+16 : pos+payloadSize]); library != "" || settings != "" {
+				if library, settings := findX264InfoSEIPayload(rbsp[pos : pos+payloadSize]); library != "" || settings != "" {
 					writingLibrary, encoding = library, settings
 				}
 			}
@@ -152,7 +213,7 @@ func findLastX264InfoLengthPrefixed(data []byte, lengthSize int) (string, string
 		if len(nal) == 0 || nal[0]&0x1F != 6 {
 			continue
 		}
-		rbsp := nalToRBSP(nal)
+		rbsp := nalToRBSP(trimH264NALTrailingZeroes(nal))
 		for seiPos := 0; seiPos < len(rbsp); {
 			payloadType := 0
 			for seiPos < len(rbsp) && rbsp[seiPos] == 0xFF {
@@ -178,7 +239,7 @@ func findLastX264InfoLengthPrefixed(data []byte, lengthSize int) (string, string
 				break
 			}
 			if payloadType == 5 && payloadSize > 16 {
-				if library, settings := findX264Info(rbsp[seiPos+16 : seiPos+payloadSize]); library != "" || settings != "" {
+				if library, settings := findX264InfoSEIPayload(rbsp[seiPos : seiPos+payloadSize]); library != "" || settings != "" {
 					writingLibrary, encoding = library, settings
 				}
 			}

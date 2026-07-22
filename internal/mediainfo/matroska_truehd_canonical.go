@@ -20,6 +20,7 @@ type matroskaTrueHDCanonicalFacts struct {
 	contentCompAlgo uint64
 	audioChannels   uint64
 	audioSampleRate float64
+	audioBitDepth   uint64
 	bitRate         uint64
 	segmentDuration float64
 	durationPrec    int
@@ -76,6 +77,10 @@ func matroskaTrueHDCanonicalSeed(facts matroskaTrueHDCanonicalFacts) []fieldEntr
 	if facts.audioSampleRate > 0 {
 		value := strconv.FormatFloat(facts.audioSampleRate, 'f', -1, 64)
 		builder.Fill("SamplingRate", value, "Sampling rate", formatSampleRate(facts.audioSampleRate))
+	}
+	if facts.audioBitDepth > 0 {
+		raw := strconv.FormatUint(facts.audioBitDepth, 10)
+		builder.Fill("BitDepth", raw, "Bit depth", raw+" bits")
 	}
 	builder.Fill("Compression_Mode", "Lossless", "Compression mode", "Lossless")
 	builder.Structured("Delay", "0.000")

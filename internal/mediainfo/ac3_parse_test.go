@@ -643,3 +643,15 @@ func buildEMDFJOCPayload() []byte {
 	bw.writeBits(0, 5)  // payload_id terminator
 	return append([]byte{0x58, 0x38, 0x00, byte(len(body))}, body...)
 }
+
+func TestAC3FrameCRCValid(t *testing.T) {
+	frame := make([]byte, 128)
+	frame[0], frame[1] = 0x0B, 0x77
+	if !ac3FrameCRCValid(frame, 8) {
+		t.Fatal("zero-remainder AC-3 frame rejected")
+	}
+	frame[10] = 1
+	if ac3FrameCRCValid(frame, 8) {
+		t.Fatal("corrupt AC-3 frame accepted")
+	}
+}

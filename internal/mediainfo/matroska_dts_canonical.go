@@ -111,6 +111,7 @@ func applyMatroskaDTSCanonicalProbe(stream *Stream, dts dtsInfo, preserveContain
 	if stream == nil || len(stream.canonicalSeed) == 0 {
 		return
 	}
+	containerChannels, _ := canonicalSeedValue(*stream, "Channels")
 	if dts.lbr {
 		replaceCanonicalSeedFill(stream, "Format", "DTS LBR", "Format", "DTS LBR")
 		replaceCanonicalSeedFill(stream, "Format_Commercial_IfAny", "DTS Express", "Commercial name", "DTS Express")
@@ -222,6 +223,19 @@ func applyMatroskaDTSCanonicalProbe(stream *Stream, dts dtsInfo, preserveContain
 		}
 		if positions != "" {
 			replaceCanonicalSeedFill(stream, "ChannelPositions", positions, "", "")
+		}
+		// Matroska files sometimes exclude LFE from Audio.Channels while the DTS
+		// core reports all six channels. File_Mk normalizes Channels to six but
+		// retains the parser's speaker map as the original layout.
+		if !dts.hd && containerChannels == "5" && channels == 6 {
+			if layout != "" {
+				replaceCanonicalSeedFill(stream, "ChannelLayout_Original", layout, "", "")
+			}
+			if positions != "" {
+				replaceCanonicalSeedFill(stream, "ChannelPositions_Original", positions, "", "")
+			}
+			clearCanonicalSeedField(stream, "ChannelLayout", "Channel layout")
+			clearCanonicalSeedField(stream, "ChannelPositions", "")
 		}
 	}
 	if bitDepth > 0 {

@@ -133,3 +133,56 @@ func TestAVIAudioAlignment(t *testing.T) {
 		t.Fatalf("unsized MPEG audio alignment = %q", got)
 	}
 }
+
+func TestAVIStreamDurationUsesRIFFFloat32Clock(t *testing.T) {
+	tests := []struct {
+		name         string
+		stream       aviStream
+		milliseconds int64
+	}{
+		{
+			name:         "1001-normalized rate",
+			stream:       aviStream{rate: 2997, scale: 125, length: 60107},
+			milliseconds: 2506963,
+		},
+		{
+			name:         "integer rate float32 product",
+			stream:       aviStream{rate: 25, scale: 1, length: 161955},
+			milliseconds: 6478201,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := aviStreamDurationMilliseconds(&test.stream); got != test.milliseconds {
+				t.Fatalf("duration = %d ms, want %d ms", got, test.milliseconds)
+			}
+		})
+	}
+}
+
+func TestAVISuperIndexDurationOverridesStreamHeaderClock(t *testing.T) {
+	payload := make([]byte, 24+2*16)
+	payload[3] = 0 // AVI_INDEX_OF_INDEXES
+	binary.LittleEndian.PutUint32(payload[4:8], 2)
+	binary.LittleEndian.PutUint32(payload[24+12:24+16], 1000)
+	binary.LittleEndian.PutUint32(payload[40+12:40+16], 27)
+	stream := aviStream{rate: 25, scale: 1, length: 1028}
+	parseAVISuperIndex(payload, &stream)
+	if stream.indxDuration != 1027 {
+		t.Fatalf("indx duration = %d, want 1027", stream.indxDuration)
+	}
+	if got := aviStreamDuration(&stream, aviMainHeader{}); math.Abs(got-41.08) > 1e-9 {
+		t.Fatalf("duration = %.9f, want 41.08", got)
+	}
+}
+
+func TestAVITruncatedChunkExtraUsesDeclaredBoundary(t *testing.T) {
+	extra := aviTruncatedChunkExtra("B_\xA6\x19", 447255552, 447255116, 447256424)
+	if extra == nil {
+		t.Fatal("truncated chunk produced no conformance metadata")
+	}
+	want := `{"IsTruncated":"Yes","ConformanceErrors":[{"B_":[{"GeneralCompliance":"File size is less than expected size (actual 447255552 99.9998%, expected 447256424, offset 0x1AA8924C) / Element size is more than maximal permitted size (actual 1308, expected 436, offset 0x1AA8924C)"}]}]}`
+	if got := structuredNodeText(*extra); got != want {
+		t.Fatalf("truncation metadata = %s, want %s", got, want)
+	}
+}

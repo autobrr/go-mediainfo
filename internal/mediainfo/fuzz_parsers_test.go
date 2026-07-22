@@ -248,7 +248,7 @@ func FuzzScanMatroskaClusters(f *testing.F) {
 		needFirstTimes := map[uint64]struct{}{1: {}}
 		applyScan := mode&0x40 != 0
 		collectBytes := mode&0x80 != 0
-		_, _ = scanMatroskaClusters(bytes.NewReader(blob), 0, int64(len(blob)), 1000000, audio, video, applyScan, collectBytes, parseSpeed, 1, needFirstTimes)
+		_, _ = scanMatroskaClusters(bytes.NewReader(blob), 0, int64(len(blob)), 1000000, audio, video, applyScan, collectBytes, parseSpeed, 1, nil, needFirstTimes)
 	})
 }
 

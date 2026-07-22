@@ -208,18 +208,18 @@ func TestOverlayDVDDeclaredLanguagesRejectsPositionalMatch(t *testing.T) {
 	}
 }
 
-func TestDVDTitleSetBitRateDurationPrefersIFOTimeline(t *testing.T) {
-	if got, corrected := dvdTitleSetBitRateDuration(7_272_744_960, 8855, 8771.8, 83.3); got != 8855 || !corrected {
-		t.Fatalf("duration = %v, corrected = %v; want complete IFO PGC timeline correction", got, corrected)
+func TestDVDTitleSetBitRateDurationRetainsBoundedPayloadClock(t *testing.T) {
+	if got, mismatch := dvdTitleSetBitRateDuration(7_272_744_960, 8855, 8771.8, 83.3); got != 83.3 || !mismatch {
+		t.Fatalf("duration = %v, mismatch = %v; want mismatched bounded payload timing", got, mismatch)
 	}
-	if got, corrected := dvdTitleSetBitRateDuration(1_000_000_000, 8855, 8771.8, 1000); got != 1000 || corrected {
-		t.Fatalf("plausible duration = %v, corrected = %v; want bounded timing retained", got, corrected)
+	if got, mismatch := dvdTitleSetBitRateDuration(1_000_000_000, 8855, 8771.8, 1000); got != 1000 || mismatch {
+		t.Fatalf("plausible duration = %v, mismatch = %v; want bounded timing retained", got, mismatch)
 	}
-	if got, corrected := dvdTitleSetBitRateDuration(7_272_744_960, 0, 8771.8, 83.3); got != 8771.8 || !corrected {
-		t.Fatalf("IFO fallback duration = %v, corrected = %v; want selected-program correction", got, corrected)
+	if got, mismatch := dvdTitleSetBitRateDuration(7_272_744_960, 0, 8771.8, 83.3); got != 83.3 || !mismatch {
+		t.Fatalf("IFO fallback duration = %v, mismatch = %v; want mismatched bounded payload timing", got, mismatch)
 	}
-	if got, corrected := dvdTitleSetBitRateDuration(7_272_744_960, 0, 0, 83.3); got != 83.3 || corrected {
-		t.Fatalf("payload fallback duration = %v, corrected = %v; want uncorrected payload timing", got, corrected)
+	if got, mismatch := dvdTitleSetBitRateDuration(7_272_744_960, 0, 0, 83.3); got != 83.3 || !mismatch {
+		t.Fatalf("payload fallback duration = %v, mismatch = %v; want mismatched bounded payload timing", got, mismatch)
 	}
 }
 
@@ -252,13 +252,13 @@ func TestDVDPGCTimelineDurationDeduplicatesFirstSector(t *testing.T) {
 	}
 }
 
-func TestDeriveDVDPSVideoBitRateAndSizeUsesLogicalDuration(t *testing.T) {
+func TestDeriveDVDPSVideoBitRateAndSizeUsesBoundedPayloadClock(t *testing.T) {
 	video := Stream{Kind: StreamVideo}
 	replaceCanonicalSeedFill(&video, "BitRate_Mode", "CBR", "Bit rate mode", "Constant")
 	replaceCanonicalSeedFill(&video, "BitRate", "6000000", "Bit rate", "6000 kb/s")
-	// The bounded VOB scan observed only 83 seconds, but the IFO timeline covers
-	// the main title plus a short PGC used for bitrate and size derivation.
 	replaceCanonicalSeedFill(&video, "Duration", "83300", "Duration", "1 min 23 s")
+	replaceCanonicalSeedFill(&video, "FrameCount", "2496", "", "")
+	replaceCanonicalSeedFill(&video, "FrameRate", "29.970", "Frame rate", "29.970 FPS")
 
 	audio := Stream{Kind: StreamAudio}
 	replaceCanonicalSeedFill(&audio, "BitRate", "384000", "Bit rate", "384 kb/s")
@@ -266,26 +266,27 @@ func TestDeriveDVDPSVideoBitRateAndSizeUsesLogicalDuration(t *testing.T) {
 
 	const (
 		payloadSize    = int64(7272744960)
-		logicalSeconds = 8855
+		sampledSeconds = 83.3
 	)
-	deriveDVDPSVideoBitRateAndSize(streams, payloadSize, logicalSeconds, true)
+	deriveDVDPSVideoBitRateAndSize(streams, payloadSize, sampledSeconds, true)
 
-	if got, _ := canonicalSeedValue(streams[0], "BitRate"); got != "6000000" {
-		t.Fatalf("video bit rate = %q, want plausible CBR header rate", got)
+	overall := math.Round(float64(payloadSize) * 8 / sampledSeconds)
+	derivedBitRate := (overall*0.99 - 384000/0.99) * 0.99
+	wantBitRate := strconv.FormatInt(int64(math.Round(derivedBitRate)), 10)
+	if got, _ := canonicalSeedValue(streams[0], "BitRate"); got != wantBitRate {
+		t.Fatalf("video bit rate = %q, want bounded-clock rate %s", got, wantBitRate)
 	}
 	if got, _ := canonicalSeedValue(streams[0], "BitRate_Maximum"); got != "6000000" {
 		t.Fatalf("maximum video bit rate = %q, want retained sequence-header rate", got)
 	}
-	overall := math.Round(float64(payloadSize) * 8 / logicalSeconds)
-	derivedBitRate := (overall*0.99 - 384000/0.99) * 0.99
-	wantSize := int64(math.Round(derivedBitRate / 8 * logicalSeconds))
+	wantSize := int64(math.Round(derivedBitRate / 8 * (2496 / 29.970)))
 	gotSizeValue, _ := canonicalSeedValue(streams[0], "StreamSize")
 	gotSize, err := strconv.ParseInt(gotSizeValue, 10, 64)
 	if err != nil {
 		t.Fatalf("parse StreamSize %q: %v", gotSizeValue, err)
 	}
 	if gotSize != wantSize {
-		t.Fatalf("video stream size = %d, want %d from logical duration", gotSize, wantSize)
+		t.Fatalf("video stream size = %d, want %d from bounded frame clock", gotSize, wantSize)
 	}
 }
 

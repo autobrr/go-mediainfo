@@ -191,7 +191,7 @@ func matroskaPCMCanonicalSeed(facts matroskaPCMCanonicalFacts) []fieldEntry {
 		value := strconv.FormatFloat(facts.audioSampleRate, 'f', -1, 64)
 		builder.Fill("SamplingRate", value, "Sampling rate", formatSampleRate(facts.audioSampleRate))
 	}
-	if facts.defaultDuration > 0 && facts.audioSampleRate > 0 && facts.audioChannels > 0 && facts.audioBitDepth > 0 && !strings.HasPrefix(facts.codecID, "A_MS/ACM") {
+	if facts.audioChannelsFromTrack && facts.defaultDuration > 0 && facts.audioSampleRate > 0 && facts.audioChannels > 0 && facts.audioBitDepth > 0 && !strings.HasPrefix(facts.codecID, "A_MS/ACM") {
 		samplesPerFrame := int64(math.Round(facts.audioSampleRate * float64(facts.defaultDuration) / 1e9))
 		if samplesPerFrame > 0 {
 			frameRate := facts.audioSampleRate / float64(samplesPerFrame)

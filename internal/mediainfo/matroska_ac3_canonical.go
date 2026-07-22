@@ -88,7 +88,7 @@ func matroskaAC3CanonicalSeed(facts matroskaAC3CanonicalFacts) []fieldEntry {
 		raw := strconv.FormatFloat(facts.audioSampleRate, 'f', -1, 64)
 		builder.Fill("SamplingRate", raw, "Sampling rate", formatSampleRate(facts.audioSampleRate))
 	}
-	if facts.format == "E-AC-3" && facts.audioBitDepth > 0 {
+	if facts.audioBitDepth > 0 {
 		raw := strconv.FormatUint(facts.audioBitDepth, 10)
 		builder.Fill("BitDepth", raw, "Bit depth", raw+" bits")
 	}

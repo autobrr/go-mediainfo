@@ -11,7 +11,8 @@ func TestFindX264InfoAnnexBUsesSEIPayloadBoundary(t *testing.T) {
 	payloadSize := 16 + len(text)
 	nal := make([]byte, 0, payloadSize+12)
 	nal = append(nal, 0, 0, 1, 0x06, 0x05, byte(payloadSize))
-	nal = append(nal, make([]byte, 16)...)
+	uuid := append(x264SEIUUIDHigh[:], make([]byte, 8)...)
+	nal = append(nal, uuid...)
 	nal = append(nal, text...)
 	nal = append(nal, 0x80, 0, 0, 1, 0x65, 0xFF)
 
@@ -52,7 +53,8 @@ func TestFindLastX264InfoLengthPrefixedValidatesNALType(t *testing.T) {
 		text := []byte("x264 - core 164 r3108 - H.264/MPEG-4 AVC codec - options: cabac=1 crf=" + crf + "\x00")
 		payloadSize := 16 + len(text)
 		nal := []byte{0x06, 0x05, byte(payloadSize)}
-		nal = append(nal, make([]byte, 16)...)
+		uuid := append(x264SEIUUIDHigh[:], make([]byte, 8)...)
+		nal = append(nal, uuid...)
 		nal = append(nal, text...)
 		return append(nal, 0x80)
 	}
@@ -72,5 +74,43 @@ func TestFindLastX264InfoLengthPrefixedValidatesNALType(t *testing.T) {
 	binary.BigEndian.PutUint32(malformed, uint32(len(malformed)))
 	if library, settings := findLastX264InfoLengthPrefixed(malformed, 4); library != "" || settings != "" {
 		t.Fatalf("malformed length accepted: library %q settings %q", library, settings)
+	}
+}
+
+func TestFindX264InfoSEIPayloadRejectsUnknownUUIDAndEmbeddedNull(t *testing.T) {
+	text := []byte("x264 - core 164 - options: crf=18.0")
+	unknown := append(make([]byte, 16), text...)
+	if library, settings := findX264InfoSEIPayload(unknown); library != "" || settings != "" {
+		t.Fatalf("unknown UUID accepted: library %q settings %q", library, settings)
+	}
+	malformed := append(append(append([]byte{}, x264SEIUUIDHigh[:]...), make([]byte, 8)...), text...)
+	malformed = append(malformed, 0, 'x')
+	if library, settings := findX264InfoSEIPayload(malformed); library != "" || settings != "" {
+		t.Fatalf("embedded null accepted: library %q settings %q", library, settings)
+	}
+}
+
+func TestFindX264InfoSEIPayloadAcceptsGenericEncoderUnderRecognizedUUID(t *testing.T) {
+	payload := append(append([]byte{}, x264SEIUUIDHigh[:]...), make([]byte, 8)...)
+	payload = append(payload, []byte("Zencoder Video Encoding System\x00")...)
+	library, settings := findX264InfoSEIPayload(payload)
+	if library != "Zencoder Video Encoding System" || settings != "" {
+		t.Fatalf("generic encoder = %q, %q", library, settings)
+	}
+}
+
+func TestFindLastX264InfoLengthPrefixedRejectsZeroTrailingSEI(t *testing.T) {
+	text := []byte("x264 - core 84 - options: bitrate=20000\x00")
+	payloadSize := 16 + len(text)
+	nal := []byte{0x06, 0x05, byte(payloadSize)}
+	nal = append(nal, x264SEIUUIDHigh[:]...)
+	nal = append(nal, make([]byte, 8)...)
+	nal = append(nal, text...)
+	nal = append(nal, 0x00)
+	framed := make([]byte, 4, len(nal)+4)
+	binary.BigEndian.PutUint32(framed, uint32(len(nal)))
+	framed = append(framed, nal...)
+	if library, settings := findLastX264InfoLengthPrefixed(framed, 4); library != "" || settings != "" {
+		t.Fatalf("zero-trailing SEI accepted: library %q settings %q", library, settings)
 	}
 }

@@ -249,3 +249,26 @@ func TestApplyMatroskaTagStatsPreservesTrueHDFrameCount(t *testing.T) {
 		t.Fatalf("FrameCount=%q want trusted Statistics Tags value", got)
 	}
 }
+
+func TestApplyMatroskaTagStatsPreservesTrueHDBitRate(t *testing.T) {
+	info := &MatroskaInfo{Tracks: []Stream{{
+		Kind: StreamAudio,
+		Fields: []Field{
+			{Name: "ID", Value: "3"},
+			{Name: "Format", Value: "MLP FBA"},
+		},
+		JSON: map[string]string{
+			"UniqueID":   "3",
+			"Duration":   "248.948708333",
+			"StreamSize": "78964338",
+		},
+	}}}
+	seedMatroskaLegacyTestStream(&info.Tracks[0])
+	applyMatroskaTagStats(info, map[uint64]matroskaTagStats{3: {
+		trusted: true, hasBitRate: true, bitRate: 2537536,
+	}}, 0)
+	refreshCanonicalCompatibilitySnapshot(&info.Tracks[0])
+	if got := info.Tracks[0].JSON["BitRate"]; got != "2537536" {
+		t.Fatalf("BitRate=%q want trusted TrueHD Statistics Tags value", got)
+	}
+}

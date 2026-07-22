@@ -191,6 +191,13 @@ func TestMatroskaFLACDetectedBitDepthUsesDeclaredStreamInfo(t *testing.T) {
 	}
 }
 
+func TestMatroskaFLACDetectedBitDepthUsesVorbisValidBits(t *testing.T) {
+	info := flacStreamInfo{bitsPerSample: 24, detectedBits: 21}
+	if got := matroskaFLACDetectedBitDepth(info); got != "21" {
+		t.Fatalf("detected bit depth = %q, want 21", got)
+	}
+}
+
 func TestApplyMatroskaEncodersAddsFLACLibraryComponents(t *testing.T) {
 	builder := newCanonicalStreamBuilder(StreamAudio)
 	builder.Fill("Format", "FLAC", "Format", "FLAC")
@@ -307,29 +314,32 @@ func TestApplyMatroskaTagStats(t *testing.T) {
 	}
 }
 
-func TestApplyMatroskaLavfDurationCorrection(t *testing.T) {
+func TestApplyMatroskaBareTagDurationCorrection(t *testing.T) {
 	tests := []struct {
 		name         string
 		delay        string
 		tagDuration  float64
 		hasDuration  bool
+		bareDuration bool
 		wantDuration string
 		wantFrames   string
 	}{
-		{name: "valid subtraction", delay: "3", tagDuration: 10.125, hasDuration: true, wantDuration: "7.125000", wantFrames: "171"},
-		{name: "equal duration", delay: "10", tagDuration: 10, hasDuration: true, wantDuration: "20.000", wantFrames: "480"},
-		{name: "delay exceeds duration", delay: "11", tagDuration: 10, hasDuration: true, wantDuration: "20.000", wantFrames: "480"},
-		{name: "rounded frame count is zero", delay: "9.99", tagDuration: 10, hasDuration: true, wantDuration: "20.000", wantFrames: "480"},
-		{name: "missing delay", tagDuration: 10, hasDuration: true, wantDuration: "20.000", wantFrames: "480"},
-		{name: "zero delay", delay: "0", tagDuration: 10, hasDuration: true, wantDuration: "20.000", wantFrames: "480"},
-		{name: "negative delay", delay: "-1", tagDuration: 10, hasDuration: true, wantDuration: "20.000", wantFrames: "480"},
-		{name: "malformed delay", delay: "invalid", tagDuration: 10, hasDuration: true, wantDuration: "20.000", wantFrames: "480"},
+		{name: "valid subtraction", delay: "3", tagDuration: 10.125, hasDuration: true, bareDuration: true, wantDuration: "7.125000", wantFrames: "171"},
+		{name: "equal duration", delay: "10", tagDuration: 10, hasDuration: true, bareDuration: true, wantDuration: "20.000", wantFrames: "480"},
+		{name: "delay exceeds duration", delay: "11", tagDuration: 10, hasDuration: true, bareDuration: true, wantDuration: "20.000", wantFrames: "480"},
+		{name: "rounded frame count is zero", delay: "9.99", tagDuration: 10, hasDuration: true, bareDuration: true, wantDuration: "20.000", wantFrames: "480"},
+		{name: "missing delay", tagDuration: 10, hasDuration: true, bareDuration: true, wantDuration: "10.000000", wantFrames: "240"},
+		{name: "zero delay", delay: "0", tagDuration: 10, hasDuration: true, bareDuration: true, wantDuration: "10.000000", wantFrames: "240"},
+		{name: "negative delay", delay: "-1", tagDuration: 10, hasDuration: true, bareDuration: true, wantDuration: "11.000000", wantFrames: "264"},
+		{name: "malformed delay", delay: "invalid", tagDuration: 10, hasDuration: true, bareDuration: true, wantDuration: "10.000000", wantFrames: "240"},
 		{name: "missing tag duration", delay: "3", tagDuration: 10, wantDuration: "20.000", wantFrames: "480"},
+		{name: "statistics duration", delay: "3", tagDuration: 10, hasDuration: true, wantDuration: "20.000", wantFrames: "480"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			info := MatroskaInfo{
+				General: []Field{{Name: "Writing application", Value: "Lavf60.3.100"}},
 				Tracks: []Stream{{
 					Kind:   StreamVideo,
 					Fields: []Field{{Name: "Frame rate", Value: "24.000 FPS"}},
@@ -340,16 +350,16 @@ func TestApplyMatroskaLavfDurationCorrection(t *testing.T) {
 						"FrameCount": "480",
 					},
 				}},
-				generalTags: map[string]string{"ENCODER": "Lavf60.3.100"},
 				tagStats: map[uint64]matroskaTagStats{123: {
 					durationSeconds: tt.tagDuration,
 					durationPrec:    6,
 					hasDuration:     tt.hasDuration,
+					bareDuration:    tt.bareDuration,
 				}},
 			}
 			seedMatroskaLegacyTestStream(&info.Tracks[0])
 
-			applyMatroskaLavfDurationCorrection(&info)
+			applyMatroskaBareTagDurationCorrection(&info)
 			refreshCanonicalCompatibilitySnapshot(&info.Tracks[0])
 
 			if got := info.Tracks[0].JSON["Duration"]; got != tt.wantDuration {
@@ -566,7 +576,7 @@ func TestApplyMatroskaTagStatsDerivesOpusCadenceFromTrustedCounts(t *testing.T) 
 	}
 }
 
-func TestApplyMatroskaTagStatsUsesTrustedAACBitRate(t *testing.T) {
+func TestApplyMatroskaTagStatsNormalizesTrustedAACBitRate(t *testing.T) {
 	info := MatroskaInfo{Tracks: []Stream{{
 		Kind: StreamAudio,
 		Fields: []Field{
@@ -582,8 +592,8 @@ func TestApplyMatroskaTagStatsUsesTrustedAACBitRate(t *testing.T) {
 	}}, 0)
 	refreshCanonicalCompatibilitySnapshot(&info.Tracks[0])
 
-	if got := info.Tracks[0].JSON["BitRate"]; got != "191999" {
-		t.Fatalf("AAC BitRate = %q, want trusted 191999", got)
+	if got := info.Tracks[0].JSON["BitRate"]; got != "192000" {
+		t.Fatalf("AAC BitRate = %q, want normalized 192000", got)
 	}
 }
 
@@ -607,6 +617,29 @@ func TestApplyMatroskaTagStatsUsesTrustedAACBitRateRegardlessOfTrackUID(t *testi
 	refreshCanonicalCompatibilitySnapshot(&info.Tracks[0])
 	if got := info.Tracks[0].JSON["BitRate"]; got != "251111" {
 		t.Fatalf("trusted AAC BitRate = %q, want 251111", got)
+	}
+}
+
+func TestApplyMatroskaTagStatsPrefersDeclaredAACBitRate(t *testing.T) {
+	info := MatroskaInfo{Tracks: []Stream{{
+		Kind: StreamAudio,
+		Fields: []Field{
+			{Name: "Format", Value: "AAC LC"},
+			{Name: "ID", Value: "1"},
+		},
+		JSON: map[string]string{"UniqueID": "123", "BitRate": "189375"},
+	}}}
+	seedMatroskaLegacyTestStream(&info.Tracks[0])
+	info.Tracks[0].matroskaDeferredFacts = &matroskaDeferredFacts{}
+	info.Tracks[0].matroskaDeferredFacts.Set("BitRate", "192000")
+
+	applyMatroskaTagStats(&info, map[uint64]matroskaTagStats{123: {
+		trusted: true, bitRate: 189375, hasBitRate: true,
+	}}, 0)
+	refreshCanonicalCompatibilitySnapshot(&info.Tracks[0])
+
+	if got := info.Tracks[0].JSON["BitRate"]; got != "192000" {
+		t.Fatalf("AAC BitRate = %q, want declared 192000", got)
 	}
 }
 
@@ -947,19 +980,15 @@ func TestParseMatroskaTagStatsWithoutDate(t *testing.T) {
 	}
 }
 
-func TestParseMatroskaTagStatsBareDurationRequiresLavfAuthority(t *testing.T) {
+func TestParseMatroskaTagStatsBareDurationIsAuthoritative(t *testing.T) {
 	bare, ok := parseMatroskaTagStats(map[string]string{
 		"DURATION": "00:42:01.080000000",
 	}, "")
 	if !ok || !bare.hasDuration || !bare.trusted || !bare.bareDuration {
 		t.Fatalf("bare DURATION not parsed: ok=%v stats=%+v", ok, bare)
 	}
-	if matroskaTagStatsAreAuthoritative(&MatroskaInfo{}, bare) {
-		t.Fatal("bare DURATION authoritative without Lavf provenance")
-	}
-	lavf := MatroskaInfo{General: []Field{{Name: "Writing library", Value: "Lavf62.3.100"}}}
-	if !matroskaTagStatsAreAuthoritative(&lavf, bare) {
-		t.Fatal("bare DURATION not authoritative for Lavf")
+	if !matroskaTagStatsAreAuthoritative(&MatroskaInfo{}, bare) {
+		t.Fatal("valid per-track DURATION was not authoritative")
 	}
 
 	listed, ok := parseMatroskaTagStats(map[string]string{
@@ -1367,7 +1396,7 @@ func TestScanMatroskaClusters_HEVCReadsLateX265AfterHDRComplete(t *testing.T) {
 		},
 	}
 
-	scanMatroskaClusters(bytes.NewReader(cluster), 0, int64(len(cluster)), 1000000, nil, map[uint64]*matroskaVideoProbe{1: probe}, false, false, 0.5, 1, nil)
+	scanMatroskaClusters(bytes.NewReader(cluster), 0, int64(len(cluster)), 1000000, nil, map[uint64]*matroskaVideoProbe{1: probe}, false, false, 0.5, 1, nil, nil)
 
 	if !probe.hdrInfo.x265Seen {
 		t.Fatalf("expected scanner to read later x265 SEI after HDR completion")
@@ -1398,7 +1427,7 @@ func TestScanMatroskaClusters_HEVCStopsAtPacketCapWithoutX265(t *testing.T) {
 	}
 	videoProbes := map[uint64]*matroskaVideoProbe{1: probe}
 
-	scanMatroskaClusters(bytes.NewReader(cluster), 0, int64(len(cluster)), 1000000, nil, videoProbes, false, false, 1, 1, nil)
+	scanMatroskaClusters(bytes.NewReader(cluster), 0, int64(len(cluster)), 1000000, nil, videoProbes, false, false, 1, 1, nil, nil)
 
 	if !probe.exhausted {
 		t.Fatalf("expected HEVC probe to exhaust at packet cap")
@@ -1472,6 +1501,32 @@ func TestApplyMatroskaInBandH264SPSOverridesStaleCadence(t *testing.T) {
 		if got := matroskaStreamScalar(stream, name); got != "" {
 			t.Fatalf("%s = %q; want cleared", name, got)
 		}
+	}
+}
+
+func TestApplyMatroskaAVCFieldCadenceUsesObservedRateRatio(t *testing.T) {
+	stream := Stream{Kind: StreamVideo}
+	for name, value := range map[fieldName]string{
+		"FrameRate":     "50.000",
+		"FrameRate_Num": "25",
+		"FrameRate_Den": "1",
+	} {
+		replaceCanonicalSeedFill(&stream, name, value, "", "")
+	}
+	applyMatroskaAVCFieldCadence(&stream, h264SPSInfo{FrameRate: 25})
+	for name, want := range map[fieldName]string{
+		"FrameRate_Mode":     "VFR",
+		"FrameRate":          "50.000",
+		"FrameRate_Original": "25.000",
+		"FrameRate_Num":      "50",
+		"FrameRate_Den":      "1",
+	} {
+		if got := matroskaStreamScalar(stream, name); got != want {
+			t.Fatalf("%s = %q; want %q", name, got, want)
+		}
+	}
+	if got := matroskaStreamDisplay(stream, "Frame rate"); got != "50.000 FPS" {
+		t.Fatalf("Frame rate display = %q; want 50.000 FPS", got)
 	}
 }
 
@@ -2075,4 +2130,41 @@ func (r shortAtReader) ReadAt(p []byte, off int64) (int, error) {
 	}
 	n, _ := r.ReaderAt.ReadAt(p[:len(p)/2], off)
 	return n, io.EOF
+}
+
+func TestMatroskaMPEG2CodecPrivatePrecedesClusterSequenceHeader(t *testing.T) {
+	private := makeMPEG2SequenceHeaderWithFlatMatrices(8, 9)
+	probe := newMatroskaMPEG2VideoProbe(Stream{mkvCodecPrivate: private})
+
+	cluster := makeMPEG2SequenceHeaderWithFlatMatrices(5, 6)
+	cluster = append(cluster, 0x00, 0x00, 0x01, 0xB7)
+	probe.mpeg2.consume(cluster)
+
+	want := strings.Repeat("08", 64) + " / " + strings.Repeat("09", 64)
+	if got := probe.mpeg2.finalize().MatrixData; got != want {
+		t.Fatalf("MatrixData = %q, want CodecPrivate value %q", got, want)
+	}
+}
+
+func makeMPEG2SequenceHeaderWithFlatMatrices(intra, nonIntra uint32) []byte {
+	payload := make([]byte, 136)
+	writer := bitWriter{b: payload}
+	writer.writeBits(720, 12)
+	writer.writeBits(480, 12)
+	writer.writeBits(3, 4)
+	writer.writeBits(4, 4)
+	writer.writeBits(10_000, 18)
+	writer.writeBits(1, 1)
+	writer.writeBits(112, 10)
+	writer.writeBits(0, 1)
+	writer.writeBits(1, 1)
+	for range 64 {
+		writer.writeBits(intra, 8)
+	}
+	writer.writeBits(1, 1)
+	for range 64 {
+		writer.writeBits(nonIntra, 8)
+	}
+	payload = payload[:(writer.bit+7)/8]
+	return append([]byte{0x00, 0x00, 0x01, 0xB3}, payload...)
 }

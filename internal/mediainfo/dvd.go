@@ -243,7 +243,6 @@ func parseDVDVideo(path string, file *os.File, size int64, opts AnalyzeOptions) 
 			if parsedInfo, parsedStreams, ok := ParseMPEGPSFiles(vobPaths, aggregateSize, mpegPSOptions{dvdExtras: true, dvdParsing: true, parseSpeed: opts.ParseSpeed}); ok {
 				info.FileSize = aggregateSize
 				streams = mergeDVDTitleSetStreams(parsedStreams, dvdTitleSetSource(base))
-				overlayDVDDeclaredLanguages(streams, audioAttrs, subpicAttrs)
 				streams = mergeDVDDeclaredStreams(streams, audioAttrs, subpicAttrs, ifoDurationSeconds, dvdTitleSetSource(base))
 				payloadDurationSeconds = dvdPayloadCanonicalDuration(streams)
 				if normalizeDVDConstantVideoClock(streams, ifoDurationSeconds) {
@@ -253,6 +252,7 @@ func parseDVDVideo(path string, file *os.File, size int64, opts AnalyzeOptions) 
 				payloadBitRateDurationSeconds, payloadBitRateCorrected = dvdTitleSetBitRateDuration(
 					payloadFileSize, ifoBitRateDurationSeconds, ifoDurationSeconds, payloadDurationSeconds,
 				)
+				payloadBitRateCorrected = payloadBitRateCorrected && dvdHasConstantVideoBitRate(streams)
 				deriveDVDPSVideoBitRateAndSize(streams, payloadFileSize, payloadBitRateDurationSeconds, payloadBitRateCorrected)
 				titleSetParsed = len(streams) > 0
 				if parsedInfo.DurationSeconds > 0 {
@@ -336,9 +336,6 @@ func parseDVDVideo(path string, file *os.File, size int64, opts AnalyzeOptions) 
 		if titleSetParsed && payloadBitRateDurationSeconds > 0 {
 			bitRateDuration = payloadBitRateDurationSeconds
 			bitRateSize = payloadFileSize
-			if payloadBitRateCorrected {
-				bitRateSize = info.FileSize
-			}
 		}
 		overall := (float64(bitRateSize) * 8) / bitRateDuration
 		generalFields = append(generalFields, Field{Name: "Overall bit rate", Value: formatBitrateSmall(overall)})
@@ -614,21 +611,30 @@ func parseDVDVideo(path string, file *os.File, size int64, opts AnalyzeOptions) 
 	return info, true
 }
 
-// dvdTitleSetBitRateDuration retains bounded VOB timing while it yields a
-// physically possible DVD mux rate. Otherwise it returns the complete IFO PGC
-// timeline, then progressively weaker program and payload fallbacks. The
-// boolean reports that impossible bounded timing was corrected.
+// dvdTitleSetBitRateDuration retains the bounded VOB timing used by
+// MediaInfoLib's payload bitrate derivation. The independently parsed IFO
+// duration remains the reported program duration; it does not replace the
+// sampled payload clock used for bitrate and stream-size math.
 func dvdTitleSetBitRateDuration(fileSize int64, ifoTimelineDuration, ifoDuration, payloadDuration float64) (float64, bool) {
-	if fileSize > 0 && payloadDuration > 0 && float64(fileSize)*8/payloadDuration <= dvdMaxMuxBitRate {
-		return payloadDuration, false
+	if payloadDuration > 0 {
+		clockMismatch := fileSize > 0 && float64(fileSize)*8/payloadDuration > dvdMaxMuxBitRate
+		return payloadDuration, clockMismatch
 	}
 	if ifoTimelineDuration > 0 {
-		return ifoTimelineDuration, true
+		return ifoTimelineDuration, false
 	}
-	if ifoDuration > 0 {
-		return ifoDuration, true
+	return ifoDuration, false
+}
+
+func dvdHasConstantVideoBitRate(streams []Stream) bool {
+	for i := range streams {
+		if streams[i].Kind != StreamVideo {
+			continue
+		}
+		mode, _ := canonicalSeedValue(streams[i], "BitRate_Mode")
+		return mode == "CBR" || mode == "Constant"
 	}
-	return payloadDuration, false
+	return false
 }
 
 // dvdStructuredFacts stages IFO facts without exposing JSON-shaped state to
@@ -1954,9 +1960,6 @@ func deriveDVDPSVideoBitRateAndSize(streams []Stream, fileSize int64, duration f
 			videoDuration = frameCount / frameRate
 		}
 	}
-	if correctedDuration {
-		videoDuration = duration
-	}
 	if videoDuration <= 0 {
 		return
 	}
@@ -1983,7 +1986,7 @@ func deriveDVDPSVideoBitRateAndSize(streams []Stream, fileSize int64, duration f
 			})
 		}
 	}
-	if mode != "CBR" && mode != "Constant" {
+	if mode != "CBR" && mode != "Constant" || correctedConstantClock {
 		replaceCanonicalSeedFill(&streams[videoIndex], "BitRate", strconv.FormatInt(int64(math.Round(bitRate)), 10), "Bit rate", formatBitrate(bitRate))
 	}
 	replaceCanonicalSeedFill(&streams[videoIndex], "StreamSize", strconv.FormatInt(streamSize, 10), "Stream size", formatStreamSize(streamSize, fileSize))

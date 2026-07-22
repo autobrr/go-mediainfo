@@ -30,15 +30,21 @@ func TestParseFLACStreamInfoDetails(t *testing.T) {
 	}
 }
 
-func TestParseMatroskaFLACPrivateReadsVorbisVendor(t *testing.T) {
+func TestParseMatroskaFLACPrivateReadsVorbisMetadata(t *testing.T) {
 	streamInfo, err := hex.DecodeString("1000100000001000210c0bb802f00e5b6540864d55f003143d8bad47d3b997fae64c")
 	if err != nil {
 		t.Fatal(err)
 	}
 	vendor := []byte("reference libFLAC 1.2.1 20070917")
-	comment := make([]byte, 4+len(vendor)+4)
+	validBits := []byte("VALID_BITS=15")
+	comment := make([]byte, 4+len(vendor)+4+4+len(validBits))
 	binary.LittleEndian.PutUint32(comment[:4], uint32(len(vendor)))
 	copy(comment[4:], vendor)
+	commentCount := 4 + len(vendor)
+	binary.LittleEndian.PutUint32(comment[commentCount:commentCount+4], 1)
+	commentPos := commentCount + 4
+	binary.LittleEndian.PutUint32(comment[commentPos:commentPos+4], uint32(len(validBits)))
+	copy(comment[commentPos+4:], validBits)
 	private := append([]byte("fLaC"), 0x00, 0x00, 0x00, 0x22)
 	private = append(private, streamInfo...)
 	private = append(private, 0x84, byte(len(comment)>>16), byte(len(comment)>>8), byte(len(comment)))
@@ -54,21 +60,55 @@ func TestParseMatroskaFLACPrivateReadsVorbisVendor(t *testing.T) {
 	if gotVendor != string(vendor) {
 		t.Fatalf("vendor = %q", gotVendor)
 	}
+	if info.detectedBits != 15 {
+		t.Fatalf("detected bits = %d, want 15", info.detectedBits)
+	}
+}
+
+func TestParseFLACDetectedBits(t *testing.T) {
+	for _, test := range []struct {
+		value string
+		want  uint8
+	}{
+		{"21", 21},
+		{" 20 ", 20},
+		{"0", 0},
+		{"invalid", 0},
+	} {
+		if got := parseFLACDetectedBits(test.value); got != test.want {
+			t.Errorf("parseFLACDetectedBits(%q) = %d, want %d", test.value, got, test.want)
+		}
+	}
+}
+
+func TestParseFLACChannelMask(t *testing.T) {
+	for _, test := range []struct {
+		value string
+		want  uint32
+		ok    bool
+	}{
+		{"0X0", 0, true},
+		{"0x3F", 0x3f, true},
+		{"invalid", 0, false},
+	} {
+		got, ok := parseFLACChannelMask(test.value)
+		if got != test.want || ok != test.ok {
+			t.Errorf("parseFLACChannelMask(%q) = %#x, %v; want %#x, %v", test.value, got, ok, test.want, test.ok)
+		}
+	}
 }
 
 func TestFLACDerivedLayoutIsOmitted(t *testing.T) {
 	for _, test := range []struct {
-		vendor string
-		want   bool
+		info flacStreamInfo
+		want bool
 	}{
-		{"reference libFLAC 1.2.1 20070917", false},
-		{"reference libFLAC 1.3.4 20220220", true},
-		{"reference libFLAC 1.4.3 20230623", false},
-		{"reference libFLAC 1.5.0 20250211", true},
-		{"", true},
+		{flacStreamInfo{}, false},
+		{flacStreamInfo{hasChannelMask: true}, true},
+		{flacStreamInfo{hasChannelMask: true, channelMask: 3}, false},
 	} {
-		if got := flacDerivedLayoutIsOmitted(test.vendor); got != test.want {
-			t.Errorf("flacDerivedLayoutIsOmitted(%q) = %v, want %v", test.vendor, got, test.want)
+		if got := flacDerivedLayoutIsOmitted(test.info); got != test.want {
+			t.Errorf("flacDerivedLayoutIsOmitted(%+v) = %v, want %v", test.info, got, test.want)
 		}
 	}
 }

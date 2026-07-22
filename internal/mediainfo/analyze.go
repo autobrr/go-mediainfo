@@ -1063,13 +1063,6 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 				}
 				break
 			}
-			applyX264Info(file, streams, x264InfoOptions{
-				skipWritingLibIfExists: true,
-				skipEncodingIfExists:   true,
-				// Matroska: only emit Nominal bit rate when Bit rate is absent (handled below).
-				addNominalBitrate: false,
-				addBitsPerPixel:   false,
-			})
 			goNominalBitRate := make([]bool, len(streams))
 			for i := range streams {
 				if streams[i].Kind != StreamVideo {
@@ -2021,7 +2014,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 		if parsedInfo, parsedStreams, generalFields, interleaved, ok := ParseAVIWithOptions(file, stat.Size(), opts); ok {
 			info = parsedInfo
 			generalFacts := &canonicalStructuredFacts{}
-			var generalExtra *structuredNode
+			generalExtra := info.generalExtra
 			var rawWritingApp string
 			var rawWritingLib string
 			for _, field := range generalFields {
@@ -2441,7 +2434,7 @@ func applyMatroskaWriterRules(writingApp string, general *Stream, streams []Stre
 			}
 			continue
 		}
-		if (handBrakeDurationRules || lavfDisplayedRate) && stream.Kind == StreamVideo {
+		if (handBrakeDurationRules || lavfDisplayedRate) && stream.Kind == StreamVideo && !stream.mkvTagDuration {
 			frameCount, frameCountErr := strconv.ParseFloat(matroskaStreamScalar(*stream, "FrameCount"), 64)
 			frameRateText := matroskaStreamScalar(*stream, "FrameRate")
 			frameRate, frameRateErr := strconv.ParseFloat(frameRateText, 64)
@@ -2464,7 +2457,7 @@ func applyMatroskaWriterRules(writingApp string, general *Stream, streams []Stre
 				replaceCanonicalSeedFill(stream, "FrameRate_Den", "1", "", "")
 			}
 		}
-		if (handBrakeDurationRules || lavfDisplayedRate || lavfIntegralDuration) && (stream.Kind == StreamVideo || stream.Kind == StreamAudio) {
+		if (handBrakeDurationRules || lavfDisplayedRate || lavfIntegralDuration) && (stream.Kind == StreamVideo || stream.Kind == StreamAudio) && !stream.mkvTagDuration {
 			durationText, _ := projectedCanonicalSeedValue(*stream, "Duration")
 			if duration, err := strconv.ParseFloat(durationText, 64); err == nil && duration > 0 {
 				value := fmt.Sprintf("%.3f", duration)

@@ -142,7 +142,7 @@ func buildJSONStreamFields(stream Stream, order int, typeOrder int, containerFor
 	fields = applyJSONExtras(fields, stream.JSON, rawExtras)
 	fields = normalizeContainerComputedJSON(stream.Kind, fields, containerFormat, stream.JSONPreserveDisplayAR)
 	if !stream.JSONSkipComputed {
-		fields = append(fields, buildJSONComputedFields(stream.Kind, fields, containerFormat, stream.JSONSkipFrameRateRatio)...)
+		fields = append(fields, buildJSONComputedFields(stream.Kind, fields, containerFormat, stream.JSONSkipFrameRateRatio, stream.mkvOmitDerivedFLACLayout)...)
 	}
 	return sortJSONFieldsForContainer(stream.Kind, fields, containerFormat)
 }
@@ -433,7 +433,7 @@ func mapStreamFieldsToJSON(kind StreamKind, fields []Field) []jsonKV {
 
 // buildJSONComputedFields derives MediaInfo-compatible JSON values that are not
 // already present in the parsed field set.
-func buildJSONComputedFields(kind StreamKind, fields []jsonKV, containerFormat string, skipFrameRateRatio bool) []jsonKV {
+func buildJSONComputedFields(kind StreamKind, fields []jsonKV, containerFormat string, skipFrameRateRatio bool, omitDerivedFLACLayout ...bool) []jsonKV {
 	out := []jsonKV{}
 	format := jsonFieldValue(fields, "Format")
 	duration, _ := strconv.ParseFloat(jsonFieldValue(fields, "Duration"), 64)
@@ -461,8 +461,7 @@ func buildJSONComputedFields(kind StreamKind, fields []jsonKV, containerFormat s
 	if kind == StreamAudio {
 		if channels != "" && jsonFieldValue(fields, "ChannelPositions") == "" && jsonFieldValue(fields, "Channels_Original") == "" {
 			omitDerivedFLACPositions := containerFormat == "Matroska" && format == "FLAC" &&
-				jsonFieldValue(fields, "ChannelLayout") == "" &&
-				flacDerivedLayoutIsOmitted(jsonFieldValue(fields, "Encoded_Library"))
+				jsonFieldValue(fields, "ChannelLayout") == "" && len(omitDerivedFLACLayout) > 0 && omitDerivedFLACLayout[0]
 			omitDerivedMatroskaPositions := containerFormat == "Matroska" &&
 				(format == "MPEG Audio" || format == "Vorbis" || format == "PCM") && jsonFieldValue(fields, "ChannelLayout") == ""
 			// Official mediainfo does not emit ChannelPositions for MPEG Audio in MPEG-PS (e.g. VOB).

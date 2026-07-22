@@ -21,6 +21,7 @@ type matroskaVideoCanonicalFacts struct {
 	trackUID        uint64
 	contentCompAlgo uint64
 	defaultDuration uint64
+	timecodeScale   uint64
 	segmentDuration float64
 	durationPrec    int
 	bitRate         uint64
@@ -466,16 +467,16 @@ func applyMatroskaStaticVideoGeometry(builder *canonicalStreamBuilder, facts mat
 		pixelRatio = float64(facts.sps.SARWidth) / float64(facts.sps.SARHeight)
 		displayRatio = float64(width) / float64(height) * pixelRatio
 		containerRatio := 0.0
-		if displayWidth > 0 && displayHeight > 0 {
+		hasContainerRatio := facts.video.hasDisplayWidth && facts.video.hasDisplayHeight && displayWidth > 0 && displayHeight > 0
+		if hasContainerRatio {
 			containerRatio = float64(displayWidth) / float64(displayHeight)
 		}
 		storedDiffers := storedWidth != width || storedHeight != height
-		if storedDiffers && containerRatio > 0 && math.Abs(containerRatio-displayRatio) >= 0.001 {
-			containerPixelRatio := containerRatio / (float64(width) / float64(height))
-			builder.Structured("PixelAspectRatio", formatJSONFloat(containerPixelRatio))
-			builder.Structured("PixelAspectRatio_Original", formatJSONFloat(pixelRatio))
-			builder.Fill("DisplayAspectRatio", formatJSONFloat(containerRatio), "Display aspect ratio", formatAspectRatio(displayWidth, displayHeight))
-			builder.Structured("DisplayAspectRatio_Original", formatJSONFloat(displayRatio))
+		if storedDiffers && hasContainerRatio && math.Abs(containerRatio-displayRatio) > 1e-9 {
+			builder.Structured("PixelAspectRatio", formatMatroskaRatio(displayWidth*height, displayHeight*width))
+			builder.Structured("PixelAspectRatio_Original", formatMatroskaRatio(uint64(facts.sps.SARWidth), uint64(facts.sps.SARHeight)))
+			builder.Fill("DisplayAspectRatio", formatMatroskaRatio(displayWidth, displayHeight), "Display aspect ratio", formatAspectRatio(displayWidth, displayHeight))
+			builder.Structured("DisplayAspectRatio_Original", formatMatroskaRatio(width*uint64(facts.sps.SARWidth), height*uint64(facts.sps.SARHeight)))
 			return
 		}
 	}
@@ -496,8 +497,27 @@ func applyMatroskaStaticVideoGeometry(builder *canonicalStreamBuilder, facts mat
 			}
 		}
 	}
-	builder.Structured("PixelAspectRatio", formatJSONFloat(pixelRatio))
-	builder.Fill("DisplayAspectRatio", formatJSONFloat(displayRatio), "Display aspect ratio", displayText)
+	pixelRatioJSON := formatJSONFloat(pixelRatio)
+	displayRatioJSON := formatJSONFloat(displayRatio)
+	if pixelRatio == 1 {
+		pixelRatioJSON = "1.000"
+		displayRatioJSON = formatMatroskaRatio(width, height)
+	}
+	builder.Structured("PixelAspectRatio", pixelRatioJSON)
+	builder.Fill("DisplayAspectRatio", displayRatioJSON, "Display aspect ratio", displayText)
+}
+
+// formatMatroskaRatio rounds a positive rational value to MediaInfo's
+// three-decimal JSON representation without binary floating-point drift.
+func formatMatroskaRatio(numerator, denominator uint64) string {
+	if denominator == 0 {
+		return ""
+	}
+	whole := numerator / denominator
+	remainder := numerator % denominator
+	fraction := (remainder*1000 + denominator/2) / denominator
+	scaled := whole*1000 + fraction
+	return fmt.Sprintf("%d.%03d", scaled/1000, scaled%1000)
 }
 
 // matroskaCanonicalVideoDimensions returns visible and stored dimensions after
@@ -534,7 +554,29 @@ func applyMatroskaStaticVideoTiming(builder *canonicalStreamBuilder, facts matro
 	}
 	rate := 1e9 / float64(facts.defaultDuration)
 	builder.Fill("FrameRate_Mode", "Constant", "Frame rate mode", "Constant")
-	displayRate := formatFrameRateWithRatio(rate)
+	ratioNum, ratioDen := rationalizeFrameRate(rate)
+	if facts.codecID == "V_MPEG4/ISO/AVC" {
+		if facts.sps.HasFixedFrameRate && facts.sps.FixedFrameRate && facts.sps.FrameRate > 0 {
+			ratioNum, ratioDen = matroskaFrameRateRatio(facts.sps.FrameRate)
+		} else {
+			// File_Mk derives the fallback from sampled cluster timecodes using
+			// float32 intermediates. Preserve those exact arithmetic boundaries;
+			// the displayed decimal alone is insufficient to infer a ratio.
+			scale := facts.timecodeScale
+			if scale == 0 {
+				scale = 1_000_000
+			}
+			time := float32(facts.defaultDuration) / float32(scale)
+			clusterRate := float32(1_000_000_000) / time / float32(scale)
+			ratioNum, ratioDen = matroskaFrameRateRatio(float64(clusterRate))
+		}
+	} else if facts.codecID == "V_MPEGH/ISO/HEVC" && facts.sps.FrameRate > 0 {
+		ratioNum, ratioDen = matroskaFrameRateRatio(facts.sps.FrameRate)
+	}
+	displayRate := formatFrameRate(rate)
+	if ratioNum > 0 && ratioDen > 0 {
+		displayRate = formatFrameRateRatio(uint32(ratioNum), uint32(ratioDen))
+	}
 	if facts.invalidAVCHRD {
 		displayRate = formatFrameRate(rate)
 	}
@@ -551,7 +593,6 @@ func applyMatroskaStaticVideoTiming(builder *canonicalStreamBuilder, facts matro
 	if useSPSDecimalRate {
 		structuredRate = formatJSONFloat(facts.sps.FrameRate)
 	}
-	builder.Fill("FrameRate", structuredRate, "Frame rate", displayRate)
 	emitRatio := true
 	if facts.codecID == "V_MPEG4/ISO/AVC" && facts.sps.FrameRate > 0 && facts.sps.HasFixedFrameRate && facts.sps.FixedFrameRate {
 		specialOriginal24 := math.Abs(facts.sps.FrameRate-24) < 1e-9 && math.Abs(rate-(24000.0/1001.0)) < 0.005
@@ -570,24 +611,26 @@ func applyMatroskaStaticVideoTiming(builder *canonicalStreamBuilder, facts matro
 			builder.DirectStructured(name, value)
 		}
 	}
-	if emitRatio {
-		if numerator, denominator := rationalizeFrameRate(rate); numerator > 0 && denominator > 0 {
-			setRatio("FrameRate_Num", strconv.Itoa(numerator))
-			setRatio("FrameRate_Den", strconv.Itoa(denominator))
-		}
-	}
 	if emitRatio && math.Abs(facts.sps.FrameRate-24) < 1e-9 && math.Abs(rate-(24000.0/1001.0)) < 0.005 {
-		setRatio("FrameRate_Num", "23976")
-		setRatio("FrameRate_Den", "1000")
+		ratioNum, ratioDen = 23976, 1000
+		displayRate = formatFrameRateRatio(23976, 1000)
 		builder.Structured("FrameRate_Original", "24.000")
 	}
 	if emitRatio && facts.codecID == "V_MPEG4/ISO/AVC" && math.Abs(facts.sps.FrameRate-(24000.0/1001.0)) < 1e-9 {
-		setRatio("FrameRate_Num", "24000")
-		setRatio("FrameRate_Den", "1001")
+		ratioNum, ratioDen = 24000, 1001
+		displayRate = formatFrameRateRatio(24000, 1001)
 	}
 	if emitRatio && useSPSDecimalRate {
-		setRatio("FrameRate_Num", "23976")
-		setRatio("FrameRate_Den", "1000")
+		ratioNum, ratioDen = 23976, 1000
+		displayRate = formatFrameRateRatio(23976, 1000)
+	}
+	if facts.invalidAVCHRD {
+		displayRate = formatFrameRate(rate)
+	}
+	builder.Fill("FrameRate", structuredRate, "Frame rate", displayRate)
+	if emitRatio && ratioNum > 0 && ratioDen > 0 {
+		setRatio("FrameRate_Num", strconv.Itoa(ratioNum))
+		setRatio("FrameRate_Den", strconv.Itoa(ratioDen))
 	}
 	if facts.sps.HasFixedFrameRate && !facts.sps.FixedFrameRate {
 		builder.Structured("FrameRate_Mode_Original", "VFR")
@@ -596,6 +639,25 @@ func applyMatroskaStaticVideoTiming(builder *canonicalStreamBuilder, facts matro
 		displayRate := math.Round(rate*1000) / 1000
 		builder.Structured("FrameCount", strconv.FormatInt(int64(math.Round(facts.segmentDuration*displayRate)), 10))
 	}
+}
+
+// matroskaFrameRateRatio mirrors File__Analyze::Fill's exact ratio detection.
+func matroskaFrameRateRatio(rate float64) (int, int) {
+	if rate <= 0 {
+		return 0, 0
+	}
+	rounded := math.Round(rate)
+	numerator, denominator := 0, 0
+	if delta := rounded - rate*1.001000; delta > -0.000002 && delta < 0.000002 {
+		numerator, denominator = int(math.Round(rate*1001)), 1001
+	}
+	if delta := rounded - rate*1.001001; delta > -0.000002 && delta < 0.000002 {
+		numerator, denominator = int(math.Round(rate*1000)), 1000
+	}
+	if rate == math.Trunc(rate) {
+		numerator, denominator = int(rate), 1
+	}
+	return numerator, denominator
 }
 
 func matroskaExactStandardFrameRate(rate float64) bool {

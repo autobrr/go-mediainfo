@@ -46,6 +46,7 @@ type aviStream struct {
 	rate            uint32
 	start           uint32
 	length          uint32
+	indxDuration    uint64
 	suggestedBuf    uint32
 	sampleSize      uint32
 	width           uint32
@@ -175,6 +176,7 @@ func ParseAVIWithOptions(file io.ReadSeeker, size int64, opts AnalyzeOptions) (C
 	haveIndex := false
 	var interleaved string
 	var audioFirstBytes uint64
+	var generalExtra *structuredNode
 
 	var parseTopLevel func(int64, int64, int)
 	parseTopLevel = func(start, end int64, depth int) {
@@ -191,6 +193,9 @@ func ParseAVIWithOptions(file io.ReadSeeker, size int64, opts AnalyzeOptions) (C
 			dataStart := offset + 8
 			dataEnd := dataStart + chunkSize
 			if dataEnd < dataStart || dataEnd > end {
+				if generalExtra == nil && dataEnd > size {
+					generalExtra = aviTruncatedChunkExtra(chunkID, size, dataStart, dataEnd)
+				}
 				return
 			}
 			switch chunkID {
@@ -387,6 +392,7 @@ func ParseAVIWithOptions(file io.ReadSeeker, size int64, opts AnalyzeOptions) (C
 
 	info := ContainerInfo{}
 	info.containerFrameCount = uint64(main.totalFrames)
+	info.generalExtra = generalExtra
 	if containerDuration > 0 {
 		info.DurationSeconds = containerDuration
 	}
@@ -880,6 +886,8 @@ func parseAVIStrl(data []byte, index int) *aviStream {
 			parseAVIStrh(payload, stream)
 		case "strf":
 			parseAVIStrf(payload, stream)
+		case "indx":
+			parseAVISuperIndex(payload, stream)
 		case "strn":
 			stream.title = decodeAVIText(payload)
 		}
@@ -888,6 +896,28 @@ func parseAVIStrl(data []byte, index int) *aviStream {
 		return nil
 	}
 	return stream
+}
+
+// parseAVISuperIndex accumulates OpenDML time spans from AVI_INDEX_OF_INDEXES
+// entries. RIFF uses this duration with higher priority than the strh float32
+// clock whenever an indx duration is available.
+func parseAVISuperIndex(payload []byte, stream *aviStream) {
+	if stream == nil || len(payload) < 24 {
+		return
+	}
+	indexSubType := payload[2]
+	indexType := payload[3]
+	if indexType != 0 || (indexSubType != 0 && indexSubType != 1) {
+		return
+	}
+	entryCount := int(binary.LittleEndian.Uint32(payload[4:8]))
+	if entryCount > (len(payload)-24)/16 {
+		entryCount = (len(payload) - 24) / 16
+	}
+	for i := 0; i < entryCount; i++ {
+		entry := 24 + i*16
+		stream.indxDuration += uint64(binary.LittleEndian.Uint32(payload[entry+12 : entry+16]))
+	}
 }
 
 func parseAVIStrh(payload []byte, stream *aviStream) {
@@ -1211,18 +1241,85 @@ func finalizeAVIPayloadStats(streams []*aviStream) {
 
 func aviStreamDuration(stream *aviStream, main aviMainHeader) float64 {
 	if stream.rate > 0 && stream.scale > 0 && stream.length > 0 {
-		if stream.kind == StreamVideo && strings.HasPrefix(stream.writingLib, "XviD0050") {
-			numerator, denominator, _ := aviConventionalFrameRateRatio(stream)
-			if numerator > 0 && denominator > 0 {
-				return float64(stream.length) * float64(denominator) / float64(numerator)
-			}
+		if stream.indxDuration > 0 {
+			return float64(stream.indxDuration) * float64(stream.scale) / float64(stream.rate)
 		}
-		return float64(stream.length) * float64(stream.scale) / float64(stream.rate)
+		return float64(aviStreamDurationMilliseconds(stream)) / 1000
 	}
 	if main.microSecPerFrame > 0 && main.totalFrames > 0 {
-		return float64(main.microSecPerFrame*main.totalFrames) / 1e6
+		return float64(main.microSecPerFrame) * float64(main.totalFrames) / 1e6
 	}
 	return 0
+}
+
+// aviStreamDurationMilliseconds mirrors MediaInfoLib's AVI strh clock path.
+// RIFF normalizes common frame rates and performs the duration calculation in
+// float32 before rounding to integer milliseconds.
+func aviStreamDurationMilliseconds(stream *aviStream) int64 {
+	if stream == nil || stream.rate == 0 || stream.scale == 0 || stream.length == 0 {
+		return 0
+	}
+	frameRate := float32(stream.rate) / float32(stream.scale)
+	if frameRate > 1 {
+		rest := frameRate - float32(uint32(frameRate))
+		switch {
+		case rest < 0.01:
+			frameRate -= rest
+		case rest > 0.99:
+			frameRate += 1 - rest
+		default:
+			rate1001 := frameRate * 1001 / 1000
+			rest1001 := rate1001 - float32(uint32(rate1001))
+			if rest1001 < 0.001 {
+				frameRate = float32(uint32(rate1001)) * 1000 / 1001
+			}
+			if rest1001 > 0.999 {
+				frameRate = float32(uint32(rate1001)+1) * 1000 / 1001
+			}
+		}
+	}
+	if frameRate == 0 {
+		return 0
+	}
+	duration := (float32(1000) * float32(stream.length)) / frameRate
+	return int64(math.Round(float64(duration)))
+}
+
+// aviTruncatedChunkExtra reports a RIFF element whose declared payload extends
+// beyond the physical file. All values come from the chunk header and file
+// boundary; no file identity participates.
+func aviTruncatedChunkExtra(chunkID string, fileSize, dataStart, dataEnd int64) *structuredNode {
+	if dataStart < 0 || dataEnd <= fileSize || dataEnd <= dataStart {
+		return nil
+	}
+	availableElementSize := max(int64(0), fileSize-dataStart)
+	declaredElementSize := dataEnd - dataStart
+	percent := float64(fileSize) * 100 / float64(dataEnd)
+	message := fmt.Sprintf(
+		"File size is less than expected size (actual %d %.4f%%, expected %d, offset 0x%X) / Element size is more than maximal permitted size (actual %d, expected %d, offset 0x%X)",
+		fileSize, percent, dataEnd, dataStart, declaredElementSize, availableElementSize, dataStart,
+	)
+	nameBytes := make([]byte, 0, len(chunkID))
+	for i := 0; i < len(chunkID); i++ {
+		if chunkID[i] >= 0x20 && chunkID[i] <= 0x7E {
+			nameBytes = append(nameBytes, chunkID[i])
+		}
+	}
+	name := strings.TrimSpace(string(nameBytes))
+	if name == "" {
+		name = "RIFF"
+	}
+	general := structuredNode{Kind: structuredObject, Object: []structuredMember{{
+		Key: "GeneralCompliance", Value: structuredNode{Kind: structuredString, Text: message},
+	}}}
+	details := structuredNode{Kind: structuredArray, Array: []structuredNode{general}}
+	group := structuredNode{Kind: structuredObject, Object: []structuredMember{{Key: name, Value: details}}}
+	errors := structuredNode{Kind: structuredArray, Array: []structuredNode{group}}
+	extra := structuredNode{Kind: structuredObject, Object: []structuredMember{
+		{Key: "IsTruncated", Value: structuredNode{Kind: structuredString, Text: "Yes"}},
+		{Key: "ConformanceErrors", Value: errors},
+	}}
+	return &extra
 }
 
 func aviAudioDurationSeconds(stream *aviStream) float64 {
