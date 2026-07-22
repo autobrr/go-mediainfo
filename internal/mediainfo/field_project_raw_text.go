@@ -882,14 +882,7 @@ func rawTextScanStoreMethod(structured map[string]string) string {
 	if structured["ScanType"] == "MBAFF" {
 		return "InterleavedFields"
 	}
-	switch structured["UniqueID"] {
-	case "2714757033321985940", "15018893693280564553":
-		return "InterleavedFields"
-	case "14826273024089481058":
-		return "SeparatedFields"
-	default:
-		return ""
-	}
+	return ""
 }
 
 // formatRawTextProfile composes video profile, level, and tier tokens using
@@ -922,10 +915,6 @@ func rawTextFrameRateUsesRatio(kind StreamKind, structured map[string]string, nu
 	if numerator == "" || denominator == "" || denominator == "1" {
 		return false
 	}
-	if structured["UniqueID"] == "18229823285062969326" {
-		// The immutable reference omits this AV1 track's surviving 24000/1001 ratio.
-		return false
-	}
 	if kind == StreamText || structured["Format"] == "MPEG-4 Visual" {
 		return true
 	}
@@ -935,19 +924,11 @@ func rawTextFrameRateUsesRatio(kind StreamKind, structured map[string]string, nu
 	return numerator == "23976" && denominator == "1000" || structured["Format"] == "AV1"
 }
 
-// rawTextAV1UsesFilmGrain reports film-grain signaling retained by encoder
-// settings or stable AV1 track compatibility identities.
+// rawTextAV1UsesFilmGrain reports film-grain signaling retained by parsed
+// encoder settings.
 func rawTextAV1UsesFilmGrain(structured map[string]string) bool {
 	settings := structured["Encoded_Library_Settings"]
-	if strings.Contains(settings, "grain=") && !strings.Contains(settings, "grain=0") {
-		return true
-	}
-	switch structured["UniqueID"] {
-	case "18229823285062969326", "14208986170866393365":
-		return true
-	default:
-		return false
-	}
+	return strings.Contains(settings, "grain=") && !strings.Contains(settings, "grain=0")
 }
 
 // rawTextCodecIDHint derives MediaInfo's short raw codec hint from canonical
@@ -1361,11 +1342,6 @@ func rawTextValue(kind StreamKind, label, display string, structured map[string]
 		key := strings.TrimSuffix(label, "/String")
 		if value := structured[key]; value != "" {
 			if milliseconds, err := strconv.ParseFloat(value, 64); err == nil {
-				// This immutable reference retains seconds where the canonical field
-				// otherwise stores milliseconds.
-				if kind == StreamVideo && value == "5965.966" {
-					milliseconds *= 1000
-				}
 				return formatRawTextDuration(milliseconds)
 			}
 		}
@@ -1419,9 +1395,6 @@ func rawTextValue(kind StreamKind, label, display string, structured map[string]
 		if kind != StreamAudio && label == "FrameRate/String" {
 			if numerator, denominator := structured["FrameRate_Num"], structured["FrameRate_Den"]; rawTextFrameRateUsesRatio(kind, structured, numerator, denominator) {
 				return structured["FrameRate"] + " (" + numerator + "/" + denominator + ") fps"
-			}
-			if structured["UniqueID"] == "18229823285062969326" {
-				return structured["FrameRate"] + " fps"
 			}
 		}
 		if kind == StreamAudio && label == "FrameRate/String" {
@@ -1552,11 +1525,6 @@ func rawTextValue(kind StreamKind, label, display string, structured map[string]
 		if structured["Format"] == "Theora" {
 			return formatRawTextAspectRatio(structured["DisplayAspectRatio"])
 		}
-		// This immutable reference preserves a source ratio not derivable from
-		// the retained rounded display value.
-		if structured["UniqueID"] == "1337866033" {
-			return "1.398"
-		}
 		if value := structured["DisplayAspectRatio"]; value != "" && rawTextAVIVisual(structured) {
 			return formatRawTextAVIAspectRatio(value)
 		}
@@ -1676,15 +1644,6 @@ func trimRawTextHexPadding(display string) string {
 // appends to a Dolby Vision raw display.
 func formatRawTextHDR(display string, structured map[string]string) string {
 	format := structured["HDR_Format"]
-	// These immutable references expose suffix/profile spellings not represented
-	// by separate canonical HDR components.
-	switch structured["UniqueID"] {
-	case "10848778679934782213":
-		return strings.TrimSuffix(display, ", HDR10+ Profile B compatible")
-	case "13465845542392905765":
-		display = strings.Replace(display, "Profile 8.1", "Profile 8", 1)
-		return strings.TrimSuffix(display, ", HDR10 compatible")
-	}
 	if !strings.Contains(display, "Dolby Vision") {
 		return display
 	}
@@ -2033,12 +1992,11 @@ func renderRawText(reports []Report) string {
 			buffer.WriteByte('\n')
 			writeRawTextFields(&buffer, streamTitle(stream.Kind, kindIndexes[stream.Kind], counts[stream.Kind]), stream.Fields)
 		}
-		buffer.WriteByte('\n')
 		buffer.WriteString(reportByLine(labelWidth))
 		buffer.WriteByte('\n')
 	}
 	output := strings.TrimRight(buffer.String(), "\n")
-	return strings.ReplaceAll(output+"\n\n", "\n", "\r\n")
+	return strings.ReplaceAll(output+"\n\n\n", "\n", "\r\n")
 }
 
 // writeRawTextFields writes one raw stream section.

@@ -30,11 +30,11 @@ func TestRenderTextWithOptionsUsesRawProjection(t *testing.T) {
 	if strings.Contains(raw, "\n") && strings.Contains(strings.ReplaceAll(raw, "\r\n", ""), "\n") {
 		t.Fatalf("raw output contains bare LF line endings: %q", raw)
 	}
-	wantFooter := "\r\n\r\n" + padRight("ReportBy", 33) + ": " + AppName + " - " + FormatVersion(AppVersion)
+	wantFooter := "\r\n" + padRight("ReportBy", 33) + ": " + AppName + " - " + FormatVersion(AppVersion)
 	if !strings.Contains(raw, wantFooter) {
 		t.Fatalf("raw output footer framing/alignment changed:\n%s", raw)
 	}
-	if !strings.HasSuffix(raw, "\r\n\r\n") || strings.HasSuffix(raw, "\r\n\r\n\r\n") {
+	if !strings.HasSuffix(raw, "\r\n\r\n\r\n") || strings.HasSuffix(raw, "\r\n\r\n\r\n\r\n") {
 		t.Fatalf("raw output terminal line endings = %q", raw[len(raw)-min(len(raw), 12):])
 	}
 	friendly := RenderText([]Report{report})
@@ -400,7 +400,7 @@ func TestRawTextFrameRateRatioPolicy(t *testing.T) {
 		{StreamVideo, "AVC", "", "23976", "1000", true},
 		{StreamVideo, "AVC", "", "24000", "1001", false},
 		{StreamVideo, "AV1", "", "24000", "1001", true},
-		{StreamVideo, "AV1", "18229823285062969326", "24000", "1001", false},
+		{StreamVideo, "AV1", "18229823285062969326", "24000", "1001", true},
 		{StreamVideo, "MPEG-4 Visual", "", "24000", "1001", true},
 		{StreamText, "ASS", "", "999", "1000", true},
 		{StreamVideo, "AVC", "", "24", "1", false},
@@ -409,6 +409,26 @@ func TestRawTextFrameRateRatioPolicy(t *testing.T) {
 		if got := rawTextFrameRateUsesRatio(test.kind, structured, test.numerator, test.denom); got != test.want {
 			t.Fatalf("rawTextFrameRateUsesRatio(%q, %q/%q) = %v, want %v", test.format, test.numerator, test.denom, got, test.want)
 		}
+	}
+}
+
+func TestRawTextFormattingIgnoresCorpusUniqueIDs(t *testing.T) {
+	if got := rawTextScanStoreMethod(map[string]string{"UniqueID": "15018893693280564553"}); got != "" {
+		t.Fatalf("scan store method = %q; identity must not synthesize a value", got)
+	}
+	if rawTextAV1UsesFilmGrain(map[string]string{"UniqueID": "18229823285062969326"}) {
+		t.Fatal("identity must not synthesize AV1 film-grain signaling")
+	}
+	if got := rawTextValue(StreamVideo, "DisplayAspectRatio/String", "1.333", map[string]string{
+		"UniqueID": "1337866033", "DisplayAspectRatio": "1.333",
+	}, 0); got != "1.333" {
+		t.Fatalf("display aspect ratio = %q, want parsed value", got)
+	}
+	display := "Dolby Vision, Version 1.0, Profile 8.1, HDR10 compatible"
+	if got := formatRawTextHDR(display, map[string]string{
+		"UniqueID": "13465845542392905765", "HDR_Format": "Dolby Vision",
+	}); got != display {
+		t.Fatalf("HDR display = %q, want parsed display unchanged", got)
 	}
 }
 

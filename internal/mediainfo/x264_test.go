@@ -2,6 +2,7 @@ package mediainfo
 
 import (
 	"encoding/binary"
+	"strings"
 	"testing"
 )
 
@@ -20,6 +21,24 @@ func TestFindX264InfoAnnexBUsesSEIPayloadBoundary(t *testing.T) {
 	}
 	if settings != "cabac=1 / trellis=2" {
 		t.Fatalf("settings=%q", settings)
+	}
+}
+
+func TestFindX264InfoPreservesVersionPaddingWithoutOptions(t *testing.T) {
+	library, settings := findX264Info([]byte("x264 - core 164 r3107 encoded by tool          \x00"))
+	if library != "x264 core 164 r3107 encoded by tool          " || settings != "" {
+		t.Fatalf("library=%q settings=%q", library, settings)
+	}
+	name, version := splitEncodedLibrary("x264 - " + strings.TrimPrefix(library, "x264 "))
+	if name != "x264" || version != "core 164 r3107 encoded by tool          " {
+		t.Fatalf("split library = (%q, %q)", name, version)
+	}
+}
+
+func TestFindX264InfoPreservesVersionPaddingBeforeOptions(t *testing.T) {
+	library, settings := findX264Info([]byte("x264 - core 164 r3107 encoded by tool          - options: cabac=1\x00"))
+	if library != "x264 core 164 r3107 encoded by tool         " || settings != "cabac=1" {
+		t.Fatalf("library=%q settings=%q", library, settings)
 	}
 }
 

@@ -79,14 +79,6 @@ func matroskaVorbisCanonicalSeed(facts matroskaVorbisCanonicalFacts) []fieldEntr
 	if facts.audioChannels > 0 {
 		value := strconv.FormatUint(facts.audioChannels, 10)
 		builder.Fill("Channels", value, "Channel(s)", formatChannels(facts.audioChannels))
-		if facts.audioChannelsFromTrack {
-			if layout := channelLayout(facts.audioChannels); layout != "" {
-				builder.StructuredJSONOnly("ChannelLayout", layout)
-			}
-			if positions := matroskaGoChannelPositions(facts.audioChannels); positions != "" {
-				builder.StructuredJSONOnly("ChannelPositions", positions)
-			}
-		}
 	}
 	if facts.audioSampleRate > 0 {
 		value := strconv.FormatFloat(facts.audioSampleRate, 'f', -1, 64)

@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestParseMatroskaTrackPublishesGoOnlyPCMJSON(t *testing.T) {
+func TestParseMatroskaTrackDoesNotSynthesizePCMSpeakerMetadata(t *testing.T) {
 	audio := buildMatroskaElement(mkvIDTrackAudio,
 		buildMatroskaElement(mkvIDChannels, encodeMatroskaUint(2)),
 	)
@@ -20,16 +20,12 @@ func TestParseMatroskaTrackPublishesGoOnlyPCMJSON(t *testing.T) {
 	if !ok {
 		t.Fatal("expected parsed PCM stream")
 	}
-	for key, want := range map[string]string{
-		"ChannelLayout":    "L R",
-		"ChannelPositions": "Front: L R",
-		"Compression_Mode": "Lossless",
-	} {
-		if got, found := projectedCanonicalSeedValue(stream, fieldName(key)); !found || got != want {
-			t.Errorf("canonical %s = %q, %v; want %q", key, got, found, want)
+	for _, key := range []string{"ChannelLayout", "ChannelPositions", "Compression_Mode"} {
+		if got, found := projectedCanonicalSeedValue(stream, fieldName(key)); found {
+			t.Errorf("canonical %s was synthesized as %q", key, got)
 		}
-		if got := stream.JSON[key]; got != want {
-			t.Errorf("published %s = %q; want %q", key, got, want)
+		if got := stream.JSON[key]; got != "" {
+			t.Errorf("published %s was synthesized as %q", key, got)
 		}
 	}
 	if got := findField(stream.Fields, "Channel layout"); got != "" {
@@ -92,14 +88,21 @@ func TestRestoreMatroskaRetainedFieldsUsesDirectState(t *testing.T) {
 	}
 	report := Report{Ref: "retained.mkv", General: general, Streams: streams}
 	attachCanonicalStore(&report)
-	if output := RenderJSON([]Report{report}); !strings.Contains(output, `"chapter":"one","edition":"two"`) {
-		t.Fatalf("merged Menu.extra missing from direct output: %s", output)
+	output := RenderJSON([]Report{report})
+	if !strings.Contains(output, `"extra":{"chapter":"one"}`) || !strings.Contains(output, `"extra":{"edition":"two"}`) {
+		t.Fatalf("separate Menu.extra objects missing from direct output: %s", output)
+	}
+	if strings.Contains(output, `"chapter":"one","edition":"two"`) {
+		t.Fatalf("Menu editions were merged: %s", output)
 	}
 	if report.Streams[0].JSON["BitRate_Mode"] != "VBR" || report.Streams[1].JSON["ChannelLayout"] != "L R" || report.General.JSON["StreamSize"] != "1234" {
 		t.Fatalf("Go-only fields missing from compatibility snapshot: general=%#v video=%#v audio=%#v", report.General.JSON, report.Streams[0].JSON, report.Streams[1].JSON)
 	}
-	if got := report.Streams[2].JSONRaw["extra"]; got != `{"chapter":"one","edition":"two"}` {
-		t.Fatalf("merged Menu.extra = %s", got)
+	if got := report.Streams[2].JSONRaw["extra"]; got != `{"chapter":"one"}` {
+		t.Fatalf("first Menu.extra = %s", got)
+	}
+	if got := report.Streams[3].JSONRaw["extra"]; got != `{"edition":"two"}` {
+		t.Fatalf("second Menu.extra = %s", got)
 	}
 	if len(streams[0].Fields) != 0 || len(streams[1].Fields) != 0 {
 		t.Fatal("restoration changed text fields")
@@ -119,14 +122,5 @@ func TestRestoreMatroskaRetainedFieldsUsesCapturedGeneralPresence(t *testing.T) 
 	restoreMatroskaRetainedFields(&general, nil, "1234", matroskaRetainedGeneralPresence{streamSize: true})
 	if got, _ := canonicalSeedValue(general, "StreamSize"); got != "326" {
 		t.Fatalf("captured General size = %q, want 326", got)
-	}
-}
-
-func TestMatroskaGoFormatLevelUsesFirstStereoProfile(t *testing.T) {
-	if got := matroskaGoFormatLevel("Stereo High@L4.1 / High@L4.1"); got != "4.1" {
-		t.Fatalf("level = %q, want 4.1", got)
-	}
-	if got := matroskaGoFormatLevel("High@L4.1"); got != "" {
-		t.Fatalf("single profile produced redundant retained level %q", got)
 	}
 }

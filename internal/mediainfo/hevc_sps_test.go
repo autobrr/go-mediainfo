@@ -27,6 +27,25 @@ func TestParseHEVCSPSInterPredictedRPSKeepsVUIAlignment(t *testing.T) {
 	}
 }
 
+func TestParseHEVCVUIPreservesVideoFormat(t *testing.T) {
+	w := &hevcBitBuf{}
+	w.put(0, 1) // aspect_ratio_info_present_flag
+	w.put(0, 1) // overscan_info_present_flag
+	w.put(1, 1) // video_signal_type_present_flag
+	w.put(2, 3) // video_format: NTSC
+	w.put(0, 1) // video_full_range_flag
+	w.put(0, 1) // colour_description_present_flag
+	w.put(0, 1) // chroma_loc_info_present_flag
+	w.put(0, 3) // neutral_chroma, field_seq, frame_field_info
+	w.put(0, 1) // default_display_window_flag
+	w.put(0, 1) // vui_timing_info_present_flag
+	w.put(0, 1) // bitstream_restriction_flag
+	_, _, _, _, _, _, _, _, _, videoFormat, present := parseHEVCVUI(newBitReader(w.bytes()))
+	if !present || videoFormat != 2 {
+		t.Fatalf("video format = %d, present=%v; want NTSC signal", videoFormat, present)
+	}
+}
+
 // hevcBitBuf is a minimal MSB-first bit accumulator for crafting HEVC SPS RBSP in
 // tests, with an Exp-Golomb (ue) writer.
 type hevcBitBuf struct{ bits []byte }

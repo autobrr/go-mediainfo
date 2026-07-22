@@ -132,7 +132,7 @@ func TestImpl001MPEG4ProbeWaitsForVOL(t *testing.T) {
 	}
 	vol := []byte{0, 0, 1, 0x20, 0x00, 0xc8, 0x0d, 0xc0, 0x01, 0xf0, 0x61, 0xc0, 0x18, 0x40}
 	probeMatroskaVideo(probes, 1, vol)
-	if !probe.mpeg4Seen || videoProbeNeedsSample(probe) || probe.mpeg4Visual.Profile != "Simple@L1" {
+	if !probe.mpeg4Seen || !videoProbeNeedsSample(probe) || probe.mpeg4Visual.Profile != "Simple@L1" {
 		t.Fatalf("VOL probe complete=%v needs=%v profile=%q", probe.mpeg4Seen, videoProbeNeedsSample(probe), probe.mpeg4Visual.Profile)
 	}
 	exhausted := &matroskaVideoProbe{codec: "MPEG-4 Visual", exhausted: true}

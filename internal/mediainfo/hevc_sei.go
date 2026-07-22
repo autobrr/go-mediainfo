@@ -388,6 +388,9 @@ func parseHDR10Plus(payload []byte, info *hevcHDRInfo) {
 }
 
 func formatHDR10Plus(info hevcHDRInfo) string {
+	if info.hdr10PlusVersion == 0 {
+		return "SMPTE ST 2094 App 4, Version 0"
+	}
 	profile := "HDR10+ Profile A"
 	if info.hdr10PlusToneMapping {
 		profile = "HDR10+ Profile B"

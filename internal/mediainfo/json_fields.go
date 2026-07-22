@@ -700,7 +700,7 @@ func splitEncodedLibrary(value string) (string, string) {
 	if strings.HasPrefix(value, "x264") {
 		trimmed := strings.TrimPrefix(value, "x264 - ")
 		trimmed = strings.TrimPrefix(trimmed, "x264 ")
-		return "x264", strings.TrimSpace(trimmed)
+		return "x264", strings.TrimLeft(trimmed, " \t\r\n")
 	}
 	if strings.HasPrefix(value, "x265") {
 		if rest, ok := strings.CutPrefix(value, "x265 - "); ok {

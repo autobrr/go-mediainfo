@@ -79,9 +79,6 @@ func matroskaFLACCanonicalSeed(facts matroskaFLACCanonicalFacts) []fieldEntry {
 				builder.Fill("ChannelLayout", layout, "Channel layout", layout)
 			}
 			builder.Structured("ChannelPositions", positions)
-		} else if facts.audioChannelsFromTrack {
-			builder.StructuredJSONOnly("ChannelLayout", channelLayout(facts.audioChannels))
-			builder.StructuredJSONOnly("ChannelPositions", positions)
 		}
 	}
 	if facts.audioSampleRate > 0 {
@@ -93,7 +90,7 @@ func matroskaFLACCanonicalSeed(facts matroskaFLACCanonicalFacts) []fieldEntry {
 		if facts.segmentDuration > 0 {
 			samplingCount = uint64(math.Round(facts.segmentDuration * float64(facts.codec.sampleRate)))
 		}
-		if facts.codec.maxBlockSize > 0 {
+		if facts.codec.minBlockSize > 0 && facts.codec.minBlockSize == facts.codec.maxBlockSize {
 			samplesPerFrame := uint64(facts.codec.maxBlockSize)
 			builder.Structured("SamplesPerFrame", strconv.FormatUint(samplesPerFrame, 10))
 			builder.Structured("FrameRate", fmt.Sprintf("%.3f", float64(facts.codec.sampleRate)/float64(samplesPerFrame)))

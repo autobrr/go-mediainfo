@@ -179,15 +179,15 @@ func TestParseMatroskaFLACCodecPrivate(t *testing.T) {
 	}
 }
 
-func TestMatroskaFLACDetectedBitDepthUsesContentIdentity(t *testing.T) {
-	generic := flacStreamInfo{bitsPerSample: 24, md5: "00112233445566778899AABBCCDDEEFF"}
-	if got := matroskaFLACDetectedBitDepth(generic); got != "24" {
-		t.Fatalf("generic detected bit depth = %q, want 24", got)
-	}
-
-	h218 := flacStreamInfo{bitsPerSample: 24, md5: "BAB396FCA9481C0BF8CB5717065C8FF8"}
-	if got := matroskaFLACDetectedBitDepth(h218); got != "21" {
-		t.Fatalf("H218 detected bit depth = %q, want 21", got)
+func TestMatroskaFLACDetectedBitDepthUsesDeclaredStreamInfo(t *testing.T) {
+	for _, digest := range []string{
+		"00112233445566778899AABBCCDDEEFF",
+		"BAB396FCA9481C0BF8CB5717065C8FF8",
+	} {
+		info := flacStreamInfo{bitsPerSample: 24, md5: digest}
+		if got := matroskaFLACDetectedBitDepth(info); got != "24" {
+			t.Fatalf("digest %q detected bit depth = %q, want declared 24", digest, got)
+		}
 	}
 }
 
@@ -210,6 +210,51 @@ func TestApplyMatroskaEncodersAddsFLACLibraryComponents(t *testing.T) {
 	} {
 		if got := streams[0].JSON[key]; got != want {
 			t.Errorf("%s = %q, want %q", key, got, want)
+		}
+	}
+}
+
+func TestApplyMatroskaEncodersNormalizesExistingLavcFLAC(t *testing.T) {
+	builder := newCanonicalStreamBuilder(StreamAudio)
+	builder.Fill("Format", "FLAC", "Format", "FLAC")
+	builder.Fill("Channels", "2", "Channel(s)", "2 channels")
+	builder.Fill("Encoded_Library", "Lavc58.91.100 flac", "Writing library", "Lavc58.91.100 flac")
+	builder.Structured("BitDepth_Detected", "16")
+	builder.Structured("UniqueID", "42")
+	stream := builder.Snapshot(canonicalStreamPolicy{})
+	stream.Fields = []Field{
+		{Name: "Format", Value: "FLAC"},
+		{Name: "Channel(s)", Value: "2 channels"},
+		{Name: "Writing library", Value: "Lavc58.91.100 flac"},
+	}
+	streams := []Stream{stream}
+
+	normalizeMatroskaLavcFLAC(&streams[0], "Lavc58.91.100 flac")
+	if got := matroskaStreamScalar(streams[0], "BitDepth_Detected"); got != "" {
+		t.Fatalf("BitDepth_Detected = %q; want omitted", got)
+	}
+	if got := matroskaStreamScalar(streams[0], "ChannelLayout"); got != "L R" {
+		t.Fatalf("ChannelLayout = %q; want L R", got)
+	}
+	if got := matroskaStreamScalar(streams[0], "ChannelPositions"); got != "Front: L R" {
+		t.Fatalf("ChannelPositions = %q; want Front: L R", got)
+	}
+}
+
+func TestMatroskaAC3StereoExtraOmitsInapplicableMixFields(t *testing.T) {
+	probe := &matroskaAudioProbe{format: "AC-3"}
+	info := ac3Info{
+		acmod: 2, dialnorm: -23, hasDialnorm: true,
+		dialnormCount: 2, dialnormSum: 2, dialnormMin: -31, dialnormMax: -23,
+		hasCmixlev: true, cmixlevDB: -3,
+		hasSurmixlev: true, surmixlevDB: -3,
+		hasDmixmod: true, dmixmod: "Lt/Rt",
+	}
+	fields := matroskaAC3CanonicalExtraFields(probe, info, false, "")
+	for _, field := range fields {
+		switch field.Key {
+		case "cmixlev", "surmixlev", "dmixmod", "dialnorm_Maximum":
+			t.Fatalf("inapplicable stereo field emitted: %s=%s", field.Key, field.Val)
 		}
 	}
 }
@@ -542,7 +587,7 @@ func TestApplyMatroskaTagStatsUsesTrustedAACBitRate(t *testing.T) {
 	}
 }
 
-func TestApplyMatroskaTagStatsScopesAACContainerBitRateParityByTrackIdentity(t *testing.T) {
+func TestApplyMatroskaTagStatsUsesTrustedAACBitRateRegardlessOfTrackUID(t *testing.T) {
 	info := MatroskaInfo{Tracks: []Stream{{
 		Kind: StreamAudio,
 		Fields: []Field{
@@ -553,13 +598,15 @@ func TestApplyMatroskaTagStatsScopesAACContainerBitRateParityByTrackIdentity(t *
 		},
 		JSON: map[string]string{"UniqueID": "18163320629618101418", "BitRate": "256000"},
 	}}}
+	seedMatroskaLegacyTestStream(&info.Tracks[0])
 
 	applyMatroskaTagStats(&info, map[uint64]matroskaTagStats{18163320629618101418: {
 		trusted: true, bitRate: 251111, hasBitRate: true,
 	}}, 0)
 
-	if got := info.Tracks[0].JSON["BitRate"]; got != "256000" {
-		t.Fatalf("explicit AAC BitRate = %q, want 256000", got)
+	refreshCanonicalCompatibilitySnapshot(&info.Tracks[0])
+	if got := info.Tracks[0].JSON["BitRate"]; got != "251111" {
+		t.Fatalf("trusted AAC BitRate = %q, want 251111", got)
 	}
 }
 
@@ -601,6 +648,7 @@ func TestApplyMatroskaMP3ProbeUsesPerStreamEvidence(t *testing.T) {
 	msProbe := base
 	msProbe.mp3.modeExt = 0x02
 	msProbe.mp3Library = "LAME3.98r"
+	msProbe.mp3AudioFrameSeen = true
 	ms := Stream{Kind: StreamAudio, JSON: map[string]string{"Duration": "10.000"}}
 	seedMatroskaLegacyTestStream(&ms)
 	applyMatroskaMP3Probe(&ms, &msProbe)
@@ -620,7 +668,7 @@ func TestApplyMatroskaAudioProbesKeepsMPEGTracksIndependent(t *testing.T) {
 	}}
 	probes := map[uint64]*matroskaAudioProbe{
 		1: {format: "MPEG Audio", ok: true, mp3: mp3HeaderInfo{bitrateKbps: 128, sampleRate: 48000, channels: 2, channelMode: 1, versionID: 3}},
-		2: {format: "MPEG Audio", ok: true, mp3: mp3HeaderInfo{bitrateKbps: 192, sampleRate: 48000, channels: 2, channelMode: 1, modeExt: 2, versionID: 3}, mp3Library: "LAME3.100", mp3FrameCount: 100},
+		2: {format: "MPEG Audio", ok: true, mp3: mp3HeaderInfo{bitrateKbps: 192, sampleRate: 48000, channels: 2, channelMode: 1, modeExt: 2, versionID: 3}, mp3Library: "LAME3.100", mp3AudioFrameSeen: true, mp3FrameCount: 100},
 	}
 	for index := range info.Tracks {
 		seedMatroskaLegacyTestStream(&info.Tracks[index])
@@ -645,7 +693,7 @@ func TestApplyMatroskaAudioProbesKeepsMPEGTracksIndependent(t *testing.T) {
 func TestProbeMatroskaMP3UsesInfoFrameAndFollowingAudioFrame(t *testing.T) {
 	const frameSize = 192
 	infoFrame := make([]byte, frameSize)
-	copy(infoFrame, []byte{0xFF, 0xFB, 0x54, 0x40})
+	copy(infoFrame, []byte{0xFF, 0xFB, 0x54, 0x60})
 	copy(infoFrame[36:], "Info")
 	binary.BigEndian.PutUint32(infoFrame[40:], 0x0003)
 	binary.BigEndian.PutUint32(infoFrame[44:], 100)
@@ -661,8 +709,14 @@ func TestProbeMatroskaMP3UsesInfoFrameAndFollowingAudioFrame(t *testing.T) {
 	nextFrame := make([]byte, frameSize)
 	copy(nextFrame, []byte{0xFF, 0xFB, 0x54, 0x60})
 	probeMatroskaAudio(probes, 1, nextFrame, 1, frameSize, true)
-	if probe.collect || probe.mp3.modeExt != 0x02 {
+	if !probe.collect || probe.mp3.modeExt != 0x02 {
 		t.Fatalf("following audio frame evidence not applied: %+v", probe)
+	}
+	for range 511 {
+		probeMatroskaAudio(probes, 1, nextFrame, 1, frameSize, true)
+	}
+	if probe.collect || probe.mp3FramesObserved != 512 {
+		t.Fatalf("bounded MP3 mode sampling did not complete: %+v", probe)
 	}
 
 	stream := Stream{Kind: StreamAudio, JSON: map[string]string{"Duration": "3.000"}}
@@ -672,22 +726,22 @@ func TestProbeMatroskaMP3UsesInfoFrameAndFollowingAudioFrame(t *testing.T) {
 	if stream.JSON["FrameCount"] != "100" || stream.JSON["Duration"] != "2.400" || stream.JSON["StreamSize"] != "19008" || stream.JSON["Format_Settings_ModeExtension"] != "MS Stereo" {
 		t.Fatalf("Info-derived MP3 metadata mismatch: %#v", stream.JSON)
 	}
-}
 
-func TestApplyMatroskaMP3ProbeScopesLegacyModeParityByFrameIdentity(t *testing.T) {
-	probe := &matroskaAudioProbe{
-		mp3: mp3HeaderInfo{
-			bitrateKbps: 64, sampleRate: 48000, channels: 2, channelMode: 0x01, modeExt: 0x02, versionID: 0x03,
-		},
-		mp3FrameCount:    100,
-		mp3FirstFrameSHA: matroskaMP3NoMSParityFrameSHA,
+	mixedProbe := &matroskaAudioProbe{format: "MPEG Audio"}
+	mixedProbes := map[uint64]*matroskaAudioProbe{1: mixedProbe}
+	probeMatroskaAudio(mixedProbes, 1, infoFrame, 1, frameSize, true)
+	nonMSFrame := append([]byte(nil), nextFrame...)
+	nonMSFrame[3] = 0x40
+	for range 19 {
+		probeMatroskaAudio(mixedProbes, 1, nonMSFrame, 1, frameSize, true)
 	}
-	stream := Stream{Kind: StreamAudio, JSON: map[string]string{"Duration": "2.400"}}
-	seedMatroskaLegacyTestStream(&stream)
-	applyMatroskaMP3Probe(&stream, probe)
-	refreshCanonicalCompatibilitySnapshot(&stream)
-	if got := stream.JSON["Format_Settings_ModeExtension"]; got != "" {
-		t.Fatalf("legacy parity stream mode extension = %q, want empty", got)
+	probeMatroskaAudio(mixedProbes, 1, nextFrame, 1, frameSize, true)
+	mixedStream := Stream{Kind: StreamAudio, JSON: map[string]string{"Duration": "3.000"}}
+	seedMatroskaLegacyTestStream(&mixedStream)
+	applyMatroskaMP3Probe(&mixedStream, mixedProbe)
+	refreshCanonicalCompatibilitySnapshot(&mixedStream)
+	if got := mixedStream.JSON["Format_Settings_ModeExtension"]; got != "" {
+		t.Fatalf("mixed Info/audio mode extension = %q; want omitted", got)
 	}
 }
 
@@ -1383,6 +1437,44 @@ func TestApplyMatroskaVideoProbes_X265SEIOverridesContainerEncoder(t *testing.T)
 	}
 }
 
+func TestApplyMatroskaInBandH264SPSOverridesStaleCadence(t *testing.T) {
+	stream := Stream{Kind: StreamVideo}
+	for name, value := range map[fieldName]string{
+		"Duration":                "10000",
+		"FrameCount":              "250",
+		"FrameRate":               "25.000",
+		"FrameRate_Mode":          "CFR",
+		"FrameRate_Mode_Original": "VFR",
+		"ScanType":                "Progressive",
+	} {
+		replaceCanonicalSeedFill(&stream, name, value, "", "")
+	}
+	applyMatroskaInBandH264SPS(&stream, h264SPSInfo{
+		HasScanType:       true,
+		MBAFF:             true,
+		HasFixedFrameRate: true,
+		FixedFrameRate:    true,
+		FrameRate:         25,
+	}, true)
+	if got := matroskaStreamScalar(stream, "ScanType"); got != "MBAFF" {
+		t.Fatalf("ScanType = %q", got)
+	}
+	if got := matroskaStreamScalar(stream, "ScanOrder"); got != "TFF" {
+		t.Fatalf("ScanOrder = %q", got)
+	}
+	if got := matroskaStreamScalar(stream, "FrameRate_Mode"); got != "VFR" {
+		t.Fatalf("FrameRate_Mode = %q", got)
+	}
+	if got := matroskaStreamScalar(stream, "FrameRate_Original"); got != "25.000" {
+		t.Fatalf("FrameRate_Original = %q", got)
+	}
+	for _, name := range []fieldName{"Duration", "FrameCount", "FrameRate", "FrameRate_Mode_Original"} {
+		if got := matroskaStreamScalar(stream, name); got != "" {
+			t.Fatalf("%s = %q; want cleared", name, got)
+		}
+	}
+}
+
 func TestApplyMatroskaVideoProbes_DolbyVisionWithStaticHDR10(t *testing.T) {
 	stream := Stream{Kind: StreamVideo,
 		mkvHasDolbyVision: true,
@@ -1426,6 +1518,94 @@ func TestApplyMatroskaVideoProbes_DolbyVisionWithStaticHDR10(t *testing.T) {
 	}
 	if got, _ := canonicalSeedValue(info.Tracks[0], "MaxFALL"); got != "144" {
 		t.Fatalf("MaxFALL = %q", got)
+	}
+}
+
+func TestApplyMatroskaVideoProbes_DolbyVisionWithoutSecondaryHDR(t *testing.T) {
+	stream := Stream{
+		Kind:              StreamVideo,
+		mkvHasDolbyVision: true,
+		mkvDolbyVision: dolbyVisionConfig{
+			versionMajor: 1, profile: 8, level: 6,
+			rpuPresent: true, blPresent: true, compatibilityID: 1,
+		},
+	}
+	replaceCanonicalSeedFill(&stream, "ID", "1", "ID", "1")
+	info := MatroskaInfo{Tracks: []Stream{stream}}
+	applyMatroskaVideoProbes(&info, map[uint64]*matroskaVideoProbe{1: {codec: "HEVC"}})
+
+	if got := matroskaStreamScalar(info.Tracks[0], "HDR_Format_Compression"); got != "None" {
+		t.Fatalf("HDR_Format_Compression = %q; want None", got)
+	}
+	if got := matroskaStreamScalar(info.Tracks[0], "HDR_Format_Compatibility"); got != "" {
+		t.Fatalf("HDR_Format_Compatibility = %q; want omitted", got)
+	}
+	if got := matroskaStreamDisplay(info.Tracks[0], "HDR format"); got != "Dolby Vision, Version 1.0, Profile 8, dvhe.08.06, BL+RPU, no metadata compression" {
+		t.Fatalf("HDR format = %q", got)
+	}
+}
+
+func TestApplyMatroskaVideoProbes_HDR10PlusVersionZero(t *testing.T) {
+	stream := Stream{Kind: StreamVideo}
+	replaceCanonicalSeedFill(&stream, "ID", "1", "ID", "1")
+	info := MatroskaInfo{Tracks: []Stream{stream}}
+	applyMatroskaVideoProbes(&info, map[uint64]*matroskaVideoProbe{1: {
+		codec: "HEVC",
+		hdrInfo: hevcHDRInfo{
+			hdr10Plus: true, hdr10PlusVersion: 0, hdr10PlusToneMapping: true,
+		},
+	}})
+
+	if got := matroskaStreamScalar(info.Tracks[0], "HDR_Format_Version"); got != "0" {
+		t.Fatalf("HDR_Format_Version = %q; want 0", got)
+	}
+	if got := matroskaStreamScalar(info.Tracks[0], "HDR_Format_Compatibility"); got != "" {
+		t.Fatalf("HDR_Format_Compatibility = %q; want omitted", got)
+	}
+	if got := matroskaStreamDisplay(info.Tracks[0], "HDR format"); got != "SMPTE ST 2094 App 4, Version 0" {
+		t.Fatalf("HDR format = %q", got)
+	}
+}
+
+func TestMatroskaDolbyVisionDuplicateSignalsStayParsed(t *testing.T) {
+	bits := make([]byte, 3)
+	writer := bitWriter{b: bits}
+	writer.writeBits(5, 7)
+	writer.writeBits(3, 6)
+	writer.writeBits(1, 1)
+	writer.writeBits(0, 1)
+	writer.writeBits(1, 1)
+	writer.writeBits(0, 4)
+	writer.writeBits(0, 2)
+	payload := append([]byte{1, 0}, bits...)
+	box := make([]byte, 8+len(payload))
+	binary.BigEndian.PutUint32(box, uint32(len(box)))
+	copy(box[4:8], "dvcC")
+	copy(box[8:], payload)
+	configs := parseDolbyVisionConfigsFromPrivate(append(append([]byte{}, box...), box...))
+	if len(configs) != 2 {
+		t.Fatalf("Dolby Vision configs = %d; want 2", len(configs))
+	}
+
+	stream := Stream{
+		Kind:                StreamVideo,
+		mkvHasDolbyVision:   true,
+		mkvDolbyVision:      configs[0],
+		mkvDolbyVisionCount: len(configs),
+	}
+	replaceCanonicalSeedFill(&stream, "ID", "1", "ID", "1")
+	info := MatroskaInfo{Tracks: []Stream{stream}}
+	applyMatroskaVideoProbes(&info, map[uint64]*matroskaVideoProbe{1: {codec: "HEVC"}})
+	for name, want := range map[fieldName]string{
+		"HDR_Format":             "Dolby Vision / Dolby Vision",
+		"HDR_Format_Profile":     "dvhe.05 / dvhe.05",
+		"HDR_Format_Level":       "03 / 03",
+		"HDR_Format_Compression": "None / None",
+		"colour_range":           "Full",
+	} {
+		if got := matroskaStreamScalar(info.Tracks[0], name); got != want {
+			t.Fatalf("%s = %q; want %q", name, got, want)
+		}
 	}
 }
 
@@ -1511,6 +1691,24 @@ func TestParseMatroskaSegmentIgnoresPartialChapters(t *testing.T) {
 	partial, ok := parseMatroskaSegment(append(append([]byte{}, base...), chapters[:len(chapters)-1]...))
 	if !ok || matroskaHasMenu(partial.Tracks) {
 		t.Fatalf("partial chapters were treated as complete: ok=%v tracks=%+v", ok, partial.Tracks)
+	}
+}
+
+func TestRestoreMatroskaRetainedFieldsKeepsChapterEditionsSeparate(t *testing.T) {
+	first := appendMatroskaChapterMenus(nil, [][]matroskaChapter{{{startMs: 0, name: "First"}}})[0]
+	second := appendMatroskaChapterMenus(nil, [][]matroskaChapter{{{startMs: 97, name: "Second"}}})[0]
+	streams := []Stream{first, second}
+	general := Stream{Kind: StreamGeneral}
+
+	restoreMatroskaRetainedFields(&general, streams, "", matroskaRetainedGeneralPresence{})
+
+	firstExtra := canonicalSeedStructuredNode(&streams[0], "extra")
+	if firstExtra == nil || len(firstExtra.Object) != 1 || firstExtra.Object[0].Key != "_00_00_00_000" {
+		t.Fatalf("first edition was contaminated: %#v", firstExtra)
+	}
+	secondExtra := canonicalSeedStructuredNode(&streams[1], "extra")
+	if secondExtra == nil || len(secondExtra.Object) != 1 || secondExtra.Object[0].Key != "_00_00_00_097" {
+		t.Fatalf("second edition changed: %#v", secondExtra)
 	}
 }
 
@@ -1622,6 +1820,15 @@ func TestApplyMatroskaMPEG2ProbeEmitsDropFrameFlag(t *testing.T) {
 	}
 }
 
+func TestApplyMatroskaMPEG2ProbeProjectsParsedStandard(t *testing.T) {
+	stream := Stream{Kind: StreamVideo, JSON: map[string]string{}}
+	parser := mpeg2VideoParser{info: mpeg2VideoInfo{Version: "2", Width: 1920, Standard: "Component"}}
+	applyMatroskaMPEG2Probe(&stream, &parser)
+	if got, found := canonicalSeedValue(stream, "Standard"); !found || got != "Component" {
+		t.Fatalf("Standard = %q, found=%v; want Component", got, found)
+	}
+}
+
 func TestApplyMatroskaMPEG2ProbeSuppressesMixedPictureStructure(t *testing.T) {
 	for _, test := range []struct {
 		name              string
@@ -1701,6 +1908,20 @@ func buildMatroskaSample() []byte {
 	segmentElem := append(buildMatroskaID(mkvIDSegment), buildMatroskaSize(uint64(len(segment)))...)
 	segmentElem = append(segmentElem, segment...)
 	return segmentElem
+}
+
+func TestParseMatroskaSegmentResolvesInfoBeforeTracks(t *testing.T) {
+	segment := append(buildMatroskaTracks(), buildMatroskaInfo()...)
+	info, ok := parseMatroskaSegment(segment)
+	if !ok || len(info.Tracks) != 1 {
+		t.Fatalf("segment parse = %v, tracks=%d", ok, len(info.Tracks))
+	}
+	if duration, found := canonicalSeedValue(info.Tracks[0], "Duration"); !found || duration == "" {
+		t.Fatalf("video duration = %q, %v; want Segment Info-derived value", duration, found)
+	}
+	if frameCount, found := canonicalSeedValue(info.Tracks[0], "FrameCount"); !found || frameCount == "" {
+		t.Fatalf("video frame count = %q, %v; want duration-derived value", frameCount, found)
+	}
 }
 
 func buildMatroskaInfo() []byte {

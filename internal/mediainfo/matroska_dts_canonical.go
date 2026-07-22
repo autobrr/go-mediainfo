@@ -150,8 +150,6 @@ func applyMatroskaDTSCanonicalProbe(stream *Stream, dts dtsInfo, preserveContain
 		}
 	}
 	if !dts.hd && dts.coreES {
-		containerLayout, _ := canonicalSeedValue(*stream, "ChannelLayout")
-		containerPositions, _ := canonicalSeedValue(*stream, "ChannelPositions")
 		commercial := "DTS-ES"
 		features := "ES"
 		if dts.coreXCh {
@@ -165,8 +163,6 @@ func applyMatroskaDTSCanonicalProbe(stream *Stream, dts dtsInfo, preserveContain
 		replaceCanonicalSeedFill(stream, "ChannelPositions_Original", "Front: L C R, Side: L R, Back: C, LFE", "", "")
 		clearCanonicalSeedField(stream, "ChannelLayout", "Channel layout")
 		clearCanonicalSeedField(stream, "ChannelPositions", "")
-		replaceCanonicalSeedJSONOnly(stream, "ChannelLayout", containerLayout)
-		replaceCanonicalSeedJSONOnly(stream, "ChannelPositions", containerPositions)
 	}
 
 	bitDepth := dts.bitDepth

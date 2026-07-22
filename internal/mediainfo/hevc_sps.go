@@ -228,9 +228,11 @@ func parseHEVCSPS(nal []byte) h264SPSInfo {
 	hasColorDescription := false
 	frameRate := float64(0)
 	chromaSampleLoc := -1
+	videoFormat := 0
+	hasVideoFormat := false
 
 	if br.readBitsValue(1) == 1 { // vui_parameters_present_flag
-		colorRange, hasColorRange, colorPrimaries, transfer, matrix, hasColorDescription, frameRate, _, chromaSampleLoc = parseHEVCVUI(br)
+		colorRange, hasColorRange, colorPrimaries, transfer, matrix, hasColorDescription, frameRate, _, chromaSampleLoc, videoFormat, hasVideoFormat = parseHEVCVUI(br)
 	}
 
 	// Conformance window cropping.
@@ -283,6 +285,8 @@ func parseHEVCSPS(nal []byte) h264SPSInfo {
 		CodedWidth:              uint64(picWidth),
 		CodedHeight:             uint64(picHeight),
 		FrameRate:               frameRate,
+		VideoFormat:             videoFormat,
+		HasVideoFmt:             hasVideoFormat,
 	}
 	return info
 }
@@ -462,7 +466,7 @@ func skipHEVCShortTermRefPicSet(br *bitReader, idx int, sets []hevcShortTermRPS)
 	return numNeg + numPos, true
 }
 
-func parseHEVCVUI(br *bitReader) (string, bool, string, string, string, bool, float64, bool, int) {
+func parseHEVCVUI(br *bitReader) (string, bool, string, string, string, bool, float64, bool, int, int, bool) {
 	colorRange := ""
 	hasColorRange := false
 	colorPrimaries := ""
@@ -472,6 +476,8 @@ func parseHEVCVUI(br *bitReader) (string, bool, string, string, string, bool, fl
 	frameRate := float64(0)
 	hasTiming := false
 	chromaSampleLoc := -1
+	videoFormat := 0
+	hasVideoFormat := false
 
 	if br.readBitsValue(1) == 1 { // aspect_ratio_info_present_flag
 		aspectRatioIDC := br.readBitsValue(8)
@@ -484,7 +490,10 @@ func parseHEVCVUI(br *bitReader) (string, bool, string, string, string, bool, fl
 		_ = br.readBitsValue(1)
 	}
 	if br.readBitsValue(1) == 1 { // video_signal_type_present_flag
-		_ = br.readBitsValue(3) // video_format
+		if value := br.readBitsValue(3); value != ^uint64(0) {
+			videoFormat = int(value)
+			hasVideoFormat = true
+		}
 		fullRange := br.readBitsValue(1) == 1
 		if fullRange {
 			colorRange = "Full"
@@ -532,7 +541,7 @@ func parseHEVCVUI(br *bitReader) (string, bool, string, string, string, bool, fl
 		if br.readBitsValue(1) == 1 { // hrd_parameters_present_flag
 			// Skip hrd_parameters() - not needed for Matroska parity work right now.
 			// If present, abort VUI parsing to avoid desync.
-			return colorRange, hasColorRange, colorPrimaries, transfer, matrix, hasColorDescription, frameRate, hasTiming, chromaSampleLoc
+			return colorRange, hasColorRange, colorPrimaries, transfer, matrix, hasColorDescription, frameRate, hasTiming, chromaSampleLoc, videoFormat, hasVideoFormat
 		}
 	}
 	if br.readBitsValue(1) == 1 { // bitstream_restriction_flag
@@ -547,5 +556,5 @@ func parseHEVCVUI(br *bitReader) (string, bool, string, string, string, bool, fl
 		_, _ = br.readUEWithOk()
 	}
 
-	return colorRange, hasColorRange, colorPrimaries, transfer, matrix, hasColorDescription, frameRate, hasTiming, chromaSampleLoc
+	return colorRange, hasColorRange, colorPrimaries, transfer, matrix, hasColorDescription, frameRate, hasTiming, chromaSampleLoc, videoFormat, hasVideoFormat
 }

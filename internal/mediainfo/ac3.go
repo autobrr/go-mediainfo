@@ -1913,9 +1913,9 @@ func ac3ChannelLayout(acmod int, lfeon bool) (uint64, string) {
 	case 3:
 		layout = []string{"L", "R", "C"}
 	case 4:
-		layout = []string{"L", "R", "S"}
+		layout = []string{"L", "R", "Cb"}
 	case 5:
-		layout = []string{"L", "R", "C", "S"}
+		layout = []string{"L", "R", "C", "Cb"}
 	case 6:
 		layout = []string{"L", "R", "Ls", "Rs"}
 	case 7:
@@ -1944,6 +1944,9 @@ func ac3ChannelLayout(acmod int, lfeon bool) (uint64, string) {
 // ac3ChannelPositions returns topology-specific positions that cannot be
 // reconstructed from the channel count alone.
 func ac3ChannelPositions(layout string) string {
+	if layout == "L R C Cb" {
+		return "Front: L C R, Back: C"
+	}
 	if layout == "L R Ls Rs LFE" {
 		return "Front: L R, Side: L R, LFE"
 	}

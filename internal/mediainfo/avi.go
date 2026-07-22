@@ -1336,8 +1336,8 @@ type divxLibraryRecord struct {
 	date    string
 }
 
-// divxLibraryRecords contains the MediaInfo build mappings observed in the AVI
-// parity corpus and the parser's existing malformed-file compatibility case.
+// divxLibraryRecords contains MediaInfo-compatible mappings from DivX build
+// identifiers embedded in MPEG-4 user data to released versions and dates.
 var divxLibraryRecords = map[string]divxLibraryRecord{
 	"830":  {version: "5.0.5", date: "2003-04-24"},
 	"1025": {version: "5.1.1 Beta2", date: "2003-11"},

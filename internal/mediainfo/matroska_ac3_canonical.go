@@ -361,10 +361,10 @@ func matroskaAC3CanonicalExtraFields(probe *matroskaAudioProbe, ac3 ac3Info, dep
 		}
 		fields = append(fields, jsonKV{Key: "lfeon", Val: value})
 	}
-	if ac3.hasCmixlev {
+	if ac3.acmod != 2 && ac3.hasCmixlev {
 		fields = append(fields, jsonKV{Key: "cmixlev", Val: fmt.Sprintf("%.1f", ac3.cmixlevDB)})
 	}
-	if ac3.hasSurmixlev {
+	if ac3.acmod != 2 && ac3.hasSurmixlev {
 		value := fmt.Sprintf("%.0f", ac3.surmixlevDB)
 		if probe.format == "AC-3" || dependentEAC3 {
 			value += " dB"
@@ -377,7 +377,7 @@ func matroskaAC3CanonicalExtraFields(probe *matroskaAudioProbe, ac3 ac3Info, dep
 	if ac3.hasRoomtyp && ac3.roomtypFirst && ac3.roomtyp != "Not indicated" {
 		fields = append(fields, jsonKV{Key: "roomtyp", Val: ac3.roomtyp})
 	}
-	if ac3.hasDmixmod {
+	if ac3.acmod != 2 && ac3.hasDmixmod {
 		fields = append(fields, jsonKV{Key: "dmixmod", Val: ac3.dmixmod})
 	}
 	if ac3.hasLtrtcmixlev {
@@ -398,7 +398,7 @@ func matroskaAC3CanonicalExtraFields(probe *matroskaAudioProbe, ac3 ac3Info, dep
 	if avg, minimum, maximum, ok := ac3.dialnormStats(); ok {
 		fields = append(fields, jsonKV{Key: "dialnorm_Average", Val: strconv.Itoa(avg)})
 		fields = append(fields, jsonKV{Key: "dialnorm_Minimum", Val: strconv.Itoa(minimum)})
-		if maximum != minimum {
+		if maximum != minimum && maximum != ac3.dialnorm {
 			fields = append(fields, jsonKV{Key: "dialnorm_Maximum", Val: strconv.Itoa(maximum)})
 		}
 	}

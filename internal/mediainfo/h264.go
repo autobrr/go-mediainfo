@@ -45,6 +45,10 @@ type h264SPSInfo struct {
 	HasFixedFrameRate     bool
 	BitRate               int64
 	HasBitRate            bool
+	BitRateNAL            int64
+	HasBitRateNAL         bool
+	BitRateVCL            int64
+	HasBitRateVCL         bool
 	BitRateCBR            bool
 	HasBitRateCBR         bool
 	BufferSize            int64
@@ -114,6 +118,14 @@ func parseAVCConfigDetails(payload []byte) (string, []Field, h264SPSInfo, avcCon
 			parameterSets = append(parameterSets, sps...)
 		}
 		offset += spsLen
+	}
+	// Some legacy muxers wrote zero profile/level bytes in avcC while retaining
+	// a valid SPS. The SPS is the authoritative codec syntax in that case.
+	if profile == "" && spsInfo.ProfileID != 0 {
+		profile = mapAVCProfile(spsInfo.ProfileID)
+	}
+	if level == "" && spsInfo.LevelID != 0 {
+		level = formatAVCLevel(spsInfo.LevelID)
 	}
 
 	if offset < len(payload) {
@@ -269,6 +281,10 @@ func parseH264SPS(nal []byte) h264SPSInfo {
 	chromaSampleLoc := 0
 	bitRate := int64(0)
 	hasBitRate := false
+	bitRateNAL := int64(0)
+	hasBitRateNAL := false
+	bitRateVCL := int64(0)
+	hasBitRateVCL := false
 	bitRateCBR := false
 	hasBitRateCBR := false
 	bufferSize := int64(0)
@@ -452,6 +468,8 @@ func parseH264SPS(nal []byte) h264SPSInfo {
 			if hrd, ok := parseH264HRD(br); ok {
 				timingHRD = hrd
 				if hrd.bitRate > 0 {
+					bitRateNAL = hrd.bitRate
+					hasBitRateNAL = true
 					bitRate = hrd.bitRate
 					hasBitRate = true
 					bitRateCBR = hrd.cbr
@@ -468,6 +486,10 @@ func parseH264SPS(nal []byte) h264SPSInfo {
 		vclHRDPresent := br.readBitsValue(1) == 1
 		if vclHRDPresent {
 			if hrd, ok := parseH264HRD(br); ok {
+				if hrd.bitRate > 0 {
+					bitRateVCL = hrd.bitRate
+					hasBitRateVCL = true
+				}
 				if !nalHRDPresent {
 					timingHRD = hrd
 				}
@@ -532,6 +554,10 @@ func parseH264SPS(nal []byte) h264SPSInfo {
 		HasFixedFrameRate:       hasFixedFrameRate,
 		BitRate:                 bitRate,
 		HasBitRate:              hasBitRate,
+		BitRateNAL:              bitRateNAL,
+		HasBitRateNAL:           hasBitRateNAL,
+		BitRateVCL:              bitRateVCL,
+		HasBitRateVCL:           hasBitRateVCL,
 		BitRateCBR:              bitRateCBR,
 		HasBitRateCBR:           hasBitRateCBR,
 		BufferSize:              bufferSize,

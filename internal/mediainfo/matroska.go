@@ -540,6 +540,10 @@ func parseMatroskaWithOptions(r io.ReaderAt, size int64, opts AnalyzeOptions, pu
 					}
 					if format == "VP9" {
 						videoProbes[id] = &matroskaVideoProbe{codec: format, targetPackets: 8}
+						continue
+					}
+					if format == "AV1" {
+						videoProbes[id] = &matroskaVideoProbe{codec: format, targetPackets: 8}
 					}
 				case StreamGeneral, StreamText, StreamImage, StreamMenu:
 					continue
@@ -621,21 +625,121 @@ func parseMatroskaWithOptions(r io.ReaderAt, size int64, opts AnalyzeOptions, pu
 		}
 	}
 	deriveMatroskaAudioFrameCounts(info.Tracks)
+	deriveCBRAudioStreamSizes(&info, size)
+	applyMatroskaTrackTags(&info)
+	normalizeMatroskaMPEGVideoBitRateModes(info.Tracks)
+	normalizeMatroskaMPEGAudioBitRates(info.Tracks)
+	normalizeMatroskaAV1FrameRateRatios(info.Tracks)
+	if publishLegacySnapshots {
+		finalizeMatroskaDeferredFacts(&info)
+	}
+	normalizeMatroskaAACExplicitPS(info.Tracks)
 	for i := range info.Tracks {
 		stream := &info.Tracks[i]
 		formatName := matroskaStreamScalar(*stream, "Format")
+		if formatName == "FLAC" {
+			encoder := firstNonEmpty(matroskaStreamDisplay(*stream, "Writing library"), matroskaStreamScalar(*stream, "Encoded_Library"))
+			normalizeMatroskaLavcFLAC(stream, encoder)
+		}
 		if formatName == "FLAC" && matroskaStreamScalar(*stream, "BitRate") == "" && matroskaStreamScalar(*stream, "StreamSize") == "" {
 			clearCanonicalSeedField(stream, "FrameCount", "")
 			clearCanonicalSeedField(stream, "FrameRate", "")
 			clearCanonicalSeedField(stream, "SamplesPerFrame", "")
 		}
 	}
-	deriveCBRAudioStreamSizes(&info, size)
-	applyMatroskaTrackTags(&info)
-	if publishLegacySnapshots {
-		finalizeMatroskaDeferredFacts(&info)
-	}
 	return info, true
+}
+
+// normalizeMatroskaAV1FrameRateRatios retains a declared rational rate only
+// when the final parsed duration and frame count corroborate it.
+func normalizeMatroskaAV1FrameRateRatios(tracks []Stream) {
+	for index := range tracks {
+		stream := &tracks[index]
+		if stream.Kind != StreamVideo || matroskaStreamScalar(*stream, "CodecID") != "V_AV1" {
+			continue
+		}
+		numerator, numeratorErr := strconv.ParseFloat(matroskaStreamScalar(*stream, "FrameRate_Num"), 64)
+		denominator, denominatorErr := strconv.ParseFloat(matroskaStreamScalar(*stream, "FrameRate_Den"), 64)
+		frameCount, frameCountErr := strconv.ParseFloat(matroskaStreamScalar(*stream, "FrameCount"), 64)
+		duration, durationOK := projectedCanonicalSeedValue(*stream, "Duration")
+		durationSeconds, durationErr := strconv.ParseFloat(duration, 64)
+		if numeratorErr != nil || denominatorErr != nil || frameCountErr != nil || durationErr != nil || !durationOK || numerator <= 0 || denominator <= 0 || frameCount <= 0 || durationSeconds <= 0 {
+			continue
+		}
+		declared := numerator / denominator
+		observed := frameCount / durationSeconds
+		if math.Abs(observed-declared)/declared <= 0.000001 {
+			continue
+		}
+		clearCanonicalSeedField(stream, "FrameRate_Num", "")
+		clearCanonicalSeedField(stream, "FrameRate_Den", "")
+	}
+}
+
+// normalizeMatroskaMPEGAudioBitRates resolves small statistics-duration drift
+// to a valid Layer II transmission rate parsed from the codec declaration.
+func normalizeMatroskaMPEGAudioBitRates(tracks []Stream) {
+	standardKbps := [...]int64{32, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 384}
+	for index := range tracks {
+		stream := &tracks[index]
+		if stream.Kind != StreamAudio || matroskaStreamScalar(*stream, "CodecID") != "A_MPEG/L2" {
+			continue
+		}
+		bitRate, err := strconv.ParseInt(matroskaStreamScalar(*stream, "BitRate"), 10, 64)
+		if err != nil || bitRate <= 0 {
+			continue
+		}
+		nearest := int64(0)
+		nearestDelta := int64(math.MaxInt64)
+		for _, kbps := range standardKbps {
+			candidate := kbps * 1000
+			delta := bitRate - candidate
+			if delta < 0 {
+				delta = -delta
+			}
+			if delta < nearestDelta {
+				nearest, nearestDelta = candidate, delta
+			}
+		}
+		if nearest == 0 || float64(nearestDelta)/float64(nearest) > 0.01 {
+			continue
+		}
+		raw := strconv.FormatInt(nearest, 10)
+		replaceCanonicalSeedFill(stream, "BitRate", raw, "Bit rate", formatBitrate(float64(nearest)))
+		replaceCanonicalSeedProjection(stream, "BitRate_Mode", "Constant", "CBR", "Bit rate mode", "Constant")
+	}
+}
+
+// normalizeMatroskaAACExplicitPS omits a negative PS declaration once parsed
+// track statistics provide measured AAC payload data. Positive PS signaling is
+// always retained.
+func normalizeMatroskaAACExplicitPS(tracks []Stream) {
+	for index := range tracks {
+		stream := &tracks[index]
+		if stream.Kind == StreamAudio && matroskaStreamScalar(*stream, "Format_Settings_PS") == "No (Explicit)" && matroskaStreamScalar(*stream, "BitRate") != "" {
+			clearCanonicalSeedField(stream, "Format_Settings_PS", "")
+		}
+	}
+}
+
+// normalizeMatroskaMPEGVideoBitRateModes treats a measured rate that differs
+// from the sequence-header rate only by container timing precision as CBR.
+func normalizeMatroskaMPEGVideoBitRateModes(tracks []Stream) {
+	for index := range tracks {
+		stream := &tracks[index]
+		if stream.Kind != StreamVideo || matroskaStreamScalar(*stream, "Format") != "MPEG Video" {
+			continue
+		}
+		bitRate, bitRateErr := strconv.ParseFloat(matroskaStreamScalar(*stream, "BitRate"), 64)
+		maximum, maximumErr := strconv.ParseFloat(matroskaStreamScalar(*stream, "BitRate_Maximum"), 64)
+		if bitRateErr != nil || maximumErr != nil || bitRate <= 0 || maximum <= 0 || math.Abs(bitRate-maximum)/maximum > 0.001 {
+			continue
+		}
+		raw := strconv.FormatInt(int64(math.Round(maximum)), 10)
+		replaceCanonicalSeedFill(stream, "BitRate", raw, "Bit rate", formatBitrate(maximum))
+		replaceCanonicalSeedProjection(stream, "BitRate_Mode", "Constant", "CBR", "Bit rate mode", "Constant")
+		clearCanonicalSeedField(stream, "BitRate_Maximum", "Maximum bit rate")
+	}
 }
 
 // deriveMatroskaAudioFrameCounts records integral access-unit counts from
@@ -667,7 +771,8 @@ func deriveMatroskaAudioFrameCounts(tracks []Stream) {
 		}
 		frameCount := strconv.FormatInt(int64(rounded), 10)
 		if strings.HasPrefix(formatName, "DTS") || formatName == "AC-3" || formatName == "E-AC-3" {
-			replaceCanonicalSeedJSONOnly(stream, "FrameCount", frameCount)
+			// Rounded timing does not prove an exact access-unit count. Trusted
+			// statistics tags or a complete cluster scan supply that fact.
 			continue
 		}
 		replaceCanonicalSeedFill(stream, "FrameCount", frameCount, "", "")
@@ -955,6 +1060,7 @@ func parseMatroskaSegmentWithBudget(buf []byte, assetBudget *embeddedAssetBudget
 	statsByTrackUID := map[uint64]matroskaTagStats{}
 	var segmentFields []Field
 	var chaptersPayloads [][]byte
+	var tracksPayloads [][]byte
 	pos := 0
 	for pos < len(buf) {
 		id, idLen, ok := readVintID(buf, pos)
@@ -988,9 +1094,7 @@ func parseMatroskaSegmentWithBudget(buf []byte, assetBudget *embeddedAssetBudget
 			}
 		}
 		if id == mkvIDTracks {
-			if tracks, ok := parseMatroskaTracks(buf[dataStart:dataEnd], info.Container.DurationSeconds, info.durationPrec); ok {
-				info.Tracks = append(info.Tracks, tracks...)
-			}
+			tracksPayloads = append(tracksPayloads, buf[dataStart:dataEnd])
 		}
 		if id == mkvIDTags {
 			encodedDate := findField(info.General, "Encoded date")
@@ -1037,6 +1141,11 @@ func parseMatroskaSegmentWithBudget(buf []byte, assetBudget *embeddedAssetBudget
 			chaptersPayloads = append(chaptersPayloads, buf[dataStart:dataEnd])
 		}
 		pos = dataEnd
+	}
+	for _, payload := range tracksPayloads {
+		if tracks, ok := parseMatroskaTracks(payload, info.Container.DurationSeconds, info.durationPrec); ok {
+			info.Tracks = append(info.Tracks, tracks...)
+		}
 	}
 	if (len(encodersByTrackUID) > 0 || len(settingsByTrackUID) > 0) && len(info.Tracks) > 0 {
 		applyMatroskaEncoders(info.Tracks, encodersByTrackUID, settingsByTrackUID)
@@ -1457,6 +1566,9 @@ func parseMatroskaTracks(buf []byte, segmentDuration float64, durationPrec int) 
 		}
 		if id == mkvIDTrackEntry {
 			if stream, ok := parseCanonicalMatroskaTrackEntry(buf[dataStart:dataEnd], segmentDuration, durationPrec); ok {
+				order := strconv.Itoa(len(entries))
+				replaceCanonicalSeedFill(&stream, "StreamOrder", order, "", "")
+				stream.matroskaDeferredFacts.Set("StreamOrder", order)
 				entries = append(entries, stream)
 			}
 		}
@@ -1503,6 +1615,20 @@ func (facts *matroskaDeferredFacts) Value(name fieldName) string {
 		}
 	}
 	return ""
+}
+
+// Unset removes a fallback fact invalidated by stronger parsed evidence.
+func (facts *matroskaDeferredFacts) Unset(name fieldName) {
+	if facts == nil {
+		return
+	}
+	kept := facts.values[:0]
+	for _, fact := range facts.values {
+		if fact.name != name {
+			kept = append(kept, fact)
+		}
+	}
+	facts.values = kept
 }
 
 // parseMatroskaTrackEntry converts one TrackEntry payload into a stream and
@@ -1559,6 +1685,7 @@ func parseCanonicalMatroskaTrackEntry(buf []byte, segmentDuration float64, durat
 	var hdrFormat string
 	var dvCfg dolbyVisionConfig
 	var hasDV bool
+	dvCount := 0
 	var contentCompAlgo uint64
 	var contentCompSettings []byte
 	var hasContentCompression bool
@@ -1728,7 +1855,14 @@ func parseCanonicalMatroskaTrackEntry(buf []byte, segmentDuration float64, durat
 	var acmBitRate uint64
 	if kind == StreamAudio && codecID == "A_MS/ACM" && len(codecPrivate) >= 16 {
 		formatTag := binary.LittleEndian.Uint16(codecPrivate[0:2])
-		if formatTag == 1 {
+		pcm := formatTag == 1
+		validBits := uint16(0)
+		if formatTag == 0xfffe && len(codecPrivate) >= 40 && binary.LittleEndian.Uint16(codecPrivate[16:18]) >= 22 {
+			pcmSubFormat := []byte{0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71}
+			pcm = bytes.Equal(codecPrivate[24:40], pcmSubFormat)
+			validBits = binary.LittleEndian.Uint16(codecPrivate[18:20])
+		}
+		if pcm {
 			format = "PCM"
 			codecID = "A_MS/ACM / 00000001-0000-0010-8000-00AA00389B71"
 			if channels := binary.LittleEndian.Uint16(codecPrivate[2:4]); channels > 0 {
@@ -1744,6 +1878,9 @@ func parseCanonicalMatroskaTrackEntry(buf []byte, segmentDuration float64, durat
 			}
 			if bits := binary.LittleEndian.Uint16(codecPrivate[14:16]); bits > 0 {
 				audioBitDepth = uint64(bits)
+			}
+			if validBits > 0 {
+				audioBitDepth = uint64(validBits)
 			}
 		}
 	}
@@ -1918,6 +2055,12 @@ func parseCanonicalMatroskaTrackEntry(buf []byte, segmentDuration float64, durat
 					hasDV = true
 				}
 			}
+		}
+		if configs := parseDolbyVisionConfigsFromPrivate(buf); len(configs) > 0 {
+			dvCfg = configs[0]
+			hasDV = true
+			dvCount = len(configs)
+			hdrFormat = formatDolbyVisionHDR(dvCfg)
 		}
 		if findField(fields, "Format profile") == "Main@L0.0" && findField(fields, "Chroma subsampling") == "4:0:0" {
 			fields = setFieldValue(fields, "Format profile", "Main@L5")
@@ -2257,22 +2400,22 @@ func parseCanonicalMatroskaTrackEntry(buf []byte, segmentDuration float64, durat
 		if audioBitDepth > 0 {
 			deferredFacts.Set("BitDepth", strconv.FormatUint(audioBitDepth, 10))
 		}
-		if defaultDuration > 0 && audioSampleRate > 0 {
+		if defaultDuration > 0 && audioSampleRate > 0 && audioChannels > 0 && audioBitDepth > 0 && !strings.HasPrefix(codecID, "A_MS/ACM") {
 			samplesPerFrame := int64(math.Round(audioSampleRate * float64(defaultDuration) / 1e9))
 			if samplesPerFrame > 0 {
 				frameRate := audioSampleRate / float64(samplesPerFrame)
 				deferredFacts.Set("SamplesPerFrame", strconv.FormatInt(samplesPerFrame, 10))
 				deferredFacts.Set("FrameRate", fmt.Sprintf("%.3f", frameRate))
-				if math.Abs(frameRate-math.Round(frameRate)) < 0.0005 {
+				declaredRate := 1e9 / float64(defaultDuration)
+				if math.Abs(declaredRate-math.Round(declaredRate)) < 1e-9 {
 					deferredFacts.Set("FrameRate_Num", strconv.FormatInt(int64(math.Round(frameRate)), 10))
 					deferredFacts.Set("FrameRate_Den", "1")
 				}
-				if segmentDuration > 0 {
-					frameCount := int64(math.Round(segmentDuration * frameRate))
-					deferredFacts.Set("FrameCount", strconv.FormatInt(frameCount, 10))
-					deferredFacts.Set("SamplingCount", strconv.FormatInt(frameCount*samplesPerFrame, 10))
-				}
 			}
+		}
+		if segmentDuration > 0 && audioSampleRate > 0 {
+			samplingCount := int64(math.RoundToEven(segmentDuration * audioSampleRate))
+			deferredFacts.Set("SamplingCount", strconv.FormatInt(samplingCount, 10))
 		}
 	}
 	if kind == StreamVideo && format == "VC-1" && vc1Info.BufferSize > 0 {
@@ -2319,7 +2462,7 @@ func parseCanonicalMatroskaTrackEntry(buf []byte, segmentDuration float64, durat
 		}
 		if aacPSMode != "" {
 			deferredFacts.Set("Format_Settings_PS", aacPSMode)
-		} else if aacSBRMode == "Yes (Explicit)" {
+		} else if aacSBRMode == "Yes (Explicit)" && bitRate == 0 {
 			deferredFacts.Set("Format_Settings_PS", "No (Explicit)")
 		}
 	}
@@ -2338,19 +2481,8 @@ func parseCanonicalMatroskaTrackEntry(buf []byte, segmentDuration float64, durat
 		if segmentDuration > 0 {
 			samplingCount = uint64(math.Round(segmentDuration * float64(flacInfo.sampleRate)))
 		}
-		if flacInfo.maxBlockSize > 0 {
-			samplesPerFrame := uint64(flacInfo.maxBlockSize)
-			deferredFacts.Set("SamplesPerFrame", strconv.FormatUint(samplesPerFrame, 10))
-			deferredFacts.Set("FrameRate", fmt.Sprintf("%.3f", float64(flacInfo.sampleRate)/float64(samplesPerFrame)))
-			if samplingCount > 0 {
-				frameCount := (samplingCount + samplesPerFrame - 1) / samplesPerFrame
-				deferredFacts.Set("FrameCount", strconv.FormatUint(frameCount, 10))
-			}
-		}
 		if samplingCount > 0 {
 			deferredFacts.Set("SamplingCount", strconv.FormatUint(samplingCount, 10))
-		}
-		if flacInfo.md5 != "" {
 		}
 		if flacEncoder != "" {
 			deferredFacts.Set("Encoded_Library", flacEncoder)
@@ -2530,7 +2662,8 @@ func parseCanonicalMatroskaTrackEntry(buf []byte, segmentDuration float64, durat
 			deferredFacts.Set("BufferSize", bufferSize)
 		}
 		// A CBR HRD value is the stream bitrate; VBR HRD exposes the maximum.
-		if validHRD && spsInfo.HasBitRate && spsInfo.BitRate > 0 {
+		ambiguousHRDBitRate := spsInfo.HasBitRateNAL && spsInfo.HasBitRateVCL && spsInfo.BitRateNAL != spsInfo.BitRateVCL
+		if validHRD && !ambiguousHRDBitRate && spsInfo.HasBitRate && spsInfo.BitRate > 0 {
 			if spsInfo.HasBitRateCBR && spsInfo.BitRateCBR {
 				fields = setFieldValue(fields, "Bit rate", formatBitrate(float64(spsInfo.BitRate)))
 				deferredFacts.Set("BitRate", strconv.FormatInt(spsInfo.BitRate, 10))
@@ -2592,6 +2725,7 @@ func parseCanonicalMatroskaTrackEntry(buf []byte, segmentDuration float64, durat
 		mkvHeaderStripBytes: headerStrip,
 		mkvDolbyVision:      dvCfg,
 		mkvHasDolbyVision:   hasDV,
+		mkvDolbyVisionCount: dvCount,
 		mkvHEVCX265Library:  x265Library,
 		mkvHEVCX265Settings: x265Settings,
 		mkvTrackOffsetNs:    trackOffset,
@@ -2634,7 +2768,7 @@ func parseCanonicalMatroskaTrackEntry(buf []byte, segmentDuration float64, durat
 			codecID: codecID, codecName: codecName, trackName: trackName,
 			languageCode: languageCode, displayLanguage: displayLanguage,
 			trackNumber: trackNumber, trackUID: trackUID, contentCompAlgo: contentCompAlgo,
-			audioChannels: audioChannels, audioSampleRate: audioSampleRate, bitRate: bitRate,
+			audioChannels: audioChannels, audioSampleRate: audioSampleRate, audioBitDepth: audioBitDepth, bitRate: bitRate,
 			segmentDuration: segmentDuration, durationPrec: durationPrec,
 			defaultValue: defaultValue, forcedValue: forcedValue, serviceKinds: serviceKinds,
 		})
@@ -2709,7 +2843,7 @@ func parseCanonicalMatroskaTrackEntry(buf []byte, segmentDuration float64, durat
 			segmentDuration: segmentDuration, durationPrec: durationPrec,
 			defaultValue: defaultValue, forcedValue: forcedValue, serviceKinds: serviceKinds,
 		})
-	case kind == StreamVideo && (format == "VP8" || format == "AV1"):
+	case kind == StreamVideo && (format == "VP8" || format == "VP9" || format == "AV1"):
 		stream.canonicalSeed = matroskaStaticVideoCanonicalSeed(matroskaVideoCanonicalFacts{
 			format: format, codecID: codecID, codecName: codecName, codecPrivate: codecPrivate,
 			trackName: trackName, languageCode: languageCode, displayLanguage: displayLanguage,
@@ -2797,29 +2931,10 @@ func matroskaGoChannelPositions(channels uint64) string {
 	}
 }
 
-// matroskaGoFormatLevel extracts the first profile's level from a compound
-// stereoscopic profile. Single-profile levels remain represented by the
-// ordinary Format profile mapping.
-func matroskaGoFormatLevel(profile string) string {
-	if !strings.Contains(profile, " / ") {
-		return ""
-	}
-	first, _, _ := strings.Cut(profile, " / ")
-	_, level, ok := strings.Cut(first, "@L")
-	if !ok {
-		return ""
-	}
-	return strings.TrimSpace(level)
-}
-
-// matroskaFLACDetectedBitDepth returns effective FLAC depth, retaining the one
-// MediaInfo compatibility result identified by the stream's content digest.
+// matroskaFLACDetectedBitDepth returns the depth declared by FLAC STREAMINFO.
+// Effective-depth detection requires decoded sample analysis and must not be
+// inferred from a file digest.
 func matroskaFLACDetectedBitDepth(info flacStreamInfo) string {
-	// Preserve the known H218 parity result by content identity. Encoder,
-	// duration, channel count, and title are not evidence of effective depth.
-	if info.md5 == "BAB396FCA9481C0BF8CB5717065C8FF8" {
-		return "21"
-	}
 	return strconv.Itoa(int(info.bitsPerSample))
 }
 
@@ -3521,7 +3636,7 @@ func parseMatroskaTags(buf []byte, encodedDate string) (map[uint64]string, map[u
 					generalTags["ENCODER"] = encoder
 				}
 			}
-			settings := firstNonEmpty(tags["ENCODER_SETTINGS"], tags["ENCODER_OPTIONS"])
+			settings := firstNonEmpty(tags["ENCODER_SETTINGS"], tags["ENCODER_OPTIONS"], tags["Encoded_Library_Settings"])
 			if settings != "" {
 				key := trackUID
 				if key == 0 {
@@ -3557,7 +3672,7 @@ func parseMatroskaTags(buf []byte, encodedDate string) (map[uint64]string, map[u
 					stats.extras = append(stats.extras, jsonKV{Key: "FORMAT", Val: format})
 					hasStats = true
 				}
-				if filterChain := strings.TrimSpace(tags["FILTER_CHAIN"]); filterChain != "" {
+				if filterChain := strings.TrimSpace(firstNonEmpty(tags["FILTER_CHAIN"], tags["FilterChain"])); filterChain != "" {
 					stats.extras = append(stats.extras, jsonKV{Key: "FilterChain", Val: filterChain})
 					hasStats = true
 				}
@@ -4643,7 +4758,48 @@ func mergeMatroskaTailTagStats(head, tail map[uint64]matroskaTagStats) map[uint6
 
 // applyMatroskaEncoders applies track-scoped encoder tags to compatible video
 // and audio streams and exposes parsed FLAC library components.
+func normalizeMatroskaLavcFLAC(stream *Stream, encoder string) {
+	if stream == nil {
+		return
+	}
+	format := firstNonEmpty(findField(stream.Fields, "Format"), matroskaStreamScalar(*stream, "Format"))
+	if format != "FLAC" || !strings.HasPrefix(encoder, "Lavc") {
+		return
+	}
+	clearCanonicalSeedField(stream, "BitDepth_Detected", "")
+	stream.matroskaDeferredFacts.Unset("BitDepth_Detected")
+	channelParts := strings.Fields(findField(stream.Fields, "Channel(s)"))
+	channels := 0
+	if len(channelParts) > 0 {
+		channels, _ = strconv.Atoi(channelParts[0])
+	}
+	layout := ""
+	switch channels {
+	case 1:
+		layout = "M"
+	case 2:
+		layout = "L R"
+	case 6:
+		layout = "L R C LFE Ls Rs"
+	}
+	if layout == "" {
+		return
+	}
+	replaceCanonicalSeedFill(stream, "ChannelLayout", layout, "Channel layout", layout)
+	setCanonicalSeedXMLVisibility(stream, "ChannelLayout", true)
+	if positions := matroskaGoChannelPositions(uint64(channels)); positions != "" {
+		replaceCanonicalSeedFill(stream, "ChannelPositions", positions, "", "")
+		setCanonicalSeedXMLVisibility(stream, "ChannelPositions", true)
+	}
+}
+
 func applyMatroskaEncoders(streams []Stream, encodersByTrackUID map[uint64]string, settingsByTrackUID map[uint64]string) {
+	for i := range streams {
+		if streams[i].Kind == StreamAudio {
+			encoder := firstNonEmpty(findField(streams[i].Fields, "Writing library"), matroskaStreamDisplay(streams[i], "Writing library"))
+			normalizeMatroskaLavcFLAC(&streams[i], encoder)
+		}
+	}
 	if len(encodersByTrackUID) == 0 && len(settingsByTrackUID) == 0 {
 		return
 	}
@@ -4659,7 +4815,6 @@ func applyMatroskaEncoders(streams []Stream, encodersByTrackUID map[uint64]strin
 		uid := streamTrackUID(streams[i])
 		enc := encodersByTrackUID[uid]
 		settings := settingsByTrackUID[uid]
-
 		if streams[i].Kind == StreamVideo {
 			if enc == "" {
 				enc = encodersByTrackUID[0]
@@ -4674,44 +4829,23 @@ func applyMatroskaEncoders(streams []Stream, encodersByTrackUID map[uint64]strin
 				streams[i].Fields = appendFieldUnique(streams[i].Fields, Field{Name: "Writing library", Value: enc})
 				replaceCanonicalSeedFill(&streams[i], "Encoded_Library", canonicalEncodedLibrary(enc), "Writing library", enc)
 			}
-			if isCodecEncoder && settings != "" && findField(streams[i].Fields, "Encoding settings") == "" {
+			format := findField(streams[i].Fields, "Format")
+			if settings != "" && (isCodecEncoder || format == "AV1") && findField(streams[i].Fields, "Encoding settings") == "" {
 				streams[i].Fields = appendFieldUnique(streams[i].Fields, Field{Name: "Encoding settings", Value: settings})
 				replaceCanonicalSeedFill(&streams[i], "Encoded_Library_Settings", settings, "Encoding settings", settings)
 			}
 		}
 		if streams[i].Kind == StreamAudio && enc != "" && (findField(streams[i].Fields, "Format") == "FLAC" || findField(streams[i].Fields, "Format") == "AC-3" || findField(streams[i].Fields, "Format") == "E-AC-3") {
-			if findField(streams[i].Fields, "Writing library") != "" {
+			existingEncoder := findField(streams[i].Fields, "Writing library")
+			normalizeMatroskaLavcFLAC(&streams[i], existingEncoder)
+			if existingEncoder != "" {
 				continue
 			}
 			replaceCanonicalSeedFill(&streams[i], "Encoded_Library", enc, "Writing library", enc)
 			if findField(streams[i].Fields, "Format") == "AC-3" && strings.Contains(enc, "ac3_fixed") {
 				replaceCanonicalSeedFill(&streams[i], "BitDepth", "16", "", "")
 			}
-			if findField(streams[i].Fields, "Format") == "FLAC" && strings.HasPrefix(enc, "Lavc") {
-				clearCanonicalSeedField(&streams[i], "BitDepth_Detected", "")
-				channelParts := strings.Fields(findField(streams[i].Fields, "Channel(s)"))
-				channels := 0
-				if len(channelParts) > 0 {
-					channels, _ = strconv.Atoi(channelParts[0])
-				}
-				layout := ""
-				switch channels {
-				case 1:
-					layout = "M"
-				case 2:
-					layout = "L R"
-				case 6:
-					layout = "L R C LFE Ls Rs"
-				}
-				if layout != "" {
-					replaceCanonicalSeedFill(&streams[i], "ChannelLayout", layout, "Channel layout", layout)
-					setCanonicalSeedXMLVisibility(&streams[i], "ChannelLayout", true)
-					if positions := matroskaGoChannelPositions(uint64(channels)); positions != "" {
-						replaceCanonicalSeedFill(&streams[i], "ChannelPositions", positions, "", "")
-						setCanonicalSeedXMLVisibility(&streams[i], "ChannelPositions", true)
-					}
-				}
-			}
+			normalizeMatroskaLavcFLAC(&streams[i], enc)
 			if name, version, date := splitFLACEncodedLibrary(enc); name != "" {
 				replaceCanonicalSeedFill(&streams[i], "Encoded_Library_Name", name, "", "")
 				if version != "" {
@@ -5000,7 +5134,7 @@ func skipAACGASpecificConfig(br *bitReader, channelConfig uint64, objType int) b
 	if extFlag == ^uint64(0) {
 		return false
 	}
-	// channelConfiguration == 0 implies a Program Config Element; not needed for our corpus.
+	// channelConfiguration == 0 requires Program Config Element parsing, which is not implemented yet.
 	if channelConfig == 0 {
 		return false
 	}

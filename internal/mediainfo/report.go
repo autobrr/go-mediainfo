@@ -53,6 +53,7 @@ type Stream struct {
 	mkvHeaderStripBytes []byte
 	mkvDolbyVision      dolbyVisionConfig
 	mkvHasDolbyVision   bool
+	mkvDolbyVisionCount int
 	// x265 writing library / encoding settings extracted from the HEVC
 	// DecoderConfigurationRecord (hvcC) SEI, when the muxer placed the x265
 	// user-data SEI in CodecPrivate rather than in frame data.

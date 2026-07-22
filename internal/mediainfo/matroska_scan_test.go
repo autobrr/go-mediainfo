@@ -279,6 +279,12 @@ func TestParseDTSCoreFrameDoesNotUsePCMResolutionAsESFlag(t *testing.T) {
 		t.Fatalf("odd PCM resolution fabricated ES metadata: %+v", parsed)
 	}
 
+	matrixES := buildMatroskaDTSCoreFrame(3, true, false)
+	parsed, ok = parseDTSCoreFrame(matrixES)
+	if !ok || !parsed.coreES || parsed.coreXCh {
+		t.Fatalf("matrix ES extension descriptor not recognized: ok=%v info=%+v", ok, parsed)
+	}
+
 	es := buildMatroskaDTSCoreFrame(3, true, true)
 	parsed, ok = parseDTSCoreFrame(es)
 	if !ok || !parsed.coreES || !parsed.coreXCh {
@@ -286,15 +292,9 @@ func TestParseDTSCoreFrameDoesNotUsePCMResolutionAsESFlag(t *testing.T) {
 	}
 }
 
-func TestParseDTSCoreFrameThreeBitPCMResolution(t *testing.T) {
-	for code, want := range []int{16, 16, 20, 20, 0, 24, 24, 0} {
+func TestParseDTSCoreFrameTwoBitPCMResolution(t *testing.T) {
+	for code, want := range []int{16, 20, 24, 24} {
 		parsed, ok := parseDTSCoreFrame(buildMatroskaDTSCoreFrame(uint32(code), false, false))
-		if want == 0 {
-			if ok {
-				t.Fatalf("reserved PCM resolution code %d parsed as %+v", code, parsed)
-			}
-			continue
-		}
 		if !ok || parsed.bitDepth != want || parsed.coreES {
 			t.Fatalf("PCM resolution code %d: ok=%v info=%+v, want depth %d without ES", code, ok, parsed, want)
 		}
@@ -322,7 +322,7 @@ func TestApplyMatroskaAudioProbesAC3StatsIgnoreDTSCompanion(t *testing.T) {
 	}
 }
 
-func buildMatroskaDTSCoreFrame(pcmResCode uint32, extAudioPresent, includeXChSync bool) []byte {
+func buildMatroskaDTSCoreFrame(pcmResCode uint32, es, includeXChSync bool) []byte {
 	out := make([]byte, 96)
 	copy(out, []byte{0x7F, 0xFE, 0x80, 0x01})
 	pos := 32
@@ -336,7 +336,7 @@ func buildMatroskaDTSCoreFrame(pcmResCode uint32, extAudioPresent, includeXChSyn
 	writeBits(out, &pos, 15, 5)
 	writeBits(out, &pos, 0, 5)
 	writeBits(out, &pos, 0, 3) // XCh descriptor
-	if extAudioPresent {
+	if includeXChSync {
 		writeBits(out, &pos, 1, 1)
 	} else {
 		writeBits(out, &pos, 0, 1)
@@ -347,7 +347,12 @@ func buildMatroskaDTSCoreFrame(pcmResCode uint32, extAudioPresent, includeXChSyn
 	writeBits(out, &pos, 0, 1)
 	writeBits(out, &pos, 0, 4)
 	writeBits(out, &pos, 0, 2)
-	writeBits(out, &pos, pcmResCode, 3)
+	writeBits(out, &pos, pcmResCode, 2)
+	if es {
+		writeBits(out, &pos, 1, 1)
+	} else {
+		writeBits(out, &pos, 0, 1)
+	}
 	if includeXChSync {
 		copy(out[20:], []byte{0x5A, 0x5A, 0x5A, 0x5A})
 	}
@@ -477,7 +482,7 @@ func TestScanMatroskaClustersInitializesOneSharedVideoProbeBudget(t *testing.T) 
 
 func TestReadMatroskaBlockHeaderReconstructsPrefixOnlyFrames(t *testing.T) {
 	block := []byte{0x81, 0x00, 0x00, 0x00}
-	audioProbe := &matroskaAudioProbe{format: "DTS", headerStrip: buildMatroskaDTSCoreFrame(5, false, false)}
+	audioProbe := &matroskaAudioProbe{format: "DTS", headerStrip: buildMatroskaDTSCoreFrame(2, false, false)}
 	er := newEBMLReader(bytes.NewReader(block))
 	if _, _, _, _, err := readMatroskaBlockHeader(er, int64(len(block)), map[uint64]*matroskaAudioProbe{1: audioProbe}, nil, 0); err != nil {
 		t.Fatalf("prefix-only audio block: %v", err)
@@ -501,7 +506,7 @@ func TestReadMatroskaBlockHeaderReconstructsPrefixOnlyFrames(t *testing.T) {
 }
 
 func TestProbeMatroskaAudioDTSCoreExtensionOrdering(t *testing.T) {
-	core := buildMatroskaDTSCoreFrame(5, false, false)
+	core := buildMatroskaDTSCoreFrame(2, false, false)
 	xll := append(append([]byte{}, core...), 0x64, 0x58, 0x20, 0x25, 0x41, 0xA2, 0x95, 0x47)
 	probe := &matroskaAudioProbe{format: "DTS"}
 	probeMatroskaAudio(map[uint64]*matroskaAudioProbe{1: probe}, 1, xll, 1, int64(len(xll)), true)
@@ -534,25 +539,6 @@ func TestApplyMatroskaAudioProbesUsesDTSBitstreamEvidenceForCoreES(t *testing.T)
 			t.Fatalf("TrackUID %d fabricated DTS feature %q without bitstream evidence", uid, got)
 		}
 	}
-	compatibilityProbe := &matroskaAudioProbe{
-		format: "DTS", ok: true,
-		dtsFirstFrameSHA: "f71c6bf3829a9752ef33d64c5891eb039de70019b8dc40346ad0227e87e2328e",
-		dts:              dtsInfo{bitRateBps: 768000, bitDepth: 24, sampleRate: 48000, samplesPerFrame: 512, channels: 6},
-	}
-	compatibility := MatroskaInfo{Tracks: []Stream{makeTrack(1)}}
-	applyMatroskaAudioProbes(&compatibility, map[uint64]*matroskaAudioProbe{1: compatibilityProbe})
-	refreshCanonicalCompatibilitySnapshot(&compatibility.Tracks[0])
-	if got := compatibility.Tracks[0].JSON["Format_AdditionalFeatures"]; got != "ES" {
-		t.Fatalf("content-compatible DTS feature = %q, want ES", got)
-	}
-	compatibilityProbe.dtsFirstFrameSHA = "unrelated"
-	unrelated := MatroskaInfo{Tracks: []Stream{makeTrack(1)}}
-	applyMatroskaAudioProbes(&unrelated, map[uint64]*matroskaAudioProbe{1: compatibilityProbe})
-	refreshCanonicalCompatibilitySnapshot(&unrelated.Tracks[0])
-	if got := unrelated.Tracks[0].JSON["Format_AdditionalFeatures"]; got != "" {
-		t.Fatalf("unrelated content fabricated DTS feature %q", got)
-	}
-
 	esProbe := &matroskaAudioProbe{format: "DTS", ok: true, dts: dtsInfo{bitRateBps: 768000, bitDepth: 24, sampleRate: 48000, samplesPerFrame: 512, channels: 6, coreES: true, coreXCh: true}}
 	es := MatroskaInfo{Tracks: []Stream{makeTrack(1)}}
 	applyMatroskaAudioProbes(&es, map[uint64]*matroskaAudioProbe{1: esProbe})
@@ -571,20 +557,82 @@ func TestParseVP9FrameHeaderUsesBitstreamProfile(t *testing.T) {
 		space   string
 		chroma  string
 	}{
-		{name: "profile 0", payload: []byte{0x42, 0x49, 0x83, 0x42, 0x01}, profile: 0, depth: 8, space: "YUV", chroma: "4:2:0"},
-		{name: "profile 1", payload: []byte{0x46, 0x49, 0x83, 0x42, 0x01}, profile: 1, depth: 8, space: "YUV", chroma: "4:4:4"},
-		{name: "profile 2", payload: []byte{0x4A, 0x49, 0x83, 0x42, 0x02}, profile: 2, depth: 10, space: "YUV", chroma: "4:2:0"},
+		{name: "profile 0", payload: buildVP9KeyFrame(0, 0, 2, 0, 0), profile: 0, depth: 8, space: "YUV", chroma: "4:2:0"},
+		{name: "profile 1", payload: buildVP9KeyFrame(1, 0, 2, 0, 0), profile: 1, depth: 8, space: "YUV", chroma: "4:4:4"},
+		{name: "profile 2", payload: buildVP9KeyFrame(2, 0, 2, 0, 0), profile: 2, depth: 10, space: "YUV", chroma: "4:2:0"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			got, ok := parseVP9FrameHeader(tc.payload)
-			if !ok || got.profile != tc.profile || got.bitDepth != tc.depth || got.colorSpace != tc.space || got.chroma != tc.chroma {
+			if !ok || got.profile != tc.profile || got.bitDepth != tc.depth || got.colorSpace != tc.space || got.chroma != tc.chroma || got.matrixCoefficients != "BT.709" || got.colorRange != "Limited" {
 				t.Fatalf("VP9 header = %+v, %v", got, ok)
 			}
 		})
 	}
-	if got, ok := parseVP9FrameHeader([]byte{0x62, 0x49, 0x83, 0x42, 0x01}); ok {
+	inter := buildVP9KeyFrame(0, 0, 2, 0, 0)
+	inter[0] |= 1 << 2
+	if got, ok := parseVP9FrameHeader(inter); ok {
 		t.Fatalf("inter frame accepted: %+v", got)
+	}
+}
+
+func buildVP9KeyFrame(profile int, twelveBit, colorSpace, subsamplingX, subsamplingY uint32) []byte {
+	payload := make([]byte, 16)
+	pos := 0
+	writeBits(payload, &pos, 2, 2) // frame marker
+	writeBits(payload, &pos, uint32(profile&1), 1)
+	writeBits(payload, &pos, uint32(profile>>1), 1)
+	if profile == 3 {
+		writeBits(payload, &pos, 0, 1) // reserved
+	}
+	writeBits(payload, &pos, 0, 1)         // show_existing_frame
+	writeBits(payload, &pos, 0, 1)         // key frame
+	writeBits(payload, &pos, 1, 1)         // show_frame
+	writeBits(payload, &pos, 0, 1)         // error_resilient_mode
+	writeBits(payload, &pos, 0x498342, 24) // sync code
+	if profile >= 2 {
+		writeBits(payload, &pos, twelveBit, 1)
+	}
+	writeBits(payload, &pos, colorSpace, 3)
+	if colorSpace != 7 {
+		writeBits(payload, &pos, 0, 1) // limited range
+		if profile == 1 || profile == 3 {
+			writeBits(payload, &pos, subsamplingX, 1)
+			writeBits(payload, &pos, subsamplingY, 1)
+			writeBits(payload, &pos, 0, 1) // reserved
+		}
+	}
+	return payload[:(pos+7)/8]
+}
+
+func TestParseAV1SequenceHeaderOBUUsesBitstreamColorConfig(t *testing.T) {
+	bits := make([]byte, 16)
+	pos := 0
+	writeBits(bits, &pos, 0, 3) // seq_profile
+	writeBits(bits, &pos, 1, 1) // still_picture
+	writeBits(bits, &pos, 1, 1) // reduced_still_picture_header
+	writeBits(bits, &pos, 0, 5) // seq_level_idx
+	writeBits(bits, &pos, 0, 4) // frame_width_bits_minus_1
+	writeBits(bits, &pos, 0, 4) // frame_height_bits_minus_1
+	writeBits(bits, &pos, 0, 1) // max_frame_width_minus_1
+	writeBits(bits, &pos, 0, 1) // max_frame_height_minus_1
+	writeBits(bits, &pos, 0, 3) // superblock/filter flags
+	writeBits(bits, &pos, 0, 3) // superres/CDEF/restoration
+	writeBits(bits, &pos, 1, 1) // high_bitdepth
+	writeBits(bits, &pos, 0, 1) // mono_chrome
+	writeBits(bits, &pos, 1, 1) // color_description_present_flag
+	writeBits(bits, &pos, 1, 8) // BT.709 primaries
+	writeBits(bits, &pos, 1, 8) // BT.709 transfer
+	writeBits(bits, &pos, 1, 8) // BT.709 matrix
+	writeBits(bits, &pos, 0, 1) // limited range
+	writeBits(bits, &pos, 0, 2) // chroma sample position
+	writeBits(bits, &pos, 0, 1) // separate_uv_delta_q
+	payload := bits[:(pos+7)/8]
+	obu := append([]byte{0x0A, byte(len(payload))}, payload...)
+
+	got, ok := parseAV1SequenceHeaderOBU(obu)
+	if !ok || !got.descriptionPresent || got.colorRange != "Limited" || got.colorPrimaries != "BT.709" || got.transferCharacteristics != "BT.709" || got.matrixCoefficients != "BT.709" {
+		t.Fatalf("AV1 color config = %+v, %v", got, ok)
 	}
 }
 

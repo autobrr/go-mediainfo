@@ -21,7 +21,8 @@ func findX264Info(data []byte) (string, string) {
 		rest := after
 		parts := strings.SplitN(rest, " - ", 2)
 		if len(parts) > 0 {
-			writingLib = "x264 " + strings.TrimSpace(parts[0])
+			version := strings.TrimLeft(parts[0], " \t\r\n")
+			writingLib = "x264 " + version
 		}
 	}
 

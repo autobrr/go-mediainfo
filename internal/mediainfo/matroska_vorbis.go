@@ -127,6 +127,8 @@ func splitMatroskaVorbisLibrary(value string) (name, version, date string) {
 		} else if match := regexp.MustCompile(`(?i)xiph\.org libvorbis i (\d{8}) (\([^)]*\))`).FindStringSubmatch(value); len(match) > 2 {
 			version = match[2]
 			date = match[1] + " " + match[2]
+		} else if dateDigits != "" {
+			version = dateDigits
 		}
 	}
 	return name, version, date

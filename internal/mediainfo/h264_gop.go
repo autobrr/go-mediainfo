@@ -73,50 +73,87 @@ func h264CountSliceForGOP(nal []byte, nalType byte, sps *h264SPSInfo) bool {
 	if sps == nil || sps.FrameMbsOnly {
 		return true
 	}
+	fieldPic, bottomField, ok := h264SliceFieldFlags(nal, *sps)
+	if !ok || !fieldPic {
+		return true
+	}
+	// Count only top fields to avoid double-counting field-coded pictures.
+	return !bottomField
+}
+
+func h264FirstFieldOrder(payload []byte, sps h264SPSInfo) (string, bool) {
+	if sps.FrameMbsOnly {
+		return "", false
+	}
+	order := ""
+	scanAnnexBNALs(payload, func(nal []byte) bool {
+		if len(nal) == 0 {
+			return true
+		}
+		nalType := nal[0] & 0x1f
+		if nalType != 1 && nalType != 5 {
+			return true
+		}
+		fieldPic, bottomField, ok := h264SliceFieldFlags(nal, sps)
+		if !ok || !fieldPic {
+			return true
+		}
+		if bottomField {
+			order = "BFF"
+		} else {
+			order = "TFF"
+		}
+		return false
+	})
+	return order, order != ""
+}
+
+func h264SliceFieldFlags(nal []byte, sps h264SPSInfo) (fieldPic, bottomField, ok bool) {
+	if len(nal) == 0 || sps.FrameMbsOnly {
+		return false, false, false
+	}
 
 	rbsp := nalToRBSP(nal)
 	if len(rbsp) == 0 {
-		return true
+		return false, false, false
 	}
 	br := newBitReader(rbsp)
 	if _, ok := br.readUEWithOk(); !ok { // first_mb_in_slice
-		return true
+		return false, false, false
 	}
 	if _, ok := br.readUEWithOk(); !ok { // slice_type
-		return true
+		return false, false, false
 	}
 	if _, ok := br.readUEWithOk(); !ok { // pic_parameter_set_id
-		return true
+		return false, false, false
 	}
 	if sps.SeparateColourPlane {
 		if br.readBitsValue(2) == ^uint64(0) {
-			return true
+			return false, false, false
 		}
 	}
 
 	bits := sps.Log2MaxFrameNumMinus4 + 4
 	if bits <= 0 || bits > 32 {
-		return true
+		return false, false, false
 	}
 	if br.readBitsValue(uint8(bits)) == ^uint64(0) { // frame_num
-		return true
+		return false, false, false
 	}
 
-	// field_pic_flag when frame_mbs_only_flag == 0.
 	fieldPicFlag := br.readBitsValue(1)
 	if fieldPicFlag == ^uint64(0) {
-		return true
+		return false, false, false
 	}
 	if fieldPicFlag == 0 {
-		return true
+		return false, false, true
 	}
 
-	// bottom_field_flag when field_pic_flag == 1. Count only top fields to avoid double-counting MBAFF/field-coded.
 	bottomFieldFlag := br.readBitsValue(1)
 	if bottomFieldFlag == ^uint64(0) {
-		return true
+		return false, false, false
 	}
-	return bottomFieldFlag == 0
+	return true, bottomFieldFlag == 1, true
 }
 
 func h264SlicePictureType(nal []byte, nalType byte) byte {
