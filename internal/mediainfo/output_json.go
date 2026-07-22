@@ -48,7 +48,7 @@ func buildProjectedJSONMedia(report Report) jsonMediaOut {
 	for _, stream := range projected.Streams {
 		tracks = append(tracks, jsonTrackOut{Fields: structuredFieldsToJSON(stream.Fields)})
 	}
-	return jsonMediaOut{Ref: mediaNameFromPath(projected.Ref), Tracks: tracks}
+	return jsonMediaOut{Ref: projected.Ref, Tracks: tracks}
 }
 
 func jsonCreatingLibraryFields() []jsonKV {

@@ -137,9 +137,6 @@ func projectStructuredStore(store *fieldStore, target structuredProjectionTarget
 			if entry.StructuredOverride != nil {
 				value = *entry.StructuredOverride
 			}
-			if target == structuredProjectionJSON && key == "CompleteName" && value.Kind == structuredString {
-				value.Text = mediaNameFromPath(value.Text)
-			}
 			projectedStream.Fields = append(projectedStream.Fields, structuredField{Key: key, Value: value})
 		}
 		projected.Streams = append(projected.Streams, projectedStream)

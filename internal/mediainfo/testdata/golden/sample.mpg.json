@@ -1,6 +1,6 @@
 {
 "creatingLibrary":{"name":"go-mediainfo","version":"dev","url":"https://github.com/autobrr/go-mediainfo"},
-"media":{"@ref":"sample.mpg","track":[{"@type":"General","VideoCount":"1",
+"media":{"@ref":"samples/sample.mpg","track":[{"@type":"General","VideoCount":"1",
 "FileExtension":"mpg",
 "Format":"MPEG Video",
 "Format_Version":"2",

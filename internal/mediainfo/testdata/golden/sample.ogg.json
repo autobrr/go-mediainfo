@@ -1,6 +1,6 @@
 {
 "creatingLibrary":{"name":"go-mediainfo","version":"dev","url":"https://github.com/autobrr/go-mediainfo"},
-"media":{"@ref":"sample.ogg","track":[{"@type":"General","AudioCount":"1",
+"media":{"@ref":"samples/sample.ogg","track":[{"@type":"General","AudioCount":"1",
 "FileExtension":"ogg",
 "Format":"Ogg",
 "FileSize":"68981",

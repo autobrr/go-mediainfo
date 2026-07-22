@@ -312,7 +312,6 @@ func projectRawTextReport(report Report) rawTextReportProjection {
 		if dvd {
 			fields = normalizeDVDRawTextFields(stream, fields, structured, dvdAggregate)
 		}
-		trimRawTextStringSuffixes(fields)
 		sort.SliceStable(fields, func(left, right int) bool {
 			if fields[left].Order != fields[right].Order {
 				return fields[left].Order < fields[right].Order
@@ -322,14 +321,6 @@ func projectRawTextReport(report Report) rawTextReportProjection {
 		projected.Streams = append(projected.Streams, rawTextStreamProjection{Kind: stream.TextKind, Fields: fields})
 	}
 	return projected
-}
-
-// trimRawTextStringSuffixes removes MediaInfo's legacy display-sibling suffix
-// from every projected raw-text field label.
-func trimRawTextStringSuffixes(fields []rawTextFieldProjection) {
-	for index := range fields {
-		fields[index].Label = strings.TrimSuffix(fields[index].Label, "/String")
-	}
 }
 
 // rawTextDVDContext identifies DVD projections from canonical container facts.
@@ -498,6 +489,9 @@ func normalizeDVDRawTextFields(stream *storedStream, fields []rawTextFieldProjec
 			})
 			sequence++
 		}
+	}
+	for index := range normalized {
+		normalized[index].Label = strings.TrimSuffix(normalized[index].Label, "/String")
 	}
 	return normalized
 }
@@ -1329,8 +1323,6 @@ func rawTextLabel(friendly string) string {
 // rawTextValue applies raw-language presentation without changing canonical facts.
 func rawTextValue(kind StreamKind, label, display string, structured map[string]string, totalFileSize int64) string {
 	switch label {
-	case "CompleteName":
-		return mediaNameFromPath(firstNonEmpty(structured["CompleteName"], display))
 	case "ID/String":
 		if kind == StreamGeneral && structured["Format"] == "BDAV" {
 			return "0 (0x0)"
@@ -1597,16 +1589,6 @@ func rawTextValue(kind StreamKind, label, display string, structured map[string]
 		}
 	}
 	return display
-}
-
-// mediaNameFromPath removes either platform's directory separators while
-// preserving the media filename and extension.
-func mediaNameFromPath(value string) string {
-	value = strings.TrimRight(value, `/\`)
-	if separator := strings.LastIndexAny(value, `/\`); separator >= 0 {
-		return value[separator+1:]
-	}
-	return value
 }
 
 func rawTextX264TargetBitRate(structured map[string]string) (float64, bool) {

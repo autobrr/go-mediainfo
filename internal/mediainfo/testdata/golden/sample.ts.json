@@ -1,6 +1,6 @@
 {
 "creatingLibrary":{"name":"go-mediainfo","version":"dev","url":"https://github.com/autobrr/go-mediainfo"},
-"media":{"@ref":"sample.ts","track":[{"@type":"General","ID":"1",
+"media":{"@ref":"samples/sample.ts","track":[{"@type":"General","ID":"1",
 "VideoCount":"1",
 "AudioCount":"1",
 "MenuCount":"1",

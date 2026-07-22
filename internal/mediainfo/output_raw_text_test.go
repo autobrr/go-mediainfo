@@ -11,38 +11,21 @@ import (
 
 func TestRenderTextWithOptionsUsesRawProjection(t *testing.T) {
 	builder := newCanonicalStreamBuilder(StreamGeneral)
-	builder.Text("Complete name", `C:\Media\Folder\raw.mkv`)
 	builder.Fill("Format", "Matroska", "Format", "Matroska")
 	builder.Fill("Duration", "3661000", "Duration", "1 h 1 min 1 s")
-	builder.Fill("OverallBitRate_Mode", "VBR", "Overall bit rate mode", "Variable")
 	builder.Fill("OverallBitRate", "25700000", "Overall bit rate", "25.7 Mb/s")
-	videoBuilder := newCanonicalStreamBuilder(StreamVideo)
-	videoBuilder.Fill("Format", "AVC", "Format", "AVC")
-	videoBuilder.Fill("BitRate_Mode", "VBR", "Bit rate mode", "Variable")
-	videoBuilder.Fill("Width", "1920", "Width", "1 920 pixels")
-	report := Report{
-		Ref:     "raw.mkv",
-		General: builder.Snapshot(canonicalStreamPolicy{}),
-		Streams: []Stream{videoBuilder.Snapshot(canonicalStreamPolicy{})},
-	}
+	report := Report{Ref: "raw.mkv", General: builder.Snapshot(canonicalStreamPolicy{})}
 	attachCanonicalStore(&report)
 
 	raw := RenderTextWithOptions([]Report{report}, TextRenderOptions{Language: "raw"})
 	for _, row := range []string{
-		"CompleteName                     : raw.mkv",
-		"Format                           : Matroska",
-		"Duration                         : 1h 1mn",
-		"OverallBitRate_Mode              : VBR",
-		"OverallBitRate                   : 25.7 Mbps",
-		"BitRate_Mode                     : VBR",
-		"Width                            : 1920 pixel",
+		"Format/String                    : Matroska",
+		"Duration/String                  : 1h 1mn",
+		"OverallBitRate/String            : 25.7 Mbps",
 	} {
 		if !strings.Contains(raw, row) {
 			t.Fatalf("raw output missing %q:\n%s", row, raw)
 		}
-	}
-	if strings.Contains(raw, "/String") {
-		t.Fatalf("raw output retained /String suffix:\n%s", raw)
 	}
 	if strings.Contains(raw, "\n") && strings.Contains(strings.ReplaceAll(raw, "\r\n", ""), "\n") {
 		t.Fatalf("raw output contains bare LF line endings: %q", raw)
@@ -55,28 +38,12 @@ func TestRenderTextWithOptionsUsesRawProjection(t *testing.T) {
 		t.Fatalf("raw output terminal line endings = %q", raw[len(raw)-min(len(raw), 12):])
 	}
 	friendly := RenderText([]Report{report})
-	if !strings.Contains(friendly, `C:\Media\Folder\raw.mkv`) {
-		t.Fatalf("friendly Complete name path changed:\n%s", friendly)
-	}
 	if !strings.Contains(friendly, "Format                                   : Matroska") {
 		t.Fatalf("friendly output changed:\n%s", friendly)
 	}
 	wantFriendlyFooter := "\n\n" + padRight("ReportBy", textLabelWidth) + ": " + AppName + " - " + FormatVersion(AppVersion)
 	if !strings.Contains(friendly, wantFriendlyFooter) {
 		t.Fatalf("friendly output footer framing/alignment changed:\n%s", friendly)
-	}
-}
-
-func TestMediaNameFromPathRemovesPath(t *testing.T) {
-	for input, want := range map[string]string{
-		`C:\Media\Folder\movie.mkv`: "movie.mkv",
-		`/mnt/media/movie.ts`:       "movie.ts",
-		`relative/movie.mp4`:        "movie.mp4",
-		`movie.avi`:                 "movie.avi",
-	} {
-		if got := mediaNameFromPath(input); got != want {
-			t.Errorf("mediaNameFromPath(%q) = %q, want %q", input, got, want)
-		}
 	}
 }
 
@@ -147,13 +114,13 @@ func TestRawTextProjectionRegistryNormalizesAliasesAndDeduplicatesCanonicalRows(
 		"LawRating                        : TV-14",
 		"Recorded/Location                : Studio A",
 		"TermsOfUse                       : Editorial",
-		"Gop_OpenClosed                   : Open",
+		"Gop_OpenClosed/String            : Open",
 	} {
 		if !strings.Contains(raw, row) {
 			t.Fatalf("raw output missing %q:\n%s", row, raw)
 		}
 	}
-	if strings.Contains(raw, "Gop_OpenClosed                   : Closed") {
+	if strings.Contains(raw, "Gop_OpenClosed/String            : Closed") {
 		t.Fatalf("raw output retained duplicate canonical GOP row:\n%s", raw)
 	}
 }
