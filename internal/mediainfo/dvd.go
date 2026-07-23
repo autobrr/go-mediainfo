@@ -937,31 +937,52 @@ func parseDVDSubpicAttrs(data []byte, countOffset int, attrOffset int) []dvdSubp
 	return attrs
 }
 
-// dvdLanguageMore maps a DVD language-extension code to its MediaInfo label.
-func dvdLanguageMore(code byte) string {
-	switch code {
-	case 1:
-		return "Normal"
-	case 2:
-		return "For visually impaired"
-	case 3:
-		return "Director's comments"
-	case 4:
-		return "Alternate director's comments"
-	case 6:
-		return "Large"
-	default:
-		return ""
-	}
+var dvdAudioLanguageMoreLabels = [...]string{
+	"",
+	"",
+	"For visually impaired",
+	"Director's comments",
+	"Director's comments",
+	"",
+	"",
+	"",
 }
 
-// dvdAudioLanguageMore maps a DVD audio language-extension code, treating the
-// audio-specific code 1 as having no additional language description.
-func dvdAudioLanguageMore(code byte) string {
-	if code == 1 {
+var dvdSubpicLanguageMoreLabels = [...]string{
+	"",
+	"Normal",
+	"Large",
+	"Children",
+	"",
+	"",
+	"Large",
+	"Children",
+	"",
+	"Forced",
+	"",
+	"",
+	"",
+	"Director comments",
+	"Director comments large",
+	"Director comments children",
+}
+
+// dvdLanguageMore maps a DVD subpicture language-extension code to its
+// MediaInfo label.
+func dvdLanguageMore(code byte) string {
+	if int(code) >= len(dvdSubpicLanguageMoreLabels) {
 		return ""
 	}
-	return dvdLanguageMore(code)
+	return dvdSubpicLanguageMoreLabels[code]
+}
+
+// dvdAudioLanguageMore maps a DVD audio language-extension code to its
+// distinct MediaInfo audio label table.
+func dvdAudioLanguageMore(code byte) string {
+	if int(code) >= len(dvdAudioLanguageMoreLabels) {
+		return ""
+	}
+	return dvdAudioLanguageMoreLabels[code]
 }
 
 // dvdAudioFormat maps a DVD audio coding-mode code to format and descriptive

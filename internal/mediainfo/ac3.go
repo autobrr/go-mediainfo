@@ -208,7 +208,7 @@ func ac3FrameCRCValid(frame []byte, bsid int) bool {
 	var table [256]uint16
 	for i := range table {
 		value := uint16(i) << 8
-		for bit := 0; bit < 8; bit++ {
+		for range 8 {
 			if value&0x8000 != 0 {
 				value = value<<1 ^ 0x8005
 			} else {
@@ -1009,7 +1009,7 @@ func parseEAC3MetadataExtension(br *ac3BitReader, info *ac3Info, strmtyp int, nu
 			}
 			if mixConfigExists == 1 {
 				blocks := eac3BlockCount(numblkscod)
-				for i := 0; i < blocks; i++ {
+				for range blocks {
 					if blocks == 1 {
 						if !br.skipBits(5) {
 							return false
@@ -1089,7 +1089,7 @@ func parseEAC3MetadataExtension(br *ac3BitReader, info *ac3Info, strmtyp int, nu
 		return false
 	}
 	additionalBytes := int(addbsil) + 1
-	for i := 0; i < additionalBytes; i++ {
+	for i := range additionalBytes {
 		if i == 0 {
 			if !br.skipBits(7) {
 				return false

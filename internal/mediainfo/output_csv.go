@@ -45,7 +45,7 @@ func writeCSVFields(buf *bytes.Buffer, trackType string, fields []Field) {
 	buf.WriteString(trackType)
 	buf.WriteString("\n")
 	for _, field := range fields {
-		buf.WriteString(field.Name)
+		buf.WriteString(safeCSVOutputValue(field.Name))
 		buf.WriteString(",")
 		buf.WriteString(safeCSVOutputValue(field.Value))
 		buf.WriteString("\n")

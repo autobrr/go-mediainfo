@@ -30,3 +30,27 @@ func TestParseStszTable(t *testing.T) {
 		t.Fatalf("total=%d ok=%v", total, ok)
 	}
 }
+
+func TestParseStszWithHeadBoundsRetainedSampleSizes(t *testing.T) {
+	const sampleCount = 256
+	payload := make([]byte, 12)
+	payload[7] = 4
+	payload[10] = byte(sampleCount >> 8)
+	payload[11] = byte(sampleCount & 0xFF)
+
+	total, head, tail, ok := parseStszWithHead(payload, sampleCount)
+	if !ok || total != sampleCount*4 {
+		t.Fatalf("total=%d ok=%v; want %d/true", total, ok, sampleCount*4)
+	}
+	if len(head) != mp4SampleSizeHeadMax {
+		t.Fatalf("head sizes=%d; want bounded %d", len(head), mp4SampleSizeHeadMax)
+	}
+	if len(tail) != mp4SampleSizeTailMax {
+		t.Fatalf("tail sizes=%d; want bounded %d", len(tail), mp4SampleSizeTailMax)
+	}
+	for index, size := range append(append([]uint32(nil), head...), tail...) {
+		if size != 4 {
+			t.Fatalf("retained size %d = %d; want 4", index, size)
+		}
+	}
+}

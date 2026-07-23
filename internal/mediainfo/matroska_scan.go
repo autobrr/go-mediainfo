@@ -186,6 +186,10 @@ type vp9FrameInfo struct {
 	chroma             string
 	colorRange         string
 	matrixCoefficients string
+	width              int
+	height             int
+	renderWidth        int
+	renderHeight       int
 }
 
 type av1SequenceInfo struct {
@@ -3269,7 +3273,7 @@ func (r *vp9BitReader) read(width int) (uint, bool) {
 		return 0, false
 	}
 	var value uint
-	for bit := 0; bit < width; bit++ {
+	for range width {
 		value = value<<1 | uint((r.data[r.pos/8]>>uint(7-r.pos%8))&1)
 		r.pos++
 	}
@@ -3335,45 +3339,77 @@ func parseVP9FrameHeader(payload []byte) (vp9FrameInfo, bool) {
 		if profile != 1 && profile != 3 {
 			return vp9FrameInfo{}, false
 		}
-		info.colorSpace = "RGB"
-		info.chroma = "4:4:4"
-		info.colorRange = "Full"
-		return info, true
-	}
-	info.colorSpace = "YUV"
-	colorRange, ok := r.read(1)
-	if !ok {
-		return vp9FrameInfo{}, false
-	}
-	if colorRange != 0 {
-		info.colorRange = "Full"
-	} else {
-		info.colorRange = "Limited"
-	}
-	// VP9 color-space values map onto ISO/IEC 23001-8 matrix-coefficient codes.
-	matrixCode := [...]uint64{2, 5, 1, 6, 7, 9, 2, 0}[colorSpaceCode]
-	info.matrixCoefficients = matroskaMatrixName(matrixCode)
-	subsamplingX, subsamplingY := uint(1), uint(1)
-	if profile == 1 || profile == 3 {
-		if subsamplingX, ok = r.read(1); !ok {
-			return vp9FrameInfo{}, false
-		}
-		if subsamplingY, ok = r.read(1); !ok {
-			return vp9FrameInfo{}, false
-		}
 		if reserved, ok := r.read(1); !ok || reserved != 0 {
 			return vp9FrameInfo{}, false
 		}
-	}
-	switch {
-	case subsamplingX == 1 && subsamplingY == 1:
-		info.chroma = "4:2:0"
-	case subsamplingX == 1 && subsamplingY == 0:
-		info.chroma = "4:2:2"
-	case subsamplingX == 0 && subsamplingY == 0:
+		info.colorSpace = "RGB"
 		info.chroma = "4:4:4"
-	default:
+		info.colorRange = "Full"
+	} else {
+		info.colorSpace = "YUV"
+		colorRange, ok := r.read(1)
+		if !ok {
+			return vp9FrameInfo{}, false
+		}
+		if colorRange != 0 {
+			info.colorRange = "Full"
+		} else {
+			info.colorRange = "Limited"
+		}
+		// VP9 color-space values map onto ISO/IEC 23001-8 matrix-coefficient codes.
+		matrixCode := [...]uint64{2, 5, 1, 6, 7, 9, 2, 0}[colorSpaceCode]
+		info.matrixCoefficients = matroskaMatrixName(matrixCode)
+		subsamplingX, subsamplingY := uint(1), uint(1)
+		if profile == 1 || profile == 3 {
+			if subsamplingX, ok = r.read(1); !ok {
+				return vp9FrameInfo{}, false
+			}
+			if subsamplingY, ok = r.read(1); !ok {
+				return vp9FrameInfo{}, false
+			}
+			if reserved, ok := r.read(1); !ok || reserved != 0 {
+				return vp9FrameInfo{}, false
+			}
+		}
+		switch {
+		case subsamplingX == 1 && subsamplingY == 1:
+			info.chroma = "4:2:0"
+		case subsamplingX == 1 && subsamplingY == 0:
+			info.chroma = "4:2:2"
+		case subsamplingX == 0 && subsamplingY == 0:
+			info.chroma = "4:4:4"
+		default:
+			return vp9FrameInfo{}, false
+		}
+	}
+
+	widthMinusOne, ok := r.read(16)
+	if !ok {
 		return vp9FrameInfo{}, false
+	}
+	heightMinusOne, ok := r.read(16)
+	if !ok {
+		return vp9FrameInfo{}, false
+	}
+	info.width = int(widthMinusOne) + 1
+	info.height = int(heightMinusOne) + 1
+	info.renderWidth = info.width
+	info.renderHeight = info.height
+	scaled, ok := r.read(1)
+	if !ok {
+		return vp9FrameInfo{}, false
+	}
+	if scaled != 0 {
+		renderWidthMinusOne, ok := r.read(16)
+		if !ok {
+			return vp9FrameInfo{}, false
+		}
+		renderHeightMinusOne, ok := r.read(16)
+		if !ok {
+			return vp9FrameInfo{}, false
+		}
+		info.renderWidth = int(renderWidthMinusOne) + 1
+		info.renderHeight = int(renderHeightMinusOne) + 1
 	}
 	return info, true
 }

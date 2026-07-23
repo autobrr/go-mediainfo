@@ -227,10 +227,10 @@ func parseMPEG4VOL(data []byte) mpeg4VOLInfo {
 			_ = br.readBitsValue(1)
 			_ = br.readBitsValue(15)
 			_ = br.readBitsValue(1)
-			// MediaInfo combines the 15-bit halves with the same three-bit
-			// shift used by the adjacent VBV buffer-size fields.
 			bitRateNominal = int64((bitRateHigh<<3)|bitRateLow) * 400
-			bufferSize = int64((bufferHigh<<3)|bufferLow) * (1 << 23)
+			// MediaInfoLib combines the 15-bit first half at bit 15 and the
+			// three-bit latter half at bit 0, then converts 2048-bit units.
+			bufferSize = int64((bufferHigh<<15)|bufferLow) * 2048
 		}
 	}
 	shape := br.readBitsValue(2) // video_object_layer_shape

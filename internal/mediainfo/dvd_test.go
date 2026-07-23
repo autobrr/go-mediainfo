@@ -9,6 +9,68 @@ import (
 	"testing"
 )
 
+func TestDVDHasConstantVideoBitRateUsesFirstVideoStream(t *testing.T) {
+	streamWithMode := func(kind StreamKind, mode string) Stream {
+		builder := newCanonicalStreamBuilder(kind)
+		if mode != "" {
+			builder.DirectStructured("BitRate_Mode", mode)
+		}
+		return builder.Snapshot(canonicalStreamPolicy{})
+	}
+	tests := []struct {
+		name    string
+		streams []Stream
+		want    bool
+	}{
+		{name: "no streams"},
+		{name: "audio only", streams: []Stream{streamWithMode(StreamAudio, "CBR")}},
+		{name: "CBR", streams: []Stream{streamWithMode(StreamVideo, "CBR")}, want: true},
+		{name: "Constant", streams: []Stream{streamWithMode(StreamVideo, "Constant")}, want: true},
+		{name: "VBR", streams: []Stream{streamWithMode(StreamVideo, "VBR")}},
+		{
+			name: "skip audio before video",
+			streams: []Stream{
+				streamWithMode(StreamAudio, "CBR"),
+				streamWithMode(StreamVideo, "Constant"),
+			},
+			want: true,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := dvdHasConstantVideoBitRate(test.streams); got != test.want {
+				t.Fatalf("dvdHasConstantVideoBitRate() = %v; want %v", got, test.want)
+			}
+		})
+	}
+}
+
+func TestDVDTitleSetBitRateDurationFlagsMuxRateAboveDVDLimit(t *testing.T) {
+	const duration = 10.0
+	atLimitSize := int64(dvdMaxMuxBitRate * duration / 8)
+
+	gotDuration, mismatch := dvdTitleSetBitRateDuration(atLimitSize, 8, 9, duration)
+	if gotDuration != duration || mismatch {
+		t.Fatalf("at-limit result=%.3f/%v; want %.3f/false", gotDuration, mismatch, duration)
+	}
+	gotDuration, mismatch = dvdTitleSetBitRateDuration(atLimitSize+1, 8, 9, duration)
+	if gotDuration != duration || !mismatch {
+		t.Fatalf("above-limit result=%.3f/%v; want %.3f/true", gotDuration, mismatch, duration)
+	}
+}
+
+func TestDVDPointerUses2048ByteSectorsAndBounds(t *testing.T) {
+	data := make([]byte, 3*dvdSectorSize)
+	binary.BigEndian.PutUint32(data[4:8], 2)
+	if got := dvdPointer(data, 4); got != 2*dvdSectorSize {
+		t.Fatalf("dvdPointer()=%d; want sector 2 offset %d", got, 2*dvdSectorSize)
+	}
+	binary.BigEndian.PutUint32(data[4:8], 3)
+	if got := dvdPointer(data, 4); got != 0 {
+		t.Fatalf("out-of-bounds dvdPointer()=%d; want 0", got)
+	}
+}
+
 func TestAnalyzeVTSIFOFallsBackToProgramMetadataForInvalidVOB(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "VIDEO_TS")
 	if err := os.MkdirAll(root, 0o755); err != nil {
@@ -138,6 +200,104 @@ func TestAnalyzeVTSIFOUsesBUPOnlyForMissingLanguage(t *testing.T) {
 	}
 }
 
+func TestDVDLanguageMoreTablesMatchMediaInfo(t *testing.T) {
+	audio := []string{
+		"",
+		"",
+		"For visually impaired",
+		"Director's comments",
+		"Director's comments",
+		"",
+		"",
+		"",
+	}
+	for code, want := range audio {
+		if got := dvdAudioLanguageMore(byte(code)); got != want {
+			t.Errorf("audio code %d = %q, want %q", code, got, want)
+		}
+	}
+	if got := dvdAudioLanguageMore(8); got != "" {
+		t.Errorf("reserved audio code = %q, want empty", got)
+	}
+
+	subpicture := []string{
+		"",
+		"Normal",
+		"Large",
+		"Children",
+		"",
+		"",
+		"Large",
+		"Children",
+		"",
+		"Forced",
+		"",
+		"",
+		"",
+		"Director comments",
+		"Director comments large",
+		"Director comments children",
+	}
+	for code, want := range subpicture {
+		if got := dvdLanguageMore(byte(code)); got != want {
+			t.Errorf("subpicture code %d = %q, want %q", code, got, want)
+		}
+	}
+	if got := dvdLanguageMore(16); got != "" {
+		t.Errorf("reserved subpicture code = %q, want empty", got)
+	}
+}
+
+func TestAnalyzeDVDProjectsDistinctLanguageMoreTables(t *testing.T) {
+	for _, extension := range []string{".IFO", ".BUP"} {
+		t.Run(extension, func(t *testing.T) {
+			data := make([]byte, 0x300)
+			copy(data[:12], "DVDVIDEO-VTS")
+			data[dvdVideoAttrVTSOffset] = 0x4C
+
+			binary.BigEndian.PutUint16(data[dvdAudioCountVTSOffset:], 1)
+			audio := dvdAudioAttrVTSOffset
+			data[audio+1] = 1
+			data[audio+2] = 'e'
+			data[audio+3] = 'n'
+			data[audio+5] = 3
+
+			binary.BigEndian.PutUint16(data[dvdSubpicCountVTSOff:], 1)
+			subpicture := dvdSubpicCountVTSOff + 2
+			data[subpicture+2] = 'e'
+			data[subpicture+3] = 'n'
+			data[subpicture+5] = 14
+
+			path := filepath.Join(t.TempDir(), "VTS_01_0"+extension)
+			if err := os.WriteFile(path, data, 0o644); err != nil { //nolint:gosec // test fixture
+				t.Fatalf("write DVD fixture: %v", err)
+			}
+			report, err := AnalyzeFile(path)
+			if err != nil {
+				t.Fatalf("AnalyzeFile: %v", err)
+			}
+
+			gotAudio := ""
+			gotSubpicture := ""
+			for _, stream := range report.Streams {
+				switch stream.Kind {
+				case StreamAudio:
+					gotAudio = findField(stream.Fields, "Language, more info")
+				case StreamText:
+					gotSubpicture = findField(stream.Fields, "Language, more info")
+				case StreamGeneral, StreamVideo, StreamImage, StreamMenu:
+				}
+			}
+			if gotAudio != "Director's comments" {
+				t.Fatalf("audio Language, more info = %q", gotAudio)
+			}
+			if gotSubpicture != "Director comments large" {
+				t.Fatalf("subpicture Language, more info = %q", gotSubpicture)
+			}
+		})
+	}
+}
+
 func TestDVDTitleSetVOBsUsesExactSparseCaseInsensitiveMembers(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "VIDEO_TS")
 	if err := os.MkdirAll(root, 0o755); err != nil {
@@ -220,6 +380,32 @@ func TestDVDTitleSetBitRateDurationRetainsBoundedPayloadClock(t *testing.T) {
 	}
 	if got, mismatch := dvdTitleSetBitRateDuration(7_272_744_960, 0, 0, 83.3); got != 83.3 || !mismatch {
 		t.Fatalf("payload fallback duration = %v, mismatch = %v; want mismatched bounded payload timing", got, mismatch)
+	}
+}
+
+func BenchmarkDVDTitleSetParsing(b *testing.B) {
+	root := filepath.Join(b.TempDir(), "VIDEO_TS")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		b.Fatal(err)
+	}
+	ifoPath := filepath.Join(root, "VTS_01_0.IFO")
+	ifoData := make([]byte, 0x0300)
+	copy(ifoData[:12], []byte("DVDVIDEO-VTS"))
+	ifoData[dvdVideoAttrVTSOffset] = 0x4C
+	if err := os.WriteFile(ifoPath, ifoData, 0o600); err != nil {
+		b.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "VTS_01_1.VOB"), make([]byte, 2<<20), 0o600); err != nil {
+		b.Fatal(err)
+	}
+
+	b.ReportAllocs()
+	b.SetBytes(2 << 20)
+	b.ResetTimer()
+	for range b.N {
+		if _, err := AnalyzeFile(ifoPath); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
 

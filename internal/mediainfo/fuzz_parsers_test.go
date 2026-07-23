@@ -146,6 +146,8 @@ func FuzzParseMPEGPSContainers(f *testing.F) {
 	f.Add([]byte{0x00, 0x00, 0x01, 0xBA, 0x44, 0x00, 0x04, 0x00})
 	// Program stream map start code.
 	f.Add([]byte{0x00, 0x00, 0x01, 0xBC, 0x00, 0x00})
+	// Truncated MPEG-1 PES STD buffer header: formerly failed to advance.
+	f.Add([]byte{0x00, 0x00, 0x01, 0xE0, 0x00, 0x02, 0x40, 0x00})
 
 	f.Fuzz(func(t *testing.T, data []byte) {
 		data = fuzzLimit(data)
@@ -163,6 +165,15 @@ func FuzzParseOggContainers(f *testing.F) {
 	seed[27] = 19
 	seed = append(seed, []byte("OpusHead\x01\x01\x00\x00\x80\xBB\x00\x00\x00\x00\x00")...)
 	f.Add(seed)
+
+	manySerials := make([]byte, 0, 27*(maxOggLogicalStreams+1))
+	for serial := uint32(1); serial <= uint32(maxOggLogicalStreams+1); serial++ {
+		header := make([]byte, 27)
+		copy(header, "OggS")
+		binary.LittleEndian.PutUint32(header[14:18], serial)
+		manySerials = append(manySerials, header...)
+	}
+	f.Add(manySerials)
 
 	f.Fuzz(func(_ *testing.T, data []byte) {
 		data = fuzzLimit(data)

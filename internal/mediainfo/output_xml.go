@@ -55,7 +55,7 @@ func renderXMLStructuredTrack(trackType string, typeOrder int, fields []structur
 	}
 	buf.WriteString(">\n")
 	for _, field := range fields {
-		if field.Key == "@type" {
+		if field.Key == "@type" || field.Key == "@typeorder" {
 			continue
 		}
 		if field.Key == "extra" {

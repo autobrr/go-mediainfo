@@ -321,10 +321,6 @@ func applyMatroskaH264CanonicalScan(builder *canonicalStreamBuilder, sps h264SPS
 // decoder buffer facts after TrackEntry bitrate values are available.
 func applyMatroskaVideoHRD(builder *canonicalStreamBuilder, facts matroskaVideoCanonicalFacts) {
 	sps := facts.sps
-	rawSPS := facts.rawSPS
-	if rawSPS == (h264SPSInfo{}) {
-		rawSPS = sps
-	}
 	if facts.invalidAVCHRD {
 		return
 	}

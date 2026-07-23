@@ -146,51 +146,6 @@ func findX264InfoAnnexB(data []byte) (string, string) {
 	return writingLibrary, encoding
 }
 
-// findLastX264Info returns the final framed x264 unregistered-SEI payload in an
-// Annex-B sample. Markers in slices or other NAL types are intentionally ignored.
-func findLastX264Info(data []byte) (string, string) {
-	var writingLibrary, encoding string
-	scanAnnexBNALs(data, func(nal []byte) bool {
-		if len(nal) == 0 || nal[0]&0x1F != 6 {
-			return true
-		}
-		rbsp := nalToRBSP(trimH264NALTrailingZeroes(nal))
-		for pos := 0; pos < len(rbsp); {
-			payloadType := 0
-			for pos < len(rbsp) && rbsp[pos] == 0xFF {
-				payloadType += 255
-				pos++
-			}
-			if pos >= len(rbsp) {
-				break
-			}
-			payloadType += int(rbsp[pos])
-			pos++
-			payloadSize := 0
-			for pos < len(rbsp) && rbsp[pos] == 0xFF {
-				payloadSize += 255
-				pos++
-			}
-			if pos >= len(rbsp) {
-				break
-			}
-			payloadSize += int(rbsp[pos])
-			pos++
-			if payloadSize > len(rbsp)-pos {
-				break
-			}
-			if payloadType == 5 && payloadSize > 16 {
-				if library, settings := findX264InfoSEIPayload(rbsp[pos : pos+payloadSize]); library != "" || settings != "" {
-					writingLibrary, encoding = library, settings
-				}
-			}
-			pos += payloadSize
-		}
-		return true
-	})
-	return writingLibrary, encoding
-}
-
 // findLastX264InfoLengthPrefixed validates MP4 AVC NAL framing before reading
 // x264 user_data_unregistered SEI. This keeps non-SEI marker bytes inert while
 // retaining the complete SEI payload rather than the abbreviated Annex-B probe.
@@ -201,7 +156,7 @@ func findLastX264InfoLengthPrefixed(data []byte, lengthSize int) (string, string
 	var writingLibrary, encoding string
 	for pos := 0; pos+lengthSize <= len(data); {
 		size := 0
-		for i := 0; i < lengthSize; i++ {
+		for i := range lengthSize {
 			size = size<<8 | int(data[pos+i])
 		}
 		pos += lengthSize

@@ -2004,8 +2004,9 @@ func writeRawTextFields(buffer *bytes.Buffer, title string, fields []rawTextFiel
 	buffer.WriteString(title)
 	buffer.WriteByte('\n')
 	for _, field := range fields {
-		buffer.WriteString(padRawTextLabel(field.Label, 33))
-		if utf8.RuneCountInString(field.Label) >= 33 {
+		label := escapeOutputControls(field.Label)
+		buffer.WriteString(padRawTextLabel(label, 33))
+		if utf8.RuneCountInString(label) >= 33 {
 			buffer.WriteByte(' ')
 		}
 		buffer.WriteString(": ")

@@ -167,6 +167,28 @@ func TestMatroskaBlockFrameLimitIncludesCrossingFrame(t *testing.T) {
 	}
 }
 
+func TestScanMatroskaBlockGroupRecordsDurationAndBytes(t *testing.T) {
+	block := mkvBlockNoLace([]byte{0x11, 0x22, 0x33})
+	group := append(buildMatroskaElement(mkvIDBlock, block), buildMatroskaElement(mkvIDBlockDuration, []byte{0x02})...)
+	reader := newEBMLReader(bytes.NewReader(group))
+	stats := map[uint64]*matroskaTrackStats{}
+
+	frames, err := scanMatroskaBlockGroup(reader, int64(len(group)), 10, 1_000_000, stats, nil, nil, true, 0, nil)
+	if err != nil {
+		t.Fatalf("scanMatroskaBlockGroup: %v", err)
+	}
+	if frames != 1 {
+		t.Fatalf("frames=%d; want 1", frames)
+	}
+	got := stats[1]
+	if got == nil {
+		t.Fatal("track 1 stats missing")
+	}
+	if got.blockCount != 1 || got.dataBytes != 3 || got.minTimeNs != 10_000_000 || got.maxEndNs != 12_000_000 || !got.hasEnd {
+		t.Fatalf("stats=%+v; want one 3-byte block spanning 10-12 ms", *got)
+	}
+}
+
 func TestApplyMatroskaStats_AudioDurationAlsoSetsJSON(t *testing.T) {
 	info := MatroskaInfo{
 		Tracks: []Stream{
@@ -531,11 +553,12 @@ func TestParseVP9FrameHeaderUsesBitstreamProfile(t *testing.T) {
 		{name: "profile 0", payload: buildVP9KeyFrame(0, 0, 2, 0, 0), profile: 0, depth: 8, space: "YUV", chroma: "4:2:0"},
 		{name: "profile 1", payload: buildVP9KeyFrame(1, 0, 2, 0, 0), profile: 1, depth: 8, space: "YUV", chroma: "4:4:4"},
 		{name: "profile 2", payload: buildVP9KeyFrame(2, 0, 2, 0, 0), profile: 2, depth: 10, space: "YUV", chroma: "4:2:0"},
+		{name: "profile 3", payload: buildVP9KeyFrame(3, 1, 2, 1, 0), profile: 3, depth: 12, space: "YUV", chroma: "4:2:2"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			got, ok := parseVP9FrameHeader(tc.payload)
-			if !ok || got.profile != tc.profile || got.bitDepth != tc.depth || got.colorSpace != tc.space || got.chroma != tc.chroma || got.matrixCoefficients != "BT.709" || got.colorRange != "Limited" {
+			if !ok || got.profile != tc.profile || got.bitDepth != tc.depth || got.colorSpace != tc.space || got.chroma != tc.chroma || got.matrixCoefficients != "BT.709" || got.colorRange != "Limited" || got.width != 640 || got.height != 360 || got.renderWidth != 640 || got.renderHeight != 360 {
 				t.Fatalf("VP9 header = %+v, %v", got, ok)
 			}
 		})
@@ -548,7 +571,11 @@ func TestParseVP9FrameHeaderUsesBitstreamProfile(t *testing.T) {
 }
 
 func buildVP9KeyFrame(profile int, twelveBit, colorSpace, subsamplingX, subsamplingY uint32) []byte {
-	payload := make([]byte, 16)
+	return buildVP9KeyFrameWithSize(profile, twelveBit, colorSpace, subsamplingX, subsamplingY, 640, 360, 640, 360)
+}
+
+func buildVP9KeyFrameWithSize(profile int, twelveBit, colorSpace, subsamplingX, subsamplingY uint32, width, height, renderWidth, renderHeight uint32) []byte {
+	payload := make([]byte, 20)
 	pos := 0
 	writeBits(payload, &pos, 2, 2) // frame marker
 	writeBits(payload, &pos, uint32(profile&1), 1)
@@ -565,7 +592,9 @@ func buildVP9KeyFrame(profile int, twelveBit, colorSpace, subsamplingX, subsampl
 		writeBits(payload, &pos, twelveBit, 1)
 	}
 	writeBits(payload, &pos, colorSpace, 3)
-	if colorSpace != 7 {
+	if colorSpace == 7 {
+		writeBits(payload, &pos, 0, 1) // reserved
+	} else {
 		writeBits(payload, &pos, 0, 1) // limited range
 		if profile == 1 || profile == 3 {
 			writeBits(payload, &pos, subsamplingX, 1)
@@ -573,7 +602,72 @@ func buildVP9KeyFrame(profile int, twelveBit, colorSpace, subsamplingX, subsampl
 			writeBits(payload, &pos, 0, 1) // reserved
 		}
 	}
+	writeBits(payload, &pos, width-1, 16)
+	writeBits(payload, &pos, height-1, 16)
+	if renderWidth != width || renderHeight != height {
+		writeBits(payload, &pos, 1, 1)
+		writeBits(payload, &pos, renderWidth-1, 16)
+		writeBits(payload, &pos, renderHeight-1, 16)
+	} else {
+		writeBits(payload, &pos, 0, 1)
+	}
 	return payload[:(pos+7)/8]
+}
+
+func TestParseVP9FrameHeaderDimensionsAndMalformedHeaders(t *testing.T) {
+	scaled := buildVP9KeyFrameWithSize(1, 0, 7, 0, 0, 1920, 1080, 1280, 720)
+	got, ok := parseVP9FrameHeader(scaled)
+	if !ok || got.colorSpace != "RGB" || got.colorRange != "Full" || got.width != 1920 || got.height != 1080 || got.renderWidth != 1280 || got.renderHeight != 720 {
+		t.Fatalf("scaled RGB VP9 header = %+v, %v", got, ok)
+	}
+
+	for length := range len(scaled) {
+		if truncated, ok := parseVP9FrameHeader(scaled[:length]); ok {
+			t.Fatalf("accepted %d-byte truncated VP9 header: %+v", length, truncated)
+		}
+	}
+
+	badMarker := append([]byte(nil), scaled...)
+	badMarker[0] &^= 0x80
+	if got, ok := parseVP9FrameHeader(badMarker); ok {
+		t.Fatalf("bad frame marker accepted: %+v", got)
+	}
+
+	badSync := append([]byte(nil), scaled...)
+	badSync[1] ^= 0x01
+	if got, ok := parseVP9FrameHeader(badSync); ok {
+		t.Fatalf("bad sync accepted: %+v", got)
+	}
+
+	badProfileReserved := buildVP9KeyFrame(3, 0, 2, 0, 0)
+	badProfileReserved[0] |= 1 << 3
+	if got, ok := parseVP9FrameHeader(badProfileReserved); ok {
+		t.Fatalf("profile reserved bit accepted: %+v", got)
+	}
+
+	badSamplingReserved := buildVP9KeyFrame(3, 0, 2, 0, 0)
+	// Profile 3's YUV sampling reserved bit is bit 40 in this independently
+	// encoded key-frame layout.
+	badSamplingReserved[5] |= 1 << 7
+	if got, ok := parseVP9FrameHeader(badSamplingReserved); ok {
+		t.Fatalf("sampling reserved bit accepted: %+v", got)
+	}
+}
+
+func TestScanMatroskaClustersParsesVP9MSBHeader(t *testing.T) {
+	video := &matroskaVideoProbe{
+		codec:         "VP9",
+		targetPackets: 1,
+		budget:        &matroskaVideoProbeBudget{remaining: 4096},
+	}
+	frame := buildVP9KeyFrameWithSize(3, 1, 2, 1, 0, 3840, 2160, 1920, 1080)
+	cluster := mkvClusterWithSimpleBlocks(mkvBlockNoLace(frame))
+
+	scanMatroskaClusters(bytes.NewReader(cluster), 0, int64(len(cluster)), 1000000, nil, map[uint64]*matroskaVideoProbe{1: video}, false, false, 0.5, 1, nil, nil)
+
+	if !video.vp9Seen || video.vp9.profile != 3 || video.vp9.bitDepth != 12 || video.vp9.width != 3840 || video.vp9.height != 2160 || video.vp9.renderWidth != 1920 || video.vp9.renderHeight != 1080 {
+		t.Fatalf("Matroska VP9 probe = %+v, seen=%v", video.vp9, video.vp9Seen)
+	}
 }
 
 func TestParseAV1SequenceHeaderOBUUsesBitstreamColorConfig(t *testing.T) {

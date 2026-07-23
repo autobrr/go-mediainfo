@@ -15,8 +15,7 @@ func escapeOutputControls(value string) string {
 	first := -1
 	for i := 0; i < len(value); {
 		r, size := utf8.DecodeRuneInString(value[i:])
-		invalidControlByte := r == utf8.RuneError && size == 1 && value[i] >= 0x80 && value[i] <= 0x9F
-		if r < 0x20 || r == 0x7F || r >= 0x80 && r <= 0x9F || invalidControlByte {
+		if r == utf8.RuneError && size == 1 || unsafeOutputControl(r) {
 			first = i
 			break
 		}
@@ -30,7 +29,7 @@ func escapeOutputControls(value string) string {
 	out.WriteString(value[:first])
 	for i := first; i < len(value); {
 		r, size := utf8.DecodeRuneInString(value[i:])
-		if r == utf8.RuneError && size == 1 && value[i] >= 0x80 && value[i] <= 0x9F {
+		if r == utf8.RuneError && size == 1 {
 			out.WriteString(`\x`)
 			out.WriteByte(uppercaseHexDigits[value[i]>>4])
 			out.WriteByte(uppercaseHexDigits[value[i]&0x0F])
@@ -48,6 +47,10 @@ func escapeOutputControls(value string) string {
 			out.WriteString(`\x1B`)
 		case '\x7F':
 			out.WriteString(`\x7F`)
+		case '\u2028':
+			out.WriteString(`\u2028`)
+		case '\u2029':
+			out.WriteString(`\u2029`)
 		default:
 			switch {
 			case r < 0x20:
@@ -65,6 +68,12 @@ func escapeOutputControls(value string) string {
 		i += size
 	}
 	return out.String()
+}
+
+// unsafeOutputControl reports code points that can trigger terminal actions or
+// split a text record without using the renderer's own framing.
+func unsafeOutputControl(r rune) bool {
+	return r < 0x20 || r == 0x7F || r >= 0x80 && r <= 0x9F || r == '\u2028' || r == '\u2029'
 }
 
 // safeCSVOutputValue escapes record-breaking controls, neutralizes formula

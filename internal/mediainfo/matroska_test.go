@@ -10,6 +10,12 @@ import (
 	"time"
 )
 
+func TestMatroskaAVCQuickProbePacketBudget(t *testing.T) {
+	if matroskaAVCQuickProbePackets != 300 {
+		t.Fatalf("matroskaAVCQuickProbePackets=%d; want MediaInfo-bounded 300-packet search", matroskaAVCQuickProbePackets)
+	}
+}
+
 func TestParseMatroskaTracks(t *testing.T) {
 	buf := buildMatroskaSample()
 	info, ok := parseMatroska(buf)

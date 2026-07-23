@@ -758,11 +758,15 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 						}
 					}
 				}
-				if track.Kind == StreamAudio && track.EditMediaTime > 0 && track.Timescale > 0 {
-					delayMs := int64(math.Round(float64(track.EditMediaTime) * 1000 / float64(track.Timescale)))
+				if track.Kind == StreamAudio {
+					sourceDelay := mp4EditSourceDelaySeconds(track)
+					if sourceDelay == 0 && len(track.editList) == 0 && track.EditMediaTime > 0 && track.Timescale > 0 {
+						sourceDelay = -float64(track.EditMediaTime) / float64(track.Timescale)
+					}
+					delayMs := int64(math.Round(sourceDelay * 1000))
 					if delayMs != 0 {
 						node := structuredObjectFromKVs([]jsonKV{
-							{Key: "Source_Delay", Val: "-" + strconv.FormatInt(delayMs, 10)},
+							{Key: "Source_Delay", Val: strconv.FormatInt(delayMs, 10)},
 							{Key: "Source_Delay_Source", Val: "Container"},
 						})
 						extraNode = &node

@@ -1,19 +1,37 @@
 package mediainfo
 
-import "testing"
+import (
+	"encoding/binary"
+	"math"
+	"testing"
+)
 
-func TestTrueHDChannelsFrontAssignmentBits(t *testing.T) {
+func TestTrueHDChannelsEveryAssignmentBit(t *testing.T) {
+	wantWeights := [...]int{2, 1, 1, 2, 2, 2, 2, 1, 1, 2, 2, 1, 1}
+	if trueHDChannelCountPerBit != wantWeights {
+		t.Fatalf("trueHDChannelCountPerBit=%v; want %v", trueHDChannelCountPerBit, wantWeights)
+	}
 	tests := []struct {
-		name       string
 		channelMap uint16
 		channels   uint64
 		layout     string
 	}{
-		{name: "stereo", channelMap: 0x0001, channels: 2, layout: "L R"},
-		{name: "mono", channelMap: 0x0002, channels: 1, layout: "C"},
+		{channelMap: 1 << 0, channels: 2, layout: "L R"},
+		{channelMap: 1 << 1, channels: 1, layout: "C"},
+		{channelMap: 1 << 2, channels: 1, layout: "LFE"},
+		{channelMap: 1 << 3, channels: 2, layout: "Ls Rs"},
+		{channelMap: 1 << 4, channels: 2, layout: "Tfl Tfr"},
+		{channelMap: 1 << 5, channels: 2, layout: "Lsc Rsc"},
+		{channelMap: 1 << 6, channels: 2, layout: "Lb Rb"},
+		{channelMap: 1 << 7, channels: 1, layout: "Cb"},
+		{channelMap: 1 << 8, channels: 1, layout: "Tc"},
+		{channelMap: 1 << 9, channels: 2, layout: "Lsd Rsd"},
+		{channelMap: 1 << 10, channels: 2, layout: "Lw Rw"},
+		{channelMap: 1 << 11, channels: 1, layout: "Tfc"},
+		{channelMap: 1 << 12, channels: 1, layout: "LFE2"},
 	}
 	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
+		t.Run(test.layout, func(t *testing.T) {
 			if got := trueHDChannels(test.channelMap); got != test.channels {
 				t.Errorf("trueHDChannels(%#x) = %d; want %d", test.channelMap, got, test.channels)
 			}
@@ -21,6 +39,60 @@ func TestTrueHDChannelsFrontAssignmentBits(t *testing.T) {
 				t.Errorf("trueHDChannelLayout(%#x) = %q; want %q", test.channelMap, got, test.layout)
 			}
 		})
+	}
+}
+
+func TestTrueHDChannelsRepresentativePresentations(t *testing.T) {
+	tests := []struct {
+		name       string
+		channelMap uint16
+		channels   uint64
+	}{
+		{name: "mono", channelMap: 0x0002, channels: 1},
+		{name: "stereo", channelMap: 0x0001, channels: 2},
+		{name: "5.1", channelMap: 0x000F, channels: 6},
+		{name: "7.1", channelMap: 0x004F, channels: 8},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := trueHDChannels(test.channelMap); got != test.channels {
+				t.Fatalf("trueHDChannels(%#x) = %d; want %d", test.channelMap, got, test.channels)
+			}
+		})
+	}
+}
+
+func TestMatroskaTrueHDTrackUIDThreeKeepsOwnFacts(t *testing.T) {
+	audioPayload := buildMatroskaElement(mkvIDChannels, encodeMatroskaUint(6))
+	samplingRate := make([]byte, 8)
+	binary.BigEndian.PutUint64(samplingRate, math.Float64bits(48_000))
+	audioPayload = append(audioPayload, buildMatroskaElement(mkvIDSamplingRate, samplingRate)...)
+	audioPayload = append(audioPayload, buildMatroskaElement(mkvIDAudioBitDepth, encodeMatroskaUint(20))...)
+
+	payload := buildMatroskaElement(mkvIDTrackNumber, encodeMatroskaUint(2))
+	payload = append(payload, buildMatroskaElement(mkvIDTrackUID, encodeMatroskaUint(3))...)
+	payload = append(payload, buildMatroskaElement(mkvIDTrackType, encodeMatroskaUint(2))...)
+	payload = append(payload, buildMatroskaElement(mkvIDCodecID, []byte("A_TRUEHD"))...)
+	payload = append(payload, buildMatroskaElement(mkvIDBitRate, encodeMatroskaUint(1_234_567))...)
+	payload = append(payload, buildMatroskaElement(mkvIDTrackAudio, audioPayload)...)
+
+	stream, ok := parseMatroskaTrackEntry(payload, 2.5, 3)
+	if !ok {
+		t.Fatal("TrueHD TrackEntry did not parse")
+	}
+	streams := []Stream{stream}
+	general := Stream{Kind: StreamGeneral}
+	applyMatroskaWriterRules("", &general, streams)
+
+	for key, want := range map[fieldName]string{
+		"UniqueID": "3",
+		"BitRate":  "1234567",
+		"BitDepth": "20",
+	} {
+		got, found := canonicalSeedValue(streams[0], key)
+		if !found || got != want {
+			t.Fatalf("%s = %q, %v; want %q from this track", key, got, found, want)
+		}
 	}
 }
 

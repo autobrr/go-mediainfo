@@ -3485,14 +3485,15 @@ func parseCaptionServiceDescriptor(descriptors []byte) map[string]tsCaptionServi
 			language := normalizeLanguageCode(strings.TrimSpace(string(data[entry : entry+3])))
 			serviceByte := data[entry+3]
 			name := ""
-			if serviceByte&0x80 != 0 {
+			switch {
+			case serviceByte&0x80 != 0:
 				serviceNumber := int(serviceByte & 0x3F)
 				if serviceNumber > 0 {
 					name = strconv.Itoa(serviceNumber)
 				}
-			} else if serviceByte&0x01 != 0 {
+			case serviceByte&0x01 != 0:
 				name = "CC3"
-			} else {
+			default:
 				name = "CC1"
 			}
 			if name != "" {

@@ -71,10 +71,11 @@ func matroskaOpusCanonicalSeed(facts matroskaOpusCanonicalFacts) []fieldEntry {
 		builder.Fill("Channels", value, "Channel(s)", formatChannels(facts.audioChannels))
 		layout := channelLayout(facts.audioChannels)
 		positions := channelPositionsFromCount(value)
-		if facts.audioChannels == 6 {
+		switch facts.audioChannels {
+		case 6:
 			layout = "L R C Lb Rb LFE"
 			positions = "Front: L C R, Back: L R, LFE"
-		} else if facts.audioChannels == 8 {
+		case 8:
 			layout = "L R C Ls Rs Lb Rb LFE"
 			positions = "Front: L C R, Side: L R, Back: L R, LFE"
 		}

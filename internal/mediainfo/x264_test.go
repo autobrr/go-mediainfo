@@ -102,7 +102,8 @@ func TestFindX264InfoSEIPayloadAcceptsGenericEncoderUnderRecognizedUUID(t *testi
 func TestFindLastX264InfoLengthPrefixedRejectsZeroTrailingSEI(t *testing.T) {
 	text := []byte("x264 - core 84 - options: bitrate=20000\x00")
 	payloadSize := 16 + len(text)
-	nal := []byte{0x06, 0x05, byte(payloadSize)}
+	nal := make([]byte, 0, 3+payloadSize+1)
+	nal = append(nal, 0x06, 0x05, byte(payloadSize))
 	nal = append(nal, x264SEIUUIDHigh[:]...)
 	nal = append(nal, make([]byte, 8)...)
 	nal = append(nal, text...)

@@ -584,7 +584,7 @@ func parseMatroskaWithOptions(r io.ReaderAt, size int64, opts AnalyzeOptions, pu
 	}
 	lateMeasurements := make(map[uint64]matroskaTagStats, len(info.tagStats))
 	for uid, tag := range info.tagStats {
-		if !tag.trusted || !(tag.hasDuration || tag.hasFrameCount || tag.hasDataBytes || tag.hasBitRate) {
+		if !tag.trusted || (!tag.hasDuration && !tag.hasFrameCount && !tag.hasDataBytes && !tag.hasBitRate) {
 			continue
 		}
 		// Reassert quantitative Tags after bounded payload/count scans without
@@ -2569,8 +2569,6 @@ func parseCanonicalMatroskaTrackEntry(buf []byte, segmentDuration float64, durat
 		}
 		if vorbisInfo.encoder != "" {
 			deferredFacts.Set("Encoded_Application", vorbisInfo.encoder)
-		}
-		if vorbisInfo.applicationURL != "" {
 		}
 		if audioSampleRate > 0 && segmentDuration > 0 {
 			deferredFacts.Set("SamplingCount", strconv.FormatInt(int64(math.RoundToEven(audioSampleRate*segmentDuration)), 10))

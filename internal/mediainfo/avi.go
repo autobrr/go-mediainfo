@@ -911,9 +911,7 @@ func parseAVISuperIndex(payload []byte, stream *aviStream) {
 		return
 	}
 	entryCount := int(binary.LittleEndian.Uint32(payload[4:8]))
-	if entryCount > (len(payload)-24)/16 {
-		entryCount = (len(payload) - 24) / 16
-	}
+	entryCount = min(entryCount, (len(payload)-24)/16)
 	for i := 0; i < entryCount; i++ {
 		entry := 24 + i*16
 		stream.indxDuration += uint64(binary.LittleEndian.Uint32(payload[entry+12 : entry+16]))

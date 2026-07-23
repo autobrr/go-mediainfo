@@ -3,7 +3,7 @@ package mediainfo
 import (
 	"encoding/json"
 	"encoding/xml"
-	"fmt"
+	"errors"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -47,7 +47,7 @@ func TestCanonicalProjectionsCanRenderConcurrently(t *testing.T) {
 			render: func() string { return RenderJSON([]Report{report}) },
 			validate: func(output string) error {
 				if !json.Valid([]byte(output)) {
-					return fmt.Errorf("invalid JSON")
+					return errors.New("invalid JSON")
 				}
 				return nil
 			},
@@ -64,7 +64,7 @@ func TestCanonicalProjectionsCanRenderConcurrently(t *testing.T) {
 			render: func() string { return RenderText([]Report{report}) },
 			validate: func(output string) error {
 				if !strings.Contains(output, "Format                                   : Matroska") {
-					return fmt.Errorf("missing Matroska format field")
+					return errors.New("missing Matroska format field")
 				}
 				return nil
 			},

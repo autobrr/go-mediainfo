@@ -69,7 +69,8 @@ func writeFields(buf *bytes.Buffer, title string, fields []Field) {
 	buf.WriteString(title)
 	buf.WriteString("\n")
 	for _, field := range fields {
-		buf.WriteString(padRight(field.Name, textLabelWidth))
+		label := escapeOutputControls(field.Name)
+		buf.WriteString(padRight(label, textLabelWidth))
 		buf.WriteString(": ")
 		buf.WriteString(escapeOutputControls(field.Value))
 		buf.WriteString("\n")
