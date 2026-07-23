@@ -240,6 +240,27 @@ func TestCanonicalSnapshotFallsBackAfterLegacyMutation(t *testing.T) {
 	}
 }
 
+func TestCanonicalSnapshotPreservesLegacyJSONDeletion(t *testing.T) {
+	builder := newCanonicalStreamBuilder(StreamGeneral)
+	builder.Fill("Format", "Matroska", "Format", "Matroska")
+	builder.Fill("Title", "Delete me", "Title", "Delete me")
+	builder.StructuredNode("extra", structuredNode{Kind: structuredObject, Object: []structuredMember{{
+		Key: "Keep", Value: structuredNode{Kind: structuredString, Text: "yes"},
+	}}})
+	report := Report{Ref: "sample.mkv", General: builder.Snapshot(canonicalStreamPolicy{})}
+	attachCanonicalStore(&report)
+
+	delete(report.General.JSON, "Title")
+	delete(report.General.JSONRaw, "extra")
+	output := RenderJSON([]Report{report})
+	if strings.Contains(output, `"Title"`) || strings.Contains(output, `"extra"`) {
+		t.Fatalf("deleted compatibility keys were restored: %s", output)
+	}
+	if !strings.Contains(output, `"Format":"Matroska"`) {
+		t.Fatalf("sibling compatibility key was lost: %s", output)
+	}
+}
+
 // TestReplaceCanonicalSeedFillRestoresXMLVisibility verifies a later display
 // fill promotes an earlier JSON-only scalar into the shared XML projection.
 func TestReplaceCanonicalSeedFillRestoresXMLVisibility(t *testing.T) {

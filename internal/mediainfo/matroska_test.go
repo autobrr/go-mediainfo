@@ -248,6 +248,59 @@ func TestApplyMatroskaEncodersNormalizesExistingLavcFLAC(t *testing.T) {
 	}
 }
 
+func TestMatroskaPostNormalizationRefreshesAACCompatibilitySnapshot(t *testing.T) {
+	builder := newCanonicalStreamBuilder(StreamAudio)
+	builder.Fill("Format", "AAC", "Format", "AAC")
+	builder.Structured("Format_Settings_PS", "No (Explicit)")
+	builder.Structured("BitRate", "128000")
+	info := MatroskaInfo{Tracks: []Stream{builder.Snapshot(canonicalStreamPolicy{})}}
+
+	finalizeMatroskaDeferredFacts(&info)
+	normalizeMatroskaAACExplicitPS(info.Tracks)
+	refreshMatroskaCompatibilitySnapshots(&info)
+
+	if _, exists := info.Tracks[0].JSON["Format_Settings_PS"]; exists {
+		t.Fatalf("stale Format_Settings_PS survived canonical cleanup: %#v", info.Tracks[0].JSON)
+	}
+	if got := info.Tracks[0].JSON["BitRate"]; got != "128000" {
+		t.Fatalf("BitRate = %q, want 128000", got)
+	}
+}
+
+func TestMatroskaPostNormalizationRefreshesFLACCompatibilitySnapshot(t *testing.T) {
+	builder := newCanonicalStreamBuilder(StreamAudio)
+	builder.Fill("Format", "FLAC", "Format", "FLAC")
+	builder.Fill("Channels", "2", "Channel(s)", "2 channels")
+	builder.Fill("Encoded_Library", "Lavc58.91.100 flac", "Writing library", "Lavc58.91.100 flac")
+	builder.Structured("BitDepth_Detected", "16")
+	builder.Structured("FrameCount", "10")
+	builder.Structured("FrameRate", "10.000")
+	builder.Structured("SamplesPerFrame", "4096")
+	stream := builder.Snapshot(canonicalStreamPolicy{})
+	info := MatroskaInfo{Tracks: []Stream{stream}}
+
+	finalizeMatroskaDeferredFacts(&info)
+	normalizeMatroskaLavcFLAC(&info.Tracks[0], "Lavc58.91.100 flac")
+	clearCanonicalSeedField(&info.Tracks[0], "FrameCount", "")
+	clearCanonicalSeedField(&info.Tracks[0], "FrameRate", "")
+	clearCanonicalSeedField(&info.Tracks[0], "SamplesPerFrame", "")
+	refreshMatroskaCompatibilitySnapshots(&info)
+
+	for _, key := range []string{"BitDepth_Detected", "FrameCount", "FrameRate", "SamplesPerFrame"} {
+		if _, exists := info.Tracks[0].JSON[key]; exists {
+			t.Fatalf("stale %s survived canonical cleanup: %#v", key, info.Tracks[0].JSON)
+		}
+	}
+	for key, want := range map[string]string{
+		"ChannelLayout":    "L R",
+		"ChannelPositions": "Front: L R",
+	} {
+		if got := info.Tracks[0].JSON[key]; got != want {
+			t.Fatalf("%s = %q, want %q", key, got, want)
+		}
+	}
+}
+
 func TestMatroskaAC3StereoExtraOmitsInapplicableMixFields(t *testing.T) {
 	probe := &matroskaAudioProbe{format: "AC-3"}
 	info := ac3Info{

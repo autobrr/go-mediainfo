@@ -80,6 +80,10 @@ type Stream struct {
 	reportStore *fieldStore
 	// reportSnapshot detects caller mutation before a renderer reuses reportStore.
 	reportSnapshot *legacyReportState
+	// legacyJSONDeleted and legacyJSONRawDeleted preserve caller deletions while
+	// rebuilding structured output from the remaining legacy text projection.
+	legacyJSONDeleted    map[string]struct{}
+	legacyJSONRawDeleted map[string]struct{}
 	// canonicalSeed retains parser-direct entries until analysis attaches the report store.
 	canonicalSeed []fieldEntry
 	// canonicalPolicy retains format-neutral projection policy until adapters publish legacy flags.

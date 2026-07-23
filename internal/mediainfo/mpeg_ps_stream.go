@@ -798,9 +798,16 @@ func parseMPEGPSFileEdges(paths []string, window int64, opts mpegPSOptions) (*ps
 		return parser, 0, false
 	}
 	tailWindow = min(tailWindow, lastInfo.Size())
-	parser.beginSection()
-	if parser.parseReader(bufio.NewReaderSize(io.NewSectionReader(last, lastInfo.Size()-tailWindow, tailWindow), 1<<20)) {
-		parsedAny = true
+	tailStart := lastInfo.Size() - tailWindow
+	if paths[0] == paths[len(paths)-1] && tailStart < headWindow {
+		tailStart = headWindow
+		tailWindow = lastInfo.Size() - tailStart
+	}
+	if tailWindow > 0 {
+		parser.beginSection()
+		if parser.parseReader(bufio.NewReaderSize(io.NewSectionReader(last, tailStart, tailWindow), 1<<20)) {
+			parsedAny = true
+		}
 	}
 	_ = last.Close()
 	return parser, headWindow + tailWindow, parsedAny

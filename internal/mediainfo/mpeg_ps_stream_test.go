@@ -2,6 +2,8 @@ package mediainfo
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -42,6 +44,73 @@ func TestMPEGPSDVDEdgeWindows(t *testing.T) {
 	_, tail := mpegPSEdgeWindows(4<<10, mpegPSOptions{dvdParsing: true, dvdWideWindow: true})
 	if tail != 0 {
 		t.Fatalf("small wide tail = %d, want 0", tail)
+	}
+}
+
+func TestParseMPEGPSFileEdgesDoesNotRescanShortFile(t *testing.T) {
+	data := []byte{
+		0x00, 0x00, 0x01, 0xBA,
+		0x21, 0x00, 0x01, 0x00, 0x01, 0x80, 0x1B, 0x91,
+		0x00, 0x00, 0x01, 0xE0, 0x00, 0x09,
+		0x21, 0x00, 0x01, 0x00, 0x01,
+		0x00, 0x00, 0x01, 0xB3,
+	}
+	path := filepath.Join(t.TempDir(), "short.mpg")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	single := newPSStreamParser(mpegPSOptions{})
+	if !single.parseReader(bytes.NewReader(data)) {
+		t.Fatal("single parse did not find MPEG-PS data")
+	}
+
+	parser, sampled, parsed := parseMPEGPSFileEdges([]string{path}, int64(len(data)), mpegPSOptions{})
+	if !parsed {
+		t.Fatal("edge parse did not find MPEG-PS data")
+	}
+	if sampled != int64(len(data)) {
+		t.Fatalf("sampled bytes = %d, want %d", sampled, len(data))
+	}
+	if parser.section != 0 {
+		t.Fatalf("parser section = %d, want no tail section", parser.section)
+	}
+	key := psStreamKey(0xE0, psSubstreamNone)
+	if parser.streams[key].bytes != single.streams[key].bytes {
+		t.Fatalf("stream bytes = %d, want single-pass %d", parser.streams[key].bytes, single.streams[key].bytes)
+	}
+}
+
+func TestParseMPEGPSFileEdgesStillSamplesNonOverlappingTail(t *testing.T) {
+	data := []byte{
+		0x00, 0x00, 0x01, 0xBA,
+		0x21, 0x00, 0x01, 0x00, 0x01, 0x80, 0x1B, 0x91,
+		0x00, 0x00, 0x01, 0xE0, 0x00, 0x09,
+		0x21, 0x00, 0x01, 0x00, 0x01,
+		0x00, 0x00, 0x01, 0xB3,
+	}
+	payload := append(append(append([]byte(nil), data...), bytes.Repeat([]byte{0xFF}, len(data))...), data...)
+	path := filepath.Join(t.TempDir(), "long.mpg")
+	if err := os.WriteFile(path, payload, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	single := newPSStreamParser(mpegPSOptions{})
+	if !single.parseReader(bytes.NewReader(data)) {
+		t.Fatal("single parse did not find MPEG-PS data")
+	}
+
+	parser, sampled, parsed := parseMPEGPSFileEdges([]string{path}, int64(len(data)), mpegPSOptions{})
+	if !parsed {
+		t.Fatal("edge parse did not find MPEG-PS data")
+	}
+	if sampled != int64(2*len(data)) {
+		t.Fatalf("sampled bytes = %d, want %d", sampled, 2*len(data))
+	}
+	if parser.section != 1 {
+		t.Fatalf("parser section = %d, want tail section", parser.section)
+	}
+	key := psStreamKey(0xE0, psSubstreamNone)
+	if parser.streams[key].bytes != 2*single.streams[key].bytes {
+		t.Fatalf("stream bytes = %d, want two passes of %d", parser.streams[key].bytes, single.streams[key].bytes)
 	}
 }
 

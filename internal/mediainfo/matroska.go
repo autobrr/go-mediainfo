@@ -663,7 +663,21 @@ func parseMatroskaWithOptions(r io.ReaderAt, size int64, opts AnalyzeOptions, pu
 			clearCanonicalSeedField(stream, "SamplesPerFrame", "")
 		}
 	}
+	if publishLegacySnapshots {
+		refreshMatroskaCompatibilitySnapshots(&info)
+	}
 	return info, true
+}
+
+// refreshMatroskaCompatibilitySnapshots publishes canonical mutations made
+// after deferred TrackEntry facts have been applied.
+func refreshMatroskaCompatibilitySnapshots(info *MatroskaInfo) {
+	if info == nil {
+		return
+	}
+	for index := range info.Tracks {
+		refreshCanonicalCompatibilitySnapshot(&info.Tracks[index])
+	}
 }
 
 // normalizeMatroskaAV1FrameRateRatios retains a declared rational rate only
