@@ -3,6 +3,7 @@ package mediainfo
 import (
 	"bytes"
 	"testing"
+	"time"
 )
 
 func TestPSStreamParserAcceptsMPEG1PackAndPESHeaders(t *testing.T) {
@@ -53,6 +54,27 @@ func TestPSStreamParserRejectsMalformedMPEG1PESHeaders(t *testing.T) {
 				t.Fatalf("malformed PES produced %d streams, PTS=%v", len(parser.streams), parser.anyPTS.has())
 			}
 		})
+	}
+}
+
+func TestPSStreamParserRejectsTruncatedMPEG1PESSTDHeader(t *testing.T) {
+	data := []byte{0, 0, 1, 0xE0, 0, 2, 0x40, 0}
+	result := make(chan bool, 1)
+	parser := newPSStreamParser(mpegPSOptions{})
+	go func() {
+		result <- parser.parseReader(bytes.NewReader(data))
+	}()
+
+	select {
+	case parsed := <-result:
+		if parsed {
+			t.Fatal("parseReader() accepted truncated MPEG-1 PES")
+		}
+		if len(parser.streams) != 0 || parser.anyPTS.has() {
+			t.Fatalf("truncated PES produced %d streams, PTS=%v", len(parser.streams), parser.anyPTS.has())
+		}
+	case <-time.After(time.Second):
+		t.Fatal("parseReader() did not terminate for truncated MPEG-1 PES")
 	}
 }
 

@@ -386,6 +386,9 @@ parseLoop:
 				header += 2
 			}
 			if header >= len(buf) {
+				if !readMore() {
+					return found
+				}
 				continue
 			}
 			switch buf[header] & 0xF0 {
