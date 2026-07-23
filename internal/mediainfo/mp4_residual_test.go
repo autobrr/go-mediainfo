@@ -3,6 +3,7 @@ package mediainfo
 import (
 	"encoding/binary"
 	"math"
+	"path/filepath"
 	"testing"
 )
 
@@ -75,6 +76,65 @@ func TestMP4PresentationAndMediaHeaderDurations(t *testing.T) {
 	}
 	if got := mp4RoundedDurationMilliseconds(6377.0 + 1.0/12.0); got != 6377084 {
 		t.Fatalf("float32 mdhd duration = %d, want 6377084", got)
+	}
+}
+
+func TestMP4PositiveAudioEditRetainsSourceTimeline(t *testing.T) {
+	report, err := AnalyzeFile(filepath.Join("samples", "sample.mp4"))
+	if err != nil {
+		t.Fatalf("AnalyzeFile: %v", err)
+	}
+
+	var audio *Stream
+	for index := range report.Streams {
+		if report.Streams[index].Kind == StreamAudio {
+			audio = &report.Streams[index]
+			break
+		}
+	}
+	if audio == nil {
+		t.Fatal("audio stream not found")
+	}
+
+	media := buildJSONMedia(report)
+	var audioFields []jsonKV
+	for _, track := range media.Tracks {
+		if jsonFieldValue(track.Fields, "@type") == string(StreamAudio) {
+			audioFields = track.Fields
+			break
+		}
+	}
+	if audioFields == nil {
+		t.Fatal("projected audio stream not found")
+	}
+
+	want := map[string]string{
+		"Source_Duration":           "4.021",
+		"Source_Duration_LastFrame": "-0.011",
+		"FrameCount":                "188",
+		"Source_FrameCount":         "189",
+		"StreamSize":                "48301",
+		"Source_StreamSize":         "48544",
+	}
+	for key, expected := range want {
+		if got := jsonFieldValue(audioFields, key); got != expected {
+			t.Errorf("%s = %q; want %q", key, got, expected)
+		}
+	}
+
+	extra := canonicalSeedStructuredNode(audio, "extra")
+	if extra == nil || extra.Kind != structuredObject {
+		t.Fatal("audio extra object not found")
+	}
+	extraValues := make(map[string]string, len(extra.Object))
+	for _, member := range extra.Object {
+		extraValues[member.Key] = member.Value.Text
+	}
+	if got := extraValues["Source_Delay"]; got != "-21" {
+		t.Errorf("Source_Delay = %q, want -21", got)
+	}
+	if got := extraValues["Source_Delay_Source"]; got != "Container" {
+		t.Errorf("Source_Delay_Source = %q, want Container", got)
 	}
 }
 

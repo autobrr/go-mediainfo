@@ -12,7 +12,7 @@
 "OverallBitRate":"555482",
 "FrameRate":"29.970",
 "FrameCount":"119",
-"StreamSize":"5721",
+"StreamSize":"5964",
 "HeaderSize":"5713",
 "DataSize":"272028",
 "FooterSize":"0",
@@ -61,6 +61,8 @@
 "Format_AdditionalFeatures":"LC",
 "CodecID":"mp4a-40-2",
 "Duration":"4.000",
+"Source_Duration":"4.021",
+"Source_Duration_LastFrame":"-0.011",
 "BitRate_Mode":"CBR",
 "BitRate":"96000",
 "Channels":"1",
@@ -70,9 +72,12 @@
 "SamplingRate":"48000",
 "SamplingCount":"192000",
 "FrameRate":"46.875",
-"FrameCount":"189",
+"FrameCount":"188",
+"Source_FrameCount":"189",
 "Compression_Mode":"Lossy",
-"StreamSize":"48544",
+"StreamSize":"48301",
+"Source_StreamSize":"48544",
 "Default":"Yes",
-"AlternateGroup":"1"}]}
+"AlternateGroup":"1",
+"extra":{"Source_Delay":"-21","Source_Delay_Source":"Container"}}]}
 }

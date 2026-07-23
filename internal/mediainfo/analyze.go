@@ -282,6 +282,9 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 						if track.trackDurationTicks == 0 {
 							displayDuration = track.EditDuration
 						}
+						if track.EditMediaTime > 0 {
+							sourceDuration = track.DurationSeconds
+						}
 					}
 				}
 				if strings.HasPrefix(track.HandlerName, "BAMTech ") {
@@ -753,6 +756,16 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 							fields = appendFieldUnique(fields, Field{Name: "Default", Value: "No"})
 							builder.Fill("Default", "No", "Default", "No")
 						}
+					}
+				}
+				if track.Kind == StreamAudio && track.EditMediaTime > 0 && track.Timescale > 0 {
+					delayMs := int64(math.Round(float64(track.EditMediaTime) * 1000 / float64(track.Timescale)))
+					if delayMs != 0 {
+						node := structuredObjectFromKVs([]jsonKV{
+							{Key: "Source_Delay", Val: "-" + strconv.FormatInt(delayMs, 10)},
+							{Key: "Source_Delay_Source", Val: "Container"},
+						})
+						extraNode = &node
 					}
 				}
 				if !x264Applied && track.Kind == StreamVideo && findField(fields, "Format") == "AVC" && (trackWritingLibrary != "" || trackEncodingSettings != "") {
