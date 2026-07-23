@@ -194,6 +194,7 @@ type vp9FrameInfo struct {
 
 type av1SequenceInfo struct {
 	hasTiming               bool
+	filmGrainPresent        bool
 	descriptionPresent      bool
 	colorRange              string
 	colorPrimaries          string
@@ -2293,6 +2294,9 @@ func applyMatroskaVideoProbes(info *MatroskaInfo, probes map[uint64]*matroskaVid
 		}
 		if probe.codec == "AV1" && probe.av1Seen {
 			applyMatroskaProbedColor(stream, probe.av1.descriptionPresent, probe.av1.colorRange, probe.av1.colorPrimaries, probe.av1.transferCharacteristics, probe.av1.matrixCoefficients)
+			if probe.av1.filmGrainPresent {
+				replaceCanonicalSeedText(stream, "Format settings", "Film Grain Synthesis")
+			}
 		}
 		if probe.codec == "HEVC" && probe.hdrInfo.x265Library != "" {
 			// x265 SEI is stream-derived encoder metadata and is more specific than
@@ -3647,10 +3651,16 @@ func parseAV1SequenceHeader(data []byte) (av1SequenceInfo, bool) {
 		return av1SequenceInfo{}, false
 	}
 	info, ok := parseAV1ColorConfig(&r, int(seqProfile))
-	if ok {
-		info.hasTiming = hasTiming
+	if !ok {
+		return av1SequenceInfo{}, false
 	}
-	return info, ok
+	filmGrainPresent, ok := r.read(1)
+	if !ok {
+		return av1SequenceInfo{}, false
+	}
+	info.hasTiming = hasTiming
+	info.filmGrainPresent = filmGrainPresent != 0
+	return info, true
 }
 
 func parseAV1ColorConfig(r *av1BitReader, seqProfile int) (av1SequenceInfo, bool) {

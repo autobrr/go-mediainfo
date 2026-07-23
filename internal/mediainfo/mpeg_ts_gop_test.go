@@ -50,3 +50,36 @@ func TestFormatMPEG2GOPSetting(t *testing.T) {
 		})
 	}
 }
+
+func TestBDAVSemanticProjectionPolicies(t *testing.T) {
+	variable := mpeg2VideoInfo{GOPVariable: true, GOPMDominant: 3, GOPNDominant: 15}
+	if !preferTSDominantGOP(variable, true) {
+		t.Fatal("BDAV should prefer its dominant GOP over bounded-window variability")
+	}
+	if preferTSDominantGOP(variable, false) {
+		t.Fatal("ordinary TS should retain variable GOP")
+	}
+
+	avc := &tsStream{format: "AVC", h264SliceCount: 4}
+	if got := bdavH264SliceCount(avc, true); got != 4 {
+		t.Fatalf("BDAV AVC slice count = %d, want 4", got)
+	}
+	if got := bdavH264SliceCount(avc, false); got != 0 {
+		t.Fatalf("ordinary TS AVC slice count = %d, want suppressed", got)
+	}
+	avc.h264SliceCount = 1
+	if got := bdavH264SliceCount(avc, true); got != 0 {
+		t.Fatalf("single-slice BDAV count = %d, want suppressed", got)
+	}
+}
+
+func TestAlignBDAVHeadBufferEndCompletesStraddlingPacket(t *testing.T) {
+	const packetSize = int64(192)
+	got := alignBDAVHeadBufferEnd(64<<10, 0, packetSize)
+	if got != 98_304 {
+		t.Fatalf("aligned end = %d, want 98304", got)
+	}
+	if got%packetSize != 0 || got < 64<<10 {
+		t.Fatalf("aligned end %d does not complete the boundary packet", got)
+	}
+}

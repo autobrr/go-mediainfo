@@ -1835,6 +1835,32 @@ func TestMatroskaAVCCanonicalSeedTracksConfigurationAndProbeFacts(t *testing.T) 
 	assertMatroskaDirectStreamMatchesLegacy(t, stream, "canonical-avc.mkv")
 }
 
+func TestMatroskaAV1FilmGrainAddsRawFormatSettingsOnlyWhenSignaled(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		filmGrain bool
+		want      bool
+	}{
+		{name: "signaled", filmGrain: true, want: true},
+		{name: "absent"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			builder := newCanonicalStreamBuilder(StreamVideo)
+			builder.Fill("ID", "1", "ID", "1")
+			builder.Fill("Format", "AV1", "Format", "AV1")
+			stream := builder.Snapshot(canonicalStreamPolicy{})
+			info := MatroskaInfo{Tracks: []Stream{stream}}
+			applyMatroskaVideoProbes(&info, map[uint64]*matroskaVideoProbe{1: {
+				codec: "AV1", av1Seen: true, av1: av1SequenceInfo{filmGrainPresent: test.filmGrain},
+			}})
+			found := matroskaStreamDisplay(info.Tracks[0], "Format settings") == "Film Grain Synthesis"
+			if found != test.want {
+				t.Fatalf("Film Grain Synthesis present = %v, want %v", found, test.want)
+			}
+		})
+	}
+}
+
 func TestMatroskaAVCStereoProfileContainsLevelWithoutSeparateField(t *testing.T) {
 	stream := Stream{Kind: StreamVideo, canonicalSeed: matroskaAVCCanonicalSeed(matroskaVideoCanonicalFacts{
 		format: "AVC", codecID: "V_MPEG4/ISO/AVC",

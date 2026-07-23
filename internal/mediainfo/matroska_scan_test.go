@@ -692,12 +692,21 @@ func TestParseAV1SequenceHeaderOBUUsesBitstreamColorConfig(t *testing.T) {
 	writeBits(bits, &pos, 0, 1) // limited range
 	writeBits(bits, &pos, 0, 2) // chroma sample position
 	writeBits(bits, &pos, 0, 1) // separate_uv_delta_q
+	writeBits(bits, &pos, 1, 1) // film_grain_params_present
 	payload := bits[:(pos+7)/8]
 	obu := append([]byte{0x0A, byte(len(payload))}, payload...)
 
 	got, ok := parseAV1SequenceHeaderOBU(obu)
-	if !ok || !got.descriptionPresent || got.colorRange != "Limited" || got.colorPrimaries != "BT.709" || got.transferCharacteristics != "BT.709" || got.matrixCoefficients != "BT.709" {
+	if !ok || !got.filmGrainPresent || !got.descriptionPresent || got.colorRange != "Limited" || got.colorPrimaries != "BT.709" || got.transferCharacteristics != "BT.709" || got.matrixCoefficients != "BT.709" {
 		t.Fatalf("AV1 color config = %+v, %v", got, ok)
+	}
+	obu[len(obu)-1] &^= 1 << uint(7-(pos-1)%8)
+	got, ok = parseAV1SequenceHeaderOBU(obu)
+	if !ok || got.filmGrainPresent {
+		t.Fatalf("AV1 no-film-grain config = %+v, %v", got, ok)
+	}
+	if got, ok := parseAV1SequenceHeaderOBU(obu[:len(obu)-1]); ok {
+		t.Fatalf("truncated AV1 sequence header accepted: %+v", got)
 	}
 }
 

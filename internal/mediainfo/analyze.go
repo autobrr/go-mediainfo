@@ -134,14 +134,10 @@ func bdavOverallBitRateMaximum(streamPath string, hasHEVC, hasPCM bool, videoStr
 
 // shouldApplyBDAVSizing reports whether MediaInfo derives BDAV stream sizes
 // from the container bitrate. Video-only HEVC clips are eligible without audio
-// sizing; HEVC clips with audio require every audio stream to be sized, and text
-// streams disable projection when present.
-func shouldApplyBDAVSizing(primaryVideoFormat string, audioCount, audioSizedCount int, textCounts ...int) bool {
-	textCount := 0
-	if len(textCounts) > 0 {
-		textCount = textCounts[0]
-	}
-	return primaryVideoFormat != "HEVC" || textCount == 0 && (audioCount == 0 || audioSizedCount == audioCount)
+// sizing; HEVC clips with audio require every audio stream to be sized. Text
+// streams remain eligible and contribute their standard estimated overhead.
+func shouldApplyBDAVSizing(primaryVideoFormat string, audioCount, audioSizedCount int) bool {
+	return primaryVideoFormat != "HEVC" || audioCount == 0 || audioSizedCount == audioCount
 }
 
 // AnalyzeFileWithOptions analyzes one local media file with opts and returns
@@ -1534,7 +1530,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			// MediaInfo BDAV behavior: derive StreamSize (and sometimes BitRate) when audio StreamSize is
 			// available for all audio streams. UHD/HEVC BDAV often omits these fields (subtitles present,
 			// or unsized audio at default ParseSpeed).
-			applyBDAVSizing := shouldApplyBDAVSizing(primaryVideoFormat, audioCount, audioSizedCount, textStreams)
+			applyBDAVSizing := shouldApplyBDAVSizing(primaryVideoFormat, audioCount, audioSizedCount)
 			if applyBDAVSizing {
 				// MediaInfo BDAV behavior: derive video bitrate/size from overall bitrate,
 				// subtracting audio + text overhead, then set General StreamSize as the remainder.

@@ -368,7 +368,8 @@ func rawTextDVDContext(store *fieldStore) (dvd, aggregate bool) {
 // normalizeDVDRawTextFields projects DVD raw text from the same canonical
 // values that already back JSON. Legacy friendly fields can contain the
 // pre-aggregation IFO values, so canonical values and the ordered extra object
-// are authoritative here. Projected DVD labels omit the raw /String suffix.
+// are authoritative here. Raw registry labels, including /String suffixes, are
+// preserved exactly.
 func normalizeDVDRawTextFields(stream *storedStream, fields []rawTextFieldProjection, structured map[string]string, aggregate bool) []rawTextFieldProjection {
 	if stream == nil {
 		return fields
@@ -489,9 +490,6 @@ func normalizeDVDRawTextFields(stream *storedStream, fields []rawTextFieldProjec
 			})
 			sequence++
 		}
-	}
-	for index := range normalized {
-		normalized[index].Label = strings.TrimSuffix(normalized[index].Label, "/String")
 	}
 	return normalized
 }
@@ -881,6 +879,9 @@ func rawTextScanStoreMethod(structured map[string]string) string {
 	}
 	if structured["ScanType"] == "MBAFF" {
 		return "InterleavedFields"
+	}
+	if structured["ScanType"] == "Interlaced" {
+		return "SeparatedFields"
 	}
 	return ""
 }
@@ -1308,7 +1309,7 @@ func rawTextValue(kind StreamKind, label, display string, structured map[string]
 		if kind == StreamGeneral && structured["Format"] == "BDAV" {
 			return "0 (0x0)"
 		}
-		if format := structured["Format"]; structured["UniqueID"] == "" && structured["StreamOrder"] == "" && (format == "Theora" || format == "Vorbis" || format == "Opus") {
+		if rawTextOggStream(structured) {
 			if id, err := strconv.ParseUint(structured["ID"], 10, 64); err == nil {
 				return fmt.Sprintf("%d (0x%X)", id, id)
 			}
@@ -1395,6 +1396,11 @@ func rawTextValue(kind StreamKind, label, display string, structured map[string]
 		if kind != StreamAudio && label == "FrameRate/String" {
 			if numerator, denominator := structured["FrameRate_Num"], structured["FrameRate_Den"]; rawTextFrameRateUsesRatio(kind, structured, numerator, denominator) {
 				return structured["FrameRate"] + " (" + numerator + "/" + denominator + ") fps"
+			}
+			if structured["FrameRate_Den"] == "1" || structured["Format"] == "AV1" {
+				if frameRate := structured["FrameRate"]; frameRate != "" {
+					return frameRate + " fps"
+				}
 			}
 		}
 		if kind == StreamAudio && label == "FrameRate/String" {
@@ -1561,7 +1567,7 @@ func rawTextValue(kind StreamKind, label, display string, structured map[string]
 
 func rawTextX264TargetBitRate(structured map[string]string) (float64, bool) {
 	codecID := strings.ToLower(structured["CodecID"])
-	if structured["Format"] != "AVC" || structured["UniqueID"] != "" || (!strings.HasPrefix(codecID, "avc1") && !strings.HasPrefix(codecID, "avc3")) {
+	if structured["Format"] != "AVC" || (!strings.HasPrefix(codecID, "avc1") && !strings.HasPrefix(codecID, "avc3")) {
 		return 0, false
 	}
 	target, ok := findX264Bitrate(structured["Encoded_Library_Settings"])
@@ -1740,22 +1746,30 @@ func stripRawTextDigitGrouping(value string) string {
 	}
 }
 
-// formatRawTextLanguage retains full language names while preserving region
-// and script subtags carried only by the canonical language code.
+// formatRawTextLanguage emits raw registry language codes and formats a single
+// region or script subtag as MediaInfo's parenthesized suffix.
 func formatRawTextLanguage(code, display string) string {
+	if strings.Contains(code, " / ") {
+		parts := strings.Split(code, " / ")
+		for index, part := range parts {
+			if part != "" {
+				parts[index] = formatRawTextLanguage(part, part)
+			}
+		}
+		return strings.Join(parts, " / ")
+	}
 	normalized := normalizeLanguageCode(code)
 	parts := strings.Split(normalized, "-")
 	if len(parts) < 2 {
-		return display
-	}
-	name := languageName(parts[0])
-	if name == "" {
-		if len(parts) > 2 {
+		if normalized != "" {
 			return normalized
 		}
-		name = parts[0]
+		return display
 	}
-	return fmt.Sprintf("%s (%s)", name, strings.Join(parts[1:], "-"))
+	if len(parts) == 2 {
+		return fmt.Sprintf("%s (%s)", parts[0], parts[1])
+	}
+	return normalized
 }
 
 // formatRawTextEncodedLibrary normalizes canonical encoder identifiers and
@@ -1837,13 +1851,28 @@ func formatRawTextEncodedLibrary(display string) string {
 }
 
 func formatRawTextEncodedLibraryForStream(display string, structured map[string]string) string {
-	if structured["UniqueID"] == "" {
+	if rawTextOggStream(structured) {
 		switch structured["Format"] {
 		case "Theora", "Vorbis":
 			return formatOggLibraryDisplay(structured["Format"], display)
 		}
 	}
 	return formatRawTextEncodedLibrary(display)
+}
+
+// rawTextOggStream identifies Ogg codec streams from container projection
+// facts. Matroska uses explicit codec IDs and stream ordering for the same
+// codecs, so identity metadata is neither needed nor consulted.
+func rawTextOggStream(structured map[string]string) bool {
+	if structured["CodecID"] != "" || structured["StreamOrder"] != "" {
+		return false
+	}
+	switch structured["Format"] {
+	case "Theora", "Vorbis", "Opus":
+		return true
+	default:
+		return false
+	}
 }
 
 // rawTextFormatInfo returns the few compound audio descriptions whose raw
