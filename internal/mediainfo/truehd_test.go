@@ -2,6 +2,28 @@ package mediainfo
 
 import "testing"
 
+func TestTrueHDChannelsFrontAssignmentBits(t *testing.T) {
+	tests := []struct {
+		name       string
+		channelMap uint16
+		channels   uint64
+		layout     string
+	}{
+		{name: "stereo", channelMap: 0x0001, channels: 2, layout: "L R"},
+		{name: "mono", channelMap: 0x0002, channels: 1, layout: "C"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := trueHDChannels(test.channelMap); got != test.channels {
+				t.Errorf("trueHDChannels(%#x) = %d; want %d", test.channelMap, got, test.channels)
+			}
+			if got := trueHDChannelLayout(test.channelMap); got != test.layout {
+				t.Errorf("trueHDChannelLayout(%#x) = %q; want %q", test.channelMap, got, test.layout)
+			}
+		})
+	}
+}
+
 func TestParseTrueHDFrameAtmosMajorSync(t *testing.T) {
 	frame := []byte{
 		0x61, 0xC8, 0xFF, 0xD5,
