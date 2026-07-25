@@ -37,9 +37,6 @@ func TestShouldApplyBDAVSizingAllowsVideoOnlyHEVC(t *testing.T) {
 	if !shouldApplyBDAVSizing("HEVC", 2, 2) {
 		t.Fatal("HEVC with fully sized audio should be sized")
 	}
-	if !shouldApplyBDAVSizing("HEVC", 2, 2) {
-		t.Fatal("HEVC with fully sized audio and text should be sized")
-	}
 }
 
 func TestNormalizeBDAVTextDurationTruncatesMilliseconds(t *testing.T) {
