@@ -381,7 +381,7 @@ func h264DisplayOrderPictureTypes(payload []byte, limit int, seededSPS ...h264SP
 	}
 	var sps h264SPSInfo
 	hasSPS := false
-	if len(seededSPS) > 0 && seededSPS[0].Log2MaxFrameNumMinus4 >= 0 {
+	if len(seededSPS) > 0 && seededSPS[0].ProfileID != 0 {
 		sps = seededSPS[0]
 		hasSPS = true
 	}

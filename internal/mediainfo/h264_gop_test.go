@@ -36,3 +36,20 @@ func TestH264FirstFieldOrderUsesSliceFlags(t *testing.T) {
 		})
 	}
 }
+
+func TestH264DisplayOrderRejectsZeroValueSeededSPS(t *testing.T) {
+	slice := make([]byte, 2)
+	writer := bitWriter{b: slice}
+	writer.writeBits(1, 1) // first_mb_in_slice = 0
+	writer.writeBits(3, 3) // slice_type = 2 (I)
+	writer.writeBits(1, 1) // pic_parameter_set_id = 0
+	writer.writeBits(0, 4) // frame_num
+	writer.writeBits(0, 1) // field_pic_flag
+	writer.writeBits(1, 1) // idr_pic_id = 0
+	writer.writeBits(0, 4) // pic_order_cnt_lsb
+	payload := append([]byte{0, 0, 1, 0x65}, slice...)
+
+	if got := h264DisplayOrderPictureTypes(payload, 1, h264SPSInfo{}); len(got) != 0 {
+		t.Fatalf("zero-value seeded SPS produced display order %q", got)
+	}
+}
