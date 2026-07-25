@@ -125,6 +125,20 @@ func FuzzParseMP4Containers(f *testing.F) {
 	})
 }
 
+func FuzzParseMP4EditList(f *testing.F) {
+	entries := []mp4EditEntry{
+		{duration: 1_000, mediaTime: -1, rate: 0x00010000},
+		{duration: 3_000, mediaTime: 1_024, rate: 0x00010000},
+	}
+	f.Add([]byte{})
+	f.Add(buildMP4ElstPayload(0, entries))
+	f.Add(buildMP4ElstPayload(1, entries))
+
+	f.Fuzz(func(t *testing.T, data []byte) {
+		_ = parseElst(fuzzLimit(data))
+	})
+}
+
 func FuzzParseAVIContainers(f *testing.F) {
 	// Minimal RIFF AVI header.
 	f.Add([]byte{
