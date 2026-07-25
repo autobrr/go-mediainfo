@@ -32,22 +32,24 @@ func TestParseMPEG4VOLBufferSizeUsesMediaInfoUnits(t *testing.T) {
 		name string
 		high uint32
 		low  uint32
+		want int64
 	}{
 		{name: "zero"},
-		{name: "one low unit", low: 1},
-		{name: "low only", low: 7},
-		{name: "high only", high: 1},
-		{name: "both halves", high: 0x1234, low: 5},
-		{name: "maximum", high: 0x7FFF, low: 7},
+		{name: "one low unit", low: 1, want: 2_048},
+		{name: "low only", low: 7, want: 14_336},
+		{name: "high only", high: 1, want: 67_108_864},
+		// MediaInfoLib v26.05 and immutable DivX samples S243/S247/S249/S250/S258.
+		{name: "official DivX buffer", high: 24, want: 1_610_612_736},
+		{name: "both halves", high: 0x1234, low: 5, want: 312_727_316_480},
+		{name: "maximum", high: 0x7FFF, low: 7, want: 2_198_956_161_024},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			const bitRateHigh = uint32(0x123)
 			const bitRateLow = uint32(0x456)
 			got := parseMPEG4VOL(buildMPEG4VOLWithVBV(bitRateHigh, bitRateLow, test.high, test.low))
-			want := int64((test.high<<15)|test.low) * 2048
-			if got.BufferSize != want {
-				t.Fatalf("BufferSize = %d, want %d", got.BufferSize, want)
+			if got.BufferSize != test.want {
+				t.Fatalf("BufferSize = %d, want %d", got.BufferSize, test.want)
 			}
 			if got.BitRateNominal != int64((bitRateHigh<<3)|bitRateLow)*400 {
 				t.Fatalf("neighboring BitRateNominal = %d", got.BitRateNominal)

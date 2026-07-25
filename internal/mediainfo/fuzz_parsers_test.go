@@ -134,7 +134,7 @@ func FuzzParseMP4EditList(f *testing.F) {
 	f.Add(buildMP4ElstPayload(0, entries))
 	f.Add(buildMP4ElstPayload(1, entries))
 
-	f.Fuzz(func(t *testing.T, data []byte) {
+	f.Fuzz(func(_ *testing.T, data []byte) {
 		_ = parseElst(fuzzLimit(data))
 	})
 }
