@@ -1,6 +1,7 @@
 package mediainfo
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -45,5 +46,30 @@ func TestRenderJSONMultiple(t *testing.T) {
 	}
 	if strings.Count(output, "\"@ref\"") < 2 {
 		t.Fatalf("expected refs in list")
+	}
+}
+
+func TestRenderJSONObjectEscapesDynamicKeys(t *testing.T) {
+	keys := []string{
+		`quote"key`,
+		`back\slash`,
+		"line\nbreak",
+		"Unicode 雪",
+		"punctuation.![]{}",
+	}
+	fields := make([]jsonKV, 0, len(keys))
+	for _, key := range keys {
+		fields = append(fields, jsonKV{Key: key, Val: key})
+	}
+
+	output := renderJSONObject(fields, false)
+	var decoded map[string]string
+	if err := json.Unmarshal([]byte(output), &decoded); err != nil {
+		t.Fatalf("invalid JSON %q: %v", output, err)
+	}
+	for _, key := range keys {
+		if got := decoded[key]; got != key {
+			t.Errorf("decoded[%q] = %q, want %q", key, got, key)
+		}
 	}
 }

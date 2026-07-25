@@ -7,6 +7,7 @@ import (
 	"go/format"
 	"go/parser"
 	"go/token"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -39,25 +40,47 @@ func TestProductionSourceHasNoCorpusIdentitySelectors(t *testing.T) {
 	if !ok {
 		t.Fatal("locate audit source")
 	}
-	dir := filepath.Dir(currentFile)
-	entries, err := os.ReadDir(dir)
+	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(currentFile), "..", ".."))
+	issues, err := auditProductionIdentityTree(repoRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var issues []string
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".go") || strings.HasSuffix(entry.Name(), "_test.go") {
-			continue
-		}
-		path := filepath.Join(dir, entry.Name())
-		source, readErr := os.ReadFile(path)
-		if readErr != nil {
-			t.Fatal(readErr)
-		}
-		issues = append(issues, auditProductionIdentitySource(entry.Name(), source)...)
-	}
 	if len(issues) > 0 {
 		t.Fatalf("production identity audit:\n%s", strings.Join(issues, "\n"))
+	}
+}
+
+func TestProductionIdentityAuditCoversRepoPackages(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	paths := []string{
+		"root.go",
+		filepath.Join("internal", "cli", "cli.go"),
+		filepath.Join("internal", "mediainfo", "analyze.go"),
+	}
+	for _, name := range paths {
+		path := filepath.Join(root, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("package sample\nconst corpusID = \"P:S021\"\n"), 0o644); err != nil { //nolint:gosec // test fixture
+			t.Fatal(err)
+		}
+	}
+
+	issues, err := auditProductionIdentityTree(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(issues) != len(paths) {
+		t.Fatalf("issues = %v, want one for each production package", issues)
+	}
+	for _, name := range paths {
+		want := filepath.ToSlash(name) + ": corpus sample ID"
+		if !strings.Contains(strings.Join(issues, "\n"), want) {
+			t.Errorf("missing audit issue for %s: %v", name, issues)
+		}
 	}
 }
 
@@ -90,6 +113,39 @@ const input = "P:S021"
 	if issues := auditProductionIdentitySource("literal.go", corpusLiteral); len(issues) != 1 {
 		t.Fatalf("corpus literal issues = %v, want one", issues)
 	}
+}
+
+func auditProductionIdentityTree(root string) ([]string, error) {
+	var issues []string
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			if path == root {
+				return nil
+			}
+			name := entry.Name()
+			if strings.HasPrefix(name, ".") || name == "testdata" || name == "vendor" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(entry.Name(), ".go") || strings.HasSuffix(entry.Name(), "_test.go") {
+			return nil
+		}
+		source, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		name, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		issues = append(issues, auditProductionIdentitySource(filepath.ToSlash(name), source)...)
+		return nil
+	})
+	return issues, err
 }
 
 func auditProductionIdentitySource(name string, source []byte) []string {

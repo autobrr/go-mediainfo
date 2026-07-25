@@ -145,9 +145,6 @@ func parseStts(payload []byte) (uint64, uint64, uint32, uint32, bool, bool) {
 	if total == 0 {
 		return 0, 0, 0, 0, false, false
 	}
-	if entryCount > 1 {
-		variable = true
-	}
 	return total, duration, firstDelta, lastDelta, true, variable
 }
 

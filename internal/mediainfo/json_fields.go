@@ -558,6 +558,7 @@ func applyJSONExtras(fields []jsonKV, extras map[string]string, rawExtras map[st
 			continue
 		}
 		fields = append(fields, jsonKV{Key: key, Val: value})
+		index[key] = len(fields) - 1
 	}
 	if len(rawExtras) > 0 {
 		rawKeys := make([]string, 0, len(rawExtras))
@@ -573,6 +574,7 @@ func applyJSONExtras(fields []jsonKV, extras map[string]string, rawExtras map[st
 				continue
 			}
 			fields = append(fields, jsonKV{Key: key, Val: value, Raw: true})
+			index[key] = len(fields) - 1
 		}
 	}
 	return fields

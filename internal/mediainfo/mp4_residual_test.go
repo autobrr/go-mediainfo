@@ -33,6 +33,74 @@ func TestParseMP4TimingRetainsIntegerDurations(t *testing.T) {
 	}
 }
 
+func TestParseSttsClassifiesDeltaVariability(t *testing.T) {
+	tests := []struct {
+		name         string
+		entries      [][2]uint32
+		wantCount    uint64
+		wantDuration uint64
+		wantVariable bool
+	}{
+		{
+			name:         "single entry constant",
+			entries:      [][2]uint32{{5, 1000}},
+			wantCount:    5,
+			wantDuration: 5000,
+		},
+		{
+			name:         "multiple equal entries constant",
+			entries:      [][2]uint32{{3, 1000}, {2, 1000}},
+			wantCount:    5,
+			wantDuration: 5000,
+		},
+		{
+			name:         "multiple unequal entries variable",
+			entries:      [][2]uint32{{3, 1000}, {2, 1001}},
+			wantCount:    5,
+			wantDuration: 5002,
+			wantVariable: true,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			payload := make([]byte, 8+len(test.entries)*8)
+			binary.BigEndian.PutUint32(payload[4:8], uint32(len(test.entries)))
+			for i, entry := range test.entries {
+				offset := 8 + i*8
+				binary.BigEndian.PutUint32(payload[offset:offset+4], entry[0])
+				binary.BigEndian.PutUint32(payload[offset+4:offset+8], entry[1])
+			}
+
+			count, duration, firstDelta, lastDelta, ok, variable := parseStts(payload)
+			if !ok || variable != test.wantVariable {
+				t.Fatalf("parseStts ok=%v variable=%v, want true/%v", ok, variable, test.wantVariable)
+			}
+			if count != test.wantCount || duration != test.wantDuration {
+				t.Fatalf("parseStts count/duration = %d/%d, want %d/%d", count, duration, test.wantCount, test.wantDuration)
+			}
+
+			if test.name == "multiple equal entries constant" {
+				track := MP4Track{
+					Timescale:           30000,
+					SampleCount:         count,
+					SampleBytes:         1000,
+					SampleDelta:         firstDelta,
+					LastSampleDelta:     lastDelta,
+					VariableDeltas:      variable,
+					sampleDurationTicks: duration,
+				}
+				rate := mp4FrameRate(track, 0)
+				if rate != 30 {
+					t.Fatalf("frame rate = %v, want 30", rate)
+				}
+				if bitRate := mp4VideoBitRate(track, rate); bitRate != 48000 {
+					t.Fatalf("bit rate = %v, want 48000", bitRate)
+				}
+			}
+		})
+	}
+}
+
 func TestParseTkhdRetainsDurationTicks(t *testing.T) {
 	v0 := make([]byte, 36)
 	binary.BigEndian.PutUint32(v0[12:16], 7)
