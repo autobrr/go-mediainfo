@@ -1582,6 +1582,11 @@ func TestMatroskaFrameRateRatioUsesExactFillSemantics(t *testing.T) {
 		{name: "rounded 1000", rate: 1_000_000_000.0 / 41_708_375.0, wantNum: 23976, wantDen: 1000},
 		{name: "near integer is not integer", rate: 1_000_000_000.0 / 33_333_334.0},
 		{name: "integer", rate: 30, wantNum: 30, wantDen: 1},
+		{name: "zero"},
+		{name: "not a number", rate: math.NaN()},
+		{name: "positive infinity", rate: math.Inf(1)},
+		{name: "negative infinity", rate: math.Inf(-1)},
+		{name: "out of integer range", rate: math.MaxFloat64},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

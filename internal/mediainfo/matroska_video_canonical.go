@@ -564,7 +564,9 @@ func applyMatroskaStaticVideoTiming(builder *canonicalStreamBuilder, facts matro
 			}
 			time := float32(facts.defaultDuration) / float32(scale)
 			clusterRate := float32(1_000_000_000) / time / float32(scale)
-			ratioNum, ratioDen = matroskaFrameRateRatio(float64(clusterRate))
+			if fallbackRate := float64(clusterRate); validMatroskaFrameRateRatioInput(fallbackRate) {
+				ratioNum, ratioDen = matroskaFrameRateRatio(fallbackRate)
+			}
 		}
 	} else if facts.codecID == "V_MPEGH/ISO/HEVC" && facts.sps.FrameRate > 0 {
 		ratioNum, ratioDen = matroskaFrameRateRatio(facts.sps.FrameRate)
@@ -639,21 +641,30 @@ func applyMatroskaStaticVideoTiming(builder *canonicalStreamBuilder, facts matro
 
 // matroskaFrameRateRatio mirrors File__Analyze::Fill's exact ratio detection.
 func matroskaFrameRateRatio(rate float64) (int, int) {
-	if rate <= 0 {
+	if !validMatroskaFrameRateRatioInput(rate) {
 		return 0, 0
 	}
 	rounded := math.Round(rate)
 	numerator, denominator := 0, 0
+	maxInt := float64(int(^uint(0) >> 1))
 	if delta := rounded - rate*1.001000; delta > -0.000002 && delta < 0.000002 {
-		numerator, denominator = int(math.Round(rate*1001)), 1001
+		if scaled := math.Round(rate * 1001); scaled < maxInt {
+			numerator, denominator = int(scaled), 1001
+		}
 	}
 	if delta := rounded - rate*1.001001; delta > -0.000002 && delta < 0.000002 {
-		numerator, denominator = int(math.Round(rate*1000)), 1000
+		if scaled := math.Round(rate * 1000); scaled < maxInt {
+			numerator, denominator = int(scaled), 1000
+		}
 	}
 	if rate == math.Trunc(rate) {
 		numerator, denominator = int(rate), 1
 	}
 	return numerator, denominator
+}
+
+func validMatroskaFrameRateRatioInput(rate float64) bool {
+	return rate > 0 && !math.IsNaN(rate) && !math.IsInf(rate, 0) && rate < float64(int(^uint(0)>>1))
 }
 
 func matroskaExactStandardFrameRate(rate float64) bool {
