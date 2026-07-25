@@ -39,6 +39,35 @@ func TestShouldApplyBDAVSizingAllowsVideoOnlyHEVC(t *testing.T) {
 	}
 }
 
+func TestMergeStructuredExtraNodePreservesProbeFields(t *testing.T) {
+	probe := structuredObjectFromKVs([]jsonKV{
+		{Key: "bsid", Val: "8"},
+		{Key: "dialnorm", Val: "-31"},
+	})
+	current := &probe
+	delay := structuredObjectFromKVs([]jsonKV{
+		{Key: "Source_Delay", Val: "-21"},
+		{Key: "Source_Delay_Source", Val: "Container"},
+	})
+
+	mergeStructuredExtraNode(&current, delay)
+
+	want := []jsonKV{
+		{Key: "bsid", Val: "8"},
+		{Key: "dialnorm", Val: "-31"},
+		{Key: "Source_Delay", Val: "-21"},
+		{Key: "Source_Delay_Source", Val: "Container"},
+	}
+	if current == nil || current.Kind != structuredObject || len(current.Object) != len(want) {
+		t.Fatalf("merged extra = %#v; want %d object members", current, len(want))
+	}
+	for index, member := range current.Object {
+		if member.Key != want[index].Key || member.Value.Text != want[index].Val {
+			t.Fatalf("member %d = %q/%q; want %q/%q", index, member.Key, member.Value.Text, want[index].Key, want[index].Val)
+		}
+	}
+}
+
 func TestNormalizeBDAVTextDurationTruncatesMilliseconds(t *testing.T) {
 	const ticks = uint64(2_649_959)
 	if got := normalizeBDAVTextDuration(float64(ticks)/90000, ticks); got != 29.443 {

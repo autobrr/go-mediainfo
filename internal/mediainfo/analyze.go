@@ -765,7 +765,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 							{Key: "Source_Delay", Val: strconv.FormatInt(delayMs, 10)},
 							{Key: "Source_Delay_Source", Val: "Container"},
 						})
-						extraNode = &node
+						mergeStructuredExtraNode(&extraNode, node)
 					}
 				}
 				if !x264Applied && track.Kind == StreamVideo && findField(fields, "Format") == "AVC" && (trackWritingLibrary != "" || trackEncodingSettings != "") {
@@ -875,11 +875,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 				}
 				if len(extraFields) > 0 {
 					node := structuredObjectFromKVs(extraFields)
-					if extraNode != nil && extraNode.Kind == structuredObject {
-						extraNode.Object = append(extraNode.Object, node.Object...)
-					} else {
-						extraNode = &node
-					}
+					mergeStructuredExtraNode(&extraNode, node)
 				}
 				trackFacts.Apply(builder)
 				if extraNode != nil {
@@ -2231,6 +2227,19 @@ func finalizeCanonicalGeneralFields(general *Stream) {
 			replaceCanonicalSeedText(general, field.Name, field.Value)
 		}
 	}
+}
+
+// mergeStructuredExtraNode appends object members without discarding extras
+// collected by an earlier codec or container probe.
+func mergeStructuredExtraNode(current **structuredNode, addition structuredNode) {
+	if current == nil || addition.Kind != structuredObject {
+		return
+	}
+	if *current != nil && (*current).Kind == structuredObject {
+		(*current).Object = append((*current).Object, addition.Object...)
+		return
+	}
+	*current = &addition
 }
 
 // omitCanonicalStreamOrder records that a parser-established stream has no
