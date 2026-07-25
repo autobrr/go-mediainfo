@@ -40,9 +40,9 @@ func TestParseHEVCVUIPreservesVideoFormat(t *testing.T) {
 	w.put(0, 1) // default_display_window_flag
 	w.put(0, 1) // vui_timing_info_present_flag
 	w.put(0, 1) // bitstream_restriction_flag
-	_, _, _, _, _, _, _, _, _, videoFormat, present := parseHEVCVUI(newBitReader(w.bytes()))
-	if !present || videoFormat != 2 {
-		t.Fatalf("video format = %d, present=%v; want NTSC signal", videoFormat, present)
+	info := parseHEVCVUI(newBitReader(w.bytes()))
+	if !info.hasVideoFormat || info.videoFormat != 2 {
+		t.Fatalf("video format = %d, present=%v; want NTSC signal", info.videoFormat, info.hasVideoFormat)
 	}
 }
 

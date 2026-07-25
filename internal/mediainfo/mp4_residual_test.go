@@ -290,6 +290,13 @@ func TestMP4EditListSourceDelayForms(t *testing.T) {
 			Timescale: 48_000, trackDurationTicks: 3_000, movieTimescale: 1_000,
 			editList: []mp4EditEntry{{duration: 0, mediaTime: 1_024, rate: 0x00010000}},
 		},
+		{
+			Timescale: 48_000, movieTimescale: 1_000,
+			editList: []mp4EditEntry{
+				{duration: 1_000, mediaTime: -1, rate: 0x00010000},
+				{duration: 3_000, mediaTime: 0, rate: 0x00010000},
+			},
+		},
 	} {
 		if got := mp4EditSourceDelaySeconds(track); got != 0 {
 			t.Fatalf("unsupported edit source delay = %v; want 0", got)

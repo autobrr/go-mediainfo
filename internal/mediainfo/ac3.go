@@ -205,18 +205,6 @@ func ac3FrameCRCValid(frame []byte, bsid int) bool {
 	if len(frame) < 6 {
 		return false
 	}
-	var table [256]uint16
-	for i := range table {
-		value := uint16(i) << 8
-		for range 8 {
-			if value&0x8000 != 0 {
-				value = value<<1 ^ 0x8005
-			} else {
-				value <<= 1
-			}
-		}
-		table[i] = value
-	}
 
 	legacy := bsid <= 9
 	fiveEighths := ((len(frame) >> 2) + (len(frame) >> 4)) << 1
@@ -227,7 +215,7 @@ func ac3FrameCRCValid(frame []byte, bsid int) bool {
 		if invertTail && pos >= len(frame)-2 {
 			value = ^value
 		}
-		crc = crc<<8 ^ table[byte(crc>>8)^value]
+		crc = crc<<8 ^ ac3CRC16Table[byte(crc>>8)^value]
 		if legacy && pos+1 == fiveEighths && crc != 0 {
 			return false
 		}

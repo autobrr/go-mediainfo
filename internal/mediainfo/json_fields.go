@@ -433,7 +433,7 @@ func mapStreamFieldsToJSON(kind StreamKind, fields []Field) []jsonKV {
 
 // buildJSONComputedFields derives MediaInfo-compatible JSON values that are not
 // already present in the parsed field set.
-func buildJSONComputedFields(kind StreamKind, fields []jsonKV, containerFormat string, skipFrameRateRatio bool, omitDerivedFLACLayout ...bool) []jsonKV {
+func buildJSONComputedFields(kind StreamKind, fields []jsonKV, containerFormat string, skipFrameRateRatio, omitDerivedFLACLayout bool) []jsonKV {
 	out := []jsonKV{}
 	format := jsonFieldValue(fields, "Format")
 	duration, _ := strconv.ParseFloat(jsonFieldValue(fields, "Duration"), 64)
@@ -461,7 +461,7 @@ func buildJSONComputedFields(kind StreamKind, fields []jsonKV, containerFormat s
 	if kind == StreamAudio {
 		if channels != "" && jsonFieldValue(fields, "ChannelPositions") == "" && jsonFieldValue(fields, "Channels_Original") == "" {
 			omitDerivedFLACPositions := containerFormat == "Matroska" && format == "FLAC" &&
-				jsonFieldValue(fields, "ChannelLayout") == "" && len(omitDerivedFLACLayout) > 0 && omitDerivedFLACLayout[0]
+				jsonFieldValue(fields, "ChannelLayout") == "" && omitDerivedFLACLayout
 			omitDerivedMatroskaPositions := containerFormat == "Matroska" &&
 				(format == "MPEG Audio" || format == "Vorbis" || format == "PCM") && jsonFieldValue(fields, "ChannelLayout") == ""
 			// Official mediainfo does not emit ChannelPositions for MPEG Audio in MPEG-PS (e.g. VOB).

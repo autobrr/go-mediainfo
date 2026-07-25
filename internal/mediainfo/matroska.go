@@ -4883,6 +4883,10 @@ func applyMatroskaEncoders(streams []Stream, encodersByTrackUID map[uint64]strin
 		uid := streamTrackUID(streams[i])
 		enc := encodersByTrackUID[uid]
 		settings := settingsByTrackUID[uid]
+		audioFormat := ""
+		if streams[i].Kind == StreamAudio {
+			audioFormat = findField(streams[i].Fields, "Format")
+		}
 		if streams[i].Kind == StreamVideo {
 			if enc == "" {
 				enc = encodersByTrackUID[0]
@@ -4903,14 +4907,13 @@ func applyMatroskaEncoders(streams []Stream, encodersByTrackUID map[uint64]strin
 				replaceCanonicalSeedFill(&streams[i], "Encoded_Library_Settings", settings, "Encoding settings", settings)
 			}
 		}
-		if streams[i].Kind == StreamAudio && enc != "" && (findField(streams[i].Fields, "Format") == "FLAC" || findField(streams[i].Fields, "Format") == "AC-3" || findField(streams[i].Fields, "Format") == "E-AC-3") {
+		if streams[i].Kind == StreamAudio && enc != "" && (audioFormat == "FLAC" || audioFormat == "AC-3" || audioFormat == "E-AC-3") {
 			existingEncoder := findField(streams[i].Fields, "Writing library")
-			normalizeMatroskaLavcFLAC(&streams[i], existingEncoder)
 			if existingEncoder != "" {
 				continue
 			}
 			replaceCanonicalSeedFill(&streams[i], "Encoded_Library", enc, "Writing library", enc)
-			if findField(streams[i].Fields, "Format") == "AC-3" && strings.Contains(enc, "ac3_fixed") {
+			if audioFormat == "AC-3" && strings.Contains(enc, "ac3_fixed") {
 				replaceCanonicalSeedFill(&streams[i], "BitDepth", "16", "", "")
 			}
 			normalizeMatroskaLavcFLAC(&streams[i], enc)
@@ -4924,7 +4927,7 @@ func applyMatroskaEncoders(streams []Stream, encodersByTrackUID map[uint64]strin
 				}
 			}
 		}
-		if streams[i].Kind == StreamAudio && findField(streams[i].Fields, "Format") == "Opus" && enc != "" {
+		if streams[i].Kind == StreamAudio && audioFormat == "Opus" && enc != "" {
 			streams[i].Fields = setFieldValue(streams[i].Fields, "Writing library", enc)
 			replaceCanonicalSeedFill(&streams[i], "Encoded_Library", canonicalEncodedLibrary(enc), "Writing library", enc)
 			if settings != "" {

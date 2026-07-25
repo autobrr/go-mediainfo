@@ -99,6 +99,40 @@ func trimH264NALTrailingZeroes(nal []byte) []byte {
 	return nal
 }
 
+func scanSEIPayloads(rbsp []byte, visit func(payloadType int, payload []byte) bool) bool {
+	for pos := 0; pos < len(rbsp); {
+		payloadType := 0
+		for pos < len(rbsp) && rbsp[pos] == 0xFF {
+			payloadType += 255
+			pos++
+		}
+		if pos >= len(rbsp) {
+			break
+		}
+		payloadType += int(rbsp[pos])
+		pos++
+
+		payloadSize := 0
+		for pos < len(rbsp) && rbsp[pos] == 0xFF {
+			payloadSize += 255
+			pos++
+		}
+		if pos >= len(rbsp) {
+			break
+		}
+		payloadSize += int(rbsp[pos])
+		pos++
+		if payloadSize > len(rbsp)-pos {
+			break
+		}
+		if !visit(payloadType, rbsp[pos:pos+payloadSize]) {
+			return false
+		}
+		pos += payloadSize
+	}
+	return true
+}
+
 // findX264InfoAnnexB extracts x264's unregistered SEI payload without mixing
 // adjacent encoded bytes into the null-terminated options string.
 func findX264InfoAnnexB(data []byte) (string, string) {
@@ -108,40 +142,15 @@ func findX264InfoAnnexB(data []byte) (string, string) {
 			return true
 		}
 		rbsp := nalToRBSP(trimH264NALTrailingZeroes(nal))
-		for pos := 0; pos < len(rbsp); {
-			payloadType := 0
-			for pos < len(rbsp) && rbsp[pos] == 0xFF {
-				payloadType += 255
-				pos++
-			}
-			if pos >= len(rbsp) {
-				break
-			}
-			payloadType += int(rbsp[pos])
-			pos++
-
-			payloadSize := 0
-			for pos < len(rbsp) && rbsp[pos] == 0xFF {
-				payloadSize += 255
-				pos++
-			}
-			if pos >= len(rbsp) {
-				break
-			}
-			payloadSize += int(rbsp[pos])
-			pos++
-			if payloadSize > len(rbsp)-pos {
-				break
-			}
-			if payloadType == 5 && payloadSize > 16 {
-				writingLibrary, encoding = findX264InfoSEIPayload(rbsp[pos : pos+payloadSize])
+		return scanSEIPayloads(rbsp, func(payloadType int, payload []byte) bool {
+			if payloadType == 5 && len(payload) > 16 {
+				writingLibrary, encoding = findX264InfoSEIPayload(payload)
 				if writingLibrary != "" {
 					return false
 				}
 			}
-			pos += payloadSize
-		}
-		return true
+			return true
+		})
 	})
 	return writingLibrary, encoding
 }
@@ -169,37 +178,14 @@ func findLastX264InfoLengthPrefixed(data []byte, lengthSize int) (string, string
 			continue
 		}
 		rbsp := nalToRBSP(trimH264NALTrailingZeroes(nal))
-		for seiPos := 0; seiPos < len(rbsp); {
-			payloadType := 0
-			for seiPos < len(rbsp) && rbsp[seiPos] == 0xFF {
-				payloadType += 255
-				seiPos++
-			}
-			if seiPos >= len(rbsp) {
-				break
-			}
-			payloadType += int(rbsp[seiPos])
-			seiPos++
-			payloadSize := 0
-			for seiPos < len(rbsp) && rbsp[seiPos] == 0xFF {
-				payloadSize += 255
-				seiPos++
-			}
-			if seiPos >= len(rbsp) {
-				break
-			}
-			payloadSize += int(rbsp[seiPos])
-			seiPos++
-			if payloadSize > len(rbsp)-seiPos {
-				break
-			}
-			if payloadType == 5 && payloadSize > 16 {
-				if library, settings := findX264InfoSEIPayload(rbsp[seiPos : seiPos+payloadSize]); library != "" || settings != "" {
+		scanSEIPayloads(rbsp, func(payloadType int, payload []byte) bool {
+			if payloadType == 5 && len(payload) > 16 {
+				if library, settings := findX264InfoSEIPayload(payload); library != "" || settings != "" {
 					writingLibrary, encoding = library, settings
 				}
 			}
-			seiPos += payloadSize
-		}
+			return true
+		})
 	}
 	return writingLibrary, encoding
 }
