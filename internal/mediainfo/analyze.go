@@ -756,9 +756,6 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 				}
 				if track.Kind == StreamAudio {
 					sourceDelay := mp4EditSourceDelaySeconds(track)
-					if sourceDelay == 0 && len(track.editList) == 0 && track.EditMediaTime > 0 && track.Timescale > 0 {
-						sourceDelay = -float64(track.EditMediaTime) / float64(track.Timescale)
-					}
 					delayMs := int64(math.Round(sourceDelay * 1000))
 					if delayMs != 0 {
 						node := structuredObjectFromKVs([]jsonKV{

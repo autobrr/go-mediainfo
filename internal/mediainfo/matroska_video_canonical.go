@@ -693,7 +693,8 @@ func applyMatroskaStaticVideoColor(builder *canonicalStreamBuilder, facts matros
 	}
 	descriptionJSONOnly := (facts.format == "AVC" || facts.format == "HEVC") &&
 		video.colorPrimaries == "" && video.transferCharacteristics == "" && video.matrixCoefficients == ""
-	descriptionPresent := facts.sps.HasColorDescription || video.colorPrimaries != "" || video.transferCharacteristics != "" || video.matrixCoefficients != ""
+	containerRange := video.colorRange != "" && strings.Contains(video.colorRangeSource, "Container")
+	descriptionPresent := facts.sps.HasColorDescription || containerRange || video.colorPrimaries != "" || video.transferCharacteristics != "" || video.matrixCoefficients != ""
 	if descriptionPresent {
 		if descriptionJSONOnly {
 			builder.StructuredJSONOnly("colour_description_present", "Yes")

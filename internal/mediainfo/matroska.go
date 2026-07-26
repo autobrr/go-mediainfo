@@ -253,8 +253,11 @@ func parseMatroskaWithOptions(r io.ReaderAt, size int64, opts AnalyzeOptions, pu
 			}
 		}
 	}
-	if info.SegmentSize == 0 && info.SegmentOffset > 0 && size > info.SegmentOffset {
-		info.SegmentSize = size - info.SegmentOffset
+	if info.SegmentOffset > 0 && size > info.SegmentOffset {
+		availableSegmentSize := size - info.SegmentOffset
+		if info.SegmentSize <= 0 || info.SegmentSize > availableSegmentSize {
+			info.SegmentSize = availableSegmentSize
+		}
 	}
 	if info.SegmentOffset > 0 && info.SegmentSize > 0 && info.TimecodeScale > 0 {
 		if size > scanSize {

@@ -134,15 +134,21 @@ func applyMatroskaTrueHDCanonicalProbe(stream *Stream, info trueHDInfo) {
 		replaceCanonicalSeedText(stream, "Format/Info", "Meridian Lossless Packing FBA with 16-channel presentation")
 		replaceCanonicalSeedFill(stream, "Format_Commercial_IfAny", "Dolby TrueHD with Dolby Atmos", "Commercial name", "Dolby TrueHD with Dolby Atmos")
 		replaceCanonicalSeedFill(stream, "Format_AdditionalFeatures", atmos.additionalFeatures, "", "")
-		replaceCanonicalSeedText(stream, "Number of dynamic objects", strconv.Itoa(atmos.dynamicObjects))
-		replaceCanonicalSeedText(stream, "Bed channel count", formatChannels(atmos.bedChannelCount))
-		replaceCanonicalSeedText(stream, "Bed channel configuration", atmos.bedChannelConfig)
 		applyMatroskaTrueHDCanonicalLayout(stream, "L R C LFE Ls Rs Lb Rb", "Front: L C R, Side: L R, Back: L R, LFE")
-		appendCanonicalSeedObjectMembers(stream, "extra", []structuredMember{
-			{Key: "NumberOfDynamicObjects", Value: structuredNode{Kind: structuredString, Text: strconv.Itoa(atmos.dynamicObjects)}},
-			{Key: "BedChannelCount", Value: structuredNode{Kind: structuredString, Text: strconv.FormatUint(atmos.bedChannelCount, 10)}},
-			{Key: "BedChannelConfiguration", Value: structuredNode{Kind: structuredString, Text: atmos.bedChannelConfigShort}},
-		})
+		extra := make([]structuredMember, 0, 3)
+		if atmos.hasDynamicObjects {
+			replaceCanonicalSeedText(stream, "Number of dynamic objects", strconv.Itoa(atmos.dynamicObjects))
+			extra = append(extra, structuredMember{Key: "NumberOfDynamicObjects", Value: structuredNode{Kind: structuredString, Text: strconv.Itoa(atmos.dynamicObjects)}})
+		}
+		if atmos.bedChannelCount > 0 && atmos.bedChannelConfig != "" {
+			replaceCanonicalSeedText(stream, "Bed channel count", formatChannels(atmos.bedChannelCount))
+			replaceCanonicalSeedText(stream, "Bed channel configuration", atmos.bedChannelConfig)
+			extra = append(extra,
+				structuredMember{Key: "BedChannelCount", Value: structuredNode{Kind: structuredString, Text: strconv.FormatUint(atmos.bedChannelCount, 10)}},
+				structuredMember{Key: "BedChannelConfiguration", Value: structuredNode{Kind: structuredString, Text: atmos.bedChannelConfigShort}},
+			)
+		}
+		appendCanonicalSeedObjectMembers(stream, "extra", extra)
 	}
 	if info.maxBitRate > 0 {
 		raw := strconv.FormatInt(info.maxBitRate, 10)

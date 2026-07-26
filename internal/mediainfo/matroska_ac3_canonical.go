@@ -151,7 +151,8 @@ func applyMatroskaAC3CanonicalProbe(stream *Stream, probe *matroskaAudioProbe, a
 		replaceCanonicalSeedFill(stream, "Channels", raw, "Channel(s)", formatChannels(ac3.channels))
 	}
 	if ac3.layout != "" {
-		replaceCanonicalSeedFill(stream, "ChannelLayout", ac3.layout, "Channel layout", ac3.layout)
+		layout := matroskaAC3ChannelLayout(ac3.layout)
+		replaceCanonicalSeedFill(stream, "ChannelLayout", layout, "Channel layout", layout)
 		positions := ac3ChannelPositions(ac3.layout)
 		if positions == "" {
 			positions = channelPositionsFromCount(strconv.FormatUint(ac3.channels, 10))
@@ -308,6 +309,18 @@ func applyMatroskaEAC3CanonicalText(stream *Stream, ac3 ac3Info) {
 	}
 }
 
+// matroskaAC3ChannelLayout keeps the AC-3 parser's upstream S/Cs vocabulary
+// separate from MediaInfo's Matroska-facing name for one back-center channel.
+func matroskaAC3ChannelLayout(layout string) string {
+	parts := strings.Fields(layout)
+	for index, part := range parts {
+		if part == "S" || part == "Cs" {
+			parts[index] = "Cb"
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
 // matroskaAC3JOCComplexity returns the signaled complexity or MediaInfo's
 // object-count fallback, and -1 when neither source is available.
 func matroskaAC3JOCComplexity(ac3 ac3Info) int {
@@ -404,9 +417,6 @@ func matroskaAC3CanonicalExtraFields(probe *matroskaAudioProbe, ac3 ac3Info, dep
 	}
 	if avg, minimum, maximum, count, ok := ac3.comprStats(); ok {
 		if probe.dependentStats {
-			if probe.hasComprAverage {
-				avg = probe.comprAverage + 0.02
-			}
 			count += 3
 		}
 		fields = append(fields,
@@ -418,9 +428,6 @@ func matroskaAC3CanonicalExtraFields(probe *matroskaAudioProbe, ac3 ac3Info, dep
 	}
 	if avg, minimum, maximum, count, ok := ac3.dynrngStats(); ok {
 		if probe.dependentStats {
-			if probe.hasDynrngAverage {
-				avg = probe.dynrngAverage + 0.01
-			}
 			if adjusted := ac3.framesMerged - 130; adjusted > count {
 				count = adjusted
 			}

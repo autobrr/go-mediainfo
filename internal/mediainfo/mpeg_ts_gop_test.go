@@ -83,3 +83,19 @@ func TestAlignBDAVHeadBufferEndCompletesStraddlingPacket(t *testing.T) {
 		t.Fatalf("aligned end %d does not complete the boundary packet", got)
 	}
 }
+
+func TestProgressivePictureThresholdIsTSSpecific(t *testing.T) {
+	base := mpeg2VideoParser{
+		gotSeqExt:         true,
+		pictureCount:      100,
+		progressiveFrames: 95,
+	}
+	shared := base
+	if got := shared.finalize(); got.ScanType != "Interlaced" {
+		t.Fatalf("shared MPEG-2 finalize ScanType = %q, want sequence-derived Interlaced", got.ScanType)
+	}
+	ts := base
+	if got := ts.finalizeTS(); got.ScanType != "Progressive" {
+		t.Fatalf("TS MPEG-2 finalize ScanType = %q, want picture-threshold Progressive", got.ScanType)
+	}
+}

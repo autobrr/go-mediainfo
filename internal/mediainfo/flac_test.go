@@ -113,6 +113,27 @@ func TestFLACDerivedLayoutIsOmitted(t *testing.T) {
 	}
 }
 
+func TestFLACChannelMaskOverridesCountDerivedLayout(t *testing.T) {
+	const quadBackMask = 0x33 // FL, FR, BL, BR
+	if got := flacChannelLayoutFromMask(quadBackMask); got != "L R Lb Rb" {
+		t.Fatalf("layout = %q, want L R Lb Rb", got)
+	}
+	if got := flacChannelPositionsFromMask(quadBackMask); got != "Front: L R, Back: L R" {
+		t.Fatalf("positions = %q, want mask-derived back channels", got)
+	}
+	stream := canonicalFLACAudioStream(flacAudioStreamParams{
+		channels:       4,
+		channelMask:    quadBackMask,
+		hasChannelMask: true,
+	})
+	if got, _ := canonicalSeedValue(stream, "ChannelLayout"); got != "L R Lb Rb" {
+		t.Fatalf("canonical ChannelLayout = %q", got)
+	}
+	if got, _ := canonicalSeedValue(stream, "ChannelPositions"); got != "Front: L R, Back: L R" {
+		t.Fatalf("canonical ChannelPositions = %q", got)
+	}
+}
+
 // FuzzParseMatroskaFLACPrivate verifies that bare STREAMINFO, complete fLaC
 // metadata, and truncated metadata blocks remain bounded for arbitrary input.
 func FuzzParseMatroskaFLACPrivate(f *testing.F) {

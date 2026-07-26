@@ -18,6 +18,10 @@ func TestRenderTextWithOptionsUsesRawProjection(t *testing.T) {
 	attachCanonicalStore(&report)
 
 	raw := RenderTextWithOptions([]Report{report}, TextRenderOptions{Language: "raw"})
+	eol := "\n"
+	if runtime.GOOS == "windows" {
+		eol = "\r\n"
+	}
 	for _, row := range []string{
 		"Format/String                    : Matroska",
 		"Duration/String                  : 1h 1mn",
@@ -27,15 +31,19 @@ func TestRenderTextWithOptionsUsesRawProjection(t *testing.T) {
 			t.Fatalf("raw output missing %q:\n%s", row, raw)
 		}
 	}
-	if strings.Contains(raw, "\n") && strings.Contains(strings.ReplaceAll(raw, "\r\n", ""), "\n") {
+	if runtime.GOOS == "windows" && strings.Contains(strings.ReplaceAll(raw, "\r\n", ""), "\n") {
 		t.Fatalf("raw output contains bare LF line endings: %q", raw)
 	}
-	wantFooter := "\r\n" + padRight("ReportBy", 33) + ": " + AppName + " - " + FormatVersion(AppVersion)
-	if !strings.Contains(raw, wantFooter) {
-		t.Fatalf("raw output footer framing/alignment changed:\n%s", raw)
+	if strings.Contains(raw, "ReportBy") {
+		t.Fatalf("raw output includes Inform_Version footer by default:\n%s", raw)
 	}
-	if !strings.HasSuffix(raw, "\r\n\r\n\r\n") || strings.HasSuffix(raw, "\r\n\r\n\r\n\r\n") {
+	if !strings.HasSuffix(raw, strings.Repeat(eol, 3)) || strings.HasSuffix(raw, strings.Repeat(eol, 4)) {
 		t.Fatalf("raw output terminal line endings = %q", raw[len(raw)-min(len(raw), 12):])
+	}
+	versioned := RenderTextWithOptions([]Report{report}, TextRenderOptions{Language: "raw", InformVersion: true})
+	wantFooter := eol + padRight("ReportBy", 33) + ": " + AppName + " - " + FormatVersion(AppVersion)
+	if !strings.Contains(versioned, wantFooter) {
+		t.Fatalf("Inform_Version raw output omitted footer:\n%s", versioned)
 	}
 	friendly := RenderText([]Report{report})
 	if !strings.Contains(friendly, "Format                                   : Matroska") {
@@ -142,6 +150,17 @@ func TestRawTextCanonicalValueFormatting(t *testing.T) {
 	if got := formatRawTextBitRate("64000"); got != "64.0 Kbps" {
 		t.Fatalf("formatRawTextBitRate = %q", got)
 	}
+	for value, want := range map[string]string{
+		"10000":  "10000 bps",
+		"10001":  "10.0 Kbps",
+		"100000": "100.0 Kbps",
+		"100001": "100 Kbps",
+		"23550":  "23.5 Kbps",
+	} {
+		if got := formatRawTextBitRate(value); got != want {
+			t.Errorf("formatRawTextBitRate(%s) = %q, want %q", value, got, want)
+		}
+	}
 	if got := formatRawTextLanguage("es-419", "Spanish"); got != "es (419)" {
 		t.Fatalf("formatRawTextLanguage = %q", got)
 	}
@@ -177,6 +196,9 @@ func TestRawTextCanonicalValueFormatting(t *testing.T) {
 	}
 	if got := formatRawTextEncodedLibrary("XviD0041"); got != "XviD 1.1.0 (2005-11-22)" {
 		t.Fatalf("formatRawTextEncodedLibrary(XviD) = %q", got)
+	}
+	if got := formatRawTextEncodedLibrary("XviD0064"); got != "XviD 64" {
+		t.Fatalf("formatRawTextEncodedLibrary(unknown-date XviD) = %q", got)
 	}
 	if got := rawTextValue(StreamVideo, "FrameRate_Original/String", "23.976 fps", map[string]string{"Format": "MPEG-4 Visual", "CodecID": "XVID"}, 0); got != "23.976 (23976/1000) fps" {
 		t.Fatalf("original frame rate = %q", got)
@@ -277,8 +299,8 @@ func TestRawTextBDAVStructuredFormatting(t *testing.T) {
 	if got := rawTextScanStoreMethod(map[string]string{"ScanType": "MBAFF"}); got != "InterleavedFields" {
 		t.Fatalf("MBAFF scan store method = %q", got)
 	}
-	if got := rawTextScanStoreMethod(map[string]string{"ScanType": "Interlaced"}); got != "SeparatedFields" {
-		t.Fatalf("interlaced scan store method = %q", got)
+	if got := rawTextScanStoreMethod(map[string]string{"ScanType": "Interlaced"}); got != "" {
+		t.Fatalf("interlaced scan store method = %q; want no invented fallback", got)
 	}
 	if got := rawTextValue(StreamAudio, "BedChannelCount", "1", map[string]string{"BedChannelCount": "1"}, 0); got != "1 channel" {
 		t.Fatalf("BedChannelCount = %q", got)
@@ -422,8 +444,8 @@ func TestRawTextFrameRateRatioPolicy(t *testing.T) {
 	}{
 		{StreamVideo, "AVC", "", "23976", "1000", true},
 		{StreamVideo, "AVC", "", "24000", "1001", false},
-		{StreamVideo, "AV1", "", "24000", "1001", true},
-		{StreamVideo, "AV1", "18229823285062969326", "24000", "1001", true},
+		{StreamVideo, "AV1", "", "24000", "1001", false},
+		{StreamVideo, "AV1", "18229823285062969326", "24000", "1001", false},
 		{StreamVideo, "AV1", "", "", "", false},
 		{StreamVideo, "MPEG-4 Visual", "", "24000", "1001", true},
 		{StreamText, "ASS", "", "999", "1000", true},

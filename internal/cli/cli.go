@@ -227,6 +227,7 @@ func runCore(opts Options, files []string) (string, int, error) {
 	}
 
 	var analyzeOpts []mediainfo.AnalyzeOption
+	informVersion := false
 	for _, opt := range opts.CoreOptions {
 		if strings.EqualFold(opt.Name, "parsespeed") {
 			if value, err := strconv.ParseFloat(strings.TrimSpace(opt.Value), 64); err == nil {
@@ -239,13 +240,17 @@ func runCore(opts Options, files []string) (string, int, error) {
 			analyzeOpts = append(analyzeOpts, mediainfo.WithTestContinuousFileNames(value != "0"))
 			continue
 		}
+		if strings.EqualFold(opt.Name, "inform_version") {
+			informVersion = strings.TrimSpace(opt.Value) != "0"
+			continue
+		}
 	}
 	reports, count, err := mediainfo.AnalyzeFilesWithCount(files, analyzeOpts...)
 	if err != nil {
 		return "", 0, err
 	}
 
-	output, err := mediainfo.RenderWithOptions(reports, outputFormat, mediainfo.RenderOptions{Language: opts.Language})
+	output, err := mediainfo.RenderWithOptions(reports, outputFormat, mediainfo.RenderOptions{Language: opts.Language, InformVersion: informVersion})
 	if err != nil {
 		return "", 0, err
 	}

@@ -23,6 +23,10 @@ type matroskaTrackStats struct {
 	hasEnd     bool
 }
 
+const maxEBMLElementReadBytes = int64(32 << 20)
+
+var errEBMLElementReadLimit = errors.New("matroska element exceeds bounded read limit")
+
 type matroskaTagStats struct {
 	trusted         bool
 	bareDuration    bool
@@ -72,10 +76,6 @@ type matroskaAudioProbe struct {
 	parseJOC          bool
 	dependentEAC3     bool
 	dependentStats    bool
-	comprAverage      float64
-	hasComprAverage   bool
-	dynrngAverage     float64
-	hasDynrngAverage  bool
 	headerStrip       []byte
 }
 
@@ -318,6 +318,9 @@ func (er *ebmlReader) readByte() (byte, error) {
 func (er *ebmlReader) readN(n int64) ([]byte, error) {
 	if n <= 0 {
 		return nil, nil
+	}
+	if n > maxEBMLElementReadBytes {
+		return nil, errEBMLElementReadLimit
 	}
 	var buf []byte
 	if n <= 4096 {
@@ -1068,18 +1071,6 @@ func readMatroskaBlockHeader(er *ebmlReader, size int64, audioProbes map[uint64]
 				}
 				// Keep probing bounded; count per Matroska packet (Block/SimpleBlock).
 				audioProbe.packetCount++
-				if audioProbe.dependentStats && audioProbe.packetCount == 299 {
-					if average, _, _, _, ok := audioProbe.info.comprStats(); ok {
-						audioProbe.comprAverage = average
-						audioProbe.hasComprAverage = true
-					}
-				}
-				if audioProbe.dependentStats && audioProbe.packetCount == 524 {
-					if average, _, _, _, ok := audioProbe.info.dynrngStats(); ok {
-						audioProbe.dynrngAverage = average
-						audioProbe.hasDynrngAverage = true
-					}
-				}
 				// Bound the expensive JOC scan (full-block reads) separately.
 				if audioProbe.parseJOC && audioProbe.jocStopPackets > 0 && audioProbe.packetCount >= audioProbe.jocStopPackets {
 					audioProbe.parseJOC = false
@@ -2192,6 +2183,9 @@ func applyMatroskaVideoProbes(info *MatroskaInfo, probes map[uint64]*matroskaVid
 			if order, ok := h264FirstFieldOrder(probe.avcAnnexB, effectiveSPS); ok {
 				replaceCanonicalSeedFill(stream, "ScanOrder", order, "Scan order", order)
 				applyMatroskaAVCFieldCadence(stream, effectiveSPS)
+			}
+			if method := h264FieldPictureStoreMethod(probe.avcAnnexB, effectiveSPS); method != "" {
+				replaceCanonicalSeedText(stream, "Scan type, store method", method)
 			}
 			if probe.activeFormat > 0 {
 				activeFormat := strconv.Itoa(probe.activeFormat)
@@ -3389,28 +3383,28 @@ func parseVP9FrameHeader(payload []byte) (vp9FrameInfo, bool) {
 
 	widthMinusOne, ok := r.read(16)
 	if !ok {
-		return vp9FrameInfo{}, false
+		return info, true
 	}
 	heightMinusOne, ok := r.read(16)
 	if !ok {
-		return vp9FrameInfo{}, false
+		return info, true
 	}
 	info.width = int(widthMinusOne) + 1
 	info.height = int(heightMinusOne) + 1
 	info.renderWidth = info.width
 	info.renderHeight = info.height
-	scaled, ok := r.read(1)
+	renderDifferent, ok := r.read(1)
 	if !ok {
-		return vp9FrameInfo{}, false
+		return info, true
 	}
-	if scaled != 0 {
+	if renderDifferent != 0 {
 		renderWidthMinusOne, ok := r.read(16)
 		if !ok {
-			return vp9FrameInfo{}, false
+			return info, true
 		}
 		renderHeightMinusOne, ok := r.read(16)
 		if !ok {
-			return vp9FrameInfo{}, false
+			return info, true
 		}
 		info.renderWidth = int(renderWidthMinusOne) + 1
 		info.renderHeight = int(renderHeightMinusOne) + 1

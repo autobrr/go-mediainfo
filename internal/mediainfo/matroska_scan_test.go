@@ -2,6 +2,7 @@ package mediainfo
 
 import (
 	"bytes"
+	"errors"
 	"strconv"
 	"strings"
 	"testing"
@@ -424,6 +425,13 @@ func TestReadMatroskaElementHeader_SizeBeyondRemaining(t *testing.T) {
 	}
 }
 
+func TestEBMLReaderRejectsOversizedDirectRead(t *testing.T) {
+	er := newEBMLReader(bytes.NewReader(nil))
+	if _, err := er.readN(maxEBMLElementReadBytes + 1); !errors.Is(err, errEBMLElementReadLimit) {
+		t.Fatalf("readN oversized error = %v, want %v", err, errEBMLElementReadLimit)
+	}
+}
+
 func TestScanMatroskaClustersVideoProbeAggregateByteBudget(t *testing.T) {
 	budget := &matroskaVideoProbeBudget{remaining: 8}
 	video := &matroskaVideoProbe{
@@ -621,10 +629,19 @@ func TestParseVP9FrameHeaderDimensionsAndMalformedHeaders(t *testing.T) {
 		t.Fatalf("scaled RGB VP9 header = %+v, %v", got, ok)
 	}
 
+	colorOnlyAccepted := false
 	for length := range len(scaled) {
-		if truncated, ok := parseVP9FrameHeader(scaled[:length]); ok {
-			t.Fatalf("accepted %d-byte truncated VP9 header: %+v", length, truncated)
+		truncated, ok := parseVP9FrameHeader(scaled[:length])
+		if !ok {
+			continue
 		}
+		if truncated.colorSpace != "RGB" || truncated.colorRange != "Full" {
+			t.Fatalf("%d-byte truncated VP9 header lost colour facts: %+v", length, truncated)
+		}
+		colorOnlyAccepted = true
+	}
+	if !colorOnlyAccepted {
+		t.Fatal("no VP9 header truncated after color_config retained colour facts")
 	}
 
 	badMarker := append([]byte(nil), scaled...)

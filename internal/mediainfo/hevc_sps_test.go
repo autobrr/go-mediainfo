@@ -159,3 +159,29 @@ func TestParseHEVCSPSRejectsHugeShortTermRPS(t *testing.T) {
 		t.Errorf("expected empty h264SPSInfo for rejected SPS, got %+v", got)
 	}
 }
+
+func TestParseHEVCSPSRejectsOversizedPicOrderCountWidth(t *testing.T) {
+	w := &hevcBitBuf{}
+	w.put(0, 4)
+	w.put(0, 3)
+	w.put(0, 1)
+	w.put(0, 2)
+	w.put(0, 1)
+	w.put(1, 5)
+	w.put(0xFFFFFFFF, 32)
+	w.put(0xFFFFFFFFFFFF, 48)
+	w.put(120, 8)
+	w.ue(0)
+	w.ue(1)
+	w.ue(16)
+	w.ue(16)
+	w.put(0, 1)
+	w.ue(0)
+	w.ue(0)
+	w.ue(13) // log2_max_pic_order_cnt_lsb_minus4; supported maximum is 12
+
+	info := parseHEVCSPS(append([]byte{0x42, 0x01}, w.bytes()...))
+	if info.ProfileID != 0 || info.Width != 0 || info.Height != 0 {
+		t.Fatalf("oversized POC width accepted: %+v", info)
+	}
+}

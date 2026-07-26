@@ -871,7 +871,7 @@ func parseEAC3MetadataExtension(br *ac3BitReader, info *ac3Info, strmtyp int, nu
 					info.hasLorocmixlev = true
 				}
 			}
-			if acmod&4 != 0 {
+			if acmod > 4 {
 				ltrtsurmixlev, ok := br.readBits(3)
 				if !ok {
 					return false
@@ -969,9 +969,16 @@ func parseEAC3MetadataExtension(br *ac3BitReader, info *ac3Info, strmtyp int, nu
 					if !br.skipBits(5) { // spchdat
 						return false
 					}
-					for range 2 {
-						speechDataExists, ok := br.readBits(1)
-						if !ok || (speechDataExists == 1 && !br.skipBits(7)) {
+					addSpeechData, ok := br.readBits(1)
+					if !ok {
+						return false
+					}
+					if addSpeechData == 1 {
+						if !br.skipBits(7) {
+							return false
+						}
+						addSpeechData1, ok := br.readBits(1)
+						if !ok || (addSpeechData1 == 1 && !br.skipBits(7)) {
 							return false
 						}
 					}
@@ -1928,53 +1935,79 @@ func parseAC3Dynrng(br *ac3BitReader, acmod int) (bool, byte, bool) {
 }
 
 func ac3ChannelLayout(acmod int, lfeon bool) (uint64, string) {
-	var layout []string
-	switch acmod {
-	case 0:
-		layout = []string{"L", "R"}
-	case 1:
-		layout = []string{"C"}
-	case 2:
-		layout = []string{"L", "R"}
-	case 3:
-		layout = []string{"L", "R", "C"}
-	case 4:
-		layout = []string{"L", "R", "Cb"}
-	case 5:
-		layout = []string{"L", "R", "C", "Cb"}
-	case 6:
-		layout = []string{"L", "R", "Ls", "Rs"}
-	case 7:
-		layout = []string{"L", "R", "C", "Ls", "Rs"}
-	default:
+	if acmod < 0 || acmod >= len(ac3ChannelLayoutsWithoutLFE) {
 		return 0, ""
 	}
+	layout := ac3ChannelLayoutsWithoutLFE[acmod]
 	if lfeon {
-		withLFE := make([]string, 0, len(layout)+1)
-		inserted := false
-		for _, ch := range layout {
-			withLFE = append(withLFE, ch)
-			if ch == "C" {
-				withLFE = append(withLFE, "LFE")
-				inserted = true
-			}
-		}
-		if !inserted {
-			withLFE = append(withLFE, "LFE")
-		}
-		layout = withLFE
+		layout = ac3ChannelLayoutsWithLFE[acmod]
 	}
-	return uint64(len(layout)), strings.Join(layout, " ")
+	channels := [...]uint64{2, 1, 2, 3, 3, 4, 4, 5}[acmod]
+	if lfeon {
+		channels++
+	}
+	return channels, layout
+}
+
+// MediaInfoLib File_Ac3.cpp AC3_ChannelLayout_lfeoff/lfeon.
+var ac3ChannelLayoutsWithoutLFE = [...]string{
+	"M M",
+	"M",
+	"L R",
+	"L R C",
+	"L R S",
+	"L R C Cs",
+	"L R Ls Rs",
+	"L R C Ls Rs",
+}
+
+var ac3ChannelLayoutsWithLFE = [...]string{
+	"1+1 LFE",
+	"C LFE",
+	"L R LFE",
+	"L R C LFE",
+	"L R S LFE",
+	"L R C LFE Cs",
+	"L R LFE Ls Rs",
+	"L R C LFE Ls Rs",
 }
 
 // ac3ChannelPositions returns topology-specific positions that cannot be
 // reconstructed from the channel count alone.
 func ac3ChannelPositions(layout string) string {
-	if layout == "L R C Cb" {
+	switch layout {
+	case "M M":
+		return "Dual mono"
+	case "1+1 LFE":
+		return "Dual mono, LFE"
+	case "M":
+		return "Front: C"
+	case "C LFE":
+		return "Front: C, LFE"
+	case "L R":
+		return "Front: L R"
+	case "L R LFE":
+		return "Front: L R, LFE"
+	case "L R C":
+		return "Front: L C R"
+	case "L R C LFE":
+		return "Front: L C R, LFE"
+	case "L R S":
+		return "Front: L R, Back: C"
+	case "L R S LFE":
+		return "Front: L R, Back: C, LFE"
+	case "L R C Cs":
 		return "Front: L C R, Back: C"
-	}
-	if layout == "L R Ls Rs LFE" {
+	case "L R C LFE Cs":
+		return "Front: L C R, Back: C, LFE"
+	case "L R Ls Rs":
+		return "Front: L R, Side: L R"
+	case "L R LFE Ls Rs":
 		return "Front: L R, Side: L R, LFE"
+	case "L R C Ls Rs":
+		return "Front: L C R, Side: L R"
+	case "L R C LFE Ls Rs":
+		return "Front: L C R, Side: L R, LFE"
 	}
 	return ""
 }

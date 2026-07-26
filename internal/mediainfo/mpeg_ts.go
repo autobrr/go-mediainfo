@@ -1567,22 +1567,6 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 
 	var streamsOut []Stream
 	videoDuration := ptsDuration(videoPTS)
-	hasTrueHDAudio := false
-	hasDTSAudio := false
-	if isBDAV {
-		for _, pid := range streamOrder {
-			st := streams[pid]
-			if st == nil || st.kind != StreamAudio {
-				continue
-			}
-			if st.hasTrueHD || st.streamType == 0x83 {
-				hasTrueHDAudio = true
-			}
-			if st.format == "DTS" || st.streamType == 0x82 || st.streamType == 0x86 {
-				hasDTSAudio = true
-			}
-		}
-	}
 	for i, pid := range streamOrder {
 		st, ok := streams[pid]
 		if !ok {
@@ -1721,18 +1705,6 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 							streamFacts.Set("matrix_coefficients", st.h264SPS.MatrixCoefficients)
 							streamFacts.Set("matrix_coefficients_Source", "Stream")
 						}
-					}
-				} else {
-					// Fallback for rare cases where SPS isn't reachable in the probe window.
-					if hasTrueHDAudio {
-						streamFacts.Set("BitRate_Maximum", "38999808")
-						streamFacts.Set("BufferSize", "30000000 / 30000000")
-					} else if hasDTSAudio {
-						streamFacts.Set("BitRate_Maximum", "35000000")
-						streamFacts.Set("BufferSize", "30000000")
-					} else {
-						streamFacts.Set("BitRate_Maximum", "39959808")
-						streamFacts.Set("BufferSize", "30000000 / 30000000")
 					}
 				}
 			}
@@ -1877,7 +1849,9 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 					streamFacts.Set("TimeCode_FirstFrame", st.h264TimeCode)
 				}
 				if sliceCount := bdavH264SliceCount(st, isBDAV); sliceCount > 0 {
-					streamFacts.Set("Format_Settings_SliceCount", strconv.Itoa(sliceCount))
+					value := strconv.Itoa(sliceCount)
+					fields = append(fields, Field{Name: "Format settings, Slice count", Value: fmt.Sprintf("%d slices per frame", sliceCount)})
+					streamFacts.Set("Format_Settings_SliceCount", value)
 				}
 			}
 			if st.streamType != 0 {
@@ -2600,11 +2574,15 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 				extraFields := make([]jsonKV, 0, 32)
 				if isTrueHD && st.hasTrueHDInfo {
 					if atmos, ok := trueHDAtmosPresentationInfo(st.trueHDInfo); ok {
-						extraFields = append(extraFields,
-							jsonKV{Key: "NumberOfDynamicObjects", Val: strconv.Itoa(atmos.dynamicObjects)},
-							jsonKV{Key: "BedChannelCount", Val: strconv.FormatUint(atmos.bedChannelCount, 10)},
-							jsonKV{Key: "BedChannelConfiguration", Val: atmos.bedChannelConfigShort},
-						)
+						if atmos.hasDynamicObjects {
+							extraFields = append(extraFields, jsonKV{Key: "NumberOfDynamicObjects", Val: strconv.Itoa(atmos.dynamicObjects)})
+						}
+						if atmos.bedChannelCount > 0 && atmos.bedChannelConfigShort != "" {
+							extraFields = append(extraFields,
+								jsonKV{Key: "BedChannelCount", Val: strconv.FormatUint(atmos.bedChannelCount, 10)},
+								jsonKV{Key: "BedChannelConfiguration", Val: atmos.bedChannelConfigShort},
+							)
+						}
 					}
 				}
 				if st.ac3Info.bsid > 0 {

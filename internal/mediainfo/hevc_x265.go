@@ -10,7 +10,10 @@ import (
 // the high 8 bytes of the 16-byte UUID; for x265 that is 0x2CA2DE09B51747DB. This
 // mirrors File_Hevc::sei_message_user_data_unregistered_x265 so the emitted
 // Encoded_Library / _Name / _Version / _Settings fields match MediaInfo 1:1.
-const x265UserDataUUIDHi uint64 = 0x2CA2DE09B51747DB
+const (
+	x265UserDataUUIDHi  uint64 = 0x2CA2DE09B51747DB
+	atemeUserDataUUIDHi uint64 = 0x427FCC9BB8924821
+)
 
 // parseHEVCUserDataUnregistered handles a payloadType==5 SEI message. payload is the
 // raw message body: a 16-byte UUID followed by the (optionally NUL-terminated) text.
@@ -18,16 +21,17 @@ func parseHEVCUserDataUnregistered(payload []byte, info *hevcHDRInfo) {
 	if info == nil || len(payload) < 16 {
 		return
 	}
-	body := strings.TrimSpace(strings.TrimRight(string(payload[16:]), "\x00"))
-	if strings.HasPrefix(body, "ATEME Titan KFE ") {
-		info.encoderLibrary = body
-		info.encoderName = "ATEME Titan KFE"
-		info.encoderVersion = strings.TrimSpace(strings.TrimPrefix(body, info.encoderName))
+	switch binary.BigEndian.Uint64(payload[0:8]) {
+	case atemeUserDataUUIDHi:
+		body := strings.TrimSpace(strings.TrimRight(string(payload[16:]), "\x00"))
+		if strings.HasPrefix(body, "ATEME Titan KFE ") {
+			info.encoderLibrary = body
+			info.encoderName = "ATEME Titan KFE"
+			info.encoderVersion = strings.TrimSpace(strings.TrimPrefix(body, info.encoderName))
+		}
+	case x265UserDataUUIDHi:
+		parseX265InfoString(payload[16:], info)
 	}
-	if binary.BigEndian.Uint64(payload[0:8]) != x265UserDataUUIDHi {
-		return
-	}
-	parseX265InfoString(payload[16:], info)
 }
 
 // parseX265InfoString parses the x265 info text, e.g.

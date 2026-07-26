@@ -115,15 +115,22 @@ func parseAVCConfigDetails(payload []byte) (string, []Field, h264SPSInfo, avcCon
 	var ppsCABAC *bool
 	var parameterSets []byte
 
-	if spsCount > 0 && offset+2 <= len(payload) {
+	for range spsCount {
+		if offset+2 > len(payload) {
+			break
+		}
 		spsLen := int(payload[offset])<<8 | int(payload[offset+1])
 		offset += 2
-		if offset+spsLen <= len(payload) && spsLen > 0 {
-			sps := payload[offset : offset+spsLen]
-			spsInfo = parseH264SPS(sps)
-			parameterSets = append(parameterSets, 0, 0, 0, 1)
-			parameterSets = append(parameterSets, sps...)
+		if spsLen <= 0 || offset+spsLen > len(payload) {
+			break
 		}
+		sps := payload[offset : offset+spsLen]
+		parsed := parseH264SPS(sps)
+		if spsInfo.ProfileID == 0 && parsed.ProfileID != 0 && parsed.Width > 0 && parsed.Height > 0 && mapAVCProfile(parsed.ProfileID) != "" {
+			spsInfo = parsed
+		}
+		parameterSets = append(parameterSets, 0, 0, 0, 1)
+		parameterSets = append(parameterSets, sps...)
 		offset += spsLen
 	}
 	// Some legacy muxers wrote zero profile/level bytes in avcC while retaining
@@ -138,17 +145,24 @@ func parseAVCConfigDetails(payload []byte) (string, []Field, h264SPSInfo, avcCon
 	if offset < len(payload) {
 		ppsCount := int(payload[offset])
 		offset++
-		if ppsCount > 0 && offset+2 <= len(payload) {
+		for range ppsCount {
+			if offset+2 > len(payload) {
+				break
+			}
 			ppsLen := int(payload[offset])<<8 | int(payload[offset+1])
 			offset += 2
-			if offset+ppsLen <= len(payload) && ppsLen > 0 {
-				pps := payload[offset : offset+ppsLen]
-				parameterSets = append(parameterSets, 0, 0, 0, 1)
-				parameterSets = append(parameterSets, pps...)
+			if ppsLen <= 0 || offset+ppsLen > len(payload) {
+				break
+			}
+			pps := payload[offset : offset+ppsLen]
+			parameterSets = append(parameterSets, 0, 0, 0, 1)
+			parameterSets = append(parameterSets, pps...)
+			if ppsCABAC == nil {
 				if cabac, ok := parseH264PPSCabac(pps); ok {
 					ppsCABAC = &cabac
 				}
 			}
+			offset += ppsLen
 		}
 	}
 
@@ -322,7 +336,7 @@ func parseH264SPS(nal []byte) h264SPSInfo {
 		if br.readBitsValue(1) == 1 {
 			scalingLists := 8
 			// H.264: 4:4:4 has 12 scaling lists (6x 4x4, 6x 8x8).
-			if chromaFormat == 3 && separateColourPlane == 0 {
+			if chromaFormat == 3 {
 				scalingLists = 12
 			}
 			for i := 0; i < scalingLists; i++ {
@@ -385,26 +399,21 @@ func parseH264SPS(nal []byte) h264SPSInfo {
 	width := codedWidth
 	height := codedHeight
 	if cropFlag == 1 {
-		subWidthC := 1
-		subHeightC := 1
-		if chromaFormat == 1 || chromaFormat == 2 {
-			subWidthC = 2
-		}
-		if chromaFormat == 1 {
-			subHeightC = 2
-		}
+		cropUnitX := 1
+		cropUnitY := 2 - frameMbsOnlyInt
 		if chromaFormat == 0 {
-			subWidthC = 1
-			subHeightC = 2 - frameMbsOnlyInt
-		}
-		if chromaFormat == 3 && separateColourPlane == 0 {
-			subWidthC = 1
-			subHeightC = 1
-		}
-		cropUnitX := subWidthC
-		cropUnitY := subHeightC
-		if frameMbsOnlyInt == 0 {
-			cropUnitY *= 2
+			cropUnitX = 1
+		} else {
+			subWidthC := 1
+			subHeightC := 1
+			if chromaFormat == 1 || chromaFormat == 2 {
+				subWidthC = 2
+			}
+			if chromaFormat == 1 {
+				subHeightC = 2
+			}
+			cropUnitX = subWidthC
+			cropUnitY = subHeightC * (2 - frameMbsOnlyInt)
 		}
 		if width > (cropLeft+cropRight)*cropUnitX {
 			width -= (cropLeft + cropRight) * cropUnitX
@@ -1164,6 +1173,9 @@ func (br *bitReader) readUEWithOk() (int, bool) {
 			break
 		}
 		zeros++
+		if zeros >= 32 {
+			return 0, false
+		}
 	}
 	if zeros == 0 {
 		return 0, true

@@ -51,7 +51,7 @@ func TestParseMPEG4VOLBufferSizeUsesMediaInfoUnits(t *testing.T) {
 			if got.BufferSize != test.want {
 				t.Fatalf("BufferSize = %d, want %d", got.BufferSize, test.want)
 			}
-			if got.BitRateNominal != int64((bitRateHigh<<3)|bitRateLow)*400 {
+			if got.BitRateNominal != int64((bitRateHigh<<3)+bitRateLow)*400 {
 				t.Fatalf("neighboring BitRateNominal = %d", got.BitRateNominal)
 			}
 		})

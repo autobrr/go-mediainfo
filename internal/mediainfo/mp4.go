@@ -604,6 +604,8 @@ func summarizeMP4EditList(entries []mp4EditEntry, movieTimescale uint32) (float6
 		return 0, 0
 	}
 	var total uint64
+	mediaEntryCount := 0
+	mediaTime := int64(0)
 	for _, entry := range entries {
 		if entry.rate != 0x00010000 {
 			return 0, 0
@@ -613,14 +615,15 @@ func summarizeMP4EditList(entries []mp4EditEntry, movieTimescale uint32) (float6
 				return 0, 0
 			}
 			total += entry.duration
+			mediaEntryCount++
+			mediaTime = entry.mediaTime
 		}
 	}
 	if total == 0 {
 		return 0, 0
 	}
-	mediaTime := int64(0)
-	if len(entries) == 1 && entries[0].mediaTime >= 0 {
-		mediaTime = entries[0].mediaTime
+	if mediaEntryCount != 1 {
+		mediaTime = 0
 	}
 	return float64(total) / float64(movieTimescale), mediaTime
 }

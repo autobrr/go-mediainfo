@@ -2,6 +2,8 @@ package mediainfo
 
 import "sort"
 
+const maxH264GOPPendingBytes = 4 << 20
+
 func appendH264PictureTypes(pics []byte, pending []byte, chunk []byte, limit int, sps *h264SPSInfo, seenAUD *bool, needSlice *bool) ([]byte, []byte) {
 	if limit <= 0 || len(pics) >= limit {
 		return pics, pending
@@ -32,6 +34,25 @@ func appendH264PictureTypes(pics []byte, pending []byte, chunk []byte, limit int
 		}
 		next, nextLen := findAnnexBStartCode(pending, nalStart)
 		if next == -1 {
+			if len(pending) > maxH264GOPPendingBytes {
+				nal := pending[nalStart:]
+				if len(nal) > 0 && nal[0]&0x80 == 0 {
+					nalType := nal[0] & 0x1F
+					canCountSlice := true
+					if seenAUD != nil && needSlice != nil {
+						canCountSlice = !*seenAUD || *needSlice
+					}
+					if (nalType == 1 || nalType == 5) && canCountSlice {
+						if firstMB, ok := h264FirstMBInSlice(nal); ok && firstMB == 0 && h264CountSliceForGOP(nal, nalType, sps) {
+							pics = append(pics, h264SlicePictureType(nal, nalType))
+							if seenAUD != nil && needSlice != nil && *seenAUD {
+								*needSlice = false
+							}
+						}
+					}
+				}
+				pending = pending[len(pending)-3:]
+			}
 			break // keep incomplete last NAL for the next PES chunk
 		}
 		if nalStart < next {
@@ -108,6 +129,32 @@ func h264FirstFieldOrder(payload []byte, sps h264SPSInfo) (string, bool) {
 		return false
 	})
 	return order, order != ""
+}
+
+// h264FieldPictureStoreMethod reports separated-field storage only when a
+// parsed slice explicitly carries field_pic_flag. Sequence-level interlacing
+// alone is insufficient evidence.
+func h264FieldPictureStoreMethod(payload []byte, sps h264SPSInfo) string {
+	if sps.FrameMbsOnly || sps.MBAFF {
+		return ""
+	}
+	method := ""
+	scanAnnexBNALs(payload, func(nal []byte) bool {
+		if len(nal) == 0 {
+			return true
+		}
+		nalType := nal[0] & 0x1f
+		if nalType != 1 && nalType != 5 {
+			return true
+		}
+		fieldPic, _, ok := h264SliceFieldFlags(nal, sps)
+		if ok && fieldPic {
+			method = "SeparatedFields"
+			return false
+		}
+		return true
+	})
+	return method
 }
 
 func h264SliceFieldFlags(nal []byte, sps h264SPSInfo) (fieldPic, bottomField, ok bool) {

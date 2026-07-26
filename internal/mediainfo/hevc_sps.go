@@ -110,7 +110,7 @@ func parseHEVCSPS(nal []byte) h264SPSInfo {
 	_, _ = br.readUEWithOk() // bit_depth_chroma_minus8
 	bitDepth := int(bitDepthLumaMinus8) + 8
 	log2MaxPicOrderCntLSBMinus4, ok := br.readUEWithOk()
-	if !ok {
+	if !ok || log2MaxPicOrderCntLSBMinus4 < 0 || log2MaxPicOrderCntLSBMinus4 > 12 {
 		return h264SPSInfo{}
 	}
 	log2MaxPicOrderCntLSB := log2MaxPicOrderCntLSBMinus4 + 4

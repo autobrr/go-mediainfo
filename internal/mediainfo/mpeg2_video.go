@@ -721,6 +721,10 @@ func (p *mpeg2VideoParser) parsePictureHeader(data []byte) {
 }
 
 func (p *mpeg2VideoParser) finalize() mpeg2VideoInfo {
+	return p.finalizeWithProgressivePictureThreshold(false)
+}
+
+func (p *mpeg2VideoParser) finalizeWithProgressivePictureThreshold(useProgressivePictures bool) mpeg2VideoInfo {
 	// Record the final GOP length if the stream ends without a following GOP header.
 	if p.sawGOP && p.currentGOPCount > 0 && !p.finalGOPRecorded {
 		if p.gopLength == 0 {
@@ -843,7 +847,7 @@ func (p *mpeg2VideoParser) finalize() mpeg2VideoInfo {
 		p.info.Version = "Version 1"
 		p.info.AspectRatio = mapMPEG1DisplayAspectRatio(p.info.Width, p.info.Height, p.sequenceAspectCode)
 	}
-	progressivePictures := p.pictureCount > 0 && p.progressiveFrames*100 >= p.pictureCount*95
+	progressivePictures := useProgressivePictures && p.pictureCount > 0 && p.progressiveFrames*100 >= p.pictureCount*95
 	if (p.sawSequence && !p.gotSeqExt) || p.progressiveSeq || progressivePictures {
 		p.info.ScanType = "Progressive"
 	} else if p.info.ScanType == "" {
@@ -868,7 +872,7 @@ func (p *mpeg2VideoParser) finalize() mpeg2VideoInfo {
 }
 
 func (p *mpeg2VideoParser) finalizeTS() mpeg2VideoInfo {
-	info := p.finalize()
+	info := p.finalizeWithProgressivePictureThreshold(true)
 	if len(p.gopMCounts) > 0 {
 		info.GOPMDominant, _ = modeValue(p.gopMCounts)
 	}

@@ -13,6 +13,8 @@ type TextRenderOptions struct {
 	// Language selects MediaInfo raw labels and values for "raw". The zero value
 	// and other languages select the friendly text projection.
 	Language string
+	// InformVersion appends MediaInfo's ReportBy footer to raw-language output.
+	InformVersion bool
 }
 
 // RenderText renders reports in MediaInfo-style aligned text from text projections.
@@ -24,7 +26,7 @@ func RenderText(reports []Report) string {
 // options. Raw matching is case-insensitive and ignores surrounding spaces.
 func RenderTextWithOptions(reports []Report, options TextRenderOptions) string {
 	if strings.EqualFold(strings.TrimSpace(options.Language), "raw") {
-		return renderRawText(reports)
+		return renderRawText(reports, options.InformVersion)
 	}
 	var buf bytes.Buffer
 	for i, report := range reports {

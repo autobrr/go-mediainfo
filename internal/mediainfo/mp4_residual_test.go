@@ -195,10 +195,11 @@ func TestSummarizeMP4EditListBoundaries(t *testing.T) {
 			name: "leading empty edit",
 			entries: []mp4EditEntry{
 				{duration: 1_000, mediaTime: -1, rate: 0x00010000},
-				{duration: 3_000, mediaTime: 0, rate: 0x00010000},
+				{duration: 3_000, mediaTime: 1_024, rate: 0x00010000},
 			},
 			movieTimescale: 1_000,
 			wantDuration:   3,
+			wantMediaTime:  1_024,
 		},
 		{
 			name: "multiple media edits do not select a source offset",

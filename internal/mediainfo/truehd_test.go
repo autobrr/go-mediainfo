@@ -136,6 +136,9 @@ func TestParseTrueHDFrameAtmosMajorSync(t *testing.T) {
 	if info.dynamicObjects != 11 {
 		t.Fatalf("dynamicObjects=%d want 11", info.dynamicObjects)
 	}
+	if !info.hasDynamicObjects {
+		t.Fatal("parsed Atmos object count is not marked present")
+	}
 	atmos, ok := trueHDAtmosPresentationInfo(info)
 	if !ok {
 		t.Fatal("expected Atmos presentation details")
@@ -148,6 +151,31 @@ func TestParseTrueHDFrameAtmosMajorSync(t *testing.T) {
 	}
 	if atmos.bedChannelCount != 1 || atmos.bedChannelConfig != "LFE" {
 		t.Fatalf("bed=%d/%q want 1/LFE", atmos.bedChannelCount, atmos.bedChannelConfig)
+	}
+}
+
+func TestParseTrueHDProgramAssignmentBedAndObjects(t *testing.T) {
+	data := make([]byte, 8)
+	bw := ac3BitWriter{buf: data}
+	bw.writeBits(0, 1)     // not dynamic-object-only
+	bw.writeBits(0x5, 4)   // bed + dynamic objects
+	bw.writeBits(0, 1)     // b_bed_object_chan_distribute
+	bw.writeBits(0, 1)     // one bed instance
+	bw.writeBits(0, 1)     // not LFE-only
+	bw.writeBits(0, 1)     // nonstandard channel assignment
+	bw.writeBits(0x3F, 17) // L R C LFE Ls Rs
+	bw.writeBits(3, 5)     // four dynamic objects
+
+	br := ac3BitReader{data: data}
+	info := trueHDInfo{dynamicObjects: 16, hasDynamicObjects: true}
+	if !parseTrueHDProgramAssignment(&br, &info) {
+		t.Fatal("program_assignment parse failed")
+	}
+	if info.dynamicObjects != 4 || !info.hasDynamicObjects {
+		t.Fatalf("dynamic objects = %d, present=%v", info.dynamicObjects, info.hasDynamicObjects)
+	}
+	if info.atmosBedChannels != 6 || info.atmosBedLayout != "L R C LFE Ls Rs" {
+		t.Fatalf("bed = %d/%q", info.atmosBedChannels, info.atmosBedLayout)
 	}
 }
 
@@ -192,7 +220,7 @@ func TestParseTrueHDFrame96KHzWithoutAtmos(t *testing.T) {
 	}
 }
 
-func TestApplyMatroskaAudioProbes_TrueHDAtmosKeepsSevenOneLayout(t *testing.T) {
+func TestApplyMatroskaAudioProbes_TrueHDAtmosWithoutExtensionOmitsObjectCounts(t *testing.T) {
 	info := &MatroskaInfo{Tracks: []Stream{{
 		Kind:   StreamAudio,
 		Fields: []Field{{Name: "ID", Value: "2"}},
@@ -228,8 +256,13 @@ func TestApplyMatroskaAudioProbes_TrueHDAtmosKeepsSevenOneLayout(t *testing.T) {
 	if got := stream.JSON["Format_AdditionalFeatures"]; got != "16-ch" {
 		t.Fatalf("Format_AdditionalFeatures=%q want 16-ch", got)
 	}
-	if got := stream.JSONRaw["extra"]; got != `{"NumberOfDynamicObjects":"11","BedChannelCount":"1","BedChannelConfiguration":"LFE"}` {
-		t.Fatalf("extra=%s", got)
+	if got := stream.JSONRaw["extra"]; got != "" {
+		t.Fatalf("fabricated Atmos object metadata: %s", got)
+	}
+	for _, field := range []string{"Number of dynamic objects", "Bed channel count", "Bed channel configuration"} {
+		if got := findField(stream.Fields, field); got != "" {
+			t.Fatalf("%s=%q without parsed extension", field, got)
+		}
 	}
 }
 

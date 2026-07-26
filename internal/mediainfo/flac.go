@@ -224,6 +224,8 @@ func parseFLAC(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, *canoni
 		encodedLibraryVersion: encodedLibraryVersion,
 		encodedLibraryDate:    encodedLibraryDate,
 		md5Hex:                md5Hex,
+		channelMask:           channelMask,
+		hasChannelMask:        hasChannelMask,
 		omitDerivedLayout: flacDerivedLayoutIsOmitted(flacStreamInfo{
 			hasChannelMask: hasChannelMask,
 			channelMask:    channelMask,
@@ -247,6 +249,8 @@ type flacAudioStreamParams struct {
 	encodedLibraryVersion string
 	encodedLibraryDate    string
 	md5Hex                string
+	channelMask           uint32
+	hasChannelMask        bool
 	omitDerivedLayout     bool
 }
 
@@ -273,10 +277,22 @@ func canonicalFLACAudioStream(params flacAudioStreamParams) Stream {
 		channelText := strconv.Itoa(int(params.channels))
 		store.Fill(ref, "Channels", channelText, fillReplace)
 		if !params.omitDerivedLayout {
-			if positions := channelPositionsFromCount(channelText); positions != "" {
+			positions := ""
+			layout := ""
+			if params.hasChannelMask {
+				positions = flacChannelPositionsFromMask(params.channelMask)
+				layout = flacChannelLayoutFromMask(params.channelMask)
+			}
+			if positions == "" {
+				positions = channelPositionsFromCount(channelText)
+			}
+			if positions != "" {
 				fillGeneratedStructured(store, ref, "ChannelPositions", positions)
 			}
-			if layout := channelLayout(uint64(params.channels)); layout != "" {
+			if layout == "" {
+				layout = channelLayout(uint64(params.channels))
+			}
+			if layout != "" {
 				store.Fill(ref, "ChannelLayout", layout, fillReplace)
 			}
 		}
@@ -614,6 +630,58 @@ func splitFLACEncodedLibrary(value string) (name, version, date string) {
 // channel count.
 func flacDerivedLayoutIsOmitted(info flacStreamInfo) bool {
 	return info.hasChannelMask && info.channelMask == 0
+}
+
+type flacSpeaker struct {
+	mask  uint32
+	token string
+}
+
+var flacSpeakers = [...]flacSpeaker{
+	{0x00001, "L"}, {0x00002, "R"}, {0x00004, "C"}, {0x00008, "LFE"},
+	{0x00010, "Lb"}, {0x00020, "Rb"}, {0x00040, "Lc"}, {0x00080, "Rc"},
+	{0x00100, "Cb"}, {0x00200, "Ls"}, {0x00400, "Rs"}, {0x00800, "Tc"},
+	{0x01000, "Tfl"}, {0x02000, "Tfc"}, {0x04000, "Tfr"},
+	{0x08000, "Tbl"}, {0x10000, "Tbc"}, {0x20000, "Tbr"},
+}
+
+func flacChannelLayoutFromMask(mask uint32) string {
+	layout := make([]string, 0, len(flacSpeakers))
+	for _, speaker := range flacSpeakers {
+		if mask&speaker.mask != 0 {
+			layout = append(layout, speaker.token)
+		}
+	}
+	return strings.Join(layout, " ")
+}
+
+func flacChannelPositionsFromMask(mask uint32) string {
+	groups := make([]string, 0, 6)
+	appendGroup := func(name string, speakers ...flacSpeaker) {
+		values := make([]string, 0, len(speakers))
+		for _, speaker := range speakers {
+			if mask&speaker.mask != 0 {
+				values = append(values, speaker.token)
+			}
+		}
+		if len(values) > 0 {
+			groups = append(groups, name+": "+strings.Join(values, " "))
+		}
+	}
+	appendGroup("Front",
+		flacSpeaker{0x00001, "L"}, flacSpeaker{0x00004, "C"}, flacSpeaker{0x00002, "R"},
+		flacSpeaker{0x00040, "Lc"}, flacSpeaker{0x00080, "Rc"},
+	)
+	appendGroup("Side", flacSpeaker{0x00200, "L"}, flacSpeaker{0x00400, "R"})
+	appendGroup("Back", flacSpeaker{0x00010, "L"}, flacSpeaker{0x00100, "C"}, flacSpeaker{0x00020, "R"})
+	appendGroup("Top",
+		flacSpeaker{0x01000, "L"}, flacSpeaker{0x02000, "C"}, flacSpeaker{0x04000, "R"},
+		flacSpeaker{0x00800, "Cs"}, flacSpeaker{0x08000, "Lb"}, flacSpeaker{0x10000, "Cb"}, flacSpeaker{0x20000, "Rb"},
+	)
+	if mask&0x00008 != 0 {
+		groups = append(groups, "LFE")
+	}
+	return strings.Join(groups, ", ")
 }
 
 // flacTagsToGeneralFacts maps Vorbis comments to canonical General scalars and

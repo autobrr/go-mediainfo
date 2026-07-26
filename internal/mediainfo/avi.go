@@ -700,8 +700,15 @@ func canonicalAVIAudioStream(st *aviStream, streams []*aviStream, size int64, vi
 		bitRate = ac3.bitRateKbps * 1000
 	}
 	if lame.variable && lame.frameCount > 0 && st.bytes > 0 && sampleRate > 0 {
+		samplesPerFrame := 1152
+		if hasMP3 {
+			samplesPerFrame = mpegAudioSamplesPerFrame(mp3Header.versionID, mp3Header.layerID)
+		}
+		if samplesPerFrame <= 0 {
+			samplesPerFrame = 1152
+		}
 		frameLength := float64(st.bytes+st.paddingBytes) / float64(lame.frameCount)
-		average := frameLength * float64(sampleRate) / float64(1152/8)
+		average := frameLength * float64(sampleRate) / (float64(samplesPerFrame) / 8)
 		bitRate = int64(math.Round(average))
 		// MediaInfoLib 26.05's LAME 3.97 path retains the next integer for
 		// this fractional average; later LAME revisions use ordinary rounding.
@@ -738,7 +745,13 @@ func canonicalAVIAudioStream(st *aviStream, streams []*aviStream, size int64, vi
 		if sampleRate > 0 {
 			samples := int64(math.Round((math.Round(duration*1000) / 1000) * sampleRate))
 			if st.audioTag == 0x0055 && lame.frameCount > 0 {
-				samples = int64(lame.frameCount) * 1152
+				samplesPerFrame := 1152
+				if hasMP3 {
+					samplesPerFrame = mpegAudioSamplesPerFrame(mp3Header.versionID, mp3Header.layerID)
+				}
+				if samplesPerFrame > 0 {
+					samples = int64(lame.frameCount) * int64(samplesPerFrame)
+				}
 			}
 			if samples > 0 {
 				structuredFacts.SetSame("SamplingCount", strconv.FormatInt(samples, 10))

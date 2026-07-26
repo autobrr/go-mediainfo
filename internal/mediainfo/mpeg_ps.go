@@ -502,7 +502,10 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 				if parser.pictureCount > 0 && st.videoFrameCount == 0 {
 					st.videoFrameCount = parser.pictureCount
 				}
-				info = parser.finalize()
+				// DVD-Video follows the same progressive-picture consensus used
+				// by TS. Other PS/elementary callers retain sequence-level scan
+				// signaling instead of inheriting this format-specific heuristic.
+				info = parser.finalizeWithProgressivePictureThreshold(opts.dvdParsing)
 				clockGOPLength = info.GOPLength
 				if opts.dvdParsing && (opts.dvdMenu || info.ScanType == "Progressive") && dvdMPEG2GOPIsVariable(parser.gopLengthCounts) {
 					info.GOPVariable = true

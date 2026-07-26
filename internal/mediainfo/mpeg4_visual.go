@@ -227,7 +227,9 @@ func parseMPEG4VOL(data []byte) mpeg4VOLInfo {
 			_ = br.readBitsValue(1)
 			_ = br.readBitsValue(15)
 			_ = br.readBitsValue(1)
-			bitRateNominal = int64((bitRateHigh<<3)|bitRateLow) * 400
+			// MediaInfoLib combines these overlapping-width halves with addition.
+			// This intentionally mirrors upstream rather than ISO/IEC 14496-2.
+			bitRateNominal = int64((bitRateHigh<<3)+bitRateLow) * 400
 			// MediaInfoLib combines the 15-bit first half at bit 15 and the
 			// three-bit latter half at bit 0, then converts 2048-bit units.
 			bufferSize = int64((bufferHigh<<15)|bufferLow) * 2048

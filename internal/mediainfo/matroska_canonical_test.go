@@ -1105,7 +1105,7 @@ func TestMatroskaTrueHDCanonicalSeedTracksAtmosProbe(t *testing.T) {
 	applyMatroskaAudioProbes(&info, map[uint64]*matroskaAudioProbe{2: {
 		format: "TrueHD", ok: true,
 		truehd: trueHDInfo{
-			atmos: true, dynamicObjects: 11, sampleRate: 48_000,
+			atmos: true, dynamicObjects: 11, hasDynamicObjects: true, atmosBedChannels: 1, atmosBedLayout: "LFE", sampleRate: 48_000,
 			samplesPerFrame: 40, maxBitRate: 18_000_000,
 		},
 	}})
@@ -1378,6 +1378,57 @@ func TestMatroskaAC3CanonicalSeedTracksJOCProbe(t *testing.T) {
 	}
 
 	assertMatroskaDirectStreamMatchesLegacy(t, stream, "canonical-eac3-joc.mkv")
+}
+
+func TestMatroskaAC3CanonicalProbeProjectsCenterSurroundLayout(t *testing.T) {
+	stream := Stream{
+		Kind: StreamAudio,
+		canonicalSeed: matroskaAC3CanonicalSeed(matroskaAC3CanonicalFacts{
+			format: "E-AC-3", audioChannels: 4,
+		}),
+	}
+	probe := &matroskaAudioProbe{format: "E-AC-3", ok: true}
+	applyMatroskaAC3CanonicalProbe(&stream, probe, ac3Info{
+		channels: 4,
+		layout:   "L R C Cs",
+	}, false)
+
+	for key, want := range map[fieldName]string{
+		"ChannelLayout":    "L R C Cb",
+		"ChannelPositions": "Front: L C R, Back: C",
+	} {
+		got, found := canonicalSeedValue(stream, key)
+		if !found || got != want {
+			t.Fatalf("canonical %s = %q, %v; want %q", key, got, found, want)
+		}
+	}
+}
+
+func TestMatroskaStaticVideoColorDescriptionRequiresContainerRange(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		rangeSource string
+		wantPresent bool
+	}{
+		{name: "container", rangeSource: "Container", wantPresent: true},
+		{name: "stream", rangeSource: "Stream", wantPresent: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			builder := newCanonicalStreamBuilder(StreamVideo)
+			applyMatroskaStaticVideoColor(builder, matroskaVideoCanonicalFacts{
+				format: "HEVC",
+				video: matroskaVideoInfo{
+					colorRange:       "Limited",
+					colorRangeSource: test.rangeSource,
+				},
+			})
+			stream := builder.Snapshot(canonicalStreamPolicy{})
+			_, found := canonicalSeedValue(stream, "colour_description_present")
+			if found != test.wantPresent {
+				t.Fatalf("colour_description_present found = %v, want %v", found, test.wantPresent)
+			}
+		})
+	}
 }
 
 func TestMatroskaAACCanonicalSeedTracksStatisticsTags(t *testing.T) {

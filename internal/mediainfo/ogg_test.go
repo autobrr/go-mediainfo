@@ -63,8 +63,8 @@ func TestParseOggBoundsLogicalSerialState(t *testing.T) {
 	}
 
 	over := buildOggSerialFixture(maxOggLogicalStreams + 1)
-	if info, streams, fields, facts, extra, ok := parseOgg(bytes.NewReader(over), int64(len(over))); ok || len(streams) != 0 || len(fields) != 0 || facts != nil || extra != nil || info != (ContainerInfo{}) {
-		t.Fatalf("limit+1 returned partial metadata: ok=%v info=%+v streams=%d fields=%d facts=%v extra=%v", ok, info, len(streams), len(fields), facts, extra)
+	if _, streams, _, _, _, ok := parseOgg(bytes.NewReader(over), int64(len(over))); !ok || len(streams) != 1 {
+		t.Fatalf("limit+1 parse = ok %v, streams %d; want retained recognized stream", ok, len(streams))
 	}
 }
 

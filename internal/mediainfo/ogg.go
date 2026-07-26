@@ -78,7 +78,12 @@ func parseOgg(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, []Field,
 		stream := logical[serial]
 		if stream == nil {
 			if len(logical) >= maxOggLogicalStreams {
-				return ContainerInfo{}, nil, nil, nil, nil, false
+				if _, err := io.CopyN(io.Discard, file, int64(bodySize)); err != nil {
+					return ContainerInfo{}, nil, nil, nil, nil, false
+				}
+				pageOverhead += int64(len(header) + len(segments) + bodySize)
+				pageIndex++
+				continue
 			}
 			stream = &oggLogicalStream{serial: serial, tags: make(map[string]string)}
 			logical[serial] = stream
