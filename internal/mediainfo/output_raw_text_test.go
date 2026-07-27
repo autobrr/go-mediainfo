@@ -106,6 +106,44 @@ func TestRawTextExtraProjectionVisibilityAndFormatting(t *testing.T) {
 	}
 }
 
+func TestRawTextAC3AggregateStatisticsFollowContainerPolicy(t *testing.T) {
+	for _, test := range []struct {
+		format  string
+		visible bool
+	}{
+		{format: "MPEG-4"},
+		{format: "MPEG-TS"},
+		{format: "BDAV", visible: true},
+		{format: "DVD Video", visible: true},
+	} {
+		t.Run(test.format, func(t *testing.T) {
+			general := newCanonicalStreamBuilder(StreamGeneral)
+			general.Fill("Format", test.format, "Format", test.format)
+			audio := newCanonicalStreamBuilder(StreamAudio)
+			audio.Fill("Format", "AC-3", "Format", "AC-3")
+			audio.Text("dialnorm_Average", "-24 dB")
+			audio.Text("compr_Average", "1.02 dB")
+			audio.Text("dynrng_Count", "32")
+			report := Report{
+				Ref:     "stats.bin",
+				General: general.Snapshot(canonicalStreamPolicy{}),
+				Streams: []Stream{audio.Snapshot(canonicalStreamPolicy{})},
+			}
+			attachCanonicalStore(&report)
+
+			raw := RenderTextWithOptions([]Report{report}, TextRenderOptions{Language: "raw"})
+			if !strings.Contains(raw, "dialnorm_Average") {
+				t.Fatalf("raw output omitted direct dialnorm statistic:\n%s", raw)
+			}
+			for _, label := range []string{"compr_Average", "dynrng_Count"} {
+				if got := strings.Contains(raw, label); got != test.visible {
+					t.Fatalf("%s visibility=%v, want %v:\n%s", label, got, test.visible, raw)
+				}
+			}
+		})
+	}
+}
+
 func TestRawTextProjectionRegistryNormalizesAliasesAndDeduplicatesCanonicalRows(t *testing.T) {
 	builder := newCanonicalStreamBuilder(StreamGeneral)
 	builder.Fill("LawRating", "TV-14", "Law rating", "TV-14")
@@ -367,6 +405,25 @@ func TestRawTextSliceCountKeepsNumericExtensionSeparate(t *testing.T) {
 		if got != test.want {
 			t.Errorf("count %s formatted sibling = %q, want %q", test.count, got, test.want)
 		}
+	}
+
+	general := newCanonicalStreamBuilder(StreamGeneral)
+	general.Fill("Format", "BDAV", "Format", "BDAV")
+	video := newCanonicalStreamBuilder(StreamVideo)
+	video.Fill("Format_Settings_SliceCount", "4", "Format settings, Slice count", "4 slices per frame")
+	video.Text("Format settings, Slice count", "4 slices per frame")
+	report := Report{
+		Ref:     "slice.m2ts",
+		General: general.Snapshot(canonicalStreamPolicy{}),
+		Streams: []Stream{video.Snapshot(canonicalStreamPolicy{})},
+	}
+	attachCanonicalStore(&report)
+	raw := RenderTextWithOptions([]Report{report}, TextRenderOptions{Language: "raw"})
+	if strings.Contains(raw, "Format settings, Slice count") {
+		t.Fatalf("raw output leaked friendly slice-count alias:\n%s", raw)
+	}
+	if strings.Count(raw, "Format_Settings_SliceCount/Strin") != 1 {
+		t.Fatalf("raw output did not retain exactly one canonical slice-count row:\n%s", raw)
 	}
 }
 

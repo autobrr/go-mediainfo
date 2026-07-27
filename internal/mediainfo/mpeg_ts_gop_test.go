@@ -52,12 +52,27 @@ func TestFormatMPEG2GOPSetting(t *testing.T) {
 }
 
 func TestBDAVSemanticProjectionPolicies(t *testing.T) {
-	variable := mpeg2VideoInfo{GOPVariable: true, GOPMDominant: 3, GOPNDominant: 15}
+	variable := mpeg2VideoInfo{
+		GOPVariable: true, GOPMDominant: 3, GOPNDominant: 15,
+		GOPOpenClosed: "Open", GOPFirstClosed: "Closed",
+	}
 	if !preferTSDominantGOP(variable, true) {
 		t.Fatal("BDAV should prefer its dominant GOP over bounded-window variability")
 	}
 	if preferTSDominantGOP(variable, false) {
 		t.Fatal("ordinary TS should retain variable GOP")
+	}
+	bdav := projectTSGOP(variable, true)
+	if bdav.Setting != "M=3, N=15" || bdav.OpenClosed != "Open" || bdav.FirstClosed != "Closed" {
+		t.Fatalf("BDAV GOP projection=%#v", bdav)
+	}
+	ordinary := projectTSGOP(variable, false)
+	if ordinary.Setting != "Variable" || ordinary.OpenClosed != "" || ordinary.FirstClosed != "" {
+		t.Fatalf("ordinary TS GOP projection=%#v", ordinary)
+	}
+	unstable := projectTSGOP(mpeg2VideoInfo{GOPVariable: true}, true)
+	if unstable.Setting == "M=3, N=15" || unstable.OpenClosed != "" || unstable.FirstClosed != "" {
+		t.Fatalf("unstable BDAV falsely projected fixed GOP: %#v", unstable)
 	}
 
 	avc := &tsStream{format: "AVC", h264SliceCount: 4}
@@ -81,6 +96,9 @@ func TestAlignBDAVHeadBufferEndCompletesStraddlingPacket(t *testing.T) {
 	}
 	if got%packetSize != 0 || got < 64<<10 {
 		t.Fatalf("aligned end %d does not complete the boundary packet", got)
+	}
+	if ordinary := boundedTransportHeadScanEnd(64<<10, 0, 188, false); ordinary != 64<<10 {
+		t.Fatalf("ordinary TS head end = %d, want unchanged 65536", ordinary)
 	}
 }
 

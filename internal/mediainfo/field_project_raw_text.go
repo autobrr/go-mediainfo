@@ -168,7 +168,8 @@ var rawTextCanonicalFieldRules = func() map[fieldName]rawTextFieldRule {
 		"@type", "@typeorder", "StreamOrder", "FirstPacketOrder",
 		"FrameRate_Num", "FrameRate_Den", "Encoded_Application_Name", "Encoded_Application_Version",
 		"Encoded_Library_Name", "Encoded_Library_Version", "Encoded_Library_Date",
-		"Format_Settings_SliceCount", "format_identifier", "OverallBitRate_Precision_Min", "OverallBitRate_Precision_Max",
+		"Format_Settings_SliceCount", "Format settings, Slice count",
+		"format_identifier", "OverallBitRate_Precision_Min", "OverallBitRate_Precision_Max",
 	} {
 		rules[name] = rawTextFieldRule{Visible: false}
 	}
@@ -192,6 +193,7 @@ func projectRawTextReport(report Report) rawTextReportProjection {
 
 	projected := rawTextReportProjection{Ref: store.ref, Streams: make([]rawTextStreamProjection, 0, len(store.streams))}
 	dvd, dvdAggregate := rawTextDVDContext(store)
+	generalFormat := rawTextGeneralFormat(store)
 	totalFileSize := int64(0)
 	streamIndexes := make([]int, len(store.streams))
 	for index := range store.streams {
@@ -214,6 +216,9 @@ func projectRawTextReport(report Report) rawTextReportProjection {
 			}
 			rule, known := rawTextProjectionRule(stream.Kind, entry)
 			if !rule.Visible {
+				continue
+			}
+			if !rawTextContainerFieldVisible(generalFormat, entry, rule) {
 				continue
 			}
 			if stream.Kind == StreamVideo && structured["Format"] == "Theora" && rule.Label == "FrameCount" {
@@ -322,6 +327,38 @@ func projectRawTextReport(report Report) rawTextReportProjection {
 		projected.Streams = append(projected.Streams, rawTextStreamProjection{Kind: stream.TextKind, Fields: fields})
 	}
 	return projected
+}
+
+// rawTextGeneralFormat returns the canonical container format used by
+// representation-specific visibility rules.
+func rawTextGeneralFormat(store *fieldStore) string {
+	if store == nil {
+		return ""
+	}
+	for index := range store.streams {
+		stream := &store.streams[index]
+		if stream.Kind == StreamGeneral {
+			return rawTextStructuredValues(stream)["Format"]
+		}
+	}
+	return ""
+}
+
+// rawTextContainerFieldVisible keeps aggregate AC-3 statistics in the raw
+// projections where MediaInfo exposes them (DVD) or where the reviewed BDAV
+// extension contract retains them. Other containers still expose the direct
+// dialnorm/compr/dynrng values, but not the aggregate statistic rows.
+func rawTextContainerFieldVisible(generalFormat string, entry fieldEntry, rule rawTextFieldRule) bool {
+	for _, name := range []string{string(entry.Name), entry.StructuredKey, rule.Label} {
+		switch name {
+		case "Format settings, Slice count":
+			return false
+		case "compr_Average", "compr_Minimum", "compr_Maximum", "compr_Count",
+			"dynrng_Average", "dynrng_Minimum", "dynrng_Maximum", "dynrng_Count":
+			return generalFormat == "BDAV" || generalFormat == "DVD Video"
+		}
+	}
+	return true
 }
 
 // rawTextDVDContext identifies DVD projections from canonical container facts.

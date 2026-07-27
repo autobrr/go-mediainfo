@@ -84,6 +84,26 @@ func TestProductionIdentityAuditCoversRepoPackages(t *testing.T) {
 	}
 }
 
+func TestProductionIdentityAuditExcludesValidationTooling(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	path := filepath.Join(root, "scripts", "parity", "gate.go")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("package main\nconst control = \"B:S013\"\n"), 0o644); err != nil { //nolint:gosec // test fixture
+		t.Fatal(err)
+	}
+	issues, err := auditProductionIdentityTree(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(issues) != 0 {
+		t.Fatalf("validation tooling treated as production: %v", issues)
+	}
+}
+
 func TestProductionIdentityAuditDistinguishesReportingFromSelectors(t *testing.T) {
 	t.Parallel()
 
@@ -126,7 +146,7 @@ func auditProductionIdentityTree(root string) ([]string, error) {
 				return nil
 			}
 			name := entry.Name()
-			if strings.HasPrefix(name, ".") || name == "testdata" || name == "vendor" {
+			if strings.HasPrefix(name, ".") || name == "scripts" || name == "testdata" || name == "vendor" {
 				return filepath.SkipDir
 			}
 			return nil
