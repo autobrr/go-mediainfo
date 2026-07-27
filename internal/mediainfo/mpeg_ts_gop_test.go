@@ -117,3 +117,15 @@ func TestProgressivePictureThresholdIsTSSpecific(t *testing.T) {
 		t.Fatalf("TS MPEG-2 finalize ScanType = %q, want picture-threshold Progressive", got.ScanType)
 	}
 }
+
+func TestGOPDominanceThresholdIsTSSpecific(t *testing.T) {
+	base := mpeg2VideoParser{gopLengthCounts: map[int]int{12: 6, 15: 4}}
+	shared := base
+	if got := shared.finalize(); got.GOPVariable || got.GOPLength != 12 {
+		t.Fatalf("shared MPEG-2 GOP = length %d, variable %v; want dominant length 12", got.GOPLength, got.GOPVariable)
+	}
+	ts := base
+	if got := ts.finalizeTS(); !got.GOPVariable || got.GOPLength != 0 {
+		t.Fatalf("TS MPEG-2 GOP = length %d, variable %v; want Variable", got.GOPLength, got.GOPVariable)
+	}
+}

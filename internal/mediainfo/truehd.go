@@ -311,7 +311,7 @@ func parseTrueHDProgramAssignment(br *ac3BitReader, info *trueHDInfo) bool {
 		if !ok || !br.skipBits(int(size)) {
 			return false
 		}
-		padding := 8 - int(size)%8
+		padding := (8 - int(size)%8) % 8
 		if !br.skipBits(padding) {
 			return false
 		}

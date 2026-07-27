@@ -179,6 +179,31 @@ func TestParseTrueHDProgramAssignmentBedAndObjects(t *testing.T) {
 	}
 }
 
+func TestParseTrueHDProgramAssignmentAlignedExtension(t *testing.T) {
+	data := make([]byte, 4)
+	bw := ac3BitWriter{buf: data}
+	bw.writeBits(0, 1)    // not dynamic-object-only
+	bw.writeBits(0xD, 4)  // bed + dynamic objects + extension
+	bw.writeBits(0, 1)    // b_bed_object_chan_distribute
+	bw.writeBits(0, 1)    // one bed instance
+	bw.writeBits(1, 1)    // LFE-only bed
+	bw.writeBits(3, 5)    // four dynamic objects
+	bw.writeBits(8, 4)    // byte-aligned extension size
+	bw.writeBits(0xAB, 8) // extension payload
+
+	br := ac3BitReader{data: data}
+	info := trueHDInfo{dynamicObjects: 16, hasDynamicObjects: true}
+	if !parseTrueHDProgramAssignment(&br, &info) {
+		t.Fatal("aligned program_assignment extension parse failed")
+	}
+	if info.dynamicObjects != 4 || !info.hasDynamicObjects {
+		t.Fatalf("dynamic objects = %d, present=%v", info.dynamicObjects, info.hasDynamicObjects)
+	}
+	if info.atmosBedChannels != 1 || info.atmosBedLayout != "LFE" {
+		t.Fatalf("bed = %d/%q", info.atmosBedChannels, info.atmosBedLayout)
+	}
+}
+
 func TestParseTrueHDFrameWithoutAtmosFlag(t *testing.T) {
 	frame := []byte{
 		0xF8, 0x72, 0x6F, 0xBA, 0x00, 0x17, 0x80, 0x4F,
