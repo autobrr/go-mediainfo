@@ -19,7 +19,7 @@
 <OverallBitRate>555482</OverallBitRate>
 <FrameRate>29.970</FrameRate>
 <FrameCount>119</FrameCount>
-<StreamSize>5964</StreamSize>
+<StreamSize>5721</StreamSize>
 <HeaderSize>5713</HeaderSize>
 <DataSize>272028</DataSize>
 <FooterSize>0</FooterSize>
@@ -76,8 +76,6 @@
 <Format_AdditionalFeatures>LC</Format_AdditionalFeatures>
 <CodecID>mp4a-40-2</CodecID>
 <Duration>4.000</Duration>
-<Source_Duration>4.021</Source_Duration>
-<Source_Duration_LastFrame>-0.011</Source_Duration_LastFrame>
 <BitRate_Mode>CBR</BitRate_Mode>
 <BitRate>96000</BitRate>
 <Channels>1</Channels>
@@ -87,17 +85,11 @@
 <SamplingRate>48000</SamplingRate>
 <SamplingCount>192000</SamplingCount>
 <FrameRate>46.875</FrameRate>
-<FrameCount>188</FrameCount>
-<Source_FrameCount>189</Source_FrameCount>
+<FrameCount>189</FrameCount>
 <Compression_Mode>Lossy</Compression_Mode>
-<StreamSize>48301</StreamSize>
-<Source_StreamSize>48544</Source_StreamSize>
+<StreamSize>48544</StreamSize>
 <Default>Yes</Default>
 <AlternateGroup>1</AlternateGroup>
-<extra>
-<Source_Delay>-21</Source_Delay>
-<Source_Delay_Source>Container</Source_Delay_Source>
-</extra>
 </track>
 </media>
 </MediaInfo>

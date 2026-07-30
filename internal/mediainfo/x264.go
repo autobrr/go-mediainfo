@@ -37,6 +37,156 @@ func findX264Info(data []byte) (string, string) {
 	return writingLib, encoding
 }
 
+// findX264InfoAnnexB extracts x264's unregistered SEI payload without mixing
+// adjacent encoded bytes into the null-terminated options string.
+func findX264InfoAnnexB(data []byte) (string, string) {
+	var writingLibrary, encoding string
+	scanAnnexBNALs(data, func(nal []byte) bool {
+		if len(nal) == 0 || nal[0]&0x1F != 6 {
+			return true
+		}
+		rbsp := nalToRBSP(nal)
+		for pos := 0; pos < len(rbsp); {
+			payloadType := 0
+			for pos < len(rbsp) && rbsp[pos] == 0xFF {
+				payloadType += 255
+				pos++
+			}
+			if pos >= len(rbsp) {
+				break
+			}
+			payloadType += int(rbsp[pos])
+			pos++
+
+			payloadSize := 0
+			for pos < len(rbsp) && rbsp[pos] == 0xFF {
+				payloadSize += 255
+				pos++
+			}
+			if pos >= len(rbsp) {
+				break
+			}
+			payloadSize += int(rbsp[pos])
+			pos++
+			if payloadSize > len(rbsp)-pos {
+				break
+			}
+			if payloadType == 5 && payloadSize > 16 {
+				writingLibrary, encoding = findX264Info(rbsp[pos+16 : pos+payloadSize])
+				if writingLibrary != "" {
+					return false
+				}
+			}
+			pos += payloadSize
+		}
+		return true
+	})
+	return writingLibrary, encoding
+}
+
+// findLastX264Info returns the final framed x264 unregistered-SEI payload in an
+// Annex-B sample. Markers in slices or other NAL types are intentionally ignored.
+func findLastX264Info(data []byte) (string, string) {
+	var writingLibrary, encoding string
+	scanAnnexBNALs(data, func(nal []byte) bool {
+		if len(nal) == 0 || nal[0]&0x1F != 6 {
+			return true
+		}
+		rbsp := nalToRBSP(nal)
+		for pos := 0; pos < len(rbsp); {
+			payloadType := 0
+			for pos < len(rbsp) && rbsp[pos] == 0xFF {
+				payloadType += 255
+				pos++
+			}
+			if pos >= len(rbsp) {
+				break
+			}
+			payloadType += int(rbsp[pos])
+			pos++
+			payloadSize := 0
+			for pos < len(rbsp) && rbsp[pos] == 0xFF {
+				payloadSize += 255
+				pos++
+			}
+			if pos >= len(rbsp) {
+				break
+			}
+			payloadSize += int(rbsp[pos])
+			pos++
+			if payloadSize > len(rbsp)-pos {
+				break
+			}
+			if payloadType == 5 && payloadSize > 16 {
+				if library, settings := findX264Info(rbsp[pos+16 : pos+payloadSize]); library != "" || settings != "" {
+					writingLibrary, encoding = library, settings
+				}
+			}
+			pos += payloadSize
+		}
+		return true
+	})
+	return writingLibrary, encoding
+}
+
+// findLastX264InfoLengthPrefixed validates MP4 AVC NAL framing before reading
+// x264 user_data_unregistered SEI. This keeps non-SEI marker bytes inert while
+// retaining the complete SEI payload rather than the abbreviated Annex-B probe.
+func findLastX264InfoLengthPrefixed(data []byte, lengthSize int) (string, string) {
+	if lengthSize < 1 || lengthSize > 4 {
+		return "", ""
+	}
+	var writingLibrary, encoding string
+	for pos := 0; pos+lengthSize <= len(data); {
+		size := 0
+		for i := 0; i < lengthSize; i++ {
+			size = size<<8 | int(data[pos+i])
+		}
+		pos += lengthSize
+		if size <= 0 || size > len(data)-pos {
+			break
+		}
+		nal := data[pos : pos+size]
+		pos += size
+		if len(nal) == 0 || nal[0]&0x1F != 6 {
+			continue
+		}
+		rbsp := nalToRBSP(nal)
+		for seiPos := 0; seiPos < len(rbsp); {
+			payloadType := 0
+			for seiPos < len(rbsp) && rbsp[seiPos] == 0xFF {
+				payloadType += 255
+				seiPos++
+			}
+			if seiPos >= len(rbsp) {
+				break
+			}
+			payloadType += int(rbsp[seiPos])
+			seiPos++
+			payloadSize := 0
+			for seiPos < len(rbsp) && rbsp[seiPos] == 0xFF {
+				payloadSize += 255
+				seiPos++
+			}
+			if seiPos >= len(rbsp) {
+				break
+			}
+			payloadSize += int(rbsp[seiPos])
+			seiPos++
+			if payloadSize > len(rbsp)-seiPos {
+				break
+			}
+			if payloadType == 5 && payloadSize > 16 {
+				if library, settings := findX264Info(rbsp[seiPos+16 : seiPos+payloadSize]); library != "" || settings != "" {
+					writingLibrary, encoding = library, settings
+				}
+			}
+			seiPos += payloadSize
+		}
+	}
+	return writingLibrary, encoding
+}
+
 func findX264Bitrate(encoding string) (float64, bool) {
 	idx := strings.Index(encoding, "bitrate=")
 	if idx == -1 {

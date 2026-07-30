@@ -8,6 +8,7 @@ type ContainerInfo struct {
 	// StreamOverheadBytes is container-level overhead not attributable to any single stream
 	// (e.g. TS headers, BDAV timestamps, adaptation fields).
 	StreamOverheadBytes int64
+	containerFrameCount uint64
 }
 
 func (c ContainerInfo) HasDuration() bool {

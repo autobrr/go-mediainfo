@@ -65,5 +65,17 @@ func TestAnalyzeVTSIFOUsesIFOProgramMetadata(t *testing.T) {
 		if got := findField(stream.Fields, "Source"); got != "" {
 			t.Fatalf("unexpected Source field in %s stream: %q", stream.Kind, got)
 		}
+		if len(stream.canonicalSeed) == 0 {
+			t.Fatalf("%s stream has no canonical seed", stream.Kind)
+		}
+		for _, entry := range stream.canonicalSeed {
+			key := firstNonEmpty(entry.StructuredKey, string(entry.Name))
+			if key == "@type" || key == "@typeorder" || key == "StreamOrder" {
+				continue
+			}
+			if entry.Projected {
+				t.Fatalf("%s field %q came from the legacy projection", stream.Kind, entry.Name)
+			}
+		}
 	}
 }

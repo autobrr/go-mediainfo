@@ -86,6 +86,18 @@ func consumeMPEG2CaptionsTS(entry *tsStream, payload []byte, pts uint64, hasPTS 
 				b0 := buf[i+4]
 				b1 := buf[i+5]
 				entry.mpeg2CurTemporalReference = uint16(b0)<<2 | uint16(b1>>6)
+				pictureCodingType := (b1 >> 3) & 0x07
+				if hasPTS {
+					switch pictureCodingType {
+					case 1:
+						entry.mpeg2LastISeen = true
+						entry.mpeg2PresentationEndPTS = 0
+					case 2:
+						if entry.mpeg2LastISeen && entry.mpeg2PresentationEndPTS == 0 {
+							entry.mpeg2PresentationEndPTS = pts
+						}
+					}
+				}
 			}
 			entry.videoFrameCount++
 		case 0xB8:
@@ -99,13 +111,15 @@ func consumeMPEG2CaptionsTS(entry *tsStream, payload []byte, pts uint64, hasPTS 
 				return false
 			}
 			userData := buf[i+4 : end]
-			// Capture GA94 payload for XDS only; parse it later in temporal_reference order.
-			// Keep the immediate parse for captions/commands unchanged.
+			// MediaInfo feeds GA94 caption and XDS payloads to the sub-parser in
+			// presentation order, not MPEG-2 decode order.
 			entry.mpeg2XDSReorder = append(entry.mpeg2XDSReorder, mpeg2UserDataPacket{
 				temporalReference: entry.mpeg2CurTemporalReference,
 				data:              append([]byte(nil), userData...),
+				pts:               pts,
+				hasPTS:            hasPTS,
+				frame:             entry.videoFrameCount,
 			})
-			parseMPEG2UserDataTS(entry, userData, pts, hasPTS, entry.videoFrameCount)
 		}
 		return true
 	})
@@ -127,6 +141,7 @@ func flushMPEG2XDSReorder(entry *tsStream) {
 		return pkts[i].temporalReference < pkts[j].temporalReference
 	})
 	for i := range pkts {
+		parseMPEG2UserDataTS(entry, pkts[i].data, pkts[i].pts, pkts[i].hasPTS, pkts[i].frame)
 		parseMPEG2UserDataTSXDS(entry, pkts[i].data)
 	}
 }
@@ -246,9 +261,68 @@ func updateCCTrackTS(entry *tsStream, ccType int, ccData1 byte, ccData2 byte, pt
 	}
 	track.lastFrame = framesBefore
 	if hasPTS {
+		isSpecial := ccData1 >= 0x10 && ccData1 <= 0x1F
+		if track.hasOldSpecial {
+			if track.oldSpecialData1 == ccData1 && track.oldSpecialData2 == ccData2 {
+				track.hasOldSpecial = false
+				if track.commandAwaitingDuplicate {
+					track.lastCommandPTS = pts
+					track.commandDuplicated = true
+				}
+				track.commandAwaitingDuplicate = false
+				return
+			}
+			track.hasOldSpecial = false
+		}
+		track.commandAwaitingDuplicate = false
 		track.lastPTS = pts
-		if track.firstCommandPTS == 0 && isCCStartCommand(ccData1, ccData2) {
+		isCommand := isCCCommand(ccData1, ccData2)
+		if isCommand {
+			track.lastCommandPTS = pts
+			track.commandDuplicated = false
+			track.commandAwaitingDuplicate = true
+			if mode := ccDisplayMode(ccData1, ccData2); mode != "" {
+				track.currentType = mode
+			}
+			switch ccData2 {
+			case 0x20:
+				track.inBack = true
+				track.rollUpLines = 0
+			case 0x25, 0x26, 0x27:
+				track.inBack = false
+				track.rollUpLines = int(ccData2-0x25) + 2
+			case 0x29:
+				track.inBack = false
+				track.rollUpLines = 0
+				track.currentHasContent = false
+			case 0x2C:
+				if track.currentHasContent {
+					recordCCDisplayChange(track, pts)
+					track.currentHasContent = false
+					if track.firstType == "" {
+						track.firstType = "PaintOn"
+						track.firstDisplayFrame = mediaInfoCCFrameCount(framesBefore)
+					}
+				}
+			case 0x2D:
+				if !track.inBack {
+					recordCCDisplayChange(track, pts)
+				}
+				if track.rollUpLines > 0 && track.currentHasContent && track.firstType == "" {
+					track.firstType = "RollUp"
+					track.firstDisplayFrame = mediaInfoCCFrameCount(framesBefore)
+				}
+			case 0x2F:
+				recordCCDisplayChange(track, pts)
+				if track.firstType == "" {
+					track.firstType = "PopOn"
+					track.firstDisplayFrame = mediaInfoCCFrameCount(framesBefore)
+				}
+			}
+		}
+		if !hasCCFirstCommandPTS(track) && isCCStartCommand(ccData1, ccData2) {
 			track.firstCommandPTS = pts
+			track.hasFirstCommandPTS = true
 			if framesBefore > 0 {
 				// Official mediainfo reports Duration_Start_Command aligned to a 0-based frame index:
 				// Delay + (frame_index / fps).
@@ -262,16 +336,80 @@ func updateCCTrackTS(entry *tsStream, ccType int, ccData1 byte, ccData2 byte, pt
 				}
 			}
 		}
-		if track.firstType == "" && ccData2 == 0x2F {
-			track.firstType = "PopOn"
-			track.firstDisplayPTS = pts
-			track.firstFrame = framesBefore
+		if !isCommand && isCCDisplayContent(ccData1, ccData2) {
+			if !track.inBack {
+				track.currentHasContent = true
+				recordCCDisplayChange(track, pts)
+			}
+		}
+		if isSpecial {
+			track.oldSpecialData1 = ccData1
+			track.oldSpecialData2 = ccData2
+			track.hasOldSpecial = true
 		}
 	}
 
 	// EIA-608 XDS is carried in GA94 user data; MediaInfoLib updates General fields with the
 	// most recently completed Program Name packet. XDS parsing is done via temporal_reference
 	// reorder in flushMPEG2XDSReorder to match MediaInfoLib.
+}
+
+// recordCCDisplayChange applies File_Eia608::HasChanged timing semantics.
+func recordCCDisplayChange(track *ccTrack, pts uint64) {
+	if track == nil {
+		return
+	}
+	if !track.hasFirstContentPTS {
+		track.firstContentPTS = pts
+		track.hasFirstContentPTS = true
+	}
+	track.lastContentPTS = pts
+}
+
+// mediaInfoCCFrameCount removes the MPEG-2 caption reorder lookahead from the
+// parser's one-based decoded-picture count.
+func mediaInfoCCFrameCount(decodedPictures int) int {
+	const captionReorderLookahead = 8
+	if decodedPictures <= captionReorderLookahead {
+		return 0
+	}
+	return decodedPictures - captionReorderLookahead
+}
+
+// ccDisplayMode maps CEA-608 presentation-mode commands to MediaInfo labels.
+func ccDisplayMode(ccData1, ccData2 byte) string {
+	if !isCCCommand(ccData1, ccData2) {
+		return ""
+	}
+	switch ccData2 {
+	case 0x25, 0x26, 0x27:
+		return "RollUp"
+	case 0x29:
+		return "PaintOn"
+	case 0x20:
+		return "PopOn"
+	default:
+		return ""
+	}
+}
+
+// isCCDisplayContent reports whether a pair carries printable caption data
+// rather than a control code, PAC, XDS packet, or padding.
+func isCCDisplayContent(ccData1, ccData2 byte) bool {
+	if isCCCommand(ccData1, ccData2) {
+		return false
+	}
+	if ccData1 >= 0x20 {
+		return true
+	}
+	switch ccData1 {
+	case 0x11:
+		return ccData2 >= 0x30 && ccData2 <= 0x3F
+	case 0x12, 0x13:
+		return ccData2 >= 0x20 && ccData2 <= 0x3F
+	default:
+		return false
+	}
 }
 
 func mpeg2CommercialNameTS(info mpeg2VideoInfo) string {

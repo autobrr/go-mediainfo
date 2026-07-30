@@ -2,7 +2,6 @@ package mediainfo
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"strings"
 )
@@ -13,26 +12,7 @@ const (
 	mediaInfoXMLVersion = "2.0"
 )
 
-type orderedValueKind int
-
-const (
-	orderedString orderedValueKind = iota
-	orderedObject
-	orderedArray
-)
-
-type orderedValue struct {
-	kind orderedValueKind
-	str  string
-	obj  []orderedKV
-	arr  []orderedValue
-}
-
-type orderedKV struct {
-	key string
-	val orderedValue
-}
-
+// RenderXML renders reports as MediaInfo XML from the shared structured projection.
 func RenderXML(reports []Report) string {
 	var buf bytes.Buffer
 	buf.WriteString("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
@@ -51,36 +31,27 @@ func RenderXML(reports []Report) string {
 }
 
 func renderXMLMedia(report Report) string {
+	projected := projectStructuredReportFor(report, structuredProjectionXML)
 	var buf bytes.Buffer
 	buf.WriteString("<media")
-	if report.Ref != "" {
-		buf.WriteString(fmt.Sprintf(" ref=\"%s\"", xmlEscapeAttr(report.Ref)))
+	if projected.Ref != "" {
+		fmt.Fprintf(&buf, " ref=\"%s\"", xmlEscapeAttr(projected.Ref))
 	}
 	buf.WriteString(">\n")
-
-	buf.WriteString(renderXMLTrack("General", 0, buildJSONGeneralFields(report)))
-
-	containerFormat := findField(report.General.Fields, "Format")
-	sorted := orderTracks(report.Streams)
-	forEachStreamWithKindIndex(sorted, func(stream Stream, index, total, order int) {
-		typeOrder := 0
-		if total > 1 {
-			typeOrder = index
-		}
-		// typeorder is rendered as a track attribute in XML, so omit @typeorder from fields.
-		fields := buildJSONStreamFields(stream, order, 0, containerFormat)
-		buf.WriteString(renderXMLTrack(string(stream.Kind), typeOrder, fields))
-	})
+	for _, stream := range projected.Streams {
+		buf.WriteString(renderXMLStructuredTrack(string(stream.Kind), stream.TypeOrder, stream.Fields))
+	}
 
 	buf.WriteString("</media>\n")
 	return buf.String()
 }
 
-func renderXMLTrack(trackType string, typeOrder int, fields []jsonKV) string {
+// renderXMLStructuredTrack renders one structured stream, preserving projected field order.
+func renderXMLStructuredTrack(trackType string, typeOrder int, fields []structuredField) string {
 	var buf bytes.Buffer
-	buf.WriteString(fmt.Sprintf("<track type=\"%s\"", xmlEscapeAttr(trackType)))
+	fmt.Fprintf(&buf, "<track type=\"%s\"", xmlEscapeAttr(trackType))
 	if typeOrder > 0 {
-		buf.WriteString(fmt.Sprintf(" typeorder=\"%d\"", typeOrder))
+		fmt.Fprintf(&buf, " typeorder=\"%d\"", typeOrder)
 	}
 	buf.WriteString(">\n")
 	for _, field := range fields {
@@ -88,13 +59,61 @@ func renderXMLTrack(trackType string, typeOrder int, fields []jsonKV) string {
 			continue
 		}
 		if field.Key == "extra" {
-			buf.WriteString(renderXMLExtra(field.Val))
+			buf.WriteString(renderXMLStructuredExtra(field.Value))
 			continue
 		}
-		buf.WriteString(renderXMLField(field.Key, field.Val))
+		buf.WriteString(renderXMLField(field.Key, structuredNodeText(field.Value)))
 	}
 	buf.WriteString("</track>\n")
 	return buf.String()
+}
+
+// renderXMLStructuredExtra expands an object-valued extra field into XML elements.
+func renderXMLStructuredExtra(value structuredNode) string {
+	if value.Kind != structuredObject {
+		return renderXMLField("extra", structuredNodeText(value))
+	}
+	var buf bytes.Buffer
+	buf.WriteString("<extra>\n")
+	for _, member := range value.Object {
+		buf.WriteString(renderStructuredXML(member.Key, member.Value))
+	}
+	buf.WriteString("</extra>\n")
+	return buf.String()
+}
+
+// renderStructuredXML recursively renders a structured node beneath key.
+func renderStructuredXML(key string, value structuredNode) string {
+	name := xmlFieldName(key)
+	switch value.Kind {
+	case structuredObject:
+		var buf bytes.Buffer
+		fmt.Fprintf(&buf, "<%s>\n", name)
+		for _, member := range value.Object {
+			buf.WriteString(renderStructuredXML(member.Key, member.Value))
+		}
+		fmt.Fprintf(&buf, "</%s>\n", name)
+		return buf.String()
+	case structuredArray:
+		var buf bytes.Buffer
+		fmt.Fprintf(&buf, "<%s>\n", name)
+		for _, item := range value.Array {
+			switch item.Kind {
+			case structuredObject:
+				for _, member := range item.Object {
+					buf.WriteString(renderStructuredXML(member.Key, member.Value))
+				}
+			case structuredArray:
+			case structuredString, structuredNumber, structuredBool, structuredNull, structuredRaw:
+				buf.WriteString(xmlEscape(structuredNodeText(item)))
+			}
+		}
+		fmt.Fprintf(&buf, "</%s>\n", name)
+		return buf.String()
+	case structuredString, structuredNumber, structuredBool, structuredNull, structuredRaw:
+		return fmt.Sprintf("<%s>%s</%s>\n", name, xmlEscape(structuredNodeText(value)), name)
+	}
+	return ""
 }
 
 func renderXMLField(key, value string) string {
@@ -102,116 +121,13 @@ func renderXMLField(key, value string) string {
 	return fmt.Sprintf("<%s>%s</%s>\n", name, xmlEscape(value), name)
 }
 
-func renderXMLExtra(raw string) string {
-	value, err := parseOrderedJSON(raw)
-	if err != nil || value.kind != orderedObject {
-		return renderXMLField("extra", raw)
-	}
-	var buf bytes.Buffer
-	buf.WriteString("<extra>\n")
-	for _, kv := range value.obj {
-		buf.WriteString(renderOrderedXML(kv.key, kv.val))
-	}
-	buf.WriteString("</extra>\n")
-	return buf.String()
-}
-
-func renderOrderedXML(key string, value orderedValue) string {
-	name := xmlFieldName(key)
-	switch value.kind {
-	case orderedString:
-		return fmt.Sprintf("<%s>%s</%s>\n", name, xmlEscape(value.str), name)
-	case orderedObject:
-		var buf bytes.Buffer
-		buf.WriteString(fmt.Sprintf("<%s>\n", name))
-		for _, kv := range value.obj {
-			buf.WriteString(renderOrderedXML(kv.key, kv.val))
-		}
-		buf.WriteString(fmt.Sprintf("</%s>\n", name))
-		return buf.String()
-	case orderedArray:
-		var buf bytes.Buffer
-		buf.WriteString(fmt.Sprintf("<%s>\n", name))
-		for _, item := range value.arr {
-			switch item.kind {
-			case orderedObject:
-				for _, kv := range item.obj {
-					buf.WriteString(renderOrderedXML(kv.key, kv.val))
-				}
-			case orderedString:
-				buf.WriteString(xmlEscape(item.str))
-			case orderedArray:
-			}
-		}
-		buf.WriteString(fmt.Sprintf("</%s>\n", name))
-		return buf.String()
-	default:
-		return fmt.Sprintf("<%s>%s</%s>\n", name, xmlEscape(value.str), name)
-	}
-}
-
-func parseOrderedJSON(value string) (orderedValue, error) {
-	dec := json.NewDecoder(strings.NewReader(value))
-	dec.UseNumber()
-	return parseOrderedValue(dec)
-}
-
-func parseOrderedValue(dec *json.Decoder) (orderedValue, error) {
-	tok, err := dec.Token()
-	if err != nil {
-		return orderedValue{}, err
-	}
-	switch t := tok.(type) {
-	case json.Delim:
-		switch t {
-		case '{':
-			var kvs []orderedKV
-			for dec.More() {
-				keyTok, err := dec.Token()
-				if err != nil {
-					return orderedValue{}, err
-				}
-				key, _ := keyTok.(string)
-				val, err := parseOrderedValue(dec)
-				if err != nil {
-					return orderedValue{}, err
-				}
-				kvs = append(kvs, orderedKV{key: key, val: val})
-			}
-			if _, err := dec.Token(); err != nil {
-				return orderedValue{}, err
-			}
-			return orderedValue{kind: orderedObject, obj: kvs}, nil
-		case '[':
-			var arr []orderedValue
-			for dec.More() {
-				val, err := parseOrderedValue(dec)
-				if err != nil {
-					return orderedValue{}, err
-				}
-				arr = append(arr, val)
-			}
-			if _, err := dec.Token(); err != nil {
-				return orderedValue{}, err
-			}
-			return orderedValue{kind: orderedArray, arr: arr}, nil
-		}
-	case string:
-		return orderedValue{kind: orderedString, str: t}, nil
-	case json.Number:
-		return orderedValue{kind: orderedString, str: t.String()}, nil
-	case bool:
-		if t {
-			return orderedValue{kind: orderedString, str: "true"}, nil
-		}
-		return orderedValue{kind: orderedString, str: "false"}, nil
-	case nil:
-		return orderedValue{kind: orderedString, str: ""}, nil
-	}
-	return orderedValue{kind: orderedString, str: fmt.Sprint(tok)}, nil
-}
-
 func xmlEscape(value string) string {
+	value = strings.Map(func(r rune) rune {
+		if r == '\t' || r == '\n' || r == '\r' || r >= 0x20 && r <= 0xD7FF || r >= 0xE000 && r <= 0xFFFD || r >= 0x10000 && r <= 0x10FFFF {
+			return r
+		}
+		return '\uFFFD'
+	}, value)
 	value = strings.ReplaceAll(value, "&", "&amp;")
 	value = strings.ReplaceAll(value, "<", "&lt;")
 	value = strings.ReplaceAll(value, ">", "&gt;")

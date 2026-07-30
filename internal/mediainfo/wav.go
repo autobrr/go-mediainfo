@@ -3,11 +3,13 @@ package mediainfo
 import (
 	"encoding/binary"
 	"io"
+	"math"
 	"strconv"
 	"strings"
 )
 
-func ParseWAV(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, []Field, map[string]string, bool) {
+// parseWAV reads RIFF/WAVE metadata into canonical audio and General facts.
+func parseWAV(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, []Field, *canonicalStructuredFacts, bool) {
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		return ContainerInfo{}, nil, nil, nil, false
 	}
@@ -142,46 +144,6 @@ func ParseWAV(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, []Field,
 		format = "Unknown"
 	}
 
-	streamFields := []Field{
-		{Name: "Format", Value: format},
-	}
-	if audioFormat > 0 {
-		streamFields = append(streamFields, Field{Name: "Codec ID", Value: strconv.Itoa(int(audioFormat))})
-	}
-	if channels > 0 {
-		streamFields = append(streamFields, Field{Name: "Channel(s)", Value: formatChannels(uint64(channels))})
-	}
-	if sampleRate > 0 {
-		streamFields = append(streamFields, Field{Name: "Sampling rate", Value: formatSampleRate(float64(sampleRate))})
-	}
-	if bitsPerSample > 0 {
-		streamFields = append(streamFields, Field{Name: "Bit depth", Value: formatBitDepth(uint8(bitsPerSample))})
-	}
-	if audioFormat == 1 {
-		streamFields = append(streamFields,
-			Field{Name: "Format settings, Endianness", Value: "Little"},
-			Field{Name: "Format settings, Sign", Value: "Signed"},
-		)
-	}
-	streamFields = addStreamDuration(streamFields, duration)
-	if mode != "" {
-		streamFields = append(streamFields, Field{Name: "Bit rate mode", Value: mode})
-	}
-	if bitrate > 0 {
-		streamFields = append(streamFields, Field{Name: "Bit rate", Value: formatBitrate(bitrate)})
-	}
-
-	streamJSON := map[string]string{}
-	if dataSize > 0 {
-		streamJSON["StreamSize"] = strconv.FormatInt(int64(dataSize), 10)
-	}
-	if blockAlign > 0 && dataSize > 0 {
-		samplingCount := int64(dataSize) / int64(blockAlign)
-		if samplingCount > 0 {
-			streamJSON["SamplingCount"] = strconv.FormatInt(samplingCount, 10)
-		}
-	}
-
 	generalFields := []Field{}
 	if audioFormat == 1 {
 		generalFields = append(generalFields, Field{Name: "Format settings", Value: "PcmWaveformat"})
@@ -189,17 +151,68 @@ func ParseWAV(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, []Field,
 	if encodedApp != "" {
 		generalFields = append(generalFields, Field{Name: "Writing application", Value: encodedApp})
 	}
-	generalJSON := map[string]string{}
+	generalFacts := &canonicalStructuredFacts{}
 	if info.StreamOverheadBytes > 0 {
-		generalJSON["StreamSize"] = strconv.FormatInt(info.StreamOverheadBytes, 10)
+		generalFacts.SetSame("StreamSize", strconv.FormatInt(info.StreamOverheadBytes, 10))
 	}
 
-	streams := []Stream{{
-		Kind:                StreamAudio,
-		Fields:              streamFields,
-		JSON:                streamJSON,
-		JSONSkipStreamOrder: true,
-		JSONSkipComputed:    true,
-	}}
-	return info, streams, generalFields, generalJSON, true
+	audioStream := canonicalWAVAudioStream(
+		format,
+		audioFormat,
+		channels,
+		sampleRate,
+		bitsPerSample,
+		duration,
+		bitrate,
+		mode,
+		dataSize,
+		blockAlign,
+	)
+	streams := []Stream{audioStream}
+	return info, streams, generalFields, generalFacts, true
+}
+
+// canonicalWAVAudioStream records PCM facts in canonical units before
+// publishing the public compatibility snapshot.
+func canonicalWAVAudioStream(format string, audioFormat, channels uint16, sampleRate uint32, bitsPerSample uint16, duration, bitrate float64, mode string, dataSize uint32, blockAlign uint16) Stream {
+	store := &fieldStore{}
+	ref := store.Prepare(StreamAudio)
+	store.streams[ref].SkipStreamOrder = true
+	store.Fill(ref, "Format", format, fillReplace)
+	if audioFormat > 0 {
+		store.Fill(ref, "CodecID", strconv.Itoa(int(audioFormat)), fillReplace)
+	}
+	if duration > 0 {
+		store.Fill(ref, "Duration", strconv.FormatInt(int64(math.Round(duration*1000)), 10), fillReplace)
+	}
+	if mode != "" {
+		store.Fill(ref, "BitRate_Mode", mode, fillReplace)
+	}
+	if bitrate > 0 {
+		store.Fill(ref, "BitRate", strconv.FormatInt(int64(math.Round(bitrate)), 10), fillReplace)
+	}
+	if channels > 0 {
+		store.Fill(ref, "Channels", strconv.Itoa(int(channels)), fillReplace)
+	}
+	if sampleRate > 0 {
+		store.Fill(ref, "SamplingRate", strconv.FormatUint(uint64(sampleRate), 10), fillReplace)
+	}
+	if dataSize > 0 && blockAlign > 0 {
+		if samplingCount := int64(dataSize) / int64(blockAlign); samplingCount > 0 {
+			value := strconv.FormatInt(samplingCount, 10)
+			fillGeneratedStructured(store, ref, "SamplingCount", value)
+		}
+	}
+	if dataSize > 0 {
+		value := strconv.FormatUint(uint64(dataSize), 10)
+		fillGeneratedStructured(store, ref, "StreamSize", value)
+	}
+	if bitsPerSample > 0 {
+		store.Fill(ref, "BitDepth", strconv.Itoa(int(bitsPerSample)), fillReplace)
+	}
+	if audioFormat == 1 {
+		store.Fill(ref, "Format_Settings_Endianness", "Little", fillReplace)
+		store.Fill(ref, "Format_Settings_Sign", "Signed", fillReplace)
+	}
+	return canonicalStreamSnapshot(store, ref, canonicalStreamPolicy{SkipStreamOrder: true, SkipComputed: true})
 }

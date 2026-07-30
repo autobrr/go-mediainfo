@@ -49,6 +49,13 @@ func TestParseMP4Duration(t *testing.T) {
 	}
 }
 
+func TestParseMP4RejectsOversizedExtendedBox(t *testing.T) {
+	data := []byte("\x00\x00\x00\x01ftypisom\x00\x00\x02\x00isommp42")
+	if _, ok := ParseMP4(bytes.NewReader(data), int64(len(data))); ok {
+		t.Fatal("oversized extended box was accepted")
+	}
+}
+
 func writeMP4Box(buf *bytes.Buffer, typ string, payload []byte) {
 	size := uint32(8 + len(payload))
 	if err := binary.Write(buf, binary.BigEndian, size); err != nil {

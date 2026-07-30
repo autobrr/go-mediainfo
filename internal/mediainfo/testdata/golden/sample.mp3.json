@@ -14,6 +14,7 @@
 "File_Modified_Date_Local":"<redacted>",
 "Encoded_Library":"LAME3.100"},{"@type":"Audio","Format":"MPEG Audio",
 "Format_Version":"1",
+"Format_Profile":"Layer 3",
 "Duration":"4.032",
 "BitRate_Mode":"CBR",
 "BitRate":"128000",
@@ -25,6 +26,5 @@
 "FrameCount":"168",
 "Compression_Mode":"Lossy",
 "Encoded_Library":"LAME3.100",
-"StreamSize":"64512",
-"Format_Profile":"Layer 3"}]}
+"StreamSize":"64512"}]}
 }

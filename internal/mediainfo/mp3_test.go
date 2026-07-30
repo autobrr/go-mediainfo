@@ -21,7 +21,7 @@ func TestMP3ModeExtensionUsesSecondFrameWhenAvailable(t *testing.T) {
 	buf = append(buf, h2...)
 	buf = append(buf, bytes.Repeat([]byte{0x00}, frameLen-len(h2))...)
 
-	info, streams, _, _, ok := ParseMP3(bytes.NewReader(buf), int64(len(buf)))
+	info, streams, _, _, ok := parseMP3(bytes.NewReader(buf), int64(len(buf)))
 	if !ok {
 		t.Fatalf("ParseMP3 ok=false")
 	}

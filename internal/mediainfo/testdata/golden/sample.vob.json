@@ -61,6 +61,7 @@
 "ID":"192",
 "Format":"MPEG Audio",
 "Format_Version":"1",
+"Format_Profile":"Layer 2",
 "Duration":"4.008",
 "BitRate_Mode":"CBR",
 "BitRate":"192000",
@@ -74,6 +75,5 @@
 "Delay":"0.523344444",
 "Delay_Source":"Container",
 "Video_Delay":"-0.010",
-"StreamSize":"96192",
-"Format_Profile":"Layer 2"}]}
+"StreamSize":"96192"}]}
 }

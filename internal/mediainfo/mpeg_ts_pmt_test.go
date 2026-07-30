@@ -27,7 +27,7 @@ func TestParsePMTDVBSubtitleDescriptor(t *testing.T) {
 	section[2] = byte(sectionLen)
 
 	payload := append([]byte{0x00}, section...)
-	streams, _, _, _ := parsePMT(payload, 1)
+	streams, _ := parsePMT(payload, 1)
 	if len(streams) != 1 {
 		t.Fatalf("streams len=%d, want 1", len(streams))
 	}
@@ -40,5 +40,42 @@ func TestParsePMTDVBSubtitleDescriptor(t *testing.T) {
 	}
 	if st.language != "eng" {
 		t.Fatalf("language=%q, want eng", st.language)
+	}
+}
+
+func TestParsePMTATSCProgramAndCaptionDescriptors(t *testing.T) {
+	section := []byte{
+		0x02, 0xB0, 0x6A, 0x00, 0x03, 0xC1, 0x00, 0x00, 0xE0, 0x31, 0xF0, 0x21,
+		0x0C, 0x04, 0x80, 0xB4, 0x81, 0x68,
+		0x0E, 0x03, 0xC0, 0x9E, 0x37,
+		0x05, 0x04, 'G', 'A', '9', '4',
+		0x10, 0x06, 0xC0, 0x9E, 0x37, 0xC0, 0x08, 0x00,
+		0x05, 0x04, 'C', 'U', 'E', 'I', 0xAA, 0x00,
+		0x02, 0xE0, 0x31, 0xF0, 0x19,
+		0x02, 0x03, 0x22, 0x85, 0x5F, 0x52, 0x01, 0x04,
+		0x0E, 0x03, 0xC0, 0x96, 0x1A, 0x06, 0x01, 0x02,
+		0x86, 0x07, 0xE1, 'e', 'n', 'g', 0xC1, 0x3F, 0xFF,
+		0x81, 0xE0, 0x34, 0xF0, 0x19,
+		0x05, 0x04, 'A', 'C', '-', '3', 0x81, 0x03, 0x08, 0x3C, 0x05,
+		0x0A, 0x04, 'e', 'n', 'g', 0x00, 0x52, 0x01, 0x8E,
+		0x0E, 0x03, 0xC0, 0x04, 0xEB,
+		0x57, 0x2C, 0xB0, 0x8F,
+	}
+
+	streams, metadata := parsePMT(append([]byte{0}, section...), 3)
+	if !metadata.ATSC {
+		t.Fatal("ATSC program registration was not detected")
+	}
+	if metadata.MaximumBitRate != 16_201_200 {
+		t.Fatalf("program maximum bitrate=%d, want 16201200", metadata.MaximumBitRate)
+	}
+	if len(streams) != 2 {
+		t.Fatalf("streams len=%d, want 2", len(streams))
+	}
+	if service, ok := streams[0].captionServices["1"]; !ok || service.Language != "en" {
+		t.Fatalf("caption service=%+v, present=%v", service, ok)
+	}
+	if streams[1].maximumBitRate != 503_600 {
+		t.Fatalf("audio maximum bitrate=%d, want 503600", streams[1].maximumBitRate)
 	}
 }

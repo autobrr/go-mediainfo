@@ -27,6 +27,7 @@ func TestRenderCSVNeutralizesFormulasAndPreservesMeasurements(t *testing.T) {
 		{Name: "Source", Value: "safe,=1+1"},
 		{Name: "Delay", Value: "-83 ms"},
 		{Name: "Gain", Value: "+1.5 dB"},
+		{Name: "Signed expression", Value: "+1 ^ HYPERLINK(B1)"},
 		{Name: "Attachment", Value: "cover\nname.jpg"},
 	}}}
 	output := RenderCSV([]Report{report})
@@ -38,13 +39,14 @@ func TestRenderCSVNeutralizesFormulasAndPreservesMeasurements(t *testing.T) {
 		`Source,"safe,=1+1"`,
 		"Delay,-83 ms",
 		"Gain,+1.5 dB",
+		"Signed expression,'+1 ^ HYPERLINK(B1)",
 		`Attachment,cover\nname.jpg`,
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("CSV missing %q in %q", want, output)
 		}
 	}
-	if strings.Count(output, "\n") != 10 {
+	if strings.Count(output, "\n") != 11 {
 		t.Fatalf("metadata forged CSV rows: %q", output)
 	}
 	var titleLine string
@@ -92,6 +94,14 @@ func TestSafeCSVOutputValuePreservesOrdinaryCommasAndContainsInjectedCells(t *te
 		{name: "injected cell", value: "safe,=1+1", want: `"safe,=1+1"`},
 		{name: "ordinary quote", value: `Director's "Cut"`, want: `"Director's ""Cut"""`},
 		{name: "quoted injected cell", value: `safe,"=1+1"`, want: `"safe,""=1+1"""`},
+		{name: "signed expression", value: "+1 ^ HYPERLINK(B1)", want: "'+1 ^ HYPERLINK(B1)"},
+		{name: "signed percent attached", value: "+12.5%", want: "+12.5%"},
+		{name: "signed percent separated", value: "-12.5 %", want: "-12.5 %"},
+		{name: "compound duration", value: "-1 s 250 ms", want: "-1 s 250 ms"},
+		{name: "tab separated measurement", value: "+1.5\tdB", want: `+1.5\tdB`},
+		{name: "arbitrary word is not a unit", value: "+1 HYPERLINK", want: "'+1 HYPERLINK"},
+		{name: "operator as unit", value: "+1 / A1", want: "'+1 / A1"},
+		{name: "hex float", value: "+0x1p2 ms", want: "'+0x1p2 ms"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

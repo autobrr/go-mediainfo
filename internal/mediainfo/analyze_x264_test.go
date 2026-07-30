@@ -2,6 +2,13 @@ package mediainfo
 
 import "testing"
 
+func TestFindH264WritingLibraryZencoder(t *testing.T) {
+	data := []byte("\x00\x00\x01\x06Zencoder Video Encoding System\x00")
+	if got := findH264WritingLibrary(data); got != "Zencoder Video Encoding System" {
+		t.Fatalf("findH264WritingLibrary()=%q", got)
+	}
+}
+
 func TestMatroskaVideoHasX264Settings(t *testing.T) {
 	x264Settings := "cabac=1 / ref=4 / deblock=1:0:0 / analyse=0x3:0x113 / me=hex / subme=7 / bitrate=5000 / vbv_maxrate=6000 / vbv_bufsize=12000"
 	tests := []struct {
@@ -62,10 +69,10 @@ func TestMatroskaVideoHasX264Settings(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			stream := Stream{Kind: StreamVideo}
 			if tc.writingLib != "" {
-				stream.Fields = append(stream.Fields, Field{Name: "Writing library", Value: tc.writingLib})
+				replaceCanonicalSeedFill(&stream, "Encoded_Library", tc.writingLib, "Writing library", tc.writingLib)
 			}
 			if tc.settings != "" {
-				stream.Fields = append(stream.Fields, Field{Name: "Encoding settings", Value: tc.settings})
+				replaceCanonicalSeedFill(&stream, "Encoded_Library_Settings", tc.settings, "Encoding settings", tc.settings)
 			}
 			if got := matroskaVideoHasX264Settings(stream); got != tc.want {
 				t.Fatalf("matroskaVideoHasX264Settings() = %v, want %v", got, tc.want)

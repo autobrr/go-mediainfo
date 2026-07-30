@@ -6,6 +6,8 @@ import (
 	"strconv"
 )
 
+// buildCCTextStream projects one detected MPEG-PS caption service into a
+// canonical text stream and its public compatibility snapshot.
 func buildCCTextStream(entry *psStream, videoDelay float64, videoDuration float64, frameRate float64) *Stream {
 	track, service := selectCCTrack(entry)
 	if track == nil {
@@ -85,23 +87,16 @@ func buildCCTextStream(entry *psStream, videoDelay float64, videoDuration float6
 	fields = append(fields, Field{Name: "Type of the first event", Value: firstType})
 	fields = append(fields, Field{Name: "Caption service name", Value: service})
 
-	stream := Stream{
-		Kind:                StreamText,
-		Fields:              fields,
-		JSON:                map[string]string{},
-		JSONRaw:             map[string]string{},
-		JSONSkipStreamOrder: true,
-		JSONSkipComputed:    true,
-	}
-	stream.JSON["ID"] = fmt.Sprintf("%d-%s", entry.id, service)
+	facts := &mpegPSStructuredFacts{}
+	facts.Set("ID", fmt.Sprintf("%d-%s", entry.id, service))
 	if entry.firstPacketOrder >= 0 {
-		stream.JSON["FirstPacketOrder"] = strconv.Itoa(entry.firstPacketOrder)
+		facts.Set("FirstPacketOrder", strconv.Itoa(entry.firstPacketOrder))
 	}
 	if videoDuration > 0 {
-		stream.JSON["Duration"] = formatJSONSeconds(videoDuration)
+		facts.Set("Duration", formatJSONSeconds(videoDuration))
 	}
 	if visible > 0 {
-		stream.JSON["Duration_Start2End"] = formatJSONSeconds6(visible)
+		facts.Set("Duration_Start2End", formatJSONSeconds6(visible))
 	}
 	startCommand := ccPTSSeconds(track.firstCommandPTS)
 	if startCommand > 0 && commandOffset > 0 {
@@ -114,24 +109,37 @@ func buildCCTextStream(entry *psStream, videoDelay float64, videoDuration float6
 		startCommand = start
 	}
 	if startCommand > 0 {
-		stream.JSON["Duration_Start_Command"] = formatJSONSeconds6(startCommand)
+		facts.Set("Duration_Start_Command", formatJSONSeconds6(startCommand))
 	}
 	if start > 0 {
-		stream.JSON["Duration_Start"] = formatJSONSeconds6(start)
+		facts.Set("Duration_Start", formatJSONSeconds6(start))
 	}
 	if end > 0 {
-		stream.JSON["Duration_End"] = formatJSONSeconds6(end)
-		stream.JSON["Duration_End_Command"] = formatJSONSeconds6(end)
+		facts.Set("Duration_End", formatJSONSeconds6(end))
+		facts.Set("Duration_End_Command", formatJSONSeconds6(end))
 	}
-	stream.JSON["BitRate_Mode"] = "CBR"
+	facts.Set("BitRate_Mode", "CBR")
 	if videoDelay > 0 {
-		stream.JSON["Delay"] = fmt.Sprintf("%.9f", videoDelay)
+		facts.Set("Delay", fmt.Sprintf("%.9f", videoDelay))
 	}
-	stream.JSON["Video_Delay"] = "0.000"
-	stream.JSON["StreamSize"] = "0"
-	stream.JSON["FirstDisplay_Delay_Frames"] = strconv.Itoa(framesBefore)
-	stream.JSON["FirstDisplay_Type"] = firstType
-	stream.JSONRaw["extra"] = renderJSONObject([]jsonKV{{Key: "CaptionServiceName", Val: service}}, false)
+	facts.Set("Video_Delay", "0.000")
+	facts.Set("StreamSize", "0")
+	facts.Set("FirstDisplay_Delay_Frames", strconv.Itoa(framesBefore))
+	facts.Set("FirstDisplay_Type", firstType)
+	extraFields := []jsonKV{{Key: "CaptionServiceName", Val: service}}
+	extraNode := structuredObjectFromKVs(extraFields)
+
+	builder := newCanonicalStreamBuilder(StreamText)
+	builder.Fill("ID", facts.Projection("ID"), "ID", idLabel)
+	builder.Fill("Format", "EIA-608", "Format", "EIA-608")
+	builder.Fill("MuxingMode_MoreInfo", "Muxed in Video #1", "Muxing mode, more info", "Muxed in Video #1")
+	stream := buildMPEGPSCanonicalSnapshot(
+		builder,
+		fields,
+		facts,
+		&extraNode,
+		canonicalStreamPolicy{SkipStreamOrder: true, SkipComputed: true},
+	)
 	return &stream
 }
 

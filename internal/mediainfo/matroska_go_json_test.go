@@ -1,8 +1,11 @@
 package mediainfo
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
-func TestParseMatroskaTrackRetainsGoOnlyPCMJSON(t *testing.T) {
+func TestParseMatroskaTrackPublishesGoOnlyPCMJSON(t *testing.T) {
 	audio := buildMatroskaElement(mkvIDTrackAudio,
 		buildMatroskaElement(mkvIDChannels, encodeMatroskaUint(2)),
 	)
@@ -22,11 +25,11 @@ func TestParseMatroskaTrackRetainsGoOnlyPCMJSON(t *testing.T) {
 		"ChannelPositions": "Front: L R",
 		"Compression_Mode": "Lossless",
 	} {
-		if got := stream.mkvGoJSON[key]; got != want {
-			t.Errorf("%s = %q, want %q", key, got, want)
+		if got, found := projectedCanonicalSeedValue(stream, fieldName(key)); !found || got != want {
+			t.Errorf("canonical %s = %q, %v; want %q", key, got, found, want)
 		}
-		if got := stream.JSON[key]; got != "" {
-			t.Errorf("%s leaked into parity JSON before final restoration: %q", key, got)
+		if got := stream.JSON[key]; got != want {
+			t.Errorf("published %s = %q; want %q", key, got, want)
 		}
 	}
 	if got := findField(stream.Fields, "Channel layout"); got != "" {
@@ -37,64 +40,85 @@ func TestParseMatroskaTrackRetainsGoOnlyPCMJSON(t *testing.T) {
 	}
 }
 
-func TestRestoreMatroskaGoJSONFieldsIsOutputOnly(t *testing.T) {
+func TestRestoreMatroskaRetainedFieldsUsesDirectState(t *testing.T) {
 	general := Stream{Kind: StreamGeneral, JSON: map[string]string{}}
-	streams := []Stream{
-		{
-			Kind:      StreamVideo,
-			JSON:      map[string]string{"BitRate_Maximum": "official"},
-			mkvGoJSON: map[string]string{"BitRate_Maximum": "legacy", "BitRate_Mode": "VBR", "FrameRate_Num": "24000"},
-		},
-		{
-			Kind:      StreamAudio,
-			JSON:      map[string]string{},
-			mkvGoJSON: map[string]string{"ChannelLayout": "L R", "ChannelPositions": "Front: L R"},
-		},
-		{
-			Kind:    StreamMenu,
-			JSONRaw: map[string]string{"extra": `{"chapter":"one"}`},
-		},
-		{
-			Kind:    StreamMenu,
-			JSONRaw: map[string]string{"extra": `{"edition":"two"}`},
-		},
-	}
+	videoBuilder := newCanonicalStreamBuilder(StreamVideo)
+	videoBuilder.Structured("BitRate_Maximum", "official")
+	videoBuilder.Structured("BitRate_Nominal", "")
+	video := videoBuilder.Snapshot(canonicalStreamPolicy{})
+	video.JSON = map[string]string{"BitRate_Maximum": "official"}
+	fillMatroskaRetainedJSON(&video, "BitRate_Maximum", "legacy")
+	fillMatroskaRetainedJSON(&video, "BitRate_Nominal", "20000000")
+	fillMatroskaRetainedJSON(&video, "BitRate_Mode", "VBR")
+	fillMatroskaRetainedJSON(&video, "FrameRate_Num", "24000")
 
-	restoreMatroskaGoJSONFields(&general, streams, "1234")
-	renderedGeneral := withMatroskaGoJSON(general)
-	renderedVideo := withMatroskaGoJSON(streams[0])
-	renderedAudio := withMatroskaGoJSON(streams[1])
-	renderedMenu := withMatroskaGoJSON(streams[2])
+	audioBuilder := newCanonicalStreamBuilder(StreamAudio)
+	audio := audioBuilder.Snapshot(canonicalStreamPolicy{})
+	fillMatroskaRetainedJSON(&audio, "ChannelLayout", "L R")
+	fillMatroskaRetainedJSON(&audio, "ChannelPositions", "Front: L R")
 
-	if got := renderedVideo.JSON["BitRate_Maximum"]; got != "official" {
-		t.Fatalf("CLI-backed field overridden: %q", got)
+	menuBuilder := newCanonicalStreamBuilder(StreamMenu)
+	menuBuilder.StructuredNode("extra", structuredNode{Kind: structuredObject, Object: []structuredMember{{Key: "chapter", Value: structuredNode{Kind: structuredString, Text: "one"}}}})
+	menu := menuBuilder.Snapshot(canonicalStreamPolicy{SkipStreamOrder: true, SkipComputed: true})
+	menu.JSONRaw = map[string]string{"extra": `{"chapter":"one"}`}
+	editionBuilder := newCanonicalStreamBuilder(StreamMenu)
+	editionBuilder.StructuredNode("extra", structuredNode{Kind: structuredObject, Object: []structuredMember{{Key: "edition", Value: structuredNode{Kind: structuredString, Text: "two"}}}})
+	edition := editionBuilder.Snapshot(canonicalStreamPolicy{SkipStreamOrder: true, SkipComputed: true})
+	edition.JSONRaw = map[string]string{"extra": `{"edition":"two"}`}
+	streams := []Stream{video, audio, menu, edition}
+
+	restoreMatroskaRetainedFields(&general, streams, "1234", matroskaRetainedGeneralPresence{})
+
+	if got, found := projectedCanonicalSeedValue(streams[0], "BitRate_Maximum"); !found || got != "official" {
+		t.Fatalf("CLI-backed field = %q, %v; want official", got, found)
 	}
-	if got := renderedVideo.JSON["BitRate_Mode"]; got != "VBR" {
-		t.Fatalf("BitRate_Mode = %q, want VBR", got)
+	if got, found := projectedCanonicalSeedValue(streams[0], "BitRate_Nominal"); !found || got != "20000000" {
+		t.Fatalf("empty placeholder fill = %q, %v; want 20000000", got, found)
 	}
-	if got := renderedVideo.JSON["FrameRate_Num"]; got != "24000" {
-		t.Fatalf("FrameRate_Num = %q, want 24000", got)
+	if got, found := projectedCanonicalSeedValue(streams[0], "BitRate_Mode"); !found || got != "VBR" {
+		t.Fatalf("BitRate_Mode = %q, %v; want VBR", got, found)
 	}
-	if got := renderedAudio.JSON["ChannelLayout"]; got != "L R" {
-		t.Fatalf("ChannelLayout = %q, want L R", got)
+	if got, found := projectedCanonicalSeedValue(streams[0], "FrameRate_Num"); !found || got != "24000" {
+		t.Fatalf("FrameRate_Num = %q, %v; want 24000", got, found)
 	}
-	if got := renderedGeneral.JSON["StreamSize"]; got != "1234" {
-		t.Fatalf("General StreamSize = %q, want 1234", got)
+	if got, found := projectedCanonicalSeedValue(streams[1], "ChannelLayout"); !found || got != "L R" {
+		t.Fatalf("ChannelLayout = %q, %v; want L R", got, found)
 	}
-	if got := renderedGeneral.JSON["OverallBitRate_Mode"]; got != "VBR" {
-		t.Fatalf("General OverallBitRate_Mode = %q, want VBR", got)
+	if got, found := projectedCanonicalSeedValue(general, "StreamSize"); !found || got != "1234" {
+		t.Fatalf("General StreamSize = %q, %v; want 1234", got, found)
 	}
-	if got := renderedMenu.JSONRaw["extra"]; got != `{"chapter":"one","edition":"two"}` {
+	if got, found := projectedCanonicalSeedValue(general, "OverallBitRate_Mode"); !found || got != "VBR" {
+		t.Fatalf("General OverallBitRate_Mode = %q, %v; want VBR", got, found)
+	}
+	report := Report{Ref: "retained.mkv", General: general, Streams: streams}
+	attachCanonicalStore(&report)
+	if output := RenderJSON([]Report{report}); !strings.Contains(output, `"chapter":"one","edition":"two"`) {
+		t.Fatalf("merged Menu.extra missing from direct output: %s", output)
+	}
+	if report.Streams[0].JSON["BitRate_Mode"] != "VBR" || report.Streams[1].JSON["ChannelLayout"] != "L R" || report.General.JSON["StreamSize"] != "1234" {
+		t.Fatalf("Go-only fields missing from compatibility snapshot: general=%#v video=%#v audio=%#v", report.General.JSON, report.Streams[0].JSON, report.Streams[1].JSON)
+	}
+	if got := report.Streams[2].JSONRaw["extra"]; got != `{"chapter":"one","edition":"two"}` {
 		t.Fatalf("merged Menu.extra = %s", got)
-	}
-	if streams[0].JSON["BitRate_Mode"] != "" || streams[1].JSON["ChannelLayout"] != "" || general.JSON["StreamSize"] != "" {
-		t.Fatal("Go-only fields leaked into the shared report")
-	}
-	if got := streams[2].JSONRaw["extra"]; got != `{"chapter":"one"}` {
-		t.Fatalf("Go-only Menu.extra mutated the shared report: %s", got)
 	}
 	if len(streams[0].Fields) != 0 || len(streams[1].Fields) != 0 {
 		t.Fatal("restoration changed text fields")
+	}
+}
+
+func TestRestoreMatroskaRetainedFieldsUsesCapturedGeneralPresence(t *testing.T) {
+	general := Stream{Kind: StreamGeneral, JSON: map[string]string{}}
+	replaceMatroskaCanonicalJSONOnlyOverrides(&general, map[string]string{"StreamSize": "326"})
+
+	restoreMatroskaRetainedFields(&general, nil, "1234", matroskaRetainedGeneralPresence{})
+	if got, _ := canonicalSeedValue(general, "StreamSize"); got != "1234" {
+		t.Fatalf("late compatibility size = %q, want retained size 1234", got)
+	}
+
+	replaceMatroskaCanonicalJSONOnlyOverrides(&general, map[string]string{"StreamSize": "326"})
+	restoreMatroskaRetainedFields(&general, nil, "1234", matroskaRetainedGeneralPresence{streamSize: true})
+	if got, _ := canonicalSeedValue(general, "StreamSize"); got != "326" {
+		t.Fatalf("captured General size = %q, want 326", got)
 	}
 }
 

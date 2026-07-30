@@ -5,10 +5,13 @@ import (
 	"encoding/binary"
 	"io"
 	"math"
+	"sort"
 	"strconv"
 	"strings"
 )
 
+// mp3HeaderInfo contains decoded MPEG audio frame-header values used for
+// duration, rate, channel, and mode-extension reporting.
 type mp3HeaderInfo struct {
 	bitrateKbps int
 	sampleRate  int
@@ -21,9 +24,10 @@ type mp3HeaderInfo struct {
 	padding     bool
 }
 
-// ParseMP3 parses MPEG audio and bounded ID3 metadata. Oversized or malformed
-// embedded artwork and text are skipped without preventing valid audio parsing.
-func ParseMP3(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, map[string]string, map[string]string, bool) {
+// parseMP3 parses MPEG audio and bounded ID3 metadata into canonical stream
+// and General facts. Oversized or malformed embedded assets are skipped
+// without preventing valid audio parsing.
+func parseMP3(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, *canonicalStructuredFacts, *structuredNode, bool) {
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		return ContainerInfo{}, nil, nil, nil, false
 	}
@@ -122,52 +126,16 @@ func ParseMP3(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, map[stri
 		}(),
 	}
 
-	fields := []Field{
-		{Name: "Format", Value: "MPEG Audio"},
-	}
-	if header.channels > 0 {
-		fields = append(fields, Field{Name: "Channel(s)", Value: formatChannels(uint64(header.channels))})
-	}
-	if header.sampleRate > 0 {
-		fields = append(fields, Field{Name: "Sampling rate", Value: formatSampleRate(float64(header.sampleRate))})
-	}
-	fields = append(fields, Field{Name: "Bit rate mode", Value: mode})
-	fields = addStreamCommon(fields, audioDuration, float64(header.bitrateKbps)*1000)
-
-	streamJSON := map[string]string{}
-	streamJSON["BitRate_Mode"] = modeJSON
-	streamJSON["Compression_Mode"] = "Lossy"
-	streamJSON["Format_Profile"] = "Layer 3"
-	if header.versionID == 0x03 {
-		streamJSON["Format_Version"] = "1"
-	}
-	streamJSON["SamplesPerFrame"] = strconv.FormatInt(int64(samplesPerFrame), 10)
-	if header.bitrateKbps > 0 {
-		streamJSON["BitRate"] = strconv.FormatInt(int64(header.bitrateKbps)*1000, 10)
-	}
-	if header.sampleRate > 0 {
-		streamJSON["SamplingRate"] = strconv.Itoa(header.sampleRate)
-	}
-	if header.channels > 0 {
-		streamJSON["Channels"] = strconv.Itoa(header.channels)
-	}
+	streamSize := int64(0)
 	if payloadBytes > 0 {
-		streamJSON["StreamSize"] = strconv.FormatInt(payloadBytes, 10)
+		streamSize = payloadBytes
 	} else if dataSize > 0 {
-		streamJSON["StreamSize"] = strconv.FormatInt(dataSize, 10)
-	}
-	if audioDuration > 0 {
-		streamJSON["Duration"] = formatJSONSeconds(audioDuration)
-	}
-	if frameCount > 0 {
-		streamJSON["FrameCount"] = strconv.FormatInt(frameCount, 10)
-		streamJSON["SamplingCount"] = strconv.FormatInt(frameCount*int64(samplesPerFrame), 10)
-		if audioDuration > 0 {
-			streamJSON["FrameRate"] = formatJSONFloat(float64(frameCount) / audioDuration)
-		}
+		streamSize = dataSize
 	}
 
 	// Format settings mode: MediaInfo appears to take it from the first audio frame after an Info header.
+	formatSettingsMode := ""
+	formatSettingsModeExtension := ""
 	if header.channels == 2 {
 		effective := header.channelMode
 		effectiveExt := header.modeExt
@@ -180,26 +148,24 @@ func ParseMP3(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, map[stri
 			}
 		}
 		if effective == 0x01 {
-			streamJSON["Format_Settings_Mode"] = "Joint stereo"
+			formatSettingsMode = "Joint stereo"
 			// Layer III: mode extension bit 1 indicates MS stereo.
 			if (effectiveExt & 0x02) != 0 {
-				streamJSON["Format_Settings_ModeExtension"] = "MS Stereo"
+				formatSettingsModeExtension = "MS Stereo"
 			} else if (effectiveExt & 0x01) != 0 {
-				streamJSON["Format_Settings_ModeExtension"] = "Intensity Stereo"
+				formatSettingsModeExtension = "Intensity Stereo"
 			}
 		}
 	}
-	if encodedLibrary != "" {
-		streamJSON["Encoded_Library"] = encodedLibrary
-	}
 
-	generalJSON := map[string]string{}
+	generalFacts := &canonicalStructuredFacts{}
 	if encodedLibrary != "" {
-		generalJSON["Encoded_Library"] = encodedLibrary
+		generalFacts.SetSame("Encoded_Library", encodedLibrary)
 	}
-	generalJSONRaw := map[string]string{}
+	generalExtras := []jsonKV{}
 
-	streams := []Stream{{Kind: StreamAudio, Fields: fields, JSON: streamJSON, JSONSkipStreamOrder: true, JSONSkipComputed: true}}
+	audioStream := canonicalMP3AudioStream(header, audioDuration, mode, samplesPerFrame, frameCount, streamSize, formatSettingsMode, formatSettingsModeExtension, encodedLibrary)
+	streams := []Stream{audioStream}
 	if len(id3.Pictures) > 0 {
 		pic := id3.Pictures[0]
 		for i := range id3.Pictures {
@@ -208,85 +174,173 @@ func ParseMP3(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, map[stri
 				break
 			}
 		}
-		mime := strings.ToLower(strings.TrimSpace(pic.MIME))
+		imageStream, mime := canonicalMP3ImageStream(pic)
+		streams = append(streams, imageStream)
 
-		imgJSON := map[string]string{
-			"StreamSize": strconv.FormatInt(pic.DataSize, 10),
-		}
-		if mime == "image/png" || bytes.HasPrefix(pic.DataHead, []byte{0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A}) {
-			imgJSON["Format"] = "PNG"
-			imgJSON["Compression_Mode"] = "Lossless"
-			imgJSON["Format_Compression"] = "Deflate"
-			if info, ok := parsePNGInfo(pic.DataHead); ok {
-				if info.Width > 0 {
-					imgJSON["Width"] = strconv.Itoa(info.Width)
-				}
-				if info.Height > 0 {
-					imgJSON["Height"] = strconv.Itoa(info.Height)
-				}
-				if info.BitDepth > 0 {
-					imgJSON["BitDepth"] = strconv.Itoa(info.BitDepth)
-				}
-				if info.ColorSpace != "" {
-					imgJSON["ColorSpace"] = info.ColorSpace
-				}
-			}
-		} else {
-			imgJSON["Format"] = "JPEG"
-			imgJSON["Compression_Mode"] = "Lossy"
-			if info, ok := parseJPEGInfo(pic.DataHead); ok {
-				if info.Width > 0 {
-					imgJSON["Width"] = strconv.Itoa(info.Width)
-				}
-				if info.Height > 0 {
-					imgJSON["Height"] = strconv.Itoa(info.Height)
-				}
-				if info.BitDepth > 0 {
-					imgJSON["BitDepth"] = strconv.Itoa(info.BitDepth)
-				}
-				if info.ColorSpace != "" {
-					imgJSON["ColorSpace"] = info.ColorSpace
-				}
-				if info.ChromaSubsample != "" {
-					imgJSON["ChromaSubsampling"] = info.ChromaSubsample
-				}
-			}
-		}
-		streams = append(streams, Stream{Kind: StreamImage, JSON: imgJSON, JSONSkipStreamOrder: true, JSONSkipComputed: true})
-
-		generalJSON["Cover"] = "Yes"
+		generalFacts.SetSame("Cover", "Yes")
 		if pic.Type == 0x03 {
-			generalJSON["Cover_Type"] = "Cover (front)"
+			generalFacts.SetSame("Cover_Type", "Cover (front)")
 		} else if pic.Type == 0x04 {
-			generalJSON["Cover_Type"] = "Cover (back)"
+			generalFacts.SetSame("Cover_Type", "Cover (back)")
 		}
 		if pic.Description != "" {
-			generalJSON["Cover_Description"] = pic.Description
+			generalFacts.SetSame("Cover_Description", pic.Description)
 		}
 		if mime != "" {
-			generalJSON["Cover_Mime"] = mime
+			generalFacts.SetSame("Cover_Mime", mime)
 		} else if pic.MIME != "" {
-			generalJSON["Cover_Mime"] = pic.MIME
+			generalFacts.SetSame("Cover_Mime", pic.MIME)
 		}
 	}
 	if id3.Text != nil {
-		applyID3TextToGeneralJSON(generalJSON, generalJSONRaw, id3.Text)
+		applyID3TextToGeneralFacts(generalFacts, &generalExtras, id3.Text)
 	}
 
 	// MediaInfo appears to omit General OverallBitRate_Mode when a cover is present.
-	if xingTag != "" && generalJSON["Cover"] == "" {
-		generalJSON["OverallBitRate_Mode"] = modeJSON
+	if xingTag != "" && generalFacts.Projection("Cover") == "" {
+		generalFacts.Set("OverallBitRate_Mode", mode, modeJSON)
 	}
 
-	if len(generalJSON) == 0 {
-		generalJSON = nil
+	var generalExtra *structuredNode
+	if len(generalExtras) > 0 {
+		node := structuredObjectFromKVs(generalExtras)
+		generalExtra = &node
 	}
-	if len(generalJSONRaw) == 0 {
-		generalJSONRaw = nil
-	}
-	return info, streams, generalJSON, generalJSONRaw, true
+	return info, streams, generalFacts, generalExtra, true
 }
 
+// canonicalMP3ImageStream projects an embedded ID3 picture and returns its detected MIME type.
+func canonicalMP3ImageStream(pic id3Picture) (Stream, string) {
+	store := &fieldStore{}
+	ref := store.Prepare(StreamImage)
+	store.streams[ref].SkipStreamOrder = true
+	fields := []jsonKV{{Key: "StreamSize", Val: strconv.FormatInt(pic.DataSize, 10)}}
+	mime := strings.ToLower(strings.TrimSpace(pic.MIME))
+	if mime == "image/png" || bytes.HasPrefix(pic.DataHead, []byte{0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A}) {
+		fields = append(fields,
+			jsonKV{Key: "Format", Val: "PNG"},
+			jsonKV{Key: "Compression_Mode", Val: "Lossless"},
+			jsonKV{Key: "Format_Compression", Val: "Deflate"},
+		)
+		if info, ok := parsePNGInfo(pic.DataHead); ok {
+			if info.Width > 0 {
+				fields = append(fields, jsonKV{Key: "Width", Val: strconv.Itoa(info.Width)})
+			}
+			if info.Height > 0 {
+				fields = append(fields, jsonKV{Key: "Height", Val: strconv.Itoa(info.Height)})
+			}
+			if info.BitDepth > 0 {
+				fields = append(fields, jsonKV{Key: "BitDepth", Val: strconv.Itoa(info.BitDepth)})
+			}
+			if info.ColorSpace != "" {
+				fields = append(fields, jsonKV{Key: "ColorSpace", Val: info.ColorSpace})
+			}
+		}
+	} else {
+		fields = append(fields,
+			jsonKV{Key: "Format", Val: "JPEG"},
+			jsonKV{Key: "Compression_Mode", Val: "Lossy"},
+		)
+		if info, ok := parseJPEGInfo(pic.DataHead); ok {
+			if info.Width > 0 {
+				fields = append(fields, jsonKV{Key: "Width", Val: strconv.Itoa(info.Width)})
+			}
+			if info.Height > 0 {
+				fields = append(fields, jsonKV{Key: "Height", Val: strconv.Itoa(info.Height)})
+			}
+			if info.BitDepth > 0 {
+				fields = append(fields, jsonKV{Key: "BitDepth", Val: strconv.Itoa(info.BitDepth)})
+			}
+			if info.ColorSpace != "" {
+				fields = append(fields, jsonKV{Key: "ColorSpace", Val: info.ColorSpace})
+			}
+			if info.ChromaSubsample != "" {
+				fields = append(fields, jsonKV{Key: "ChromaSubsampling", Val: info.ChromaSubsample})
+			}
+		}
+	}
+	for _, field := range fields {
+		name := fieldName(field.Key)
+		fillGeneratedStructured(store, ref, name, field.Val)
+	}
+	return canonicalStreamSnapshot(store, ref, canonicalStreamPolicy{SkipStreamOrder: true, SkipComputed: true}), mime
+}
+
+// canonicalMP3AudioStream records MPEG audio facts before publishing the
+// public compatibility snapshot.
+func canonicalMP3AudioStream(header mp3HeaderInfo, duration float64, mode string, samplesPerFrame float64, frameCount, streamSize int64, formatSettingsMode, formatSettingsModeExtension, encodedLibrary string) Stream {
+	store := &fieldStore{}
+	ref := store.Prepare(StreamAudio)
+	store.streams[ref].SkipStreamOrder = true
+	store.Fill(ref, "Format", "MPEG Audio", fillReplace)
+	if duration > 0 {
+		store.Fill(ref, "Duration", strconv.FormatInt(int64(math.Round(duration*1000)), 10), fillReplace)
+	}
+	if mode != "" {
+		store.Fill(ref, "BitRate_Mode", mode, fillReplace)
+	}
+	if header.bitrateKbps > 0 {
+		store.Fill(ref, "BitRate", strconv.FormatInt(int64(header.bitrateKbps)*1000, 10), fillReplace)
+	}
+	if header.channels > 0 {
+		store.Fill(ref, "Channels", strconv.Itoa(header.channels), fillReplace)
+	}
+	if header.sampleRate > 0 {
+		store.Fill(ref, "SamplingRate", strconv.Itoa(header.sampleRate), fillReplace)
+	}
+	overrides := []jsonKV{
+		{Key: "BitRate_Mode", Val: mapBitrateMode(mode)},
+		{Key: "Compression_Mode", Val: "Lossy"},
+		{Key: "Format_Profile", Val: "Layer 3"},
+		{Key: "SamplesPerFrame", Val: strconv.FormatInt(int64(samplesPerFrame), 10)},
+	}
+	if header.versionID == 0x03 {
+		overrides = append(overrides, jsonKV{Key: "Format_Version", Val: "1"})
+	}
+	if header.bitrateKbps > 0 {
+		overrides = append(overrides, jsonKV{Key: "BitRate", Val: strconv.FormatInt(int64(header.bitrateKbps)*1000, 10)})
+	}
+	if header.sampleRate > 0 {
+		overrides = append(overrides, jsonKV{Key: "SamplingRate", Val: strconv.Itoa(header.sampleRate)})
+	}
+	if header.channels > 0 {
+		overrides = append(overrides, jsonKV{Key: "Channels", Val: strconv.Itoa(header.channels)})
+	}
+	if streamSize > 0 {
+		overrides = append(overrides, jsonKV{Key: "StreamSize", Val: strconv.FormatInt(streamSize, 10)})
+	}
+	if duration > 0 {
+		overrides = append(overrides, jsonKV{Key: "Duration", Val: formatJSONSeconds(duration)})
+	}
+	if frameCount > 0 {
+		overrides = append(overrides,
+			jsonKV{Key: "FrameCount", Val: strconv.FormatInt(frameCount, 10)},
+			jsonKV{Key: "SamplingCount", Val: strconv.FormatInt(frameCount*int64(samplesPerFrame), 10)},
+		)
+		if duration > 0 {
+			overrides = append(overrides, jsonKV{Key: "FrameRate", Val: formatJSONFloat(float64(frameCount) / duration)})
+		}
+	}
+	if formatSettingsMode != "" {
+		overrides = append(overrides, jsonKV{Key: "Format_Settings_Mode", Val: formatSettingsMode})
+	}
+	if formatSettingsModeExtension != "" {
+		overrides = append(overrides, jsonKV{Key: "Format_Settings_ModeExtension", Val: formatSettingsModeExtension})
+	}
+	if encodedLibrary != "" {
+		overrides = append(overrides, jsonKV{Key: "Encoded_Library", Val: encodedLibrary})
+	}
+	sort.Slice(overrides, func(left, right int) bool { return overrides[left].Key < overrides[right].Key })
+	for _, override := range overrides {
+		name := fieldName(override.Key)
+		if _, ok := store.Get(ref, name); !ok {
+			fillGeneratedStructured(store, ref, name, override.Val)
+		}
+	}
+	return canonicalStreamSnapshot(store, ref, canonicalStreamPolicy{SkipStreamOrder: true, SkipComputed: true})
+}
+
+// hasID3v1 reports whether the file ends with a complete ID3v1 tag.
 func hasID3v1(file io.ReadSeeker, size int64) bool {
 	if size < 128 {
 		return false
@@ -301,6 +355,8 @@ func hasID3v1(file io.ReadSeeker, size int64) bool {
 	return buf[0] == 'T' && buf[1] == 'A' && buf[2] == 'G'
 }
 
+// findMP3Header searches a bounded probe from offset for the first valid MPEG
+// audio frame and returns its decoded header, version, relative offset, and data.
 func findMP3Header(file io.ReadSeeker, offset int64) (mp3HeaderInfo, string, int, []byte, bool) {
 	if _, err := file.Seek(offset, io.SeekStart); err != nil {
 		return mp3HeaderInfo{}, "", 0, nil, false
@@ -319,6 +375,8 @@ func findMP3Header(file io.ReadSeeker, offset int64) (mp3HeaderInfo, string, int
 	return mp3HeaderInfo{}, "", 0, buf, false
 }
 
+// parseMP3Header validates one MPEG audio header and returns its decoded stream
+// characteristics.
 func parseMP3Header(header []byte) (mp3HeaderInfo, bool) {
 	if len(header) < 4 {
 		return mp3HeaderInfo{}, false
@@ -362,6 +420,8 @@ func parseMP3Header(header []byte) (mp3HeaderInfo, bool) {
 	}, true
 }
 
+// mp3Bitrate maps MPEG audio version, layer, and bitrate indexes to kilobits
+// per second.
 func mp3Bitrate(versionID, layerID, index byte) int {
 	if layerID != 0x01 {
 		return 0
@@ -382,6 +442,8 @@ func mp3Bitrate(versionID, layerID, index byte) int {
 	return rates[idx]
 }
 
+// mp3SampleRate maps an MPEG audio version and sampling-frequency index to
+// hertz.
 func mp3SampleRate(versionID, index byte) int {
 	var rates []int
 	switch versionID {
@@ -401,6 +463,8 @@ func mp3SampleRate(versionID, index byte) int {
 	return rates[idx]
 }
 
+// findXingTag locates a Xing or Info identifier at the MPEG-version and channel
+// mode dependent side-information offset.
 func findXingTag(buf []byte, info mp3HeaderInfo) string {
 	if info.layerID != 0x01 {
 		return ""
@@ -431,6 +495,8 @@ func findXingTag(buf []byte, info mp3HeaderInfo) string {
 	return ""
 }
 
+// parseXingInfo decodes frame and byte counts from a Xing or Info header and
+// reports whether either count was present.
 func parseXingInfo(buf []byte, info mp3HeaderInfo, tag string) (int64, int64, bool) {
 	if info.layerID != 0x01 {
 		return 0, 0, false
@@ -480,6 +546,8 @@ func parseXingInfo(buf []byte, info mp3HeaderInfo, tag string) (int64, int64, bo
 	return 0, 0, false
 }
 
+// mp3FrameLengthBytes returns the constant frame length implied by a valid
+// MPEG audio header, or zero when its rate facts are unusable.
 func mp3FrameLengthBytes(info mp3HeaderInfo) int {
 	if info.layerID != 0x01 || info.bitrateKbps <= 0 || info.sampleRate <= 0 {
 		return 0
@@ -494,6 +562,8 @@ func mp3FrameLengthBytes(info mp3HeaderInfo) int {
 	return (72000*info.bitrateKbps)/info.sampleRate + pad
 }
 
+// validateMP3FrameCount trims a CBR frame-count estimate until its final frame
+// begins with a matching MPEG audio header.
 func validateMP3FrameCount(file io.ReadSeeker, start int64, guess int64, frameLen int, want mp3HeaderInfo) int64 {
 	if guess <= 0 || frameLen <= 0 {
 		return 0
@@ -512,6 +582,8 @@ func validateMP3FrameCount(file io.ReadSeeker, start int64, guess int64, frameLe
 	return guess
 }
 
+// hasMP3HeaderAt reports whether pos contains an MPEG audio header matching
+// the supplied stream characteristics.
 func hasMP3HeaderAt(file io.ReadSeeker, pos int64, want mp3HeaderInfo) bool {
 	if _, err := file.Seek(pos, io.SeekStart); err != nil {
 		return false
@@ -528,6 +600,8 @@ func hasMP3HeaderAt(file io.ReadSeeker, pos int64, want mp3HeaderInfo) bool {
 	return info.bitrateKbps == want.bitrateKbps && info.sampleRate == want.sampleRate && info.channels == want.channels && info.versionID == want.versionID && info.layerID == want.layerID
 }
 
+// findLAMELibrary extracts the first bounded LAME encoder identifier from
+// MPEG audio data.
 func findLAMELibrary(buf []byte) string {
 	// Look for "LAME" then parse a compact version string.
 	// We return "LAME3.100" style to match MediaInfo.
@@ -580,10 +654,13 @@ func findLAMELibrary(buf []byte) string {
 	return string(runes)
 }
 
-func applyID3TextToGeneralJSON(dst map[string]string, raw map[string]string, text map[string]string) {
+// applyID3TextToGeneralFacts maps ID3 text frames to canonical General facts
+// and retains unmapped user fields as ordered extra members.
+func applyID3TextToGeneralFacts(facts *canonicalStructuredFacts, extras *[]jsonKV, text map[string]string) {
 	set := func(k, v string) {
-		if v != "" && dst[k] == "" {
-			dst[k] = v
+		name := fieldName(k)
+		if v != "" && facts.Projection(name) == "" {
+			facts.SetSame(name, v)
 		}
 	}
 	if v := text["TALB"]; v != "" {
@@ -670,7 +747,6 @@ func applyID3TextToGeneralJSON(dst map[string]string, raw map[string]string, tex
 	if v := text["TXXX:ISRC"]; v != "" {
 		set("ISRC", v)
 	}
-	extras := []jsonKV{}
 	for k, v := range text {
 		if !strings.HasPrefix(k, "WXXX:") {
 			continue
@@ -680,7 +756,7 @@ func applyID3TextToGeneralJSON(dst map[string]string, raw map[string]string, tex
 			continue
 		}
 		if strings.EqualFold(name, "URL") {
-			extras = append(extras, jsonKV{Key: "URL", Val: v})
+			*extras = append(*extras, jsonKV{Key: "URL", Val: v})
 		}
 	}
 	for k, v := range text {
@@ -691,9 +767,6 @@ func applyID3TextToGeneralJSON(dst map[string]string, raw map[string]string, tex
 		if name == "" || v == "" || name == "ISRC" {
 			continue
 		}
-		extras = append(extras, jsonKV{Key: name, Val: v})
-	}
-	if len(extras) > 0 && raw != nil {
-		raw["extra"] = renderJSONObject(extras, false)
+		*extras = append(*extras, jsonKV{Key: name, Val: v})
 	}
 }

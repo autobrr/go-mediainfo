@@ -43,7 +43,37 @@ func TestNormalizeTSStreamOrderTSKeepsDiscoveryOrder(t *testing.T) {
 	}
 }
 
-func TestMergeTSStreamFromPMTPreservesLanguageOnEmptyUpdate(t *testing.T) {
+func TestStructuredBDAVFieldOrder(t *testing.T) {
+	tests := []struct {
+		kind   StreamKind
+		before string
+		after  string
+	}{
+		{kind: StreamGeneral, before: "OverallBitRate_Maximum", after: "FrameRate"},
+		{kind: StreamVideo, before: "Format_Settings_SliceCount", after: "CodecID"},
+		{kind: StreamAudio, before: "Format_Settings_Mode", after: "Format_Settings_Endianness"},
+		{kind: StreamAudio, before: "BitRate_Encoded", after: "BitRate_Maximum"},
+		{kind: StreamAudio, before: "StreamSize", after: "StreamSize_Encoded"},
+		{kind: StreamText, before: "MenuID", after: "Format"},
+	}
+	for _, tt := range tests {
+		order := structuredFieldOrderForContainer(tt.kind, "BDAV")
+		if order[tt.before] >= order[tt.after] {
+			t.Errorf("%s order=%d must precede %s order=%d", tt.before, order[tt.before], tt.after, order[tt.after])
+		}
+	}
+}
+
+func TestRecordH264SliceCountPreservesDominantValue(t *testing.T) {
+	entry := &tsStream{h264SliceCounts: map[int]int{1: 1, 4: 2}, h264SliceCount: 4}
+	// A payload without complete slice NAL units must preserve accumulated state.
+	recordH264SliceCount(entry, []byte{0, 0, 1, 9, 0xf0})
+	if entry.h264SliceCount != 4 {
+		t.Fatalf("h264SliceCount=%d want=4", entry.h264SliceCount)
+	}
+}
+
+func TestMergeTSStreamFromPMTClearsRemovedLanguage(t *testing.T) {
 	existing := &tsStream{
 		pid:      4611,
 		kind:     StreamText,
@@ -58,8 +88,8 @@ func TestMergeTSStreamFromPMTPreservesLanguageOnEmptyUpdate(t *testing.T) {
 		programNumber: 1,
 		language:      "",
 	})
-	if existing.language != "zho" {
-		t.Fatalf("mergeTSStreamFromPMT() language=%q, want %q", existing.language, "zho")
+	if existing.language != "" {
+		t.Fatalf("mergeTSStreamFromPMT() language=%q, want empty", existing.language)
 	}
 }
 
@@ -80,5 +110,23 @@ func TestMergeTSStreamFromPMTUpdatesLanguageWhenPresent(t *testing.T) {
 	})
 	if existing.language != "zho" {
 		t.Fatalf("mergeTSStreamFromPMT() language=%q, want %q", existing.language, "zho")
+	}
+}
+
+func TestMergeTSStreamFromPMTReplacesProvisionalParserState(t *testing.T) {
+	existing := &tsStream{
+		pid: 49, provisional: true, kind: StreamVideo, format: "MPEG Video",
+		videoFrameCount: 15, ccFound: true,
+	}
+	existing.pts.add(90_000)
+	parsed := tsStream{pid: 49, programNumber: 3, streamType: 0x02, kind: StreamVideo, format: "MPEG Video"}
+
+	mergeTSStreamFromPMT(existing, parsed)
+
+	if existing.provisional || existing.pts.has() || existing.videoFrameCount != 0 || existing.ccFound {
+		t.Fatalf("provisional state survived PMT merge: %+v", existing)
+	}
+	if existing.programNumber != 3 || existing.streamType != 0x02 {
+		t.Fatalf("PMT identity not applied: %+v", existing)
 	}
 }

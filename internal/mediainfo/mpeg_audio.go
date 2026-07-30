@@ -6,6 +6,7 @@ type mpegAudioHeader struct {
 	bitrateKbps int
 	sampleRate  int
 	channels    int
+	channelMode byte
 	padding     bool
 }
 
@@ -43,6 +44,7 @@ func parseMPEGAudioHeader(hdr []byte) (mpegAudioHeader, bool) {
 		bitrateKbps: bitrate,
 		sampleRate:  sampleRate,
 		channels:    channels,
+		channelMode: channelMode,
 		padding:     padding,
 	}, true
 }

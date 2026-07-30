@@ -5,6 +5,8 @@ import (
 	"fmt"
 )
 
+// hevcConfigInfo contains HEVCDecoderConfigurationRecord facts needed by
+// direct canonical stream builders and length-prefixed NAL scanning.
 type hevcConfigInfo struct {
 	profileName   string
 	levelName     string

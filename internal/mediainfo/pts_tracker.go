@@ -134,6 +134,15 @@ func (t ptsTracker) durationTotal() float64 {
 	return float64(t.segmentTotal+ptsDelta(t.segmentStart, t.last)) / 90000.0
 }
 
+// durationTotalTicks returns the accumulated PTS duration in the track's
+// native 90 kHz clock, including segments separated by timestamp resets.
+func (t ptsTracker) durationTotalTicks() uint64 {
+	if !t.ok {
+		return 0
+	}
+	return t.segmentTotal + ptsDelta(t.segmentStart, t.last)
+}
+
 func (t ptsTracker) hasResets() bool {
 	return t.resets > 0
 }

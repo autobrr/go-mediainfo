@@ -1,5 +1,7 @@
 package mediainfo
 
+// psStream accumulates one MPEG-PS elementary stream's identifiers, timing,
+// codec probes, byte counts, and canonical source facts.
 type psStream struct {
 	id                   byte
 	subID                byte
@@ -18,8 +20,17 @@ type psStream struct {
 	mpegAudioBitrateKbps int
 	mpegAudioBitrateMin  int
 	mpegAudioBitrateMax  int
+	mpegAudioChannelMode byte
 	audioFrames          uint64
 	audioBuffer          []byte
+	sampleSection        int
+	clockPTS             uint64
+	clockHasPTS          bool
+	clockAudioStart      uint64
+	clockVideoStart      int
+	programEndSeen       bool
+	terminalTracked      bool
+	terminalBytes        []byte
 	ac3Info              ac3Info
 	hasAC3               bool
 	videoHeaderBytes     uint64
@@ -38,6 +49,8 @@ type psStream struct {
 	videoLastStartPos    int64
 	videoNoPTSPackets    uint64
 	videoFields          []Field
+	videoAVC             avcConfigInfo
+	videoSPS             h264SPSInfo
 	hasVideoFields       bool
 	videoWidth           uint64
 	videoHeight          uint64
@@ -46,6 +59,7 @@ type psStream struct {
 	videoSliceProbed     bool
 	videoIsH264          bool
 	videoIsMPEG2         bool
+	videoBitRateMode     string
 	videoBuffer          []byte
 	videoCCCarry         []byte
 	videoFrameCount      int
@@ -58,13 +72,28 @@ type psStream struct {
 }
 
 type ccTrack struct {
-	found             bool
-	firstFrame        int
-	lastFrame         int
-	firstPTS          uint64
-	lastPTS           uint64
-	firstCommandPTS   uint64
-	firstCommandFrame int
-	firstDisplayPTS   uint64
-	firstType         string
+	found                    bool
+	firstFrame               int
+	lastFrame                int
+	firstPTS                 uint64
+	lastPTS                  uint64
+	firstCommandPTS          uint64
+	hasFirstCommandPTS       bool
+	firstCommandFrame        int
+	firstDisplayPTS          uint64
+	firstDisplayFrame        int
+	firstContentPTS          uint64
+	hasFirstContentPTS       bool
+	lastCommandPTS           uint64
+	lastContentPTS           uint64
+	currentType              string
+	firstType                string
+	inBack                   bool
+	rollUpLines              int
+	currentHasContent        bool
+	oldSpecialData1          byte
+	oldSpecialData2          byte
+	hasOldSpecial            bool
+	commandDuplicated        bool
+	commandAwaitingDuplicate bool
 }

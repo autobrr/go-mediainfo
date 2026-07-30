@@ -74,7 +74,7 @@ func TestParseFLACLargePictureReadsOnlyBoundedHeader(t *testing.T) {
 	data = append(data, []byte("image/jpeg")...)
 	logicalSize := int64(4+4+len(streamInfo)+4) + pictureBlockSize
 	reader := &sparseReadSeeker{data: data, size: logicalSize}
-	_, _, _, _, ok := ParseFLAC(reader, logicalSize)
+	_, _, _, _, ok := parseFLAC(reader, logicalSize)
 	if !ok {
 		t.Fatal("bounded large-picture FLAC did not parse")
 	}

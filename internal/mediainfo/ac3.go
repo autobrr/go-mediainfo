@@ -181,6 +181,22 @@ func (br *ac3BitReader) readVariableBits(bits int) (uint32, bool) {
 	return value, true
 }
 
+// ac3CoreFrameSize returns the declared size from a complete legacy AC-3
+// synchronization header without requiring the rest of the frame.
+func ac3CoreFrameSize(payload []byte) (int, bool) {
+	if len(payload) < 7 || payload[0] != 0x0B || payload[1] != 0x77 {
+		return 0, false
+	}
+	fscod := int(payload[4] >> 6)
+	frmsizecod := int(payload[4] & 0x3F)
+	bsid := int(payload[5] >> 3)
+	if bsid > 10 || bsid <= 8 && fscod == 3 {
+		return 0, false
+	}
+	frameSize := ac3FrameSizeBytes(fscod, frmsizecod)
+	return frameSize, frameSize > 0
+}
+
 // parseAC3Frame parses one legacy AC-3 syncframe. It returns the declared frame
 // size and reports false for truncated, invalid, or unsupported headers.
 func parseAC3Frame(payload []byte) (ac3Info, int, bool) {

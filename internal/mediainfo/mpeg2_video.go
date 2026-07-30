@@ -3,6 +3,7 @@ package mediainfo
 import (
 	"fmt"
 	"math"
+	"strings"
 )
 
 var mpeg2DefaultIntraMatrix = [64]byte{
@@ -81,7 +82,10 @@ type mpeg2VideoInfo struct {
 	GOPVariable              bool
 	GOPM                     int
 	GOPN                     int
+	GOPMDominant             int
+	GOPNDominant             int
 	GOPLengthFirst           int
+	GOPSamples               int
 	GOPOpenClosed            string
 	GOPFirstClosed           string
 	GOPDropFrame             *bool
@@ -99,54 +103,77 @@ type mpeg2VideoInfo struct {
 	ScanType                 string
 	ScanOrder                string
 	PictureStructure         string
+	Standard                 string
 	MatrixData               string
 	BufferSize               int64
 	IntraDCPrecision         int
 	IntraDCPrecisionFirst    int
 	IntraDCPrecisionLast     int
+	EncodedLibrary           string
+	EncodedLibraryName       string
+	EncodedLibraryVersion    string
 }
 
 type mpeg2VideoParser struct {
-	carry             []byte
-	info              mpeg2VideoInfo
-	rescanFromZero    bool
-	expectPictureExt  bool
-	intraFrozen       bool
-	intraFreezeAfterI int
-	firstIntraDCOk    bool
-	firstIntraDC      int
-	lastIntraDCOk     bool
-	lastIntraDC       int
-	currentGOPCount   int
-	sawGOP            bool
-	gopLength         int
-	gopLengthCounts   map[int]int
-	gopM              int
-	gopN              int
-	gopMVariable      bool
-	gopNVariable      bool
-	gopMCounts        map[int]int
-	gopNCounts        map[int]int
-	framesSinceI      int
-	framesSinceAnchor int
-	lastISeen         bool
-	lastAnchorSeen    bool
-	iFrameCount       int
-	pFrameCount       int
-	maxBitRateKbps    int64
-	maxBitRateSet     bool
-	maxBitRateMixed   bool
-	firstGOPClosed    *bool
-	anyOpenGOP        bool
-	gotSeqExt         bool
-	sawSequence       bool
-	progressiveSeq    bool
-	pictureCount      int
-	progressiveFrames int
-	repeatFirstField  int
-	topFieldFirst     int
-	intraDCCounts     map[int]int
-	pictureStructures map[int]int
+	carry              []byte
+	info               mpeg2VideoInfo
+	rescanFromZero     bool
+	expectPictureExt   bool
+	intraFrozen        bool
+	intraFreezeAfterI  int
+	firstIntraDCOk     bool
+	firstIntraDC       int
+	lastIntraDCOk      bool
+	lastIntraDC        int
+	currentGOPCount    int
+	finalGOPRecorded   bool
+	sawGOP             bool
+	gopLength          int
+	gopLengthCounts    map[int]int
+	gopM               int
+	gopN               int
+	gopMVariable       bool
+	gopNVariable       bool
+	gopMCounts         map[int]int
+	gopNCounts         map[int]int
+	framesSinceI       int
+	framesSinceAnchor  int
+	lastISeen          bool
+	lastAnchorSeen     bool
+	iFrameCount        int
+	pFrameCount        int
+	maxBitRateKbps     int64
+	maxBitRateSet      bool
+	maxBitRateMixed    bool
+	firstGOPClosed     *bool
+	anyOpenGOP         bool
+	gotSeqExt          bool
+	sawSequence        bool
+	progressiveSeq     bool
+	pictureCount       int
+	progressiveFrames  int
+	repeatFirstField   int
+	topFieldFirst      int
+	intraDCCounts      map[int]int
+	pictureStructures  map[int]int
+	sequenceAspectCode uint64
+	vbvDelaySeen       bool
+	vbvDelayVariable   bool
+}
+
+// startSegment drops elementary-stream carry and cross-GOP counters at a
+// bounded-read jump while retaining codec evidence accumulated so far.
+func (p *mpeg2VideoParser) startSegment() {
+	p.carry = nil
+	p.rescanFromZero = false
+	p.expectPictureExt = false
+	p.currentGOPCount = 0
+	p.finalGOPRecorded = false
+	p.sawGOP = false
+	p.framesSinceI = 0
+	p.framesSinceAnchor = 0
+	p.lastISeen = false
+	p.lastAnchorSeen = false
 }
 
 func (p *mpeg2VideoParser) recordGOPMCount() {
@@ -191,6 +218,12 @@ func (p *mpeg2VideoParser) consume(data []byte) {
 		switch code {
 		case 0xB3:
 			p.parseSequenceHeader(payload)
+		case 0xB2:
+			if library, name, version := parseMPEGVideoWritingLibrary(payload); library != "" && p.info.EncodedLibrary == "" {
+				p.info.EncodedLibrary = library
+				p.info.EncodedLibraryName = name
+				p.info.EncodedLibraryVersion = version
+			}
 		case 0xB5:
 			p.parseExtension(payload)
 		case 0xB8:
@@ -208,6 +241,44 @@ func (p *mpeg2VideoParser) consume(data []byte) {
 	} else {
 		p.carry = append(p.carry[:0], buf...)
 	}
+}
+
+func parseMPEGVideoWritingLibrary(data []byte) (library, name, version string) {
+	for start := 0; start < len(data); {
+		for start < len(data) && (data[start] < 0x20 || data[start] > 0x7E) {
+			start++
+		}
+		end := start
+		for end < len(data) && data[end] >= 0x20 && data[end] <= 0x7E {
+			end++
+		}
+		candidate := strings.TrimSpace(string(data[start:end]))
+		if library, name, version = classifyMPEGVideoWritingLibrary(candidate); library != "" {
+			return library, name, version
+		}
+		start = end + 1
+	}
+	return "", "", ""
+}
+
+// classifyMPEGVideoWritingLibrary extracts the encoder family, display name,
+// and version from an MPEG video writing-library string.
+func classifyMPEGVideoWritingLibrary(value string) (library, name, version string) {
+	switch {
+	case strings.Contains(value, "TMPGEnc"):
+		if start := strings.Index(value, "encoded by "); start >= 0 {
+			value = value[start:]
+		}
+		library = value
+		name = "TMPGEnc"
+		if _, parsedVersion, ok := strings.Cut(value, "(ver. "); ok {
+			version = strings.TrimSuffix(parsedVersion, ")")
+		}
+	case strings.Contains(value, "Saar Software"):
+		library = value
+		name = value
+	}
+	return library, name, version
 }
 
 func (p *mpeg2VideoParser) parseSequenceHeader(data []byte) {
@@ -283,9 +354,7 @@ func (p *mpeg2VideoParser) parseSequenceHeader(data []byte) {
 		p.info.Width = width
 		p.info.Height = height
 	}
-	if p.info.AspectRatio == "" {
-		p.info.AspectRatio = mapMPEG2AspectRatio(aspect)
-	}
+	p.sequenceAspectCode = aspect
 	if p.info.FrameRate == 0 {
 		if rate, num, den := mapMPEG2FrameRate(frameRateCode); rate > 0 {
 			p.info.FrameRate = rate
@@ -366,7 +435,10 @@ func (p *mpeg2VideoParser) parseExtension(data []byte) {
 		// ISO/IEC 13818-2: video_format (3), colour_description (1),
 		// colour_primaries (8), transfer_characteristics (8), matrix_coefficients (8)
 		// then display sizes. We only need the color description values for parity.
-		_ = br.readBitsValue(3) // video_format
+		videoFormat := br.readBitsValue(3)
+		if videoFormat != ^uint64(0) && p.info.Standard == "" {
+			p.info.Standard = mapMPEG2VideoFormat(byte(videoFormat))
+		}
 		colourDesc := br.readBitsValue(1)
 		if colourDesc == ^uint64(0) {
 			return
@@ -503,22 +575,27 @@ func (p *mpeg2VideoParser) parseGOPHeader(data []byte) {
 		if p.gopLength == 0 {
 			p.gopLength = p.currentGOPCount
 		}
-		if p.gopLengthCounts == nil {
-			p.gopLengthCounts = map[int]int{}
-		}
-		p.gopLengthCounts[p.currentGOPCount]++
 	}
 	p.currentGOPCount = 0
+	p.finalGOPRecorded = false
 	p.sawGOP = true
 }
 
 func (p *mpeg2VideoParser) parsePictureHeader(data []byte) {
-	if len(data) < 2 {
+	if len(data) < 4 {
 		return
 	}
 	br := newBitReader(data)
 	_ = br.readBitsValue(10)
 	codingType := br.readBitsValue(3)
+	vbvDelay := br.readBitsValue(16)
+	if vbvDelay == ^uint64(0) {
+		return
+	}
+	p.vbvDelaySeen = true
+	if vbvDelay == 0xFFFF {
+		p.vbvDelayVariable = true
+	}
 	if codingType == 3 {
 		val := true
 		p.info.BVOP = &val
@@ -560,7 +637,7 @@ func (p *mpeg2VideoParser) parsePictureHeader(data []byte) {
 
 func (p *mpeg2VideoParser) finalize() mpeg2VideoInfo {
 	// Record the final GOP length if the stream ends without a following GOP header.
-	if p.sawGOP && p.currentGOPCount > 0 {
+	if p.sawGOP && p.currentGOPCount > 0 && !p.finalGOPRecorded {
 		if p.gopLength == 0 {
 			p.gopLength = p.currentGOPCount
 		}
@@ -568,6 +645,7 @@ func (p *mpeg2VideoParser) finalize() mpeg2VideoInfo {
 			p.gopLengthCounts = map[int]int{}
 		}
 		p.gopLengthCounts[p.currentGOPCount]++
+		p.finalGOPRecorded = true
 	}
 	if len(p.gopLengthCounts) > 0 {
 		mode, variable := modeValue(p.gopLengthCounts)
@@ -579,6 +657,7 @@ func (p *mpeg2VideoParser) finalize() mpeg2VideoInfo {
 				modeCount = count
 			}
 		}
+		p.info.GOPSamples = total
 		// MediaInfo tends to report the dominant GOP length instead of "Variable" if most GOPs match.
 		if !variable || (total > 0 && float64(modeCount)/float64(total) >= 0.50) {
 			p.info.GOPLength = mode
@@ -604,6 +683,14 @@ func (p *mpeg2VideoParser) finalize() mpeg2VideoInfo {
 		p.info.GOPM = 0
 		p.info.GOPN = 0
 	}
+	if !p.gotSeqExt {
+		if len(p.gopMCounts) > 0 {
+			p.info.GOPM, _ = modeValue(p.gopMCounts)
+		}
+		if len(p.gopNCounts) > 0 {
+			p.info.GOPN, _ = modeValue(p.gopNCounts)
+		}
+	}
 	if p.maxBitRateSet {
 		if p.maxBitRateMixed {
 			if p.info.Width == 720 && (p.info.Height == 480 || p.info.Height == 576) {
@@ -621,6 +708,13 @@ func (p *mpeg2VideoParser) finalize() mpeg2VideoInfo {
 	if p.info.BVOP == nil {
 		val := false
 		p.info.BVOP = &val
+	}
+	if p.vbvDelaySeen {
+		if p.vbvDelayVariable {
+			p.info.BitRateMode = "Variable"
+		} else {
+			p.info.BitRateMode = "Constant"
+		}
 	}
 	if p.info.GOPOpenClosed == "" {
 		if p.anyOpenGOP {
@@ -649,7 +743,13 @@ func (p *mpeg2VideoParser) finalize() mpeg2VideoInfo {
 	if p.info.BitDepth == "" {
 		p.info.BitDepth = "8 bits"
 	}
-	if p.progressiveSeq || p.progressiveFrames > 0 {
+	if p.gotSeqExt {
+		p.info.AspectRatio = mapMPEG2AspectRatio(p.sequenceAspectCode)
+	} else if p.sawSequence {
+		p.info.Version = "Version 1"
+		p.info.AspectRatio = mapMPEG1DisplayAspectRatio(p.info.Width, p.info.Height, p.sequenceAspectCode)
+	}
+	if p.sawSequence && !p.gotSeqExt || p.progressiveSeq || p.progressiveFrames > 0 {
 		p.info.ScanType = "Progressive"
 	} else if p.info.ScanType == "" {
 		p.info.ScanType = "Interlaced"
@@ -672,6 +772,12 @@ func (p *mpeg2VideoParser) finalize() mpeg2VideoInfo {
 
 func (p *mpeg2VideoParser) finalizeTS() mpeg2VideoInfo {
 	info := p.finalize()
+	if len(p.gopMCounts) > 0 {
+		info.GOPMDominant, _ = modeValue(p.gopMCounts)
+	}
+	if len(p.gopNCounts) > 0 {
+		info.GOPNDominant, _ = modeValue(p.gopNCounts)
+	}
 	// TS parity: keep the dominant GOP length when variation is sparse; use "Variable"
 	// only when no clear dominant mode emerges.
 	if len(p.gopLengthCounts) > 0 {
@@ -739,14 +845,51 @@ func mapMPEG2AspectRatio(code uint64) string {
 	}
 }
 
+func mapMPEG1DisplayAspectRatio(width, height, code uint64) string {
+	if width == 0 || height == 0 {
+		return ""
+	}
+	pelAspect := map[uint64]float64{
+		1: 1.0000, 2: 0.6735, 3: 0.7031, 4: 0.7615,
+		5: 0.8055, 6: 0.8437, 7: 0.8935, 8: 0.9375,
+		9: 0.9815, 10: 1.0255, 11: 1.0695, 12: 1.1250,
+		13: 1.1575, 14: 1.2015,
+	}[code]
+	if pelAspect == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%.3f", (float64(width)/float64(height))/pelAspect)
+}
+
 func mapMPEG2Standard(frameRate float64) string {
 	switch {
+	case frameRate > 50:
+		return "Component"
 	case frameRate > 0 && math.Abs(frameRate-29.97) < 0.01:
 		return "NTSC"
 	case frameRate > 0 && math.Abs(frameRate-30.0) < 0.01:
 		return "NTSC"
 	case frameRate > 0 && math.Abs(frameRate-25.0) < 0.01:
 		return "PAL"
+	default:
+		return ""
+	}
+}
+
+// mapMPEG2VideoFormat maps sequence-display video_format codes to the raw
+// MediaInfo Standard vocabulary.
+func mapMPEG2VideoFormat(code byte) string {
+	switch code {
+	case 0:
+		return "Component"
+	case 1:
+		return "PAL"
+	case 2:
+		return "NTSC"
+	case 3:
+		return "SECAM"
+	case 4:
+		return "MAC"
 	default:
 		return ""
 	}

@@ -20,11 +20,11 @@ func TestGoldenOutputs(t *testing.T) {
 	}
 
 	cases := []goldenCase{
-		{name: "text", render: RenderText, ext: ".txt", norm: normalizeText},
+		{name: "text", render: RenderText, ext: ".txt", norm: normalizeGoldenEOF},
 		{name: "json", render: RenderJSON, ext: ".json", norm: normalizeJSONLike},
 		{name: "xml", render: RenderXML, ext: ".xml", norm: normalizeXMLLike},
-		{name: "html", render: RenderHTML, ext: ".html", norm: normalizeText},
-		{name: "csv", render: RenderCSV, ext: ".csv", norm: normalizeText},
+		{name: "html", render: RenderHTML, ext: ".html", norm: normalizeGoldenEOF},
+		{name: "csv", render: RenderCSV, ext: ".csv", norm: normalizeGoldenEOF},
 	}
 
 	samples := []string{
@@ -53,7 +53,9 @@ func TestGoldenOutputs(t *testing.T) {
 
 			for _, tc := range cases {
 				t.Run(tc.name, func(t *testing.T) {
-					got := tc.norm(tc.render(reports))
+					rendered := tc.render(reports)
+					assertRendererEOF(t, tc.name, rendered)
+					got := tc.norm(rendered)
 					goldenPath := filepath.Join(goldenDir, sample+tc.ext)
 
 					if *updateGolden {
@@ -73,7 +75,7 @@ func TestGoldenOutputs(t *testing.T) {
 					want := tc.norm(string(wantBytes))
 
 					if got != want {
-						t.Fatalf("golden mismatch: %s (run: go test ./... -update)", goldenPath)
+						t.Fatalf("golden mismatch: %s (run: go test ./... -update)\nwant=%s\ngot=%s", goldenPath, want, got)
 					}
 				})
 			}
@@ -86,6 +88,24 @@ func normalizeText(s string) string {
 	s = strings.ReplaceAll(s, `samples\\`, "samples/")
 	s = strings.ReplaceAll(s, `samples\`, "samples/")
 	return s
+}
+
+func normalizeGoldenEOF(s string) string {
+	return strings.TrimRight(normalizeText(s), "\n")
+}
+
+func assertRendererEOF(t *testing.T, format, rendered string) {
+	t.Helper()
+	switch format {
+	case "text", "csv":
+		if !strings.HasSuffix(rendered, "\n\n") || strings.HasSuffix(rendered, "\n\n\n") {
+			t.Fatalf("%s renderer must end with exactly two newlines", format)
+		}
+	case "html":
+		if strings.HasSuffix(rendered, "\n") {
+			t.Fatal("html renderer must not end with a newline")
+		}
+	}
 }
 
 var (

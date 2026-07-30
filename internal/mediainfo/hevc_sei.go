@@ -199,7 +199,11 @@ func parseHEVCTimeCode(payload []byte, info *hevcHDRInfo) {
 		if clockFlag == 0 {
 			continue
 		}
-		if br.readBitsValue(1) == ^uint64(0) || br.readBitsValue(5) == ^uint64(0) {
+		if br.readBitsValue(1) == ^uint64(0) {
+			return
+		}
+		countingType := br.readBitsValue(5)
+		if countingType == ^uint64(0) {
 			return
 		}
 		fullTimestamp := br.readBitsValue(1)
@@ -243,7 +247,11 @@ func parseHEVCTimeCode(payload []byte, info *hevcHDRInfo) {
 		if !completeTimestamp || seconds > 59 || minutes > 59 || hours > 31 || frames > 511 {
 			continue
 		}
-		info.timeCode = fmt.Sprintf("%02d:%02d:%02d:%02d", hours, minutes, seconds, frames)
+		separator := ":"
+		if countingType == 4 {
+			separator = ";"
+		}
+		info.timeCode = fmt.Sprintf("%02d:%02d:%02d%s%02d", hours, minutes, seconds, separator, frames)
 		return
 	}
 }

@@ -9,15 +9,17 @@ import (
 )
 
 type psStreamParser struct {
-	streams      map[uint16]*psStream
-	streamOrder  []uint16
-	videoParsers map[uint16]*mpeg2VideoParser
-	videoPTS     ptsTracker
-	anyPTS       ptsTracker
-	packetOrder  int
-	quickAC3     bool
-	quickAC3Max  uint64
-	sampled      bool
+	streams         map[uint16]*psStream
+	streamOrder     []uint16
+	videoParsers    map[uint16]*mpeg2VideoParser
+	videoPTS        ptsTracker
+	anyPTS          ptsTracker
+	packetOrder     int
+	quickAC3        bool
+	quickAC3Max     uint64
+	sampled         bool
+	section         int
+	afterProgramEnd bool
 }
 
 type psPending struct {
@@ -30,6 +32,8 @@ type psPending struct {
 	skip       int
 }
 
+const mpegPSTerminalTailMax = 16
+
 func newPSStreamParser(opts mpegPSOptions) *psStreamParser {
 	parseSpeed := opts.parseSpeed
 	if parseSpeed == 0 {
@@ -41,6 +45,45 @@ func newPSStreamParser(opts mpegPSOptions) *psStreamParser {
 		videoParsers: map[uint16]*mpeg2VideoParser{},
 		quickAC3:     parseSpeed < 1 && !opts.dvdExtras,
 		quickAC3Max:  128,
+	}
+}
+
+// beginSection resets only state that cannot cross a bounded-read jump and
+// starts a new timing section for per-stream frame-clock reconstruction.
+func (p *psStreamParser) beginSection() {
+	p.section++
+	for key, entry := range p.streams {
+		entry.audioBuffer = nil
+		entry.videoHeaderCarry = nil
+		entry.videoFrameCarry = nil
+		entry.videoCCCarry = nil
+		entry.videoBuffer = nil
+		entry.clockHasPTS = false
+		entry.programEndSeen = false
+		entry.terminalTracked = false
+		entry.terminalBytes = nil
+		entry.sampleSection = p.section
+		if parser := p.videoParsers[key]; parser != nil {
+			parser.startSegment()
+		}
+	}
+}
+
+// recordPTS retains container PTS history and the latest timestamp/frame clock
+// in each sampled section. Elementary parsers advance from that anchor.
+func (p *psStreamParser) recordPTS(entry *psStream, currentPTS uint64) {
+	if entry.sampleSection != p.section {
+		entry.sampleSection = p.section
+		entry.clockHasPTS = false
+	}
+	entry.clockPTS = currentPTS
+	entry.clockAudioStart = entry.audioFrames
+	entry.clockVideoStart = entry.videoFrameCount
+	entry.clockHasPTS = true
+	p.anyPTS.add(currentPTS)
+	entry.pts.add(currentPTS)
+	if entry.kind == StreamVideo {
+		p.videoPTS.add(currentPTS)
 	}
 }
 
@@ -80,6 +123,7 @@ func (p *psStreamParser) parseReader(r io.Reader) bool {
 		}
 	}
 
+parseLoop:
 	for {
 		if pending != nil {
 			if pending.payloadPos >= len(buf) {
@@ -135,16 +179,34 @@ func (p *psStreamParser) parseReader(r io.Reader) bool {
 		idx := findPESStart(buf, pos)
 		if idx < 0 {
 			if eof {
+				p.appendTerminalBytes(buf[pos:])
 				return found
 			}
 			if len(buf) > 2 {
-				buf = append(buf[:0], buf[len(buf)-2:]...)
-				pos = 0
+				safeEnd := len(buf) - 2
+				if pos < safeEnd {
+					p.appendTerminalBytes(buf[pos:safeEnd])
+					buf = append(buf[:0], buf[safeEnd:]...)
+					pos = 0
+				} else if pos > 0 {
+					buf = append(buf[:0], buf[pos:]...)
+					pos = 0
+				}
 			}
 			if !readMore() {
+				p.appendTerminalBytes(buf[pos:])
 				return found
 			}
 			continue
+		}
+		if p.afterProgramEnd {
+			p.appendTerminalBytes(buf[pos:idx])
+			p.afterProgramEnd = false
+			for _, entry := range p.streams {
+				entry.programEndSeen = false
+				entry.terminalTracked = false
+				entry.terminalBytes = nil
+			}
 		}
 		pos = idx
 		if pos+4 > len(buf) {
@@ -157,14 +219,30 @@ func (p *psStreamParser) parseReader(r io.Reader) bool {
 		streamID := buf[pos+3]
 		switch streamID {
 		case 0xBA:
-			if pos+14 > len(buf) {
+			if pos+5 > len(buf) {
 				if !readMore() {
 					return found
 				}
 				continue
 			}
-			stuffing := int(buf[pos+13] & 0x07)
-			needed := pos + 14 + stuffing
+			needed := 0
+			switch {
+			case (buf[pos+4] & 0xC0) == 0x40:
+				// MPEG-2 pack headers are 14 bytes plus the declared stuffing.
+				if pos+14 > len(buf) {
+					if !readMore() {
+						return found
+					}
+					continue
+				}
+				needed = pos + 14 + int(buf[pos+13]&0x07)
+			case (buf[pos+4] & 0xF0) == 0x20:
+				// MPEG-1 pack headers have a fixed 12-byte size.
+				needed = pos + 12
+			default:
+				pos++
+				continue
+			}
 			if needed > len(buf) {
 				if !readMore() {
 					return found
@@ -223,32 +301,140 @@ func (p *psStreamParser) parseReader(r io.Reader) bool {
 			pos = payloadEnd
 			compact()
 			continue
+		case 0xB9:
+			for _, entry := range p.streams {
+				entry.programEndSeen = true
+				entry.terminalTracked = true
+				// MediaInfoLib treats a lone zero left by the final MPEG-audio
+				// payload as terminal sync loss at program_end_code. Snapshot it
+				// into lifecycle-owned state; later program data clears it.
+				if len(entry.audioBuffer) == 1 && entry.audioBuffer[0] == 0 {
+					entry.terminalBytes = []byte{0}
+				} else {
+					entry.terminalBytes = nil
+				}
+			}
+			p.afterProgramEnd = true
+			pos += 4
+			found = true
+			compact()
+			continue
 		}
 
-		if pos+9 > len(buf) {
+		if pos+7 > len(buf) {
 			if !readMore() {
 				return found
 			}
 			continue
 		}
 		pesLen := int(binary.BigEndian.Uint16(buf[pos+4 : pos+6]))
-		if (buf[pos+6] & 0xC0) != 0x80 {
-			pos++
-			continue
+		flags := byte(0)
+		payloadStart := 0
+		ptsStart := -1
+		headerBytes := 0
+		if (buf[pos+6] & 0xC0) == 0x80 {
+			// MPEG-2 PES optional headers carry flags and an explicit header length.
+			if pos+9 > len(buf) {
+				if !readMore() {
+					return found
+				}
+				continue
+			}
+			flags = buf[pos+7]
+			headerLen := int(buf[pos+8])
+			headerBytes = 3 + headerLen
+			payloadStart = pos + 9 + headerLen
+			if flags&0x80 != 0 {
+				ptsStart = pos + 9
+			}
+		} else {
+			// MPEG-1 PES optional headers use stuffing and marker bits instead of
+			// the MPEG-2 flags/header-length pair.
+			header := pos + 6
+			packetEnd := len(buf)
+			if pesLen > 0 {
+				packetEnd = pos + 6 + pesLen
+			}
+			stuffingBytes := 0
+			for {
+				if header >= packetEnd || stuffingBytes > 16 {
+					pos++
+					continue parseLoop
+				}
+				if header >= len(buf) {
+					if !readMore() {
+						return found
+					}
+					continue
+				}
+				if buf[header] != 0xFF {
+					break
+				}
+				header++
+				stuffingBytes++
+			}
+			if header >= len(buf) {
+				continue
+			}
+			if buf[header]&0xC0 == 0x40 {
+				if header+2 > len(buf) {
+					if !readMore() {
+						return found
+					}
+					continue
+				}
+				header += 2
+			}
+			if header >= len(buf) {
+				continue
+			}
+			switch buf[header] & 0xF0 {
+			case 0x20:
+				ptsStart = header
+				flags = 0x80
+				header += 5
+			case 0x30:
+				ptsStart = header
+				flags = 0x80
+				header += 10
+			case 0x00:
+				if buf[header] != 0x0F {
+					pos++
+					continue
+				}
+				header++
+			default:
+				pos++
+				continue
+			}
+			headerBytes = header - (pos + 6)
+			payloadStart = header
 		}
-		flags := buf[pos+7]
-		headerLen := int(buf[pos+8])
-		payloadStart := pos + 9 + headerLen
 		if payloadStart > len(buf) {
 			if !readMore() {
 				return found
 			}
 			continue
 		}
+		if pesLen > 0 && headerBytes > pesLen {
+			pos++
+			continue
+		}
+		var currentPTS uint64
+		var hasPTS bool
+		if ptsStart >= 0 {
+			if ptsStart+5 > len(buf) {
+				if !readMore() {
+					return found
+				}
+				continue
+			}
+			currentPTS, hasPTS = parsePTS(buf[ptsStart:])
+		}
 
 		payloadLen := 0
 		if pesLen > 0 {
-			payloadLen = max(pesLen-3-headerLen, 0)
+			payloadLen = max(pesLen-headerBytes, 0)
 			payloadEnd := payloadStart + payloadLen
 			if payloadEnd > len(buf) {
 				if !readMore() {
@@ -276,18 +462,8 @@ func (p *psStreamParser) parseReader(r io.Reader) bool {
 					entry.firstPacketOrder = p.packetOrder
 					p.packetOrder++
 				}
-				var currentPTS uint64
-				var hasPTS bool
-				if (flags&0x80) != 0 && pos+9+headerLen <= len(buf) {
-					if pts, ok := parsePTS(buf[pos+9:]); ok {
-						currentPTS = pts
-						hasPTS = true
-						p.anyPTS.add(pts)
-						entry.pts.add(pts)
-						if entry.kind == StreamVideo {
-							p.videoPTS.add(pts)
-						}
-					}
+				if hasPTS {
+					p.recordPTS(entry, currentPTS)
 				}
 				if payloadOffset < len(payload) {
 					p.consumePayload(entry, psStreamKey(streamID, subID), flags, currentPTS, hasPTS, payload[payloadOffset:])
@@ -327,25 +503,15 @@ func (p *psStreamParser) parseReader(r io.Reader) bool {
 			entry.firstPacketOrder = p.packetOrder
 			p.packetOrder++
 		}
-		var streamPTS uint64
-		var streamHasPTS bool
-		if (flags&0x80) != 0 && pos+9+headerLen <= len(buf) {
-			if pts, ok := parsePTS(buf[pos+9:]); ok {
-				streamPTS = pts
-				streamHasPTS = true
-				p.anyPTS.add(pts)
-				entry.pts.add(pts)
-				if entry.kind == StreamVideo {
-					p.videoPTS.add(pts)
-				}
-			}
+		if hasPTS {
+			p.recordPTS(entry, currentPTS)
 		}
 		pending = &psPending{
 			entry:      entry,
 			key:        psStreamKey(streamID, subID),
 			flags:      flags,
-			pts:        streamPTS,
-			hasPTS:     streamHasPTS,
+			pts:        currentPTS,
+			hasPTS:     hasPTS,
 			payloadPos: payloadStart,
 			skip:       payloadOffset,
 		}
@@ -388,6 +554,7 @@ func (p *psStreamParser) consumePayload(entry *psStream, key uint16, flags byte,
 			p.videoParsers[key] = parser
 		}
 		parser.consume(payload)
+		entry.videoFrameCount = parser.pictureCount
 		if parser.sawSequence {
 			entry.videoIsMPEG2 = true
 			entry.videoIsH264 = false
@@ -510,10 +677,26 @@ func parseMPEGPSFileSample(parser *psStreamParser, file *os.File, opts mpegPSOpt
 			tailSample = min(tailSample, int64(8<<20))
 		}
 		start := size - tailSample
+		parser.beginSection()
 		last := io.NewSectionReader(file, start, tailSample)
 		if reader(last) {
 			parsedAny = true
 		}
 	}
 	return parsedAny
+}
+
+// appendTerminalBytes retains only the bounded tail needed to detect a final
+// MPEG audio sync frame across parser input boundaries.
+func (p *psStreamParser) appendTerminalBytes(data []byte) {
+	if !p.afterProgramEnd || len(data) == 0 {
+		return
+	}
+	for _, entry := range p.streams {
+		remaining := mpegPSTerminalTailMax - len(entry.terminalBytes)
+		if remaining <= 0 {
+			continue
+		}
+		entry.terminalBytes = append(entry.terminalBytes, data[:min(len(data), remaining)]...)
+	}
 }

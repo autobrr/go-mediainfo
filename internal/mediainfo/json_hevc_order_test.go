@@ -92,7 +92,7 @@ func TestHEVCVideoJSONFieldOrder(t *testing.T) {
 // "Chroma subsampling" (rather than sorting to the trailing unmapped block).
 func TestHEVCTextFieldOrder(t *testing.T) {
 	// Input in the order the parser appends them (parseHEVCConfig +
-	// parseMP4HEVCSampleEntry). Without the streamFieldOrder entries these unmapped
+	// parseMP4HEVCSampleEntry). Without the textStreamFieldOrder entries these unmapped
 	// names would sort to the trailing block after "Scan type".
 	fields := []Field{
 		{Name: "Format profile", Value: "Main@L4"},

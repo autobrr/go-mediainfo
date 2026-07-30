@@ -2,7 +2,6 @@ package mediainfo
 
 import (
 	"fmt"
-	"maps"
 	"math"
 	"os"
 	"path/filepath"
@@ -11,21 +10,57 @@ import (
 	"strings"
 )
 
+// jsonKV is one ordered scalar field in the legacy JSON compatibility model.
 type jsonKV struct {
 	Key string
 	Val string
 	Raw bool
 }
 
+// sortJSONFields reorders legacy JSON fields using the shared structured
+// policy for kind.
+func sortJSONFields(kind StreamKind, fields []jsonKV) []jsonKV {
+	return sortJSONFieldsWithOrder(fields, structuredFieldOrderPolicy(kind))
+}
+
+// sortJSONFieldsForContainer reorders legacy JSON fields using an evidenced
+// container override when one exists.
+func sortJSONFieldsForContainer(kind StreamKind, fields []jsonKV, containerFormat string) []jsonKV {
+	return sortJSONFieldsWithOrder(fields, structuredFieldOrderForContainer(kind, containerFormat))
+}
+
+// sortJSONFieldsWithOrder stably moves registered keys into schema order while
+// retaining the relative order of unregistered dynamic keys.
+func sortJSONFieldsWithOrder(fields []jsonKV, order map[string]int) []jsonKV {
+	positions := map[string]int{}
+	for i, field := range fields {
+		positions[field.Key] = i
+	}
+	sort.SliceStable(fields, func(i, j int) bool {
+		ai, aok := order[fields[i].Key]
+		aj, bok := order[fields[j].Key]
+		switch {
+		case aok && bok:
+			return ai < aj
+		case aok:
+			return true
+		case bok:
+			return false
+		default:
+			return positions[fields[i].Key] < positions[fields[j].Key]
+		}
+	})
+	return fields
+}
+
+// buildJSONMedia adapts one public Report snapshot into ordered legacy JSON
+// fields; canonical renderers use it only at the compatibility boundary.
 func buildJSONMedia(report Report) jsonMediaOut {
-	jsonReport := report
-	jsonReport.General = withMatroskaGoJSON(report.General)
 	tracks := make([]jsonTrackOut, 0, len(report.Streams)+1)
-	tracks = append(tracks, jsonTrackOut{Fields: buildJSONGeneralFields(jsonReport)})
+	tracks = append(tracks, jsonTrackOut{Fields: buildJSONGeneralFields(report)})
 	containerFormat := firstNonEmpty(report.General.JSON["Format"], findField(report.General.Fields, "Format"))
 	sorted := orderTracks(report.Streams)
 	forEachStreamWithKindIndex(sorted, func(stream Stream, index, total, order int) {
-		stream = withMatroskaGoJSON(stream)
 		typeOrder := 0
 		if total > 1 {
 			typeOrder = index
@@ -33,39 +68,6 @@ func buildJSONMedia(report Report) jsonMediaOut {
 		tracks = append(tracks, jsonTrackOut{Fields: buildJSONStreamFields(stream, order, typeOrder, containerFormat)})
 	})
 	return jsonMediaOut{Ref: report.Ref, Tracks: tracks}
-}
-
-// withMatroskaGoJSON returns a stream copy with staged Matroska extensions
-// merged into cloned JSON maps. Existing report fields take precedence, and
-// the source stream remains unchanged.
-func withMatroskaGoJSON(stream Stream) Stream {
-	if len(stream.mkvGoJSON) == 0 && len(stream.mkvGoJSONRaw) == 0 {
-		return stream
-	}
-	stream.JSON = maps.Clone(stream.JSON)
-	if stream.JSON == nil {
-		stream.JSON = map[string]string{}
-	}
-	for key, value := range stream.mkvGoJSON {
-		if value != "" && !matroskaJSONFieldProvided(stream, key) {
-			stream.JSON[key] = value
-		}
-	}
-	stream.JSONRaw = maps.Clone(stream.JSONRaw)
-	if stream.JSONRaw == nil {
-		stream.JSONRaw = map[string]string{}
-	}
-	for key, value := range stream.mkvGoJSONRaw {
-		if value == "" {
-			continue
-		}
-		if key == "extra" {
-			stream.JSONRaw[key] = appendJSONExtraObject(stream.JSONRaw[key], value)
-		} else if stream.JSONRaw[key] == "" {
-			stream.JSONRaw[key] = value
-		}
-	}
-	return stream
 }
 
 // buildJSONGeneralFields assembles General fields, merges parser-discovered
@@ -108,7 +110,7 @@ func buildJSONGeneralFields(report Report) []jsonKV {
 	}
 	fields = append(fields, mapStreamFieldsToJSON(StreamGeneral, report.General.Fields)...)
 	containerFormat := firstNonEmpty(report.General.JSON["Format"], findField(report.General.Fields, "Format"))
-	rawExtras := withDynamicJSONExtras(report.General.JSONRaw, report.General.dynamicJSON)
+	rawExtras := report.General.JSONRaw
 	switch containerFormat {
 	case "Matroska":
 		rawExtras = withMatroskaJSONExtraOrder(rawExtras)
@@ -130,7 +132,7 @@ func buildJSONStreamFields(stream Stream, order int, typeOrder int, containerFor
 		fields = append(fields, jsonKV{Key: "StreamOrder", Val: strconv.Itoa(order)})
 	}
 	fields = append(fields, mapStreamFieldsToJSON(stream.Kind, stream.Fields)...)
-	rawExtras := withDynamicJSONExtras(stream.JSONRaw, stream.dynamicJSON)
+	rawExtras := stream.JSONRaw
 	switch containerFormat {
 	case "Matroska":
 		rawExtras = withMatroskaJSONExtraOrder(rawExtras)
@@ -583,6 +585,8 @@ func channelPositionsFromCount(value string) string {
 		return "Front: C"
 	case "2":
 		return "Front: L R"
+	case "3":
+		return "Front: L C R"
 	case "5":
 		return "Front: L C R, Side: L R"
 	case "6":
@@ -690,6 +694,9 @@ func extractVersionNumber(value string) string {
 }
 
 func splitEncodedLibrary(value string) (string, string) {
+	if value == "Zencoder Video Encoding System" {
+		return value, ""
+	}
 	if strings.HasPrefix(value, "x264") {
 		trimmed := strings.TrimPrefix(value, "x264 - ")
 		trimmed = strings.TrimPrefix(trimmed, "x264 ")

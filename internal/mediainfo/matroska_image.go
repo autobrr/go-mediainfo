@@ -11,22 +11,19 @@ import (
 )
 
 // matroskaAttachmentImageStream converts a content-detected attachment into
-// the Image stream fields emitted by MediaInfo for Matroska embedded images.
+// the canonical Image stream emitted for Matroska embedded images.
 func matroskaAttachmentImageStream(attachment matroskaAttachment) (Stream, bool) {
-	jsonFields := map[string]string{"MuxingMode": "Attachment"}
+	builder := newCanonicalStreamBuilder(StreamImage)
+	fillStructured := func(name fieldName, value string) {
+		builder.Structured(name, value)
+	}
+	fillStructured("MuxingMode", "Attachment")
 	coverType := matroskaAttachmentCoverType(attachment)
 	if coverType != "" {
-		jsonFields["Type"] = coverType
-	}
-	stream := Stream{
-		Kind:                StreamImage,
-		JSON:                jsonFields,
-		JSONRaw:             map[string]string{},
-		JSONSkipStreamOrder: true,
-		JSONSkipComputed:    true,
+		fillStructured("Type", coverType)
 	}
 	title := firstNonEmpty(attachment.description, attachment.name)
-	stream.Fields = append(stream.Fields, Field{Name: "Title", Value: title})
+	builder.Fill("Title", title, "Title", title)
 	data := attachment.data
 	size := attachment.size
 	if size == 0 {
@@ -36,66 +33,68 @@ func matroskaAttachmentImageStream(attachment matroskaAttachment) (Stream, bool)
 	switch {
 	case detected && detection.kind == embeddedImageJPEG:
 		width, height, depth, subsampling, iccSpace, iccDescription, metadataBytes, _ := parseJPEGAttachment(data)
-		stream.Fields = append(stream.Fields, Field{Name: "Format", Value: "JPEG"})
-		stream.JSON["Width"] = strconv.Itoa(width)
-		stream.JSON["Height"] = strconv.Itoa(height)
-		stream.JSON["ColorSpace"] = "YUV"
-		stream.JSON["ChromaSubsampling"] = subsampling
-		stream.JSON["BitDepth"] = strconv.Itoa(depth)
-		stream.JSON["Compression_Mode"] = "Lossy"
+		builder.Fill("Format", "JPEG", "Format", "JPEG")
+		fillStructured("Width", strconv.Itoa(width))
+		fillStructured("Height", strconv.Itoa(height))
+		fillStructured("ColorSpace", "YUV")
+		fillStructured("ChromaSubsampling", subsampling)
+		fillStructured("BitDepth", strconv.Itoa(depth))
+		fillStructured("Compression_Mode", "Lossy")
 		if iccDescription != "" {
-			stream.JSON["colour_description_present"] = "Yes"
-			stream.JSON["colour_range"] = "Full"
-			stream.JSON["colour_primaries"] = "BT.709"
-			stream.JSON["transfer_characteristics"] = "sRGB/sYCC"
-			stream.JSON["matrix_coefficients"] = "Identity"
-			extra := []jsonKV{}
+			fillStructured("colour_description_present", "Yes")
+			fillStructured("colour_range", "Full")
+			fillStructured("colour_primaries", "BT.709")
+			fillStructured("transfer_characteristics", "sRGB/sYCC")
+			fillStructured("matrix_coefficients", "Identity")
+			members := []structuredMember{}
 			if iccSpace != "" {
-				extra = append(extra, jsonKV{Key: "ColorSpace_ICC", Val: iccSpace})
+				members = append(members, structuredMember{Key: "ColorSpace_ICC", Value: structuredNode{Kind: structuredString, Text: iccSpace}})
 			}
-			extra = append(extra, jsonKV{Key: "colour_primaries_ICC_Description", Val: iccDescription})
-			stream.JSONRaw["extra"] = renderJSONObject(extra, false)
+			members = append(members, structuredMember{Key: "colour_primaries_ICC_Description", Value: structuredNode{Kind: structuredString, Text: iccDescription}})
+			extra := structuredNode{Kind: structuredObject, Object: members}
+			builder.StructuredNode("extra", extra)
 		}
 		size = subtractAttachmentMetadataSize(size, metadataBytes)
 	case detected && detection.kind == embeddedImagePNG:
 		width, height, depth, gamma, _ := parsePNGAttachment(data)
-		stream.Fields = append(stream.Fields, Field{Name: "Format", Value: "PNG"})
-		stream.JSON["Format_Compression"] = "Deflate"
-		stream.JSON["Format_Settings_Packing"] = "Linear"
-		stream.JSON["Width"] = strconv.Itoa(width)
-		stream.JSON["Height"] = strconv.Itoa(height)
-		stream.JSON["PixelAspectRatio"] = "1.000"
-		stream.JSON["DisplayAspectRatio"] = formatJSONFloat(float64(width) / float64(height))
-		stream.JSON["ColorSpace"] = pngAttachmentColorSpace(data)
-		stream.JSON["BitDepth"] = strconv.Itoa(depth)
-		stream.JSON["Compression_Mode"] = "Lossless"
-		extra := []jsonKV{}
+		builder.Fill("Format", "PNG", "Format", "PNG")
+		fillStructured("Format_Compression", "Deflate")
+		fillStructured("Format_Settings_Packing", "Linear")
+		fillStructured("Width", strconv.Itoa(width))
+		fillStructured("Height", strconv.Itoa(height))
+		fillStructured("PixelAspectRatio", "1.000")
+		fillStructured("DisplayAspectRatio", formatJSONFloat(float64(width)/float64(height)))
+		fillStructured("ColorSpace", pngAttachmentColorSpace(data))
+		fillStructured("BitDepth", strconv.Itoa(depth))
+		fillStructured("Compression_Mode", "Lossless")
+		members := []structuredMember{}
 		if gamma != "" {
-			extra = append(extra, jsonKV{Key: "Gamma", Val: gamma})
+			members = append(members, structuredMember{Key: "Gamma", Value: structuredNode{Kind: structuredString, Text: gamma}})
 		}
 		iccSpace, iccDescription, metadataBytes := parsePNGAttachmentMetadata(data)
 		if iccDescription != "" {
-			stream.JSON["colour_description_present"] = "Yes"
-			stream.JSON["colour_range"] = "Full"
-			stream.JSON["colour_primaries"] = "BT.709"
-			stream.JSON["transfer_characteristics"] = "sRGB/sYCC"
-			stream.JSON["matrix_coefficients"] = "Identity"
+			fillStructured("colour_description_present", "Yes")
+			fillStructured("colour_range", "Full")
+			fillStructured("colour_primaries", "BT.709")
+			fillStructured("transfer_characteristics", "sRGB/sYCC")
+			fillStructured("matrix_coefficients", "Identity")
 			if iccSpace != "" {
-				extra = append(extra, jsonKV{Key: "ColorSpace_ICC", Val: iccSpace})
+				members = append(members, structuredMember{Key: "ColorSpace_ICC", Value: structuredNode{Kind: structuredString, Text: iccSpace}})
 			}
-			extra = append(extra, jsonKV{Key: "colour_primaries_ICC_Description", Val: iccDescription})
+			members = append(members, structuredMember{Key: "colour_primaries_ICC_Description", Value: structuredNode{Kind: structuredString, Text: iccDescription}})
 		}
-		if len(extra) > 0 {
-			stream.JSONRaw["extra"] = renderJSONObject(extra, false)
+		if len(members) > 0 {
+			extra := structuredNode{Kind: structuredObject, Object: members}
+			builder.StructuredNode("extra", extra)
 		}
 		size = subtractAttachmentMetadataSize(size, metadataBytes)
 	case detected && detection.kind == embeddedImageGIF:
 		width, height, profile, _ := parseGIFAttachment(data)
-		stream.Fields = append(stream.Fields, Field{Name: "Format", Value: "GIF"})
-		stream.JSON["Format_Profile"] = profile
-		stream.JSON["Width"] = strconv.Itoa(width)
-		stream.JSON["Height"] = strconv.Itoa(height)
-		stream.JSON["Compression_Mode"] = "Lossless"
+		builder.Fill("Format", "GIF", "Format", "GIF")
+		fillStructured("Format_Profile", profile)
+		fillStructured("Width", strconv.Itoa(width))
+		fillStructured("Height", strconv.Itoa(height))
+		fillStructured("Compression_Mode", "Lossless")
 	default:
 		if coverType == "" {
 			return Stream{}, false
@@ -104,8 +103,8 @@ func matroskaAttachmentImageStream(attachment matroskaAttachment) (Stream, bool)
 	if size <= 0 {
 		return Stream{}, false
 	}
-	stream.JSON["StreamSize"] = strconv.FormatInt(size, 10)
-	return stream, true
+	fillStructured("StreamSize", strconv.FormatInt(size, 10))
+	return builder.Snapshot(canonicalStreamPolicy{SkipStreamOrder: true, SkipComputed: true}), true
 }
 
 // subtractAttachmentMetadataSize removes excluded metadata without allowing a

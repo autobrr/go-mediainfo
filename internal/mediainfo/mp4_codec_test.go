@@ -7,6 +7,27 @@ import (
 	"testing"
 )
 
+func TestMP4StructuredFactsPreserveCanonicalValues(t *testing.T) {
+	seedBuilder := newCanonicalStreamBuilder(StreamVideo)
+	seedBuilder.Fill("Duration", "1250", "Duration", "1 s 250 ms")
+	seed := seedBuilder.Snapshot(canonicalStreamPolicy{}).canonicalSeed
+
+	facts := newMP4StructuredFacts(seed)
+	facts.Set("BitRate", "1000")
+	facts.Set("BitRate", "2000")
+	builder := newCanonicalStreamBuilder(StreamVideo)
+	builder.ImportCanonicalSeed(seed)
+	facts.Apply(builder)
+	stream := builder.Snapshot(canonicalStreamPolicy{})
+
+	if value, found := canonicalSeedValue(stream, "Duration"); !found || value != "1250" {
+		t.Fatalf("canonical duration = %q, found = %v", value, found)
+	}
+	if stream.JSON["Duration"] != "1.250" || stream.JSON["BitRate"] != "2000" {
+		t.Fatalf("legacy compatibility values = %#v", stream.JSON)
+	}
+}
+
 func TestParseMP4CodecFromStsd(t *testing.T) {
 	var buf bytes.Buffer
 	writeMP4Box(&buf, "ftyp", []byte{'i', 's', 'o', 'm'})

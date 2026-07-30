@@ -23,8 +23,19 @@ type id3v2Data struct {
 }
 
 func parseID3v2(file io.ReadSeeker, fileSize int64, assetBudget *embeddedAssetBudget) (id3v2Data, bool) {
+	return parseID3v2WithAllocator(file, fileSize, assetBudget, func(size int) []byte {
+		return make([]byte, size)
+	})
+}
+
+// parseID3v2WithAllocator exposes payload allocation to security regression
+// tests without using package-global hooks that would race parallel parsers.
+func parseID3v2WithAllocator(file io.ReadSeeker, fileSize int64, assetBudget *embeddedAssetBudget, allocate func(int) []byte) (id3v2Data, bool) {
 	if assetBudget == nil {
 		assetBudget = &embeddedAssetBudget{}
+	}
+	if allocate == nil {
+		allocate = func(size int) []byte { return make([]byte, size) }
 	}
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		return id3v2Data{}, false
@@ -58,7 +69,11 @@ func parseID3v2(file io.ReadSeeker, fileSize int64, assetBudget *embeddedAssetBu
 		return id3v2Data{Offset: offset}, true
 	}
 
-	payload := make([]byte, int(tagSize))
+	payload := allocate(int(tagSize))
+	if len(payload) != int(tagSize) {
+		_, _ = file.Seek(min(offset, fileSize), io.SeekStart)
+		return id3v2Data{Offset: offset}, true
+	}
 	if _, err := io.ReadFull(file, payload); err != nil {
 		_, _ = file.Seek(min(offset, fileSize), io.SeekStart)
 		return id3v2Data{Offset: offset}, true
