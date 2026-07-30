@@ -12,6 +12,7 @@
 <FileExtension>avi</FileExtension>
 <Format>AVI</Format>
 <Format_Settings>BitmapInfoHeader / WaveFormatEx</Format_Settings>
+<Interleaved>Yes</Interleaved>
 <FileSize>1012854</FileSize>
 <Duration>4.032</Duration>
 <OverallBitRate>2009631</OverallBitRate>
@@ -23,7 +24,6 @@
 <File_Modified_Date><redacted></File_Modified_Date>
 <File_Modified_Date_Local><redacted></File_Modified_Date_Local>
 <Encoded_Application>Lavf62.3.100</Encoded_Application>
-<Interleaved>Yes</Interleaved>
 </track>
 <track type="Video">
 <StreamOrder>0</StreamOrder>
@@ -62,6 +62,7 @@
 <ID>1</ID>
 <Format>MPEG Audio</Format>
 <Format_Version>1</Format_Version>
+<Format_Profile>Layer 3</Format_Profile>
 <CodecID>55</CodecID>
 <Duration>4.032</Duration>
 <BitRate_Mode>CBR</BitRate_Mode>
@@ -73,13 +74,12 @@
 <Delay>0.000</Delay>
 <Delay_Source>Stream</Delay_Source>
 <Video_Delay>0.000</Video_Delay>
-<Encoded_Library>LAME3.100</Encoded_Library>
 <StreamSize>64512</StreamSize>
 <Alignment>Aligned</Alignment>
-<Format_Profile>Layer 3</Format_Profile>
+<Interleave_VideoFrames>0.71</Interleave_VideoFrames>
 <Interleave_Duration>0.024</Interleave_Duration>
 <Interleave_Preload>0.024</Interleave_Preload>
-<Interleave_VideoFrames>0.71</Interleave_VideoFrames>
+<Encoded_Library>LAME3.100</Encoded_Library>
 </track>
 </media>
 </MediaInfo>

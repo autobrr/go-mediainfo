@@ -21,12 +21,15 @@ type mp3HeaderInfo struct {
 	padding     bool
 }
 
+// ParseMP3 parses MPEG audio and bounded ID3 metadata. Oversized or malformed
+// embedded artwork and text are skipped without preventing valid audio parsing.
 func ParseMP3(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, map[string]string, map[string]string, bool) {
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		return ContainerInfo{}, nil, nil, nil, false
 	}
 
-	id3, ok := parseID3v2(file)
+	assetBudget := &embeddedAssetBudget{}
+	id3, ok := parseID3v2(file, size, assetBudget)
 	if !ok {
 		return ContainerInfo{}, nil, nil, nil, false
 	}

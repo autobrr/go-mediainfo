@@ -5,6 +5,8 @@ import (
 	"fmt"
 )
 
+// hevcHDRInfo accumulates HDR and encoder metadata discovered in HEVC SEI
+// messages during bounded sample scans.
 type hevcHDRInfo struct {
 	masteringPrimaries    string
 	masteringLuminanceMin float64
@@ -20,6 +22,12 @@ type hevcHDRInfo struct {
 	x265Library  string // "x265 <version>" (space form, mirrors findX264Info output)
 	x265Settings string // encoding options joined with " / "
 	x265Seen     bool
+	// Non-x265 encoder identity, such as ATEME Titan, carried by the same SEI
+	// message type.
+	encoderLibrary string
+	encoderName    string
+	encoderVersion string
+	timeCode       string
 }
 
 func (info *hevcHDRInfo) complete() bool {
@@ -164,12 +172,79 @@ func parseHEVCSEI(rbsp []byte, info *hevcHDRInfo) {
 			parseMasteringDisplayColourVolume(payload, info)
 		case 144:
 			parseContentLightLevel(payload, info)
+		case 136:
+			parseHEVCTimeCode(payload, info)
 		case 4:
 			parseHEVCUserDataRegistered(payload, info)
 		}
-		if info.sampleScanDone() {
+	}
+}
+
+// parseHEVCTimeCode records the first complete clock timestamp from an HEVC
+// time_code SEI payload. Truncated payloads and partial clocks are ignored.
+func parseHEVCTimeCode(payload []byte, info *hevcHDRInfo) {
+	if len(payload) == 0 || info == nil || info.timeCode != "" {
+		return
+	}
+	br := newBitReader(payload)
+	clockCount := br.readBitsValue(2)
+	if clockCount == ^uint64(0) || clockCount == 0 {
+		return
+	}
+	for range clockCount {
+		clockFlag := br.readBitsValue(1)
+		if clockFlag == ^uint64(0) {
 			return
 		}
+		if clockFlag == 0 {
+			continue
+		}
+		if br.readBitsValue(1) == ^uint64(0) || br.readBitsValue(5) == ^uint64(0) {
+			return
+		}
+		fullTimestamp := br.readBitsValue(1)
+		if fullTimestamp == ^uint64(0) || br.readBitsValue(1) == ^uint64(0) || br.readBitsValue(1) == ^uint64(0) {
+			return
+		}
+		frames := br.readBitsValue(9)
+		if frames == ^uint64(0) {
+			return
+		}
+		var seconds, minutes, hours uint64
+		completeTimestamp := fullTimestamp == 1
+		if fullTimestamp == 1 {
+			seconds = br.readBitsValue(6)
+			minutes = br.readBitsValue(6)
+			hours = br.readBitsValue(5)
+		} else {
+			secondsFlag := br.readBitsValue(1)
+			if secondsFlag == ^uint64(0) {
+				return
+			}
+			if secondsFlag == 1 {
+				seconds = br.readBitsValue(6)
+				minutesFlag := br.readBitsValue(1)
+				if minutesFlag == ^uint64(0) {
+					return
+				}
+				if minutesFlag == 1 {
+					minutes = br.readBitsValue(6)
+					hoursFlag := br.readBitsValue(1)
+					if hoursFlag == ^uint64(0) {
+						return
+					}
+					if hoursFlag == 1 {
+						hours = br.readBitsValue(5)
+						completeTimestamp = true
+					}
+				}
+			}
+		}
+		if !completeTimestamp || seconds > 59 || minutes > 59 || hours > 31 || frames > 511 {
+			continue
+		}
+		info.timeCode = fmt.Sprintf("%02d:%02d:%02d:%02d", hours, minutes, seconds, frames)
+		return
 	}
 }
 
@@ -190,6 +265,13 @@ func parseMasteringDisplayColourVolume(payload []byte, info *hevcHDRInfo) {
 	minLum := binary.BigEndian.Uint32(payload[20:24])      //nolint:gosec // payload length validated
 	if info.masteringPrimaries == "" {
 		info.masteringPrimaries = masteringDisplayPrimariesName(primaries)
+		if info.masteringPrimaries == "" {
+			info.masteringPrimaries = fmt.Sprintf("R: x=%.6f y=%.6f, G: x=%.6f y=%.6f, B: x=%.6f y=%.6f, White point: x=%.6f y=%.6f",
+				float64(primaries[4])/50000, float64(primaries[5])/50000,
+				float64(primaries[0])/50000, float64(primaries[1])/50000,
+				float64(primaries[2])/50000, float64(primaries[3])/50000,
+				float64(primaries[6])/50000, float64(primaries[7])/50000)
+		}
 	}
 	info.masteringLuminanceMin = float64(minLum) / 10000.0
 	info.masteringLuminanceMax = float64(maxLum) / 10000.0
@@ -334,19 +416,19 @@ func masteringDisplayPrimariesName(values [8]uint16) string {
 			match := true
 			for j := 0; j < 2; j++ {
 				gVal, ok := primariesAt(values, gIndex*2+j)
-				if !ok || !withinTolerance(gVal, entry.values[0*2+j], 25) {
+				if !ok || !withinTolerance(gVal, entry.values[0*2+j], 5) {
 					match = false
 				}
 				bVal, ok := primariesAt(values, bIndex*2+j)
-				if !ok || !withinTolerance(bVal, entry.values[1*2+j], 25) {
+				if !ok || !withinTolerance(bVal, entry.values[1*2+j], 5) {
 					match = false
 				}
 				rVal, ok := primariesAt(values, rIndex*2+j)
-				if !ok || !withinTolerance(rVal, entry.values[2*2+j], 25) {
+				if !ok || !withinTolerance(rVal, entry.values[2*2+j], 5) {
 					match = false
 				}
 				wVal, ok := primariesAt(values, 3*2+j)
-				if !ok || !withinTolerance(wVal, entry.values[3*2+j], 25) {
+				if !ok || !withinTolerance(wVal, entry.values[3*2+j], 5) {
 					match = false
 				}
 			}

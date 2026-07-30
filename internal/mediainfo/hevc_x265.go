@@ -18,6 +18,12 @@ func parseHEVCUserDataUnregistered(payload []byte, info *hevcHDRInfo) {
 	if info == nil || len(payload) < 16 {
 		return
 	}
+	body := strings.TrimSpace(strings.TrimRight(string(payload[16:]), "\x00"))
+	if strings.HasPrefix(body, "ATEME Titan KFE ") {
+		info.encoderLibrary = body
+		info.encoderName = "ATEME Titan KFE"
+		info.encoderVersion = strings.TrimSpace(strings.TrimPrefix(body, info.encoderName))
+	}
 	if binary.BigEndian.Uint64(payload[0:8]) != x265UserDataUUIDHi {
 		return
 	}

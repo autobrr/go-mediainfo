@@ -5,20 +5,26 @@ import (
 	"strings"
 )
 
+// ac3Info contains frame metadata and accumulated statistics shared by AC-3
+// and E-AC-3 renderers.
 type ac3Info struct {
-	bitRateKbps int64
-	sampleRate  float64
-	channels    uint64
-	layout      string
-	bsid        int
-	bsmod       int
-	acmod       int
-	lfeon       int
-	dsurmod     int
-	hasDsurmod  bool
-	serviceKind string
-	frameRate   float64
-	spf         int
+	bitRateKbps  int64
+	sampleRate   float64
+	channels     uint64
+	layout       string
+	bsid         int
+	bsmod        int
+	acmod        int
+	lfeon        int
+	hasLFE       bool
+	dsurmod      int
+	hasDsurmod   bool
+	dsurexmod    int
+	hasDsurexmod bool
+	hasAdconvtyp bool
+	serviceKind  string
+	frameRate    float64
+	spf          int
 
 	// Frame-scoped raw codes, used for MediaInfo-style stats (histogram-based).
 	// When aggregating, these fields come from the merged frame, not the accumulator.
@@ -48,6 +54,7 @@ type ac3Info struct {
 	comprFieldDB  float64
 	hasComprField bool
 	dynrngDB      float64
+	dynrngFirst   bool
 	hasDynrng     bool
 	dynrngCount   int
 	dynrngSum     float64
@@ -64,8 +71,10 @@ type ac3Info struct {
 	hasSurmixlev     bool
 	mixlevel         int
 	hasMixlevel      bool
+	mixlevelFirst    bool
 	roomtyp          string
 	hasRoomtyp       bool
+	roomtypFirst     bool
 	dmixmod          string
 	hasDmixmod       bool
 	ltrtcmixlevDB    float64
@@ -87,6 +96,11 @@ type ac3Info struct {
 	jocBedLayout     string
 
 	eac3FrameType         int
+	hasEAC3Independent    bool
+	hasEAC3Dependent      bool
+	dependentACMod        int
+	dependentLFE          int
+	hasDependentACMod     bool
 	eac3ChannelMap        uint16
 	hasEAC3ChannelMap     bool
 	eac3ChannelMapLayout  string
@@ -167,6 +181,8 @@ func (br *ac3BitReader) readVariableBits(bits int) (uint32, bool) {
 	return value, true
 }
 
+// parseAC3Frame parses one legacy AC-3 syncframe. It returns the declared frame
+// size and reports false for truncated, invalid, or unsupported headers.
 func parseAC3Frame(payload []byte) (ac3Info, int, bool) {
 	var info ac3Info
 	if len(payload) < 7 {
@@ -423,8 +439,21 @@ func parseAC3Frame(payload []byte) (ac3Info, int, bool) {
 			return info, 0, false
 		}
 		if xbsi2e == 1 {
-			// dsurexmod (2) + dheadphonmod (2) + adconvtyp (1) + xbsi2 (8) + encinfo (1)
-			if _, ok := br.readBits(14); !ok {
+			dsurexmod, ok := br.readBits(2)
+			if !ok {
+				return info, 0, false
+			}
+			info.dsurexmod = int(dsurexmod)
+			info.hasDsurexmod = true
+			if _, ok := br.readBits(2); !ok { // dheadphonmod
+				return info, 0, false
+			}
+			adconvtyp, ok := br.readBits(1)
+			if !ok {
+				return info, 0, false
+			}
+			info.hasAdconvtyp = adconvtyp == 1
+			if _, ok := br.readBits(9); !ok { // xbsi2 + encinfo
 				return info, 0, false
 			}
 		}
@@ -493,8 +522,12 @@ func parseAC3Frame(payload []byte) (ac3Info, int, bool) {
 		bsmod:            int(bsmod),
 		acmod:            int(acmod),
 		lfeon:            int(lfeonVal),
+		hasLFE:           true,
 		dsurmod:          info.dsurmod,
 		hasDsurmod:       info.hasDsurmod,
+		dsurexmod:        info.dsurexmod,
+		hasDsurexmod:     info.hasDsurexmod,
+		hasAdconvtyp:     info.hasAdconvtyp,
 		serviceKind:      ac3ServiceKind(int(bsmod)),
 		frameRate:        frameRate,
 		spf:              spf,
@@ -549,10 +582,9 @@ func parseAC3Frame(payload []byte) (ac3Info, int, bool) {
 	return info, frameSize, true
 }
 
-func parseEAC3Frame(payload []byte) (ac3Info, int, bool) {
-	return parseEAC3FrameWithOptions(payload, true)
-}
-
+// parseEAC3FrameWithOptions parses one E-AC-3 syncframe from payload. It returns
+// the declared frame size even when payload contains following syncframes, and
+// limits optional JOC discovery to the declared frame when parseJOC is true.
 func parseEAC3FrameWithOptions(payload []byte, parseJOC bool) (ac3Info, int, bool) {
 	var info ac3Info
 	if len(payload) < 7 {
@@ -615,18 +647,20 @@ func parseEAC3FrameWithOptions(payload []byte, parseJOC bool) (ac3Info, int, boo
 	if bsid < 10 {
 		return info, 0, false
 	}
-	if strmtyp == 0 {
+	for i := 0; i < eac3DialnormFieldCount(int(acmod)); i++ {
 		dialnorm, ok := br.readBits(5)
 		if !ok {
 			return info, 0, false
 		}
-		info.hasDialnorm = true
-		info.dialnorm = ac3DialnormDB(dialnorm)
-		info.dialnormCode = uint8(dialnorm)
-		info.dialnormCount = 1
-		info.dialnormSum = math.Pow(10.0, float64(info.dialnorm)/10.0)
-		info.dialnormMin = info.dialnorm
-		info.dialnormMax = info.dialnorm
+		if i == 0 && strmtyp == 0 {
+			info.hasDialnorm = true
+			info.dialnorm = ac3DialnormDB(dialnorm)
+			info.dialnormCode = uint8(dialnorm)
+			info.dialnormCount = 1
+			info.dialnormSum = math.Pow(10.0, float64(info.dialnorm)/10.0)
+			info.dialnormMin = info.dialnorm
+			info.dialnormMax = info.dialnorm
+		}
 
 		compre, ok := br.readBits(1)
 		if !ok {
@@ -637,26 +671,15 @@ func parseEAC3FrameWithOptions(payload []byte, parseJOC bool) (ac3Info, int, boo
 			if !ok {
 				return info, 0, false
 			}
-			info.compre = true
-			info.comprCode = uint8(compr)
-			info.comprDB = ac3ComprDB(uint8(compr))
-			info.hasCompr = true
-		}
-	} else if strmtyp == 1 {
-		for i := 0; i < eac3DialnormFieldCount(int(acmod)); i++ {
-			if _, ok := br.readBits(5); !ok { // dialnorm
-				return info, 0, false
-			}
-			compre, ok := br.readBits(1)
-			if !ok {
-				return info, 0, false
-			}
-			if compre == 1 {
-				if _, ok := br.readBits(8); !ok { // compr
-					return info, 0, false
-				}
+			if i == 0 {
+				info.compre = true
+				info.comprCode = uint8(compr)
+				info.comprDB = ac3ComprDB(uint8(compr))
+				info.hasCompr = true
 			}
 		}
+	}
+	if strmtyp == 1 {
 		chanmape, ok := br.readBits(1)
 		if !ok {
 			return info, 0, false
@@ -673,6 +696,11 @@ func parseEAC3FrameWithOptions(payload []byte, parseJOC bool) (ac3Info, int, boo
 				info.eac3ChannelMapChannel = count
 			}
 		}
+	}
+	if parseEAC3MetadataExtension(&br, &info, int(strmtyp), int(numblkscod), int(acmod), lfeonVal == 1, int(fscod)) {
+		// Extension type A carries the JOC complexity index, but MediaInfo only
+		// identifies Atmos when object-audio metadata is also present in EMDF.
+		info.hasJOCComplex = true
 	}
 
 	sampleRate := eac3SampleRate(int(fscod), int(fscod2))
@@ -702,10 +730,13 @@ func parseEAC3FrameWithOptions(payload []byte, parseJOC bool) (ac3Info, int, boo
 		channels:      channels,
 		layout:        layout,
 		bsid:          int(bsid),
-		bsmod:         0,
+		bsmod:         info.bsmod,
 		acmod:         int(acmod),
+		dsurmod:       info.dsurmod,
+		hasDsurmod:    info.hasDsurmod,
 		lfeon:         int(lfeonVal),
-		serviceKind:   ac3ServiceKind(0),
+		hasLFE:        true,
+		serviceKind:   ac3ServiceKind(info.bsmod),
 		frameRate:     frameRate,
 		spf:           spf,
 		dialnorm:      info.dialnorm,
@@ -725,9 +756,9 @@ func parseEAC3FrameWithOptions(payload []byte, parseJOC bool) (ac3Info, int, boo
 		dynrngDB:      info.dynrngDB,
 		hasDynrng:     info.hasDynrng,
 		hasCompr:      info.hasCompr,
-		hasJOC:        jocMeta.hasJOC,
-		hasJOCComplex: jocMeta.hasJOCComplex,
-		jocComplexity: jocMeta.jocComplexity,
+		hasJOC:        info.hasJOC || jocMeta.hasJOC,
+		hasJOCComplex: info.hasJOCComplex || jocMeta.hasJOCComplex,
+		jocComplexity: firstNonZero(info.jocComplexity, jocMeta.jocComplexity),
 		jocObjects:    jocMeta.jocObjects,
 		hasJOCDyn:     jocMeta.hasJOCDyn,
 		jocDynObjects: jocMeta.jocDynObjects,
@@ -740,8 +771,351 @@ func parseEAC3FrameWithOptions(payload []byte, parseJOC bool) (ac3Info, int, boo
 		hasEAC3ChannelMap:     info.hasEAC3ChannelMap,
 		eac3ChannelMapLayout:  info.eac3ChannelMapLayout,
 		eac3ChannelMapChannel: info.eac3ChannelMapChannel,
+		dmixmod:               info.dmixmod,
+		hasDmixmod:            info.hasDmixmod,
+		ltrtcmixlevDB:         info.ltrtcmixlevDB,
+		hasLtrtcmixlev:        info.hasLtrtcmixlev,
+		ltrtsurmixlevDB:       info.ltrtsurmixlevDB,
+		hasLtrtsurmixlev:      info.hasLtrtsurmixlev,
+		lorocmixlevDB:         info.lorocmixlevDB,
+		hasLorocmixlev:        info.hasLorocmixlev,
+		lorosurmixlevDB:       info.lorosurmixlevDB,
+		hasLorosurmixlev:      info.hasLorosurmixlev,
+		mixlevel:              info.mixlevel,
+		hasMixlevel:           info.hasMixlevel,
+		roomtyp:               info.roomtyp,
+		hasRoomtyp:            info.hasRoomtyp,
+		hasAdconvtyp:          info.hasAdconvtyp,
 	}
 	return info, frameSize, true
+}
+
+// parseEAC3MetadataExtension advances over the E-AC-3 mixing and informational
+// metadata through addbsi, recording fields that MediaInfo exposes. It reports
+// a Dolby extension type A complexity index only when addbsi contains both
+// required bytes. It returns true only when that index is read; the type A flag
+// alone does not identify Atmos without object metadata.
+func parseEAC3MetadataExtension(br *ac3BitReader, info *ac3Info, strmtyp int, numblkscod int, acmod int, lfeon bool, fscod int) bool {
+	if br == nil || info == nil {
+		return false
+	}
+	if mixmdate, ok := br.readBits(1); !ok {
+		return false
+	} else if mixmdate == 1 {
+		if acmod > 2 {
+			dmixmod, ok := br.readBits(2)
+			if !ok {
+				return false
+			}
+			if value := ac3PreferredDownmix(dmixmod); value != "" {
+				info.dmixmod = value
+				info.hasDmixmod = true
+			}
+			if acmod&1 != 0 {
+				ltrtcmixlev, ok := br.readBits(3)
+				if !ok {
+					return false
+				}
+				if value, ok := ac3ExtendedMixLevelDB(ltrtcmixlev); ok {
+					info.ltrtcmixlevDB = value
+					info.hasLtrtcmixlev = true
+				}
+				lorocmixlev, ok := br.readBits(3)
+				if !ok {
+					return false
+				}
+				if value, ok := ac3ExtendedMixLevelDB(lorocmixlev); ok {
+					info.lorocmixlevDB = value
+					info.hasLorocmixlev = true
+				}
+			}
+			if acmod&4 != 0 {
+				ltrtsurmixlev, ok := br.readBits(3)
+				if !ok {
+					return false
+				}
+				if value, ok := ac3ExtendedMixLevelDB(ltrtsurmixlev); ok {
+					info.ltrtsurmixlevDB = value
+					info.hasLtrtsurmixlev = true
+				}
+				lorosurmixlev, ok := br.readBits(3)
+				if !ok {
+					return false
+				}
+				if value, ok := ac3ExtendedMixLevelDB(lorosurmixlev); ok {
+					info.lorosurmixlevDB = value
+					info.hasLorosurmixlev = true
+				}
+			}
+		}
+		if lfeon {
+			lfeMixLevelExists, ok := br.readBits(1)
+			if !ok {
+				return false
+			}
+			if lfeMixLevelExists == 1 && !br.skipBits(5) {
+				return false
+			}
+		}
+		if strmtyp == 0 {
+			for i := 0; i < eac3DialnormFieldCount(acmod); i++ {
+				programScaleExists, ok := br.readBits(1)
+				if !ok {
+					return false
+				}
+				if programScaleExists == 1 && !br.skipBits(6) {
+					return false
+				}
+			}
+			externalScaleExists, ok := br.readBits(1)
+			if !ok {
+				return false
+			}
+			if externalScaleExists == 1 && !br.skipBits(6) {
+				return false
+			}
+			mixData, ok := br.readBits(2)
+			if !ok {
+				return false
+			}
+			switch mixData {
+			case 1:
+				if !br.skipBits(5) {
+					return false
+				}
+			case 2:
+				if !br.skipBits(12) {
+					return false
+				}
+			case 3:
+				size, ok := br.readBits(5)
+				if !ok {
+					return false
+				}
+				mixData2Exists, ok := br.readBits(1)
+				if !ok {
+					return false
+				}
+				if mixData2Exists == 1 {
+					if !br.skipBits(10) { // premixcmpsel, drcsrc, premixcmpscl
+						return false
+					}
+					for range 7 {
+						scaleExists, ok := br.readBits(1)
+						if !ok || (scaleExists == 1 && !br.skipBits(4)) {
+							return false
+						}
+					}
+					additionalChannelsExist, ok := br.readBits(1)
+					if !ok {
+						return false
+					}
+					if additionalChannelsExist == 1 {
+						for range 2 {
+							scaleExists, ok := br.readBits(1)
+							if !ok || (scaleExists == 1 && !br.skipBits(4)) {
+								return false
+							}
+						}
+					}
+				}
+				mixData3Exists, ok := br.readBits(1)
+				if !ok {
+					return false
+				}
+				if mixData3Exists == 1 {
+					if !br.skipBits(5) { // spchdat
+						return false
+					}
+					for range 2 {
+						speechDataExists, ok := br.readBits(1)
+						if !ok || (speechDataExists == 1 && !br.skipBits(7)) {
+							return false
+						}
+					}
+				}
+				if !br.skipBits((int(size) + 2) * 8) {
+					return false
+				}
+			}
+			if acmod < 2 {
+				for i := 0; i < eac3DialnormFieldCount(acmod); i++ {
+					panInfoExists, ok := br.readBits(1)
+					if !ok {
+						return false
+					}
+					if panInfoExists == 1 && !br.skipBits(14) {
+						return false
+					}
+				}
+			}
+			mixConfigExists, ok := br.readBits(1)
+			if !ok {
+				return false
+			}
+			if mixConfigExists == 1 {
+				blocks := eac3BlockCount(numblkscod)
+				for i := 0; i < blocks; i++ {
+					if blocks == 1 {
+						if !br.skipBits(5) {
+							return false
+						}
+						continue
+					}
+					blockMixExists, ok := br.readBits(1)
+					if !ok {
+						return false
+					}
+					if blockMixExists == 1 && !br.skipBits(5) {
+						return false
+					}
+				}
+			}
+		}
+	}
+	if infomdate, ok := br.readBits(1); !ok {
+		return false
+	} else if infomdate == 1 {
+		bsmod, ok := br.readBits(3)
+		if !ok || !br.skipBits(2) {
+			return false
+		}
+		info.bsmod = int(bsmod)
+		info.serviceKind = ac3ServiceKind(int(bsmod))
+		if acmod == 2 {
+			dsurmod, ok := br.readBits(2)
+			if !ok || !br.skipBits(2) { // dheadphonmod
+				return false
+			}
+			info.dsurmod = int(dsurmod)
+			info.hasDsurmod = true
+		}
+		if acmod >= 6 && !br.skipBits(2) {
+			return false
+		}
+		for i := 0; i < eac3DialnormFieldCount(acmod); i++ {
+			audioProdInfoExists, ok := br.readBits(1)
+			if !ok {
+				return false
+			}
+			if audioProdInfoExists == 1 {
+				if !parseEAC3AudioProductionInfo(br, info) {
+					return false
+				}
+			}
+		}
+		if fscod != 3 && !br.skipBits(1) {
+			return false
+		}
+	}
+	if strmtyp == 0 && numblkscod != 3 {
+		if !br.skipBits(1) {
+			return false
+		}
+	}
+	if strmtyp == 2 && numblkscod == 3 {
+		if !br.skipBits(6) {
+			return false
+		}
+	} else if strmtyp == 2 {
+		convertExists, ok := br.readBits(1)
+		if !ok {
+			return false
+		}
+		if convertExists == 1 && !br.skipBits(6) {
+			return false
+		}
+	}
+	addbsie, ok := br.readBits(1)
+	if !ok || addbsie == 0 {
+		return false
+	}
+	addbsil, ok := br.readBits(6)
+	if !ok {
+		return false
+	}
+	additionalBytes := int(addbsil) + 1
+	for i := 0; i < additionalBytes; i++ {
+		if i == 0 {
+			if !br.skipBits(7) {
+				return false
+			}
+			flag, ok := br.readBits(1)
+			if !ok {
+				return false
+			}
+			if flag == 1 && additionalBytes >= 2 {
+				complexity, ok := br.readBits(8)
+				if !ok {
+					return false
+				}
+				info.jocComplexity = int(complexity)
+				return true
+			}
+			continue
+		}
+		if !br.skipBits(8) {
+			return false
+		}
+	}
+	return false
+}
+
+// parseEAC3AudioProductionInfo reads mix level and room type from one E-AC-3
+// informational-metadata program, retaining the first reported values.
+func parseEAC3AudioProductionInfo(br *ac3BitReader, info *ac3Info) bool {
+	mixlevel, ok := br.readBits(5)
+	if !ok {
+		return false
+	}
+	roomtyp, ok := br.readBits(2)
+	if !ok {
+		return false
+	}
+	adconvtyp, ok := br.readBits(1)
+	if !ok {
+		return false
+	}
+	if info != nil {
+		if !info.hasMixlevel {
+			info.mixlevel = int(mixlevel) + 80
+			info.hasMixlevel = true
+		}
+		if value, ok := ac3RoomType(roomtyp); ok && !info.hasRoomtyp {
+			info.roomtyp = value
+			info.hasRoomtyp = true
+		}
+		if adconvtyp == 1 {
+			info.hasAdconvtyp = true
+		}
+	}
+	return true
+}
+
+// eac3BlockCount maps the E-AC-3 numblkscod field to audio blocks per frame.
+func eac3BlockCount(numblkscod int) int {
+	switch numblkscod {
+	case 0:
+		return 1
+	case 1:
+		return 2
+	case 2:
+		return 3
+	case 3:
+		return 6
+	default:
+		return 0
+	}
+}
+
+// firstNonZero returns the first non-zero value in priority order.
+func firstNonZero(values ...int) int {
+	for _, v := range values {
+		if v != 0 {
+			return v
+		}
+	}
+	return 0
 }
 
 // eac3DialnormFieldCount returns how many dialog-normalization/compression field groups
@@ -858,6 +1232,26 @@ func eac3SamplesPerFrame(numblkscod int) int {
 }
 
 func (info *ac3Info) mergeFrame(frame ac3Info) {
+	if frame.eac3FrameType == 0 && !info.hasEAC3Independent {
+		info.hasEAC3Independent = true
+		info.channels = frame.channels
+		info.layout = frame.layout
+		info.acmod = frame.acmod
+		info.lfeon = frame.lfeon
+		info.hasLFE = true
+		info.bsmod = frame.bsmod
+		info.serviceKind = frame.serviceKind
+	}
+	if frame.eac3FrameType == 1 {
+		info.hasEAC3Dependent = true
+		frame.dynrngParsed = true
+		frame.dynrngCode = 0
+		if !info.hasDependentACMod {
+			info.dependentACMod = frame.acmod
+			info.dependentLFE = frame.lfeon
+			info.hasDependentACMod = true
+		}
+	}
 	if info.framesMerged == 0 {
 		// Base fields are first-frame-only in MediaInfo.
 		info.hasCompr = frame.compre
@@ -869,7 +1263,12 @@ func (info *ac3Info) mergeFrame(frame ac3Info) {
 		info.hasDynrng = frame.dynrnge
 		if frame.dynrnge {
 			info.dynrngDB = frame.dynrngDB
+			info.dynrngFirst = true
 		}
+	}
+	if !info.hasDynrng && frame.dynrnge {
+		info.hasDynrng = true
+		info.dynrngDB = frame.dynrngDB
 	}
 
 	if frame.bitRateKbps > 0 && info.bitRateKbps == 0 {
@@ -897,8 +1296,16 @@ func (info *ac3Info) mergeFrame(frame ac3Info) {
 		info.dsurmod = frame.dsurmod
 		info.hasDsurmod = true
 	}
-	if frame.lfeon > 0 && info.lfeon == 0 {
+	if frame.hasDsurexmod && !info.hasDsurexmod {
+		info.dsurexmod = frame.dsurexmod
+		info.hasDsurexmod = true
+	}
+	if frame.hasAdconvtyp {
+		info.hasAdconvtyp = true
+	}
+	if frame.hasLFE && !info.hasLFE {
 		info.lfeon = frame.lfeon
+		info.hasLFE = true
 	}
 	if frame.serviceKind != "" && info.serviceKind == "" {
 		info.serviceKind = frame.serviceKind
@@ -948,10 +1355,12 @@ func (info *ac3Info) mergeFrame(frame ac3Info) {
 	if frame.hasMixlevel && !info.hasMixlevel {
 		info.mixlevel = frame.mixlevel
 		info.hasMixlevel = true
+		info.mixlevelFirst = info.framesMerged == 0
 	}
 	if frame.hasRoomtyp && !info.hasRoomtyp {
 		info.roomtyp = frame.roomtyp
 		info.hasRoomtyp = true
+		info.roomtypFirst = info.framesMerged == 0
 	}
 	if frame.hasDialnorm {
 		if info.dialnormCount == 0 {
@@ -1069,8 +1478,16 @@ func (info *ac3Info) mergeFrameBase(frame ac3Info) {
 		info.dsurmod = frame.dsurmod
 		info.hasDsurmod = true
 	}
-	if frame.lfeon > 0 && info.lfeon == 0 {
+	if frame.hasDsurexmod && !info.hasDsurexmod {
+		info.dsurexmod = frame.dsurexmod
+		info.hasDsurexmod = true
+	}
+	if frame.hasAdconvtyp {
+		info.hasAdconvtyp = true
+	}
+	if frame.hasLFE && !info.hasLFE {
 		info.lfeon = frame.lfeon
+		info.hasLFE = true
 	}
 	if frame.serviceKind != "" && info.serviceKind == "" {
 		info.serviceKind = frame.serviceKind
@@ -1092,10 +1509,12 @@ func (info *ac3Info) mergeFrameBase(frame ac3Info) {
 	if frame.hasMixlevel && !info.hasMixlevel {
 		info.mixlevel = frame.mixlevel
 		info.hasMixlevel = true
+		info.mixlevelFirst = info.framesMerged == 0
 	}
 	if frame.hasRoomtyp && !info.hasRoomtyp {
 		info.roomtyp = frame.roomtyp
 		info.hasRoomtyp = true
+		info.roomtypFirst = info.framesMerged == 0
 	}
 	if frame.hasJOC && !info.hasJOC {
 		info.hasJOC = true
@@ -1388,13 +1807,16 @@ func ac3ExtendedMixLevelDB(code uint32) (float64, bool) {
 	}
 }
 
-// ac3PreferredDownmix maps AC-3 xbsi preferred stereo downmix codes to MediaInfo labels.
+// ac3PreferredDownmix maps AC-3 xbsi preferred stereo downmix codes to MediaInfo labels,
+// including MediaInfo's literal rendering of reserved code 3.
 func ac3PreferredDownmix(code uint32) string {
 	switch code {
 	case 1:
 		return "Lt/Rt"
 	case 2:
 		return "Lo/Ro"
+	case 3:
+		return "3"
 	default:
 		return ""
 	}
@@ -1503,6 +1925,15 @@ func ac3ChannelLayout(acmod int, lfeon bool) (uint64, string) {
 		layout = withLFE
 	}
 	return uint64(len(layout)), strings.Join(layout, " ")
+}
+
+// ac3ChannelPositions returns topology-specific positions that cannot be
+// reconstructed from the channel count alone.
+func ac3ChannelPositions(layout string) string {
+	if layout == "L R Ls Rs LFE" {
+		return "Front: L R, Side: L R, LFE"
+	}
+	return ""
 }
 
 func ac3ServiceKind(bsmod int) string {

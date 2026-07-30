@@ -2,6 +2,7 @@ package mediainfo
 
 import (
 	"fmt"
+	"maps"
 	"math"
 	"os"
 	"path/filepath"
@@ -17,11 +18,14 @@ type jsonKV struct {
 }
 
 func buildJSONMedia(report Report) jsonMediaOut {
+	jsonReport := report
+	jsonReport.General = withMatroskaGoJSON(report.General)
 	tracks := make([]jsonTrackOut, 0, len(report.Streams)+1)
-	tracks = append(tracks, jsonTrackOut{Fields: buildJSONGeneralFields(report)})
-	containerFormat := findField(report.General.Fields, "Format")
+	tracks = append(tracks, jsonTrackOut{Fields: buildJSONGeneralFields(jsonReport)})
+	containerFormat := firstNonEmpty(report.General.JSON["Format"], findField(report.General.Fields, "Format"))
 	sorted := orderTracks(report.Streams)
 	forEachStreamWithKindIndex(sorted, func(stream Stream, index, total, order int) {
+		stream = withMatroskaGoJSON(stream)
 		typeOrder := 0
 		if total > 1 {
 			typeOrder = index
@@ -31,6 +35,41 @@ func buildJSONMedia(report Report) jsonMediaOut {
 	return jsonMediaOut{Ref: report.Ref, Tracks: tracks}
 }
 
+// withMatroskaGoJSON returns a stream copy with staged Matroska extensions
+// merged into cloned JSON maps. Existing report fields take precedence, and
+// the source stream remains unchanged.
+func withMatroskaGoJSON(stream Stream) Stream {
+	if len(stream.mkvGoJSON) == 0 && len(stream.mkvGoJSONRaw) == 0 {
+		return stream
+	}
+	stream.JSON = maps.Clone(stream.JSON)
+	if stream.JSON == nil {
+		stream.JSON = map[string]string{}
+	}
+	for key, value := range stream.mkvGoJSON {
+		if value != "" && !matroskaJSONFieldProvided(stream, key) {
+			stream.JSON[key] = value
+		}
+	}
+	stream.JSONRaw = maps.Clone(stream.JSONRaw)
+	if stream.JSONRaw == nil {
+		stream.JSONRaw = map[string]string{}
+	}
+	for key, value := range stream.mkvGoJSONRaw {
+		if value == "" {
+			continue
+		}
+		if key == "extra" {
+			stream.JSONRaw[key] = appendJSONExtraObject(stream.JSONRaw[key], value)
+		} else if stream.JSONRaw[key] == "" {
+			stream.JSONRaw[key] = value
+		}
+	}
+	return stream
+}
+
+// buildJSONGeneralFields assembles General fields, merges parser-discovered
+// dynamic extras, and applies the active container's key order.
 func buildJSONGeneralFields(report Report) []jsonKV {
 	fields := []jsonKV{{Key: "@type", Val: string(StreamGeneral)}}
 	counts := countStreams(report.Streams)
@@ -68,10 +107,20 @@ func buildJSONGeneralFields(report Report) []jsonKV {
 		}
 	}
 	fields = append(fields, mapStreamFieldsToJSON(StreamGeneral, report.General.Fields)...)
-	fields = applyJSONExtras(fields, report.General.JSON, report.General.JSONRaw)
-	return sortJSONFields(StreamGeneral, fields)
+	containerFormat := firstNonEmpty(report.General.JSON["Format"], findField(report.General.Fields, "Format"))
+	rawExtras := withDynamicJSONExtras(report.General.JSONRaw, report.General.dynamicJSON)
+	switch containerFormat {
+	case "Matroska":
+		rawExtras = withMatroskaJSONExtraOrder(rawExtras)
+	case "AVI":
+		rawExtras = withAVIJSONExtraOrder(rawExtras)
+	}
+	fields = applyJSONExtras(fields, report.General.JSON, rawExtras)
+	return sortJSONFieldsForContainer(StreamGeneral, fields, containerFormat)
 }
 
+// buildJSONStreamFields assembles one non-General stream, merges dynamic extras,
+// derives allowed computed fields, and applies the container-specific key order.
 func buildJSONStreamFields(stream Stream, order int, typeOrder int, containerFormat string) []jsonKV {
 	fields := []jsonKV{{Key: "@type", Val: string(stream.Kind)}}
 	if typeOrder > 0 {
@@ -81,21 +130,58 @@ func buildJSONStreamFields(stream Stream, order int, typeOrder int, containerFor
 		fields = append(fields, jsonKV{Key: "StreamOrder", Val: strconv.Itoa(order)})
 	}
 	fields = append(fields, mapStreamFieldsToJSON(stream.Kind, stream.Fields)...)
-	fields = applyJSONExtras(fields, stream.JSON, stream.JSONRaw)
-	fields = normalizeContainerComputedJSON(stream.Kind, fields, containerFormat)
-	if !stream.JSONSkipComputed {
-		fields = append(fields, buildJSONComputedFields(stream.Kind, fields, containerFormat)...)
+	rawExtras := withDynamicJSONExtras(stream.JSONRaw, stream.dynamicJSON)
+	switch containerFormat {
+	case "Matroska":
+		rawExtras = withMatroskaJSONExtraOrder(rawExtras)
+	case "AVI":
+		rawExtras = withAVIJSONExtraOrder(rawExtras)
 	}
-	return sortJSONFields(stream.Kind, fields)
+	fields = applyJSONExtras(fields, stream.JSON, rawExtras)
+	fields = normalizeContainerComputedJSON(stream.Kind, fields, containerFormat, stream.JSONPreserveDisplayAR)
+	if !stream.JSONSkipComputed {
+		fields = append(fields, buildJSONComputedFields(stream.Kind, fields, containerFormat, stream.JSONSkipFrameRateRatio)...)
+	}
+	return sortJSONFieldsForContainer(stream.Kind, fields, containerFormat)
 }
 
-func normalizeContainerComputedJSON(kind StreamKind, fields []jsonKV, containerFormat string) []jsonKV {
+func normalizeContainerComputedJSON(kind StreamKind, fields []jsonKV, containerFormat string, preserveDisplayAspect ...bool) []jsonKV {
+	preserveMatroskaDisplayAspect := len(preserveDisplayAspect) > 0 && preserveDisplayAspect[0]
 	if kind == StreamVideo && strings.EqualFold(containerFormat, "Matroska") {
 		width, _ := strconv.ParseFloat(jsonFieldValue(fields, "Width"), 64)
 		height, _ := strconv.ParseFloat(jsonFieldValue(fields, "Height"), 64)
 		if width > 0 && height > 0 {
+			pixelAspect, _ := strconv.ParseFloat(jsonFieldValue(fields, "PixelAspectRatio"), 64)
+			if pixelAspect <= 0 {
+				pixelAspect = 1
+			}
 			// Official mediainfo JSON reports the numeric ratio even when the text field snaps to a common value.
-			fields = setJSONField(fields, "DisplayAspectRatio", formatJSONFloat(width/height))
+			isAVCOrHEVC := jsonFieldValue(fields, "Format") == "AVC" || jsonFieldValue(fields, "Format") == "HEVC"
+			preserveActiveFormatRatio := jsonFieldValue(fields, "ActiveFormatDescription") != ""
+			displayAspect, _ := strconv.ParseFloat(jsonFieldValue(fields, "DisplayAspectRatio"), 64)
+			preserveContainerRatio := jsonFieldValue(fields, "Format") == "HEVC" && displayAspect > 0 && math.Abs(displayAspect-width/height) >= 0.003
+			if preserveMatroskaDisplayAspect || preserveActiveFormatRatio || preserveContainerRatio && math.Abs(pixelAspect-1) < 0.0005 {
+				return fields
+			}
+			if isAVCOrHEVC && math.Abs(pixelAspect-1) < 0.005 {
+				fields = setJSONField(fields, "PixelAspectRatio", "1.000")
+				fields = setJSONField(fields, "DisplayAspectRatio", formatJSONFloat(width/height))
+				return fields
+			}
+			computedDisplayAspect := (width / height) * pixelAspect
+			if displayAspect > 0 && math.Abs(displayAspect-computedDisplayAspect) < 0.001 {
+				return fields
+			}
+			if preserveContainerRatio {
+				return fields
+			}
+			if jsonFieldValue(fields, "Format") == "MPEG Video" && width == 720 && height == 576 && math.Abs(pixelAspect-1.067) < 0.0005 {
+				fields = setJSONField(fields, "DisplayAspectRatio", "1.333")
+				return fields
+			}
+			if pixelAspect > 0 {
+				fields = setJSONField(fields, "DisplayAspectRatio", formatJSONFloat((width/height)*pixelAspect))
+			}
 		}
 	}
 	if kind == StreamVideo && (strings.EqualFold(containerFormat, "MPEG-4") || strings.EqualFold(containerFormat, "QuickTime")) {
@@ -136,6 +222,8 @@ func mapStreamFieldsToJSON(kind StreamKind, fields []Field) []jsonKV {
 			}
 		case "Format tier":
 			out = append(out, jsonKV{Key: "Format_Tier", Val: field.Value})
+		case "Format level":
+			out = append(out, jsonKV{Key: "Format_Level", Val: field.Value})
 		case "ID":
 			out = append(out, jsonKV{Key: "ID", Val: field.Value})
 		case "Menu ID":
@@ -341,7 +429,9 @@ func mapStreamFieldsToJSON(kind StreamKind, fields []Field) []jsonKV {
 	return out
 }
 
-func buildJSONComputedFields(kind StreamKind, fields []jsonKV, containerFormat string) []jsonKV {
+// buildJSONComputedFields derives MediaInfo-compatible JSON values that are not
+// already present in the parsed field set.
+func buildJSONComputedFields(kind StreamKind, fields []jsonKV, containerFormat string, skipFrameRateRatio bool) []jsonKV {
 	out := []jsonKV{}
 	format := jsonFieldValue(fields, "Format")
 	duration, _ := strconv.ParseFloat(jsonFieldValue(fields, "Duration"), 64)
@@ -356,7 +446,7 @@ func buildJSONComputedFields(kind StreamKind, fields []jsonKV, containerFormat s
 		}
 		// MediaInfo emits FrameRate_Num/Den for some containers even when the displayed frame rate
 		// field lacks a "(num/den)" hint (e.g. BDAV and MPEG-TS).
-		if (containerFormat == "MPEG-4" || containerFormat == "MPEG-TS" || containerFormat == "BDAV") &&
+		if !skipFrameRateRatio && (containerFormat == "MPEG-4" || containerFormat == "MPEG-TS" || containerFormat == "BDAV" || containerFormat == "Matroska") &&
 			jsonFieldValue(fields, "FrameRate_Num") == "" && jsonFieldValue(fields, "FrameRate_Den") == "" {
 			num, den := rationalizeFrameRate(frameRate)
 			if num > 0 && den > 0 {
@@ -367,9 +457,14 @@ func buildJSONComputedFields(kind StreamKind, fields []jsonKV, containerFormat s
 	}
 
 	if kind == StreamAudio {
-		if channels != "" && jsonFieldValue(fields, "ChannelPositions") == "" {
+		if channels != "" && jsonFieldValue(fields, "ChannelPositions") == "" && jsonFieldValue(fields, "Channels_Original") == "" {
+			omitDerivedFLACPositions := containerFormat == "Matroska" && format == "FLAC" &&
+				jsonFieldValue(fields, "ChannelLayout") == "" &&
+				flacDerivedLayoutIsOmitted(jsonFieldValue(fields, "Encoded_Library"))
+			omitDerivedMatroskaPositions := containerFormat == "Matroska" &&
+				(format == "MPEG Audio" || format == "Vorbis" || format == "PCM") && jsonFieldValue(fields, "ChannelLayout") == ""
 			// Official mediainfo does not emit ChannelPositions for MPEG Audio in MPEG-PS (e.g. VOB).
-			if !(containerFormat == "MPEG-PS" && format == "MPEG Audio") {
+			if (containerFormat != "MPEG-PS" || format != "MPEG Audio") && !omitDerivedFLACPositions && !omitDerivedMatroskaPositions {
 				// For MPEG-TS/BDAV, MediaInfo often omits ChannelPositions when ChannelLayout isn't known
 				// (e.g. DTS-HD ExSS without a speaker mask). Avoid synthesizing positions in that case.
 				if (containerFormat == "MPEG-TS" || containerFormat == "BDAV") && jsonFieldValue(fields, "ChannelLayout") == "" {
@@ -488,6 +583,8 @@ func channelPositionsFromCount(value string) string {
 		return "Front: C"
 	case "2":
 		return "Front: L R"
+	case "5":
+		return "Front: L C R, Side: L R"
 	case "6":
 		return "Front: L C R, Side: L R, LFE"
 	default:
@@ -563,6 +660,9 @@ func splitCodecID(value string) (string, string) {
 }
 
 func splitProfileLevel(value string) (string, string) {
+	if strings.Contains(value, " / ") {
+		return strings.TrimSpace(value), ""
+	}
 	parts := strings.SplitN(value, "@", 2)
 	profile := strings.TrimSpace(parts[0])
 	if len(parts) == 1 {

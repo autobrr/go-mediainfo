@@ -27,6 +27,9 @@ func TestParseTrueHDFrameAtmosMajorSync(t *testing.T) {
 	if info.maxBitRate != 8199000 {
 		t.Fatalf("maxBitRate=%d want 8199000", info.maxBitRate)
 	}
+	if info.dynamicObjects != 11 {
+		t.Fatalf("dynamicObjects=%d want 11", info.dynamicObjects)
+	}
 	atmos, ok := trueHDAtmosPresentationInfo(info)
 	if !ok {
 		t.Fatal("expected Atmos presentation details")
@@ -59,6 +62,27 @@ func TestParseTrueHDFrameWithoutAtmosFlag(t *testing.T) {
 	}
 	if _, ok := trueHDAtmosPresentationInfo(info); ok {
 		t.Fatal("did not expect Atmos presentation details")
+	}
+}
+
+func TestParseTrueHDFrame96KHzWithoutAtmos(t *testing.T) {
+	frame := []byte{
+		0x22, 0x16, 0xFF, 0xB0,
+		0xF8, 0x72, 0x6F, 0xBA, 0x10, 0x17, 0x80, 0x4F,
+		0xB7, 0x52, 0x00, 0x00, 0x00, 0x00, 0x87, 0x50,
+		0x30, 0x7C, 0x00, 0x00, 0x4A, 0xEF, 0xE3, 0x07,
+		0xE3, 0x00, 0xE5, 0xED,
+	}
+
+	info, ok := parseTrueHDFrame(frame)
+	if !ok {
+		t.Fatal("parseTrueHDFrame returned ok=false")
+	}
+	if info.atmos {
+		t.Fatal("did not expect Atmos")
+	}
+	if info.sampleRate != 96000 || info.samplesPerFrame != 80 {
+		t.Fatalf("rate=%d/%d want 96000/80", info.sampleRate, info.samplesPerFrame)
 	}
 }
 
@@ -158,5 +182,65 @@ func TestApplyMatroskaAudioProbes_TrueHDNonAtmosKeepsMatroskaLayout(t *testing.T
 	}
 	if got := stream.JSON["FrameRate_Den"]; got != "40" {
 		t.Fatalf("FrameRate_Den=%q want 40", got)
+	}
+}
+
+func TestApplyMatroskaAudioProbes_TrueHDNonAtmosEightChannelLayout(t *testing.T) {
+	info := &MatroskaInfo{Tracks: []Stream{{
+		Kind: StreamAudio,
+		Fields: []Field{
+			{Name: "ID", Value: "2"},
+			{Name: "Format", Value: "TrueHD"},
+			{Name: "Channel(s)", Value: "8 channels"},
+			{Name: "Channel layout", Value: "C L R Ls Rs Lb Rb LFE"},
+		},
+		JSON: map[string]string{"Duration": "10.000000000"},
+	}}}
+	probes := map[uint64]*matroskaAudioProbe{
+		2: {
+			format: "TrueHD",
+			truehd: trueHDInfo{sampleRate: 96000, samplesPerFrame: 80},
+			ok:     true,
+		},
+	}
+
+	applyMatroskaAudioProbes(info, probes)
+	stream := info.Tracks[0]
+
+	if got := findField(stream.Fields, "Format"); got != "MLP FBA" {
+		t.Fatalf("Format=%q want MLP FBA", got)
+	}
+	if got := findField(stream.Fields, "Commercial name"); got != "Dolby TrueHD" {
+		t.Fatalf("Commercial name=%q want Dolby TrueHD", got)
+	}
+	if got := stream.JSON["ChannelLayout"]; got != "L R C LFE Ls Rs Lb Rb" {
+		t.Fatalf("ChannelLayout=%q want standard 7.1", got)
+	}
+	if got := stream.JSON["ChannelPositions"]; got != "Front: L C R, Side: L R, Back: L R, LFE" {
+		t.Fatalf("ChannelPositions=%q want standard 7.1 positions", got)
+	}
+}
+
+func TestApplyMatroskaTagStatsPreservesTrueHDFrameCount(t *testing.T) {
+	info := &MatroskaInfo{Tracks: []Stream{{
+		Kind: StreamAudio,
+		Fields: []Field{
+			{Name: "ID", Value: "2"},
+			{Name: "Format", Value: "TrueHD"},
+		},
+		JSON: map[string]string{"UniqueID": "17"},
+	}}}
+	tags := map[uint64]matroskaTagStats{
+		17: {
+			trusted:       true,
+			hasFrameCount: true,
+			frameCount:    8856498,
+		},
+	}
+
+	applyMatroskaTagStats(info, tags, 0)
+
+	if got := info.Tracks[0].JSON["FrameCount"]; got != "8856498" {
+		t.Fatalf("FrameCount=%q want trusted Statistics Tags value", got)
 	}
 }

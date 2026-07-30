@@ -1,6 +1,9 @@
 package mediainfo
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 const x265RealInfo = "x265 (build 216) - 4.2+1-e444744:[Mac OS X][clang 21.0.0][64 bit] 8bit+10bit+12bit - H.265/HEVC codec - Copyright 2013-2018 (c) Multicoreware, Inc - http://x265.org - options: cpuid=98 frame-threads=3 wpp bitdepth=8 fps=24/1 input-res=320x240 deblock=0:0 scenecut-aware-qp=0conformance-window-offsets"
 
@@ -57,6 +60,15 @@ func TestParseHEVCUserDataUnregistered(t *testing.T) {
 	parseHEVCUserDataUnregistered(payload2, &info2)
 	if info2.x265Seen {
 		t.Fatalf("non-x265 UUID should be ignored")
+	}
+}
+
+func TestParseHEVCUserDataUnregisteredATEME(t *testing.T) {
+	payload := append(make([]byte, 16), []byte("ATEME Titan KFE 3.7.3 (4.7.3.1001)\x00")...)
+	var info hevcHDRInfo
+	parseHEVCUserDataUnregistered(payload, &info)
+	if info.encoderLibrary != "ATEME Titan KFE 3.7.3 (4.7.3.1001)" || info.encoderName != "ATEME Titan KFE" || info.encoderVersion != "3.7.3 (4.7.3.1001)" {
+		t.Fatalf("unexpected ATEME metadata: %+v", info)
 	}
 }
 
@@ -120,5 +132,81 @@ func TestMapStreamFieldsToJSONX265EncodedLibrary(t *testing.T) {
 	}
 	if v := jsonFieldValue(got, "Encoded_Library_Settings"); v != x265WantSettings {
 		t.Fatalf("Encoded_Library_Settings = %q", v)
+	}
+}
+
+func TestApplyMatroskaVideoProbesX265OutranksGenericEncoder(t *testing.T) {
+	var hdr hevcHDRInfo
+	atemePayload := append(make([]byte, 16), []byte("ATEME Titan KFE 3.7.3 (4.7.3.1001)\x00")...)
+	parseHEVCUserDataUnregistered(atemePayload, &hdr)
+	x265Payload := make([]byte, 0, 16+len(x265RealInfo))
+	x265Payload = append(x265Payload, 0x2C, 0xA2, 0xDE, 0x09, 0xB5, 0x17, 0x47, 0xDB, 0xBB, 0x55, 0xA4, 0xFE, 0x7F, 0xC2, 0xFC, 0x4E)
+	x265Payload = append(x265Payload, x265RealInfo...)
+	parseHEVCUserDataUnregistered(x265Payload, &hdr)
+	hdr.timeCode = "01:02:03:04"
+
+	info := MatroskaInfo{Tracks: []Stream{{
+		Kind: StreamVideo,
+		Fields: []Field{
+			{Name: "ID", Value: "1"},
+			{Name: "Writing library", Value: "container encoder"},
+			{Name: "Encoding settings", Value: "container settings"},
+		},
+		JSON: map[string]string{
+			"Encoded_Library":          "container encoder",
+			"Encoded_Library_Name":     "container",
+			"Encoded_Library_Version":  "1",
+			"Encoded_Library_Settings": "container settings",
+		},
+	}}}
+	applyMatroskaVideoProbes(&info, map[uint64]*matroskaVideoProbe{1: {codec: "HEVC", hdrInfo: hdr}})
+
+	stream := info.Tracks[0]
+	if got := findField(stream.Fields, "Writing library"); got != x265WantLibrary {
+		t.Fatalf("Writing library = %q, want %q", got, x265WantLibrary)
+	}
+	if got := findField(stream.Fields, "Encoding settings"); got != x265WantSettings {
+		t.Fatalf("Encoding settings = %q, want %q", got, x265WantSettings)
+	}
+	if got := stream.JSON["Encoded_Library"]; got != "x265 - "+strings.TrimPrefix(x265WantLibrary, "x265 ") {
+		t.Fatalf("Encoded_Library = %q", got)
+	}
+	if got := stream.JSON["Encoded_Library_Name"]; got != "x265" {
+		t.Fatalf("Encoded_Library_Name = %q, want x265", got)
+	}
+	if got := stream.JSON["Encoded_Library_Version"]; got != "4.2+1-e444744:[Mac OS X][clang 21.0.0][64 bit] 8bit+10bit+12bit" {
+		t.Fatalf("Encoded_Library_Version = %q, stale container version survived", got)
+	}
+	if got := stream.JSON["Encoded_Library_Settings"]; got != x265WantSettings {
+		t.Fatalf("Encoded_Library_Settings = %q, want %q", got, x265WantSettings)
+	}
+	if got := stream.JSON["TimeCode_FirstFrame"]; got != "01:02:03:04" {
+		t.Fatalf("TimeCode_FirstFrame = %q, want independent HEVC time code", got)
+	}
+}
+
+func TestApplyMatroskaVideoProbesGenericEncoderWithoutX265(t *testing.T) {
+	hdr := hevcHDRInfo{
+		encoderLibrary: "ATEME Titan KFE 3.7.3",
+		encoderName:    "ATEME Titan KFE",
+		encoderVersion: "3.7.3",
+		timeCode:       "01:02:03:04",
+	}
+	info := MatroskaInfo{Tracks: []Stream{{
+		Kind:   StreamVideo,
+		Fields: []Field{{Name: "ID", Value: "1"}},
+	}}}
+
+	applyMatroskaVideoProbes(&info, map[uint64]*matroskaVideoProbe{1: {codec: "HEVC", hdrInfo: hdr}})
+
+	stream := info.Tracks[0]
+	if got := findField(stream.Fields, "Writing library"); got != hdr.encoderLibrary {
+		t.Fatalf("Writing library = %q, want generic %q", got, hdr.encoderLibrary)
+	}
+	if got := stream.JSON["Encoded_Library"]; got != hdr.encoderLibrary {
+		t.Fatalf("Encoded_Library = %q, want generic %q", got, hdr.encoderLibrary)
+	}
+	if got := stream.JSON["TimeCode_FirstFrame"]; got != hdr.timeCode {
+		t.Fatalf("TimeCode_FirstFrame = %q, want %q", got, hdr.timeCode)
 	}
 }

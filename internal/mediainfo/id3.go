@@ -22,7 +22,10 @@ type id3v2Data struct {
 	Pictures []id3Picture
 }
 
-func parseID3v2(file io.ReadSeeker) (id3v2Data, bool) {
+func parseID3v2(file io.ReadSeeker, fileSize int64, assetBudget *embeddedAssetBudget) (id3v2Data, bool) {
+	if assetBudget == nil {
+		assetBudget = &embeddedAssetBudget{}
+	}
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		return id3v2Data{}, false
 	}
@@ -41,17 +44,23 @@ func parseID3v2(file io.ReadSeeker) (id3v2Data, bool) {
 		// Unsupported version; still skip.
 		size := synchsafe32(header[6:10])
 		offset := int64(10 + size)
-		_, _ = file.Seek(offset, io.SeekStart)
+		seekOffset := max(0, min(offset, fileSize))
+		_, _ = file.Seek(seekOffset, io.SeekStart)
 		return id3v2Data{Offset: offset}, true
 	}
 
 	flags := header[5]
 	tagSize := int64(synchsafe32(header[6:10]))
 	offset := int64(10) + tagSize
+	if fileSize < 10 || tagSize > fileSize-10 || assetBudget.allowAllocation(uint64(tagSize), embeddedAssetMaxRetainedBytes) != embeddedAssetAccepted {
+		seekOffset := max(0, min(offset, fileSize))
+		_, _ = file.Seek(seekOffset, io.SeekStart)
+		return id3v2Data{Offset: offset}, true
+	}
 
-	payload := make([]byte, tagSize)
+	payload := make([]byte, int(tagSize))
 	if _, err := io.ReadFull(file, payload); err != nil {
-		_, _ = file.Seek(offset, io.SeekStart)
+		_, _ = file.Seek(min(offset, fileSize), io.SeekStart)
 		return id3v2Data{Offset: offset}, true
 	}
 
@@ -96,27 +105,45 @@ func parseID3v2(file io.ReadSeeker) (id3v2Data, bool) {
 		data := rd[10 : 10+size]
 		switch id {
 		case "TIT2", "TALB", "TPE1", "TPE2", "TPE3", "TPE4", "TENC", "TRCK", "TYER", "TDRC", "TCON", "TCOM", "TEXT", "TPUB", "TPOS", "TDAT", "TSSE", "TCOP", "TOLY", "TOPE", "TRSN":
+			if assetBudget.reserveString(uint64(len(data)), embeddedAssetMaxStringBytes) != embeddedAssetAccepted {
+				break
+			}
 			if v := decodeID3Text(data); v != "" {
 				text[id] = normalizeID3Multi(v)
 			}
 		case "TXXX":
+			if assetBudget.reserveString(uint64(len(data)), embeddedAssetMaxStringBytes) != embeddedAssetAccepted {
+				break
+			}
 			if desc, value, ok := parseID3TXXX(data); ok && desc != "" && value != "" {
 				text["TXXX:"+desc] = normalizeID3Multi(value)
 			}
 		case "WXXX":
+			if assetBudget.reserveString(uint64(len(data)), embeddedAssetMaxStringBytes) != embeddedAssetAccepted {
+				break
+			}
 			if desc, url, ok := parseID3WXXX(data); ok && desc != "" && url != "" {
 				text["WXXX:"+desc] = normalizeID3Multi(url)
 			}
 		case "COMM":
+			if assetBudget.reserveString(uint64(len(data)), embeddedAssetMaxStringBytes) != embeddedAssetAccepted {
+				break
+			}
 			if comment, ok := parseID3COMM(data); ok && comment != "" {
 				text["COMM"] = normalizeID3Multi(comment)
 			}
 		case "USLT":
+			if assetBudget.reserveString(uint64(len(data)), embeddedAssetMaxStringBytes) != embeddedAssetAccepted {
+				break
+			}
 			if lyrics, ok := parseID3USLT(data); ok && lyrics != "" {
 				text["USLT"] = normalizeID3Multi(lyrics)
 			}
 		case "APIC":
-			if pic, ok := parseID3APIC(data); ok {
+			if assetBudget.reserveItem() != embeddedAssetAccepted {
+				break
+			}
+			if pic, ok := parseID3APIC(data, assetBudget); ok {
 				pics = append(pics, pic)
 			}
 		}
@@ -225,14 +252,14 @@ func normalizeID3Lines(s string) string {
 	return strings.Join(parts, " / ")
 }
 
-func parseID3APIC(data []byte) (id3Picture, bool) {
+func parseID3APIC(data []byte, assetBudget *embeddedAssetBudget) (id3Picture, bool) {
 	if len(data) < 4 {
 		return id3Picture{}, false
 	}
 	enc := data[0]
 	rd := data[1:]
 	mimeEnd := bytes.IndexByte(rd, 0x00)
-	if mimeEnd < 0 {
+	if mimeEnd < 0 || assetBudget.reserveString(uint64(mimeEnd), embeddedAssetMaxMIMEBytes) != embeddedAssetAccepted {
 		return id3Picture{}, false
 	}
 	mime := string(rd[:mimeEnd])
@@ -245,16 +272,20 @@ func parseID3APIC(data []byte) (id3Picture, bool) {
 
 	desc := ""
 	if enc == 0x00 || enc == 0x03 {
-		if idx := bytes.IndexByte(rd, 0x00); idx >= 0 {
-			desc = strings.TrimSpace(string(rd[:idx]))
-			rd = rd[idx+1:]
+		idx := bytes.IndexByte(rd, 0x00)
+		if idx < 0 || assetBudget.reserveString(uint64(idx), embeddedAssetMaxNameBytes) != embeddedAssetAccepted {
+			return id3Picture{}, false
 		}
+		desc = strings.TrimSpace(string(rd[:idx]))
+		rd = rd[idx+1:]
 	} else {
 		// UTF-16: description ends with 0x00 0x00
-		if idx := indexUTF16TerminatorAligned(rd); idx >= 0 {
-			desc = decodeID3Text(append([]byte{enc}, rd[:idx]...))
-			rd = rd[idx+2:]
+		idx := indexUTF16TerminatorAligned(rd)
+		if idx < 0 || assetBudget.reserveString(uint64(idx), embeddedAssetMaxNameBytes) != embeddedAssetAccepted {
+			return id3Picture{}, false
 		}
+		desc = decodeID3Text(append([]byte{enc}, rd[:idx]...))
+		rd = rd[idx+2:]
 	}
 	if len(rd) == 0 {
 		return id3Picture{}, false
@@ -262,6 +293,9 @@ func parseID3APIC(data []byte) (id3Picture, bool) {
 	head := rd
 	if len(head) > 64<<10 {
 		head = head[:64<<10]
+	}
+	if assetBudget.reservePayload(uint64(len(head)), embeddedAssetMaxImageProbe) != embeddedAssetAccepted {
+		return id3Picture{}, false
 	}
 	return id3Picture{
 		Type:        picType,

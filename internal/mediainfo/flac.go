@@ -1,6 +1,7 @@
 package mediainfo
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
@@ -15,6 +16,22 @@ type flacTagKV struct {
 	Val string
 }
 
+// flacStreamInfo contains the lossless stream properties encoded by a FLAC
+// STREAMINFO metadata block.
+type flacStreamInfo struct {
+	minBlockSize  uint16
+	maxBlockSize  uint16
+	sampleRate    uint32
+	channels      uint8
+	bitsPerSample uint8
+	totalSamples  uint64
+	md5           string
+}
+
+// ParseFLAC parses FLAC metadata and returns container, stream, and JSON field
+// data. Oversized or malformed comments and pictures are skipped without
+// preventing valid audio parsing. It returns false when the reader cannot be
+// rewound/read or the input does not begin with a valid FLAC signature.
 func ParseFLAC(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, map[string]string, map[string]string, bool) {
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		return ContainerInfo{}, nil, nil, nil, false
@@ -38,6 +55,7 @@ func ParseFLAC(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, map[str
 	tags := map[string]string{}
 	var coverMIME string
 	var coverType string
+	assetBudget := &embeddedAssetBudget{}
 
 	for {
 		var blockHeader [4]byte
@@ -47,75 +65,68 @@ func ParseFLAC(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, map[str
 		isLast := (blockHeader[0] & 0x80) != 0
 		blockType := blockHeader[0] & 0x7F
 		blockLen := int(blockHeader[1])<<16 | int(blockHeader[2])<<8 | int(blockHeader[3])
-		if blockLen <= 0 {
-			if isLast {
-				break
-			}
-			continue
+		blockStart, err := file.Seek(0, io.SeekCurrent)
+		if err != nil {
+			break
 		}
-		if blockType == 0 {
-			if blockLen < 34 {
-				if _, err := file.Seek(int64(blockLen), io.SeekCurrent); err != nil {
-					break
-				}
-			} else {
+		blockEnd, reason := checkedEmbeddedRange(blockStart, uint64(blockLen), size)
+		if reason != embeddedAssetAccepted {
+			break
+		}
+		blockReadOK := true
+		switch blockType {
+		case 0:
+			if blockLen >= 34 {
 				var streamInfo [34]byte
 				if _, err := io.ReadFull(file, streamInfo[:]); err != nil {
-					break
-				}
-				sampleRate, channels, bitsPerSample, totalSamples, md5Hex = parseFLACStreamInfo(streamInfo[:])
-				if blockLen > 34 {
-					if _, err := file.Seek(int64(blockLen-34), io.SeekCurrent); err != nil {
-						break
-					}
+					blockReadOK = false
+				} else {
+					sampleRate, channels, bitsPerSample, totalSamples, md5Hex = parseFLACStreamInfo(streamInfo[:])
 				}
 			}
-		} else if blockType == 4 {
+		case 4:
 			// VorbisComment. Primary source for tags like ENCODER, TITLE, ALBUM, etc.
-			buf := make([]byte, blockLen)
-			if _, err := io.ReadFull(file, buf); err != nil {
-				break
-			}
-			vendor, pairs := parseFLACVorbisComment(buf)
-			if encoder == "" {
-				encoder = vendor
-			}
-			for _, kv := range pairs {
-				if kv.Key == "" || kv.Val == "" {
-					continue
-				}
-				if tags[kv.Key] == "" {
-					tags[kv.Key] = kv.Val
-					continue
-				}
-				if tags[kv.Key] != kv.Val {
-					tags[kv.Key] = tags[kv.Key] + " / " + kv.Val
-				}
-			}
-		} else {
-			if blockType == 6 {
-				// METADATA_BLOCK_PICTURE (cover art). We only need the mime/type to match MediaInfo.
+			if assetBudget.reserveString(uint64(blockLen), embeddedAssetMaxStringBytes) == embeddedAssetAccepted {
 				buf := make([]byte, blockLen)
 				if _, err := io.ReadFull(file, buf); err != nil {
-					break
-				}
-				if coverMIME == "" {
-					if mime, typ, ok := parseFLACPicture(buf); ok {
-						coverMIME = mime
-						coverType = typ
+					blockReadOK = false
+				} else {
+					vendor, pairs := parseFLACVorbisComment(buf)
+					if encoder == "" {
+						encoder = vendor
+					}
+					for _, kv := range pairs {
+						if kv.Key == "" || kv.Val == "" {
+							continue
+						}
+						if tags[kv.Key] == "" {
+							tags[kv.Key] = kv.Val
+							continue
+						}
+						if tags[kv.Key] != kv.Val {
+							tags[kv.Key] = tags[kv.Key] + " / " + kv.Val
+						}
 					}
 				}
-			} else {
-				if _, err := file.Seek(int64(blockLen), io.SeekCurrent); err != nil {
-					break
+			}
+		case 6:
+			// METADATA_BLOCK_PICTURE (cover art). Only its bounded type/MIME prefix is needed.
+			if assetBudget.reserveItem() == embeddedAssetAccepted && coverMIME == "" {
+				mime, typ, ok, err := readFLACPictureHeader(file, int64(blockLen), assetBudget)
+				if err != nil {
+					blockReadOK = false
+				} else if ok {
+					coverMIME = mime
+					coverType = typ
 				}
 			}
+		}
+		if _, err := file.Seek(blockEnd, io.SeekStart); err != nil || !blockReadOK {
+			break
 		}
 		if isLast {
 			// The file cursor is now positioned at the start of the audio frames.
-			if pos, err := file.Seek(0, io.SeekCurrent); err == nil {
-				audioStart = pos
-			}
+			audioStart = blockEnd
 			break
 		}
 	}
@@ -221,28 +232,25 @@ func parseFLACPicture(data []byte) (mime string, typ string, ok bool) {
 		return "", "", false
 	}
 	picType := binary.BigEndian.Uint32(data[0:4])
-	pos := 4
-	mimeLen := int(binary.BigEndian.Uint32(data[pos : pos+4]))
+	pos := uint64(4)
+	mimeLen := uint64(binary.BigEndian.Uint32(data[pos : pos+4]))
 	pos += 4
-	if mimeLen < 0 || pos+mimeLen > len(data) {
+	if mimeLen > uint64(len(data))-pos {
 		return "", "", false
 	}
-	mime = string(data[pos : pos+mimeLen])
+	mime = string(data[int(pos):int(pos+mimeLen)])
 	pos += mimeLen
-	if pos+4 > len(data) {
+	if uint64(len(data))-pos < 4 {
 		return "", "", false
 	}
-	descLen := int(binary.BigEndian.Uint32(data[pos : pos+4]))
+	descLen := uint64(binary.BigEndian.Uint32(data[int(pos) : int(pos)+4]))
 	pos += 4 + descLen
-	if pos+20 > len(data) {
+	if pos > uint64(len(data)) || uint64(len(data))-pos < 20 {
 		return "", "", false
 	}
 	// Skip width/height/depth/colors.
 	pos += 16
-	if pos+4 > len(data) {
-		return "", "", false
-	}
-	_ = binary.BigEndian.Uint32(data[pos : pos+4]) // data_length
+	_ = binary.BigEndian.Uint32(data[int(pos) : int(pos)+4]) // data_length
 	switch picType {
 	case 3:
 		typ = "Cover (front)"
@@ -254,9 +262,67 @@ func parseFLACPicture(data []byte) (mime string, typ string, ok bool) {
 	return mime, typ, true
 }
 
+// readFLACPictureHeader reads only the bounded picture type and MIME prefix.
+// The caller remains responsible for seeking to the validated block end.
+func readFLACPictureHeader(file io.ReadSeeker, blockLen int64, assetBudget *embeddedAssetBudget) (mime string, typ string, ok bool, err error) {
+	if blockLen < 8 || assetBudget == nil {
+		return "", "", false, nil
+	}
+	var header [8]byte
+	if _, err := io.ReadFull(file, header[:]); err != nil {
+		return "", "", false, err
+	}
+	picType := binary.BigEndian.Uint32(header[0:4])
+	mimeLen := uint64(binary.BigEndian.Uint32(header[4:8]))
+	if mimeLen > uint64(blockLen-8) || assetBudget.reserveString(mimeLen, embeddedAssetMaxMIMEBytes) != embeddedAssetAccepted {
+		return "", "", false, nil
+	}
+	mimeBytes := make([]byte, int(mimeLen))
+	if _, err := io.ReadFull(file, mimeBytes); err != nil {
+		return "", "", false, err
+	}
+	var descriptionSize [4]byte
+	if _, err := io.ReadFull(file, descriptionSize[:]); err != nil {
+		return "", "", false, err
+	}
+	descLen := uint64(binary.BigEndian.Uint32(descriptionSize[:]))
+	remaining := uint64(blockLen-8) - mimeLen
+	if remaining < 24 || descLen > remaining-24 || assetBudget.reserveString(descLen, embeddedAssetMaxNameBytes) != embeddedAssetAccepted {
+		return "", "", false, nil
+	}
+	if _, err := file.Seek(int64(descLen), io.SeekCurrent); err != nil {
+		return "", "", false, err
+	}
+	var imageHeader [20]byte
+	if _, err := io.ReadFull(file, imageHeader[:]); err != nil {
+		return "", "", false, err
+	}
+	dataLen := uint64(binary.BigEndian.Uint32(imageHeader[16:20]))
+	if dataLen > remaining-24-descLen {
+		return "", "", false, nil
+	}
+	switch picType {
+	case 3:
+		typ = "Cover (front)"
+	case 4:
+		typ = "Cover (back)"
+	}
+	return string(mimeBytes), typ, true, nil
+}
+
 func parseFLACStreamInfo(data []byte) (uint32, uint8, uint8, uint64, string) {
-	if len(data) < 34 {
+	info, ok := parseFLACStreamInfoDetails(data)
+	if !ok {
 		return 0, 0, 0, 0, ""
+	}
+	return info.sampleRate, info.channels, info.bitsPerSample, info.totalSamples, info.md5
+}
+
+// parseFLACStreamInfoDetails decodes a 34-byte STREAMINFO payload and reports
+// false when the payload is truncated or lacks usable audio properties.
+func parseFLACStreamInfoDetails(data []byte) (flacStreamInfo, bool) {
+	if len(data) < 34 {
+		return flacStreamInfo{}, false
 	}
 	sampleRate := uint32(data[10])<<12 | uint32(data[11])<<4 | uint32(data[12])>>4
 	channels := ((data[12] & 0x0E) >> 1) + 1
@@ -276,7 +342,61 @@ func parseFLACStreamInfo(data []byte) (uint32, uint8, uint8, uint64, string) {
 	if !allZero {
 		md5Hex = strings.ToUpper(hex.EncodeToString(md5))
 	}
-	return sampleRate, channels, bitsPerSample, totalSamples, md5Hex
+	return flacStreamInfo{
+		minBlockSize:  binary.BigEndian.Uint16(data[0:2]),
+		maxBlockSize:  binary.BigEndian.Uint16(data[2:4]),
+		sampleRate:    sampleRate,
+		channels:      channels,
+		bitsPerSample: bitsPerSample,
+		totalSamples:  totalSamples,
+		md5:           md5Hex,
+	}, sampleRate > 0 && channels > 0
+}
+
+// parseMatroskaFLACPrivate accepts either a bare STREAMINFO payload or a full
+// fLaC metadata sequence and returns its STREAMINFO plus Vorbis vendor string.
+func parseMatroskaFLACPrivate(data []byte) (flacStreamInfo, string, bool) {
+	if len(data) == 34 {
+		info, ok := parseFLACStreamInfoDetails(data)
+		return info, "", ok
+	}
+	if len(data) < 8 || !bytes.Equal(data[:4], []byte("fLaC")) {
+		return flacStreamInfo{}, "", false
+	}
+
+	var info flacStreamInfo
+	var vendor string
+	hasStreamInfo := false
+	pos := 4
+	for pos+4 <= len(data) {
+		header := data[pos]
+		blockType := header & 0x7F
+		blockSize := int(data[pos+1])<<16 | int(data[pos+2])<<8 | int(data[pos+3])
+		pos += 4
+		if blockSize < 0 || pos+blockSize > len(data) {
+			return flacStreamInfo{}, "", false
+		}
+		block := data[pos : pos+blockSize]
+		switch blockType {
+		case 0:
+			parsed, ok := parseFLACStreamInfoDetails(block)
+			if !ok {
+				return flacStreamInfo{}, "", false
+			}
+			info = parsed
+			hasStreamInfo = true
+		case 4:
+			parsedVendor, _ := parseFLACVorbisComment(block)
+			if parsedVendor != "" {
+				vendor = parsedVendor
+			}
+		}
+		pos += blockSize
+		if header&0x80 != 0 {
+			return info, vendor, hasStreamInfo
+		}
+	}
+	return flacStreamInfo{}, "", false
 }
 
 func parseFLACVorbisComment(buf []byte) (string, []flacTagKV) {
@@ -344,6 +464,33 @@ func splitFLACEncodedLibrary(value string) (name, version, date string) {
 		return name, version, date
 	}
 	return "", "", ""
+}
+
+// flacDerivedLayoutIsOmitted reports whether MediaInfo omits synthesized FLAC
+// channel positions for the supplied libFLAC vendor. Unknown versions,
+// libFLAC 1.3, and libFLAC 1.5 or later use the omission behavior observed in
+// MediaInfo; 1.2 and 1.4 retain their derived layouts.
+func flacDerivedLayoutIsOmitted(vendor string) bool {
+	if strings.HasPrefix(vendor, "Lavf") {
+		return false
+	}
+	if strings.TrimSpace(vendor) == "" {
+		return true
+	}
+	name, version, _ := splitFLACEncodedLibrary(vendor)
+	if name == "" {
+		return false
+	}
+	parts := strings.Split(version, ".")
+	if len(parts) < 2 {
+		return true
+	}
+	major, majorErr := strconv.Atoi(parts[0])
+	minor, minorErr := strconv.Atoi(parts[1])
+	if majorErr != nil || minorErr != nil {
+		return true
+	}
+	return major > 1 || major == 1 && (minor == 3 || version == "1.4.2" || minor >= 5)
 }
 
 func flacTagsToGeneralJSON(tags map[string]string, encoder string) (map[string]string, map[string]string) {

@@ -43,7 +43,7 @@ func buildDTSCoreFrame(amode uint32, lfe uint32, brCode uint32) []byte {
 	writeBits(out, &pos, 0, 1)      // multirate interpolator
 	writeBits(out, &pos, 0, 4)      // encoder software rev
 	writeBits(out, &pos, 0, 2)      // copy history
-	writeBits(out, &pos, 2, 2)      // resolution code (24-bit)
+	writeBits(out, &pos, 6, 3)      // source PCM resolution code (24-bit)
 	return out
 }
 
@@ -55,6 +55,33 @@ func TestInferBDAVStreamDTS(t *testing.T) {
 	}
 	if kind != StreamAudio || format != "DTS" || stype != 0x82 {
 		t.Fatalf("inferBDAVStream: got kind=%v format=%q stype=0x%02X", kind, format, stype)
+	}
+}
+
+func TestParseDTSCoreFrameUsesActualPaddedFrameRate(t *testing.T) {
+	frame := make([]byte, 424)
+	copy(frame, []byte{0x7F, 0xFE, 0x80, 0x01})
+	pos := 32
+	writeBits(frame, &pos, 0, 1)    // FrameType
+	writeBits(frame, &pos, 0, 5)    // Deficit sample count
+	writeBits(frame, &pos, 0, 1)    // CRC present
+	writeBits(frame, &pos, 15, 7)   // 512 samples per frame
+	writeBits(frame, &pos, 423, 14) // 424-byte primary frame
+	writeBits(frame, &pos, 2, 6)    // stereo channel arrangement
+	writeBits(frame, &pos, 13, 4)   // 48 kHz
+	writeBits(frame, &pos, 9, 5)    // nominal 320 kb/s transmission code
+	writeBits(frame, &pos, 0, 13)   // optional core flags through predictor history
+	writeBits(frame, &pos, 0, 1)    // multirate interpolator
+	writeBits(frame, &pos, 0, 4)    // encoder software revision
+	writeBits(frame, &pos, 0, 2)    // copy history
+	writeBits(frame, &pos, 6, 3)    // source PCM resolution code (24-bit)
+
+	info, ok := parseDTSCoreFrame(frame)
+	if !ok {
+		t.Fatal("parseDTSCoreFrame returned ok=false")
+	}
+	if info.bitRateBps != 318000 {
+		t.Fatalf("bitRateBps = %d, want 318000", info.bitRateBps)
 	}
 }
 
@@ -219,5 +246,23 @@ func TestApplyMatroskaAudioProbes_DTSHDXLLPlainKeepsExistingBehavior(t *testing.
 	}
 	if got := stream.JSON["BitRate"]; got != "" {
 		t.Fatalf("JSON BitRate should be removed for plain DTS-HD, got %q", got)
+	}
+}
+
+func TestNormalizeDTSHDChannelLayout(t *testing.T) {
+	tests := []struct {
+		name   string
+		layout string
+		want   string
+	}{
+		{name: "rear and side pairs", layout: "C L R LFE Lsr Rsr Lss Rss", want: "C L R LFE Lb Rb Lss Rss"},
+		{name: "rear pair only", layout: "C L R LFE Lsr Rsr", want: "C L R LFE Lsr Rsr"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := normalizeDTSHDChannelLayout(tt.layout); got != tt.want {
+				t.Fatalf("normalizeDTSHDChannelLayout(%q)=%q want %q", tt.layout, got, tt.want)
+			}
+		})
 	}
 }
