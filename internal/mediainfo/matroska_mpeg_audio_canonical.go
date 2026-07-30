@@ -81,10 +81,6 @@ func matroskaMPEGAudioCanonicalSeed(facts matroskaMPEGAudioCanonicalFacts) []fie
 	if facts.audioChannels > 0 {
 		value := strconv.FormatUint(facts.audioChannels, 10)
 		builder.Fill("Channels", value, "Channel(s)", formatChannels(facts.audioChannels))
-		if facts.audioChannelsFromTrack {
-			builder.StructuredJSONOnly("ChannelLayout", channelLayout(facts.audioChannels))
-			builder.StructuredJSONOnly("ChannelPositions", matroskaGoChannelPositions(facts.audioChannels))
-		}
 	}
 	if facts.audioSampleRate > 0 {
 		value := strconv.FormatFloat(facts.audioSampleRate, 'f', -1, 64)

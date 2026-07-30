@@ -110,7 +110,7 @@ func parseHEVCSPS(nal []byte) h264SPSInfo {
 	_, _ = br.readUEWithOk() // bit_depth_chroma_minus8
 	bitDepth := int(bitDepthLumaMinus8) + 8
 	log2MaxPicOrderCntLSBMinus4, ok := br.readUEWithOk()
-	if !ok {
+	if !ok || log2MaxPicOrderCntLSBMinus4 < 0 || log2MaxPicOrderCntLSBMinus4 > 12 {
 		return h264SPSInfo{}
 	}
 	log2MaxPicOrderCntLSB := log2MaxPicOrderCntLSBMinus4 + 4
@@ -220,17 +220,10 @@ func parseHEVCSPS(nal []byte) h264SPSInfo {
 		return h264SPSInfo{}
 	}
 
-	colorRange := ""
-	hasColorRange := false
-	colorPrimaries := ""
-	transfer := ""
-	matrix := ""
-	hasColorDescription := false
-	frameRate := float64(0)
-	chromaSampleLoc := -1
+	vui := hevcVUIInfo{chromaSampleLoc: -1}
 
 	if br.readBitsValue(1) == 1 { // vui_parameters_present_flag
-		colorRange, hasColorRange, colorPrimaries, transfer, matrix, hasColorDescription, frameRate, _, chromaSampleLoc = parseHEVCVUI(br)
+		vui = parseHEVCVUI(br)
 	}
 
 	// Conformance window cropping.
@@ -267,14 +260,14 @@ func parseHEVCSPS(nal []byte) h264SPSInfo {
 	info := h264SPSInfo{
 		ChromaFormat:            hevcChromaFormatName(byte(chromaFormatIDC)),
 		BitDepth:                bitDepth,
-		ColorRange:              colorRange,
-		HasColorRange:           hasColorRange,
-		ColorPrimaries:          colorPrimaries,
-		TransferCharacteristics: transfer,
-		MatrixCoefficients:      matrix,
-		HasColorDescription:     hasColorDescription,
-		HasChromaLoc:            chromaSampleLoc >= 0,
-		ChromaSampleLoc:         chromaSampleLoc,
+		ColorRange:              vui.colorRange,
+		HasColorRange:           vui.hasColorRange,
+		ColorPrimaries:          vui.colorPrimaries,
+		TransferCharacteristics: vui.transfer,
+		MatrixCoefficients:      vui.matrix,
+		HasColorDescription:     vui.hasColorDescription,
+		HasChromaLoc:            vui.chromaSampleLoc >= 0,
+		ChromaSampleLoc:         vui.chromaSampleLoc,
 		ProfileID:               profileIDC,
 		LevelID:                 levelIDC,
 		HEVCTier:                tierName,
@@ -282,7 +275,9 @@ func parseHEVCSPS(nal []byte) h264SPSInfo {
 		Height:                  uint64(height),
 		CodedWidth:              uint64(picWidth),
 		CodedHeight:             uint64(picHeight),
-		FrameRate:               frameRate,
+		FrameRate:               vui.frameRate,
+		VideoFormat:             vui.videoFormat,
+		HasVideoFmt:             vui.hasVideoFormat,
 	}
 	return info
 }
@@ -462,16 +457,22 @@ func skipHEVCShortTermRefPicSet(br *bitReader, idx int, sets []hevcShortTermRPS)
 	return numNeg + numPos, true
 }
 
-func parseHEVCVUI(br *bitReader) (string, bool, string, string, string, bool, float64, bool, int) {
-	colorRange := ""
-	hasColorRange := false
-	colorPrimaries := ""
-	transfer := ""
-	matrix := ""
-	hasColorDescription := false
-	frameRate := float64(0)
-	hasTiming := false
-	chromaSampleLoc := -1
+type hevcVUIInfo struct {
+	colorRange          string
+	hasColorRange       bool
+	colorPrimaries      string
+	transfer            string
+	matrix              string
+	hasColorDescription bool
+	frameRate           float64
+	hasTiming           bool
+	chromaSampleLoc     int
+	videoFormat         int
+	hasVideoFormat      bool
+}
+
+func parseHEVCVUI(br *bitReader) hevcVUIInfo {
+	info := hevcVUIInfo{chromaSampleLoc: -1}
 
 	if br.readBitsValue(1) == 1 { // aspect_ratio_info_present_flag
 		aspectRatioIDC := br.readBitsValue(8)
@@ -484,27 +485,30 @@ func parseHEVCVUI(br *bitReader) (string, bool, string, string, string, bool, fl
 		_ = br.readBitsValue(1)
 	}
 	if br.readBitsValue(1) == 1 { // video_signal_type_present_flag
-		_ = br.readBitsValue(3) // video_format
+		if value := br.readBitsValue(3); value != ^uint64(0) {
+			info.videoFormat = int(value)
+			info.hasVideoFormat = true
+		}
 		fullRange := br.readBitsValue(1) == 1
 		if fullRange {
-			colorRange = "Full"
+			info.colorRange = "Full"
 		} else {
-			colorRange = "Limited"
+			info.colorRange = "Limited"
 		}
-		hasColorRange = true
+		info.hasColorRange = true
 		if br.readBitsValue(1) == 1 { // colour_description_present_flag
 			primaries := br.readBitsValue(8)
 			trc := br.readBitsValue(8)
 			mat := br.readBitsValue(8)
-			colorPrimaries = matroskaColorPrimariesName(primaries)
-			transfer = matroskaTransferName(trc)
-			matrix = matroskaMatrixName(mat)
-			hasColorDescription = true
+			info.colorPrimaries = matroskaColorPrimariesName(primaries)
+			info.transfer = matroskaTransferName(trc)
+			info.matrix = matroskaMatrixName(mat)
+			info.hasColorDescription = true
 		}
 	}
 	if br.readBitsValue(1) == 1 { // chroma_loc_info_present_flag
 		if loc, ok := br.readUEWithOk(); ok { // chroma_sample_loc_type_top_field
-			chromaSampleLoc = int(loc)
+			info.chromaSampleLoc = loc
 		}
 		_, _ = br.readUEWithOk() // chroma_sample_loc_type_bottom_field
 	}
@@ -523,8 +527,8 @@ func parseHEVCVUI(br *bitReader) (string, bool, string, string, string, bool, fl
 		timeScale := br.readBitsValue(32)
 		if numUnitsInTick != ^uint64(0) && timeScale != ^uint64(0) && numUnitsInTick > 0 && timeScale > 0 {
 			// HEVC VUI: frame rate = time_scale / num_units_in_tick (unlike AVC which uses /2).
-			frameRate = float64(timeScale) / float64(numUnitsInTick)
-			hasTiming = true
+			info.frameRate = float64(timeScale) / float64(numUnitsInTick)
+			info.hasTiming = true
 		}
 		if br.readBitsValue(1) == 1 { // poc_proportional_to_timing_flag
 			_, _ = br.readUEWithOk()
@@ -532,7 +536,7 @@ func parseHEVCVUI(br *bitReader) (string, bool, string, string, string, bool, fl
 		if br.readBitsValue(1) == 1 { // hrd_parameters_present_flag
 			// Skip hrd_parameters() - not needed for Matroska parity work right now.
 			// If present, abort VUI parsing to avoid desync.
-			return colorRange, hasColorRange, colorPrimaries, transfer, matrix, hasColorDescription, frameRate, hasTiming, chromaSampleLoc
+			return info
 		}
 	}
 	if br.readBitsValue(1) == 1 { // bitstream_restriction_flag
@@ -547,5 +551,5 @@ func parseHEVCVUI(br *bitReader) (string, bool, string, string, string, bool, fl
 		_, _ = br.readUEWithOk()
 	}
 
-	return colorRange, hasColorRange, colorPrimaries, transfer, matrix, hasColorDescription, frameRate, hasTiming, chromaSampleLoc
+	return info
 }

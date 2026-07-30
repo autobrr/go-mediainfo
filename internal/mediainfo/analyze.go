@@ -134,14 +134,10 @@ func bdavOverallBitRateMaximum(streamPath string, hasHEVC, hasPCM bool, videoStr
 
 // shouldApplyBDAVSizing reports whether MediaInfo derives BDAV stream sizes
 // from the container bitrate. Video-only HEVC clips are eligible without audio
-// sizing; HEVC clips with audio require every audio stream to be sized, and text
-// streams disable projection when present.
-func shouldApplyBDAVSizing(primaryVideoFormat string, audioCount, audioSizedCount int, textCounts ...int) bool {
-	textCount := 0
-	if len(textCounts) > 0 {
-		textCount = textCounts[0]
-	}
-	return primaryVideoFormat != "HEVC" || textCount == 0 && (audioCount == 0 || audioSizedCount == audioCount)
+// sizing; HEVC clips with audio require every audio stream to be sized. Text
+// streams remain eligible and contribute their standard estimated overhead.
+func shouldApplyBDAVSizing(primaryVideoFormat string, audioCount, audioSizedCount int) bool {
+	return primaryVideoFormat != "HEVC" || audioCount == 0 || audioSizedCount == audioCount
 }
 
 // AnalyzeFileWithOptions analyzes one local media file with opts and returns
@@ -281,6 +277,9 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 					if math.Abs(track.EditDuration-track.DurationSeconds) > 0.0005 {
 						if track.trackDurationTicks == 0 {
 							displayDuration = track.EditDuration
+						}
+						if track.EditMediaTime > 0 {
+							sourceDuration = track.DurationSeconds
 						}
 					}
 				}
@@ -755,6 +754,17 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 						}
 					}
 				}
+				if track.Kind == StreamAudio {
+					sourceDelay := mp4EditSourceDelaySeconds(track)
+					delayMs := int64(math.Round(sourceDelay * 1000))
+					if delayMs != 0 {
+						node := structuredObjectFromKVs([]jsonKV{
+							{Key: "Source_Delay", Val: strconv.FormatInt(delayMs, 10)},
+							{Key: "Source_Delay_Source", Val: "Container"},
+						})
+						mergeStructuredExtraNode(&extraNode, node)
+					}
+				}
 				if !x264Applied && track.Kind == StreamVideo && findField(fields, "Format") == "AVC" && (trackWritingLibrary != "" || trackEncodingSettings != "") {
 					if trackWritingLibrary != "" {
 						fields = appendFieldUnique(fields, Field{Name: "Writing library", Value: trackWritingLibrary})
@@ -862,11 +872,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 				}
 				if len(extraFields) > 0 {
 					node := structuredObjectFromKVs(extraFields)
-					if extraNode != nil && extraNode.Kind == structuredObject {
-						extraNode.Object = append(extraNode.Object, node.Object...)
-					} else {
-						extraNode = &node
-					}
+					mergeStructuredExtraNode(&extraNode, node)
 				}
 				trackFacts.Apply(builder)
 				if extraNode != nil {
@@ -1063,13 +1069,6 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 				}
 				break
 			}
-			applyX264Info(file, streams, x264InfoOptions{
-				skipWritingLibIfExists: true,
-				skipEncodingIfExists:   true,
-				// Matroska: only emit Nominal bit rate when Bit rate is absent (handled below).
-				addNominalBitrate: false,
-				addBitsPerPixel:   false,
-			})
 			goNominalBitRate := make([]bool, len(streams))
 			for i := range streams {
 				if streams[i].Kind != StreamVideo {
@@ -1090,8 +1089,6 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 				if !matroskaVideoHasX264Settings(streams[i]) {
 					continue
 				}
-				explicitX264 := matroskaWritingLibraryIsX264(matroskaStreamDisplay(streams[i], "Writing library"))
-
 				x264Bitrate, x264HasBitrate := findX264Bitrate(enc)
 				if goNominalBitRate[i] && x264HasBitrate && x264Bitrate > 0 {
 					fillMatroskaRetainedJSON(&streams[i], "BitRate_Nominal", strconv.FormatInt(int64(math.Round(x264Bitrate)), 10))
@@ -1128,8 +1125,8 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 					replaceCanonicalSeedFill(&streams[i], "BitRate_Nominal", strconv.FormatInt(int64(math.Round(x264Bitrate)), 10), "Nominal bit rate", formatBitrate(x264Bitrate))
 				}
 				// MediaInfo reports VBV constraints only when HRD signaling is enabled.
-				hrdEnabled, hrdDisabled := matroskaX264HRDState(enc)
-				if hrdEnabled || explicitX264 && !hrdDisabled {
+				hrdEnabled, _ := matroskaX264HRDState(enc)
+				if hrdEnabled {
 					if maxKbps, ok := findX264VbvMaxrate(enc); ok && maxKbps > 0 {
 						fillMatroskaRetainedJSON(&streams[i], "BitRate_Maximum", strconv.FormatInt(int64(math.Round(maxKbps*1000)), 10))
 					}
@@ -1151,6 +1148,12 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 						}
 					}
 				}
+				bitRate, _ := canonicalSeedValue(streams[i], "BitRate")
+				nominal, _ := canonicalSeedValue(streams[i], "BitRate_Nominal")
+				mode, _ := canonicalSeedValue(streams[i], "BitRate_Mode")
+				if bitRate != "" && nominal != "" && (bitRate == nominal || strings.TrimSpace(mode) == "") {
+					clearCanonicalSeedField(&streams[i], "BitRate_Nominal", "Nominal bit rate")
+				}
 			}
 			streamSizeSum := sumCanonicalStreamSizes(streams)
 			clearCanonicalSeedField(&general, "StreamSize", "")
@@ -1162,8 +1165,6 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			_, matroskaRetainedGeneral.streamSize = projectedCanonicalSeedValue(general, "StreamSize")
 			_, matroskaRetainedGeneral.overallBitRateMode = projectedCanonicalSeedValue(general, "OverallBitRate_Mode")
 			applyMatroskaWriterRules(rawWritingApp, &general, streams)
-			applyMatroskaGeneralIdentityOverride(&general)
-			applyMatroskaSnapshotSuppressions(&general, streams)
 		}
 	case "MPEG-TS":
 		if parsedInfo, parsedStreams, generalFields, ok := ParseMPEGTS(file, stat.Size(), opts.ParseSpeed); ok {
@@ -1522,7 +1523,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			// MediaInfo BDAV behavior: derive StreamSize (and sometimes BitRate) when audio StreamSize is
 			// available for all audio streams. UHD/HEVC BDAV often omits these fields (subtitles present,
 			// or unsized audio at default ParseSpeed).
-			applyBDAVSizing := shouldApplyBDAVSizing(primaryVideoFormat, audioCount, audioSizedCount, textStreams)
+			applyBDAVSizing := shouldApplyBDAVSizing(primaryVideoFormat, audioCount, audioSizedCount)
 			if applyBDAVSizing {
 				// MediaInfo BDAV behavior: derive video bitrate/size from overall bitrate,
 				// subtracting audio + text overhead, then set General StreamSize as the remainder.
@@ -2019,7 +2020,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 		if parsedInfo, parsedStreams, generalFields, interleaved, ok := ParseAVIWithOptions(file, stat.Size(), opts); ok {
 			info = parsedInfo
 			generalFacts := &canonicalStructuredFacts{}
-			var generalExtra *structuredNode
+			generalExtra := info.generalExtra
 			var rawWritingApp string
 			var rawWritingLib string
 			for _, field := range generalFields {
@@ -2075,9 +2076,6 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			streamSizeSum := sumCanonicalStreamSizes(streams)
 			if streamSize, ok := remainingStreamSizeValue(stat.Size(), streamSizeSum); ok {
 				generalFacts.SetSame("StreamSize", streamSize)
-			}
-			if identityExtra := applyTruncatedAVIIdentityOverride(stat.Size(), generalFacts, streams); identityExtra != nil {
-				generalExtra = identityExtra
 			}
 			if generalExtra != nil && generalExtra.Kind == structuredObject {
 				appendCanonicalSeedObjectMembers(&general, "extra", generalExtra.Object)
@@ -2163,17 +2161,14 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 	sortStreams(streams)
 	if format == "Matroska" {
 		applyMatroskaFallbackTypeOrderXMLCompatibility(streams)
-		if matroskaCanRetainGeneralStreamSize {
+		if matroskaCanRetainGeneralStreamSize && matroskaPayloadStreamSizesKnown(streams) {
 			matroskaGoGeneralStreamSize, _ = remainingStreamSizeValue(stat.Size(), sumCanonicalStreamSizes(streams))
 		}
 		restoreMatroskaRetainedFields(&general, streams, matroskaGoGeneralStreamSize, matroskaRetainedGeneral)
 		for index := range streams {
 			streams[index].matroskaDeferredFacts.ApplyToStream(&streams[index])
 		}
-		// Deferred track facts and final General derivation can restore fields
-		// intentionally absent from MediaInfo's bounded snapshot. Close the
-		// omission policy at the final canonical seam.
-		applyMatroskaSnapshotSuppressions(&general, streams)
+		normalizeMatroskaAACExplicitPS(streams)
 		for index := range streams {
 			refreshCanonicalCompatibilitySnapshot(&streams[index])
 		}
@@ -2231,6 +2226,19 @@ func finalizeCanonicalGeneralFields(general *Stream) {
 	}
 }
 
+// mergeStructuredExtraNode appends object members without discarding extras
+// collected by an earlier codec or container probe.
+func mergeStructuredExtraNode(current **structuredNode, addition structuredNode) {
+	if current == nil || addition.Kind != structuredObject {
+		return
+	}
+	if *current != nil && (*current).Kind == structuredObject {
+		(*current).Object = append((*current).Object, addition.Object...)
+		return
+	}
+	*current = &addition
+}
+
 // omitCanonicalStreamOrder records that a parser-established stream has no
 // StreamOrder field without mutating the exported JSON compatibility flags.
 func omitCanonicalStreamOrder(stream *Stream) {
@@ -2241,14 +2249,13 @@ func omitCanonicalStreamOrder(stream *Stream) {
 }
 
 // matroskaRetainedGeneralPresence captures CLI-compatible General values before
-// writer and content-identity corrections add later canonical projections.
+// writer and codec-derived corrections add later canonical projections.
 type matroskaRetainedGeneralPresence struct {
 	streamSize         bool
 	overallBitRateMode bool
 }
 
-// restoreMatroskaRetainedFields records General Go extensions and merges later
-// Menu edition objects directly into canonical stream seeds.
+// restoreMatroskaRetainedFields records retained General Go extensions.
 func restoreMatroskaRetainedFields(general *Stream, streams []Stream, generalStreamSize string, retained matroskaRetainedGeneralPresence) {
 	if general == nil {
 		return
@@ -2264,20 +2271,6 @@ func restoreMatroskaRetainedFields(general *Stream, streams []Stream, generalStr
 	}
 	if !retained.overallBitRateMode && goVariable {
 		replaceCanonicalSeedJSONOnly(general, "OverallBitRate_Mode", "VBR")
-	}
-
-	var firstMenu *Stream
-	for i := range streams {
-		if streams[i].Kind != StreamMenu {
-			continue
-		}
-		if firstMenu == nil {
-			firstMenu = &streams[i]
-			continue
-		}
-		if node := canonicalSeedStructuredNode(&streams[i], "extra"); node != nil && node.Kind == structuredObject {
-			appendCanonicalSeedObjectMembers(firstMenu, "extra", node.Object)
-		}
 	}
 }
 
@@ -2409,107 +2402,25 @@ func applyLegacyMatroskaFrameRateRatio(writingApp string, streams []Stream) {
 	}
 }
 
-// applyTruncatedAVIIdentityOverride preserves MediaInfo snapshot decisions
-// that cannot be reconstructed from the surviving AVI indexes and headers.
-func applyTruncatedAVIIdentityOverride(size int64, generalFacts *canonicalStructuredFacts, streams []Stream) *structuredNode {
-	if generalFacts == nil {
-		return nil
-	}
-	if size == 1015769088 {
-		for index := range streams {
-			frameCount, _ := canonicalSeedValue(streams[index], "FrameCount")
-			if streams[index].Kind != StreamVideo || findField(streams[index].Fields, "Writing library") != "DivX503b1338" || frameCount != "161955" {
-				continue
-			}
-			generalFacts.Set("Duration", "6478201", "6478.201")
-			replaceCanonicalSeedProjection(&streams[index], "Duration", "6478201", "6478.201", "Duration", formatDuration(6478.201))
-			return nil
-		}
-	}
-	if size != 447255552 {
-		return nil
-	}
-	matchedVideo := false
-	for _, stream := range streams {
-		frameCount, _ := canonicalSeedValue(stream, "FrameCount")
-		if stream.Kind == StreamVideo && findField(stream.Fields, "Writing library") == "DivX503b2816p" && frameCount == "60107" {
-			matchedVideo = true
-			break
-		}
-	}
-	if !matchedVideo {
-		return nil
-	}
-	generalFacts.SetSame("Format", "AVI")
-	generalFacts.Set("Duration", "2506963", "2506.963")
-	generalFacts.SetSame("OverallBitRate", "1427243")
-	for i := range streams {
-		switch streams[i].Kind {
-		case StreamVideo:
-			replaceCanonicalSeedProjection(&streams[i], "Duration", "2506963", "2506.963", "", "")
-			for _, override := range []struct {
-				name  fieldName
-				value string
-			}{
-				{"BitRate_Nominal", "4854000"},
-				{"BufferSize", "1610612736"},
-				{"Encoded_Library_Date", "2009-08-20"},
-				{"Encoded_Library_Version", "6.8.5"},
-				{"FrameRate_Num", "24000"},
-				{"FrameRate_Den", "1001"},
-				{"MuxingMode", "MuxingMode_PackedBitstream"},
-			} {
-				replaceCanonicalSeedFill(&streams[i], override.name, override.value, "", "")
-			}
-		case StreamAudio:
-			for _, override := range []struct {
-				name  fieldName
-				value string
-			}{
-				{"Delay", "0.026"},
-				{"Title", "Audio Stream"},
-				{"Video_Delay", "0.026"},
-			} {
-				replaceCanonicalSeedFill(&streams[i], override.name, override.value, "", "")
-			}
-		case StreamGeneral, StreamText, StreamImage, StreamMenu:
-			continue
-		}
-	}
-	compliance := structuredNode{Kind: structuredString, Text: "File size is less than expected size (actual 447255552 99.9998%, expected 447256424, offset 0x1AA8924C) / Element size is more than maximal permitted size (actual 1308, expected 436, offset 0x1AA8924C)"}
-	bGroup := structuredNode{Kind: structuredArray, Array: []structuredNode{{
-		Kind: structuredObject,
-		Object: []structuredMember{{
-			Key:   "GeneralCompliance",
-			Value: compliance,
-		}},
-	}}}
-	conformanceErrors := structuredNode{Kind: structuredArray, Array: []structuredNode{{
-		Kind: structuredObject,
-		Object: []structuredMember{{
-			Key:   "B_",
-			Value: bGroup,
-		}},
-	}}}
-	return &structuredNode{Kind: structuredObject, Object: []structuredMember{
-		{Key: "IsTruncated", Value: structuredNode{Kind: structuredString, Text: "Yes"}},
-		{Key: "ConformanceErrors", Value: conformanceErrors},
-	}}
-}
-
 // applyMatroskaWriterRules applies writer-version rules that affect
 // MediaInfo's duration, frame-rate, audio-setting, and nominal-rate output.
 func applyMatroskaWriterRules(writingApp string, general *Stream, streams []Stream) {
-	segmentUID := ""
-	if general != nil {
-		segmentUID = matroskaStreamScalar(*general, "UniqueID")
-	}
 	handBrake := strings.HasPrefix(writingApp, "HandBrake ")
 	handBrakeVFR := strings.HasPrefix(writingApp, "HandBrake 1.3.3 ")
 	lavf := strings.HasPrefix(writingApp, "Lavf")
 	lavfDisplayedRate := strings.HasPrefix(writingApp, "Lavf56.") || strings.HasPrefix(writingApp, "Lavf57.")
 	lavfIntegralDuration := writingApp == "Lavf59.27.100"
 	omitExplicitPS := lavf || strings.HasPrefix(writingApp, "mkvmerge v63.")
+	handBrakeHEVC := false
+	if handBrake {
+		for i := range streams {
+			if streams[i].Kind == StreamVideo && matroskaStreamScalar(streams[i], "Format") == "HEVC" {
+				handBrakeHEVC = true
+				break
+			}
+		}
+	}
+	handBrakeDurationRules := handBrake && !handBrakeHEVC
 	for i := range streams {
 		stream := &streams[i]
 		if stream.Kind == StreamVideo && matroskaStreamDisplay(*stream, "Format") == "HEVC" && strings.Contains(matroskaStreamDisplay(*stream, "Encoding settings"), " / sar=1 / ") {
@@ -2526,6 +2437,9 @@ func applyMatroskaWriterRules(writingApp string, general *Stream, streams []Stre
 			clearCanonicalSeedField(stream, "Format_Settings_PS", "")
 		}
 		if handBrakeVFR && stream.Kind == StreamVideo && matroskaStreamScalar(*stream, "FrameRate_Mode_Original") == "VFR" {
+			for _, name := range []fieldName{"Duration", "FrameCount", "FrameRate", "FrameRate_Num", "FrameRate_Den", "FrameRate_Mode_Original", "Standard"} {
+				stream.matroskaDeferredFacts.Unset(name)
+			}
 			clearCanonicalSeedField(stream, "Duration", "Duration")
 			clearCanonicalSeedField(stream, "FrameCount", "")
 			clearCanonicalSeedField(stream, "FrameRate", "Frame rate")
@@ -2539,7 +2453,7 @@ func applyMatroskaWriterRules(writingApp string, general *Stream, streams []Stre
 			}
 			continue
 		}
-		if (handBrake || lavfDisplayedRate) && stream.Kind == StreamVideo {
+		if (handBrakeDurationRules || lavfDisplayedRate) && stream.Kind == StreamVideo && !stream.mkvTagDuration {
 			frameCount, frameCountErr := strconv.ParseFloat(matroskaStreamScalar(*stream, "FrameCount"), 64)
 			frameRateText := matroskaStreamScalar(*stream, "FrameRate")
 			frameRate, frameRateErr := strconv.ParseFloat(frameRateText, 64)
@@ -2557,12 +2471,12 @@ func applyMatroskaWriterRules(writingApp string, general *Stream, streams []Stre
 				clearCanonicalSeedField(stream, "Standard", "Standard")
 			}
 			frameRateText := matroskaStreamScalar(*stream, "FrameRate")
-			if frameRate, err := strconv.ParseFloat(frameRateText, 64); err == nil && frameRate > 0 && math.Abs(frameRate-math.Round(frameRate)) < 1e-9 {
+			if frameRate, err := strconv.ParseFloat(frameRateText, 64); err == nil && frameRate > 0 && math.Abs(frameRate-math.Round(frameRate)) < 1e-9 && matroskaStreamScalar(*stream, "FrameRate_Mode_Original") != "VFR" {
 				replaceCanonicalSeedFill(stream, "FrameRate_Num", strconv.FormatInt(int64(math.Round(frameRate)), 10), "", "")
 				replaceCanonicalSeedFill(stream, "FrameRate_Den", "1", "", "")
 			}
 		}
-		if (handBrake || lavfDisplayedRate || lavfIntegralDuration) && (stream.Kind == StreamVideo || stream.Kind == StreamAudio) {
+		if (handBrakeDurationRules || lavfDisplayedRate || lavfIntegralDuration) && (stream.Kind == StreamVideo || stream.Kind == StreamAudio) && !stream.mkvTagDuration {
 			durationText, _ := projectedCanonicalSeedValue(*stream, "Duration")
 			if duration, err := strconv.ParseFloat(durationText, 64); err == nil && duration > 0 {
 				value := fmt.Sprintf("%.3f", duration)
@@ -2573,6 +2487,7 @@ func applyMatroskaWriterRules(writingApp string, general *Stream, streams []Stre
 			if bitRate := matroskaStreamScalar(*stream, "BitRate"); bitRate != "" && matroskaStreamScalar(*stream, "StreamSize") == "" {
 				if parsed, err := strconv.ParseFloat(bitRate, 64); err == nil && parsed > 0 {
 					replaceCanonicalSeedFill(stream, "BitRate_Nominal", bitRate, "Nominal bit rate", formatBitrate(parsed))
+					stream.matroskaDeferredFacts.Unset("BitRate")
 					clearCanonicalSeedField(stream, "BitRate", "Bit rate")
 				}
 			}
@@ -2580,7 +2495,6 @@ func applyMatroskaWriterRules(writingApp string, general *Stream, streams []Stre
 	}
 	normalizeMatroskaDeclaredFrameRates(streams)
 	normalizeMatroskaMPEG4VisualSettings(streams)
-	applyMatroskaTrackIdentityOverrides(segmentUID, general, streams)
 }
 
 // normalizeMatroskaDeclaredFrameRates resolves small measured-rate drift by
@@ -2623,684 +2537,6 @@ func normalizeMatroskaMPEG4VisualSettings(streams []Stream) {
 	}
 }
 
-// applyMatroskaTrackIdentityOverrides retains only decisions unavailable from
-// parsed TrackEntry, codec-private, tag, and bounded-cluster facts. The cases
-// cover full-stream counts/statistics and malformed or contradictory payloads;
-// focused unit fixtures and immutable parity samples document each category.
-func applyMatroskaTrackIdentityOverrides(segmentUID string, general *Stream, streams []Stream) {
-	for i := range streams {
-		stream := &streams[i]
-		applyMatroskaMeasuredVideoBitRate(stream)
-		uid := streamTrackUID(*stream)
-		switch uid {
-		case 17365356515652011545:
-			overrides := map[string]string{
-				"HDR_Format": "Dolby Vision / Dolby Vision", "HDR_Format_Compression": "None / None",
-				"HDR_Format_Level": "03 / 03", "HDR_Format_Profile": "dvhe.05 / dvhe.05",
-				"HDR_Format_Settings": "BL+RPU / BL+RPU", "HDR_Format_Version": "1.0 / 1.0",
-				"colour_range": "Full", "colour_range_Source": "Stream",
-			}
-			replaceMatroskaCanonicalOverrides(stream, overrides)
-		case 14826273024089481058:
-			replaceMatroskaCanonicalOverrides(stream, map[string]string{
-				"FrameRate_Mode": "VFR", "FrameRate_Original": "25.000", "ScanOrder": "TFF",
-			})
-		case 622040981096581920:
-			// The bounded cluster scan does not reach the final MPEG Audio
-			// frame; retain official full-stream accounting for this identity.
-			replaceMatroskaCanonicalOverrides(stream, map[string]string{
-				"BitRate_Mode": "CBR", "FrameCount": "33818", "SamplingCount": "38958336",
-			})
-		case 7135819886179266576:
-			if stream.Kind == StreamText {
-				replaceCanonicalSeedFill(stream, "FrameRate_Num", "999", "", "")
-				replaceCanonicalSeedFill(stream, "FrameRate_Den", "1000", "", "")
-			}
-		case 18360697904230747953:
-			setMatroskaJSONExtras(stream, map[string]string{"compr_Average": "3.21", "compr_Count": "3226", "dynrng_Average": "1.53", "dynrng_Count": "4234"})
-		case 1:
-			applyReusedMatroskaUIDOneIdentityOverride(stream)
-		case 3350138809:
-			replaceCanonicalSeedFill(stream, "Encoded_Library_Version", "20090709", "", "")
-		case 1332958560819736266:
-			setMatroskaJSONExtras(stream, map[string]string{"compr_Average": "2.69", "compr_Count": "2318", "compr_Minimum": "-4.08", "dynrng_Average": "1.42", "dynrng_Count": "2542", "dynrng_Minimum": "-3.87"})
-		case 10165305946312299993:
-			setMatroskaJSONExtras(stream, map[string]string{"compr_Average": "-1.17", "compr_Count": "1260", "compr_Minimum": "-3.25", "dynrng_Average": "-1.12", "dynrng_Count": "1276", "dynrng_Minimum": "-3.45"})
-		case 15018893693280564553:
-			clearCanonicalSeedField(stream, "Duration", "Duration")
-			clearCanonicalSeedField(stream, "FrameCount", "")
-			clearCanonicalSeedField(stream, "FrameRate", "Frame rate")
-			clearCanonicalSeedField(stream, "FrameRate_Num", "")
-			clearCanonicalSeedField(stream, "FrameRate_Den", "")
-			replaceMatroskaCanonicalOverrides(stream, map[string]string{
-				"FrameRate_Mode": "VFR", "FrameRate_Original": "25.000", "FrameRate_Num": "25",
-				"FrameRate_Den": "1", "ScanOrder": "TFF", "ScanType": "MBAFF",
-			})
-		case 1337866033:
-			replaceMatroskaCanonicalOverrides(stream, map[string]string{
-				"DisplayAspectRatio": "1.398", "DisplayAspectRatio_Original": "1.399",
-				"PixelAspectRatio": "1.066", "PixelAspectRatio_Original": "1.067",
-			})
-		case 17968196293234071689:
-			replaceCanonicalSeedFill(stream, "BitRate", "66150", "", "")
-		case 2:
-			applyReusedMatroskaUIDTwoIdentityOverride(segmentUID, stream)
-		case 3:
-			format := matroskaStreamScalar(*stream, "Format")
-			if format == "TrueHD" && matroskaStreamScalar(*stream, "CodecID") == "A_TRUEHD" {
-				format = "MLP FBA"
-			}
-			if format == "MLP FBA" {
-				replaceMatroskaCanonicalOverrides(stream, map[string]string{"BitDepth": "24", "BitRate": "2537536"})
-			}
-		case 8414186581023850897:
-			replaceCanonicalSeedFill(stream, "Format_Settings_GOP", "M=4, N=48", "", "")
-		case 12696988805161608405:
-			replaceCanonicalSeedFill(stream, "Format_Settings_GOP", "N=2", "", "")
-		case 8429675313857933913, 13415293375763136618:
-			removeMatroskaCanonicalField(stream, "Format_Settings_GOP", "Format settings, GOP")
-		case 2685510896410436351:
-			replaceMatroskaDurationProjection(stream, "4835.294", 3)
-			replaceCanonicalSeedFill(stream, "FrameCount", "115931", "", "")
-			removeMatroskaCanonicalField(stream, "Format_Settings_GOP", "Format settings, GOP")
-		case 3024932759986631645:
-			replaceMatroskaDurationProjection(stream, "4835.296", 3)
-			replaceCanonicalSeedFill(stream, "SamplingCount", "232094208", "", "")
-		case 15454466038305321864:
-			replaceMatroskaDurationProjection(stream, "4835.296", 3)
-			replaceMatroskaCanonicalOverrides(stream, map[string]string{
-				"SamplingCount": "232094208", "StreamSize": "116047104",
-			})
-			setMatroskaJSONExtras(stream, map[string]string{"compr_Average": "2.03", "compr_Count": "1089", "dynrng_Average": "2.09", "dynrng_Count": "1104"})
-		case 2258291487955814043:
-			replaceCanonicalSeedFill(stream, "DisplayAspectRatio", "1.783", "", "")
-		case 12894577728004814758:
-			// DTS-ES extension metadata is applied by the bounded DTS probe.
-		case 16522162004083314576:
-			setMatroskaJSONExtras(stream, map[string]string{"compr_Average": "0.44", "compr_Count": "964", "dynrng_Average": "0.89", "dynrng_Count": "987"})
-		case 1454056016244297151:
-			if segmentUID == "249145026190604183892181043117169235058" {
-				replaceCanonicalSeedFill(stream, "BitRate", "144000", "", "")
-			}
-		case 9120899472342782044:
-			replaceCanonicalSeedFill(stream, "Format_Settings_GOP", "M=3, N=23", "", "")
-		case 7009308330616645156:
-			replaceMatroskaCanonicalOverrides(stream, map[string]string{
-				"Encoded_Library": "Zencoder Video Encoding System", "Encoded_Library_Name": "Zencoder Video Encoding System",
-			})
-		case 12818140624937077533:
-			replaceMatroskaCanonicalOverrides(stream, map[string]string{
-				"colour_primaries_Source": "Stream", "matrix_coefficients_Source": "Stream",
-			})
-		case 7849396997401118244:
-			replaceCanonicalSeedFill(stream, "Format_Settings_GOP", "M=3, N=24", "", "")
-		case 10848778679934782213:
-			clearCanonicalSeedField(stream, "HDR_Format_Compatibility", "")
-			replaceMatroskaCanonicalOverrides(stream, map[string]string{"HDR_Format_Version": "0", "Standard": "NTSC"})
-		case 14911214151676619632:
-			replaceCanonicalSeedFill(stream, "BitRate", "192000", "", "")
-		case 12762733521390261687:
-			replaceCanonicalSeedFill(stream, "DisplayAspectRatio", "1.783", "", "")
-		case 3006405325172474771:
-			replaceCanonicalSeedFill(stream, "BitRate", "132300", "", "")
-		case 13465845542392905765:
-			clearCanonicalSeedField(stream, "HDR_Format_Compatibility", "")
-			replaceCanonicalSeedFill(stream, "HDR_Format_Compression", "None", "", "")
-		case 6793509049751060696:
-			replaceCanonicalSeedFill(stream, "Standard", "Component", "", "")
-		case 12806499188313892430, 6589486521748685424:
-			setMatroskaJSONExtras(stream, map[string]string{"dynrng_Average": "2.69", "dynrng_Count": "857"})
-		case 371040528991388763:
-			replaceCanonicalSeedFill(stream, "BitDepth_Detected", "20", "", "")
-		}
-		applyMatroskaSegmentIdentityOverride(segmentUID, stream)
-	}
-	if segmentUID == "279432490384478975316367262664809380522" {
-		order := 0
-		for i := range streams {
-			if streams[i].Kind != StreamVideo && streams[i].Kind != StreamAudio && streams[i].Kind != StreamText {
-				continue
-			}
-			value := strconv.Itoa(order)
-			replaceCanonicalSeedFill(&streams[i], "StreamOrder", value, "", "")
-			streams[i].matroskaDeferredFacts.Set("StreamOrder", value)
-			order++
-		}
-	}
-
-	for _, stream := range streams {
-		if streamTrackUID(stream) == 15018893693280564553 {
-			if general != nil {
-				clearCanonicalSeedField(general, "FrameCount", "")
-				clearCanonicalSeedField(general, "FrameRate", "")
-			}
-		}
-		if general != nil && streamTrackUID(stream) == 2685510896410436351 {
-			replaceCanonicalSeedFill(general, "FrameCount", "115931", "", "")
-		}
-		if general != nil && streamTrackUID(stream) == 1 && matroskaStreamScalar(stream, "FrameCount") == "9363" && matroskaStreamScalar(stream, "StreamSize") == "66666378" {
-			replaceCanonicalSeedFill(general, "FrameCount", "9363", "", "")
-		}
-	}
-}
-
-type matroskaSnapshotSuppressionGroup struct {
-	fields     []string
-	identities map[string]struct{}
-}
-
-// matroskaSnapshotSuppressionGroups captures MediaInfo's bounded-scan
-// omissions that cannot be inferred from TrackEntry, tags, or sampled clusters.
-// Grouping identical field policies keeps the identity surface compact.
-var matroskaSnapshotSuppressionGroups = []matroskaSnapshotSuppressionGroup{
-	{
-		fields: []string{"BitDepth_Detected"},
-		identities: map[string]struct{}{
-			"47318881547696706116967755732948194964/15080404650862144133": {},
-		},
-	},
-	{
-		fields: []string{"BitRate_Maximum"},
-		identities: map[string]struct{}{
-			"135897777900999648287296946773580208149/10984828632262846533": {},
-			"14473794946182189836205452810269116825/13042043696965600885":  {},
-			"146240660841410204175873416482649042019/1":                    {},
-			"157146852637817630566970905945042663479/1760154262909079532":  {},
-			"167828994259326646758454252773548458698/13502175821566323270": {},
-			"171579420443269141113957024309105851951/18060314100732008157": {},
-			"18802068151680175042144111192608171600/13415293375763136618":  {},
-			"298582060193180940828433554095145332930/5737175259453615959":  {},
-			"57198272187021638060040265892682059444/13511086196862937928":  {},
-			"65364540277330267530421739970038369442/1":                     {},
-			"73352670590527736618676434282186760604/12818140624937077533":  {},
-			"83480976153630965005211236657228274548/15020313808079622978":  {},
-		},
-	},
-	{
-		fields: []string{"BitRate_Maximum", "BitRate_Mode", "BufferSize"},
-		identities: map[string]struct{}{
-			"180733416804044160577937918120998291202/12762733521390261687": {},
-			"232460017791246606214352529602968161033/2258291487955814043":  {},
-		},
-	},
-	{
-		fields: []string{"BitRate_Maximum", "BitRate_Mode", "BufferSize", "FrameRate_Den", "FrameRate_Num"},
-		identities: map[string]struct{}{
-			"239565141472415318893036736836581916609/18138888523546286320": {},
-			"243510220913414879041383749194986580928/6157641875766035639":  {},
-			"97075743128489674712763293861383150218/12696988805161608405":  {},
-		},
-	},
-	{
-		fields: []string{"BitRate_Maximum", "BitRate_Nominal", "BufferSize", "FrameRate_Den", "FrameRate_Num"},
-		identities: map[string]struct{}{
-			"155710212500165582448344499697287547925/1": {},
-			"227336523567815000881105104926235229145/1": {},
-		},
-	},
-	{
-		fields: []string{"BitRate_Maximum", "BufferSize", "FrameRate_Den", "FrameRate_Num"},
-		identities: map[string]struct{}{
-			"188073579630724219246844527979013831038/1": {},
-		},
-	},
-	{
-		fields: []string{"BitRate_Nominal"},
-		identities: map[string]struct{}{
-			"/1": {},
-			"113701216767337669346795642691303127028/1":                    {},
-			"116474550834518576861602889786874438949/1":                    {},
-			"170342548867559438146563805592484896346/1":                    {},
-			"173987668459775450027284050850972295121/1":                    {},
-			"182417118402522262415924750338390012532/1":                    {},
-			"185915378740837334372088824097428755339/1":                    {},
-			"187410205005641658854487582421797919437/1":                    {},
-			"191730149166483768305329880438260251583/1":                    {},
-			"192386688326399111812748137687024800578/17295535628063321261": {},
-			"192832689515023759602329039553213033409/1":                    {},
-			"193846022130570669429965189470266967696/1":                    {},
-			"199505952405924995201463976568603946719/1":                    {},
-			"219202368436029058732762834665169896654/1":                    {},
-			"233717476760974987367990102347056411459/1":                    {},
-			"235598020637687964483532655016670806275/1":                    {},
-			"238254325445507383106990986414332281868/1":                    {},
-			"246979030130857560242775811098546504921/1":                    {},
-			"252234027661963962579737643556143249052/1":                    {},
-			"253019247215402864606385850431011180154/1":                    {},
-			"253851821553612662644699933006525077084/1":                    {},
-		},
-	},
-	{
-		fields: []string{"BitRate_Nominal", "FrameRate_Den", "FrameRate_Num"},
-		identities: map[string]struct{}{
-			"175208480591352090567304222275503160284/1": {},
-			"195391992144967335443352926490634666314/1": {},
-			"199875943957975110650995217354497504734/1": {},
-			"209597106630083227454695254516041614162/1": {},
-			"219140685162430904884051026667585153318/1": {},
-			"222150013974609333298440778034190711101/1": {},
-			"229791673837052501261905237449350929531/1": {},
-			"251616463719494968071736089817656651064/1": {},
-		},
-	},
-	{
-		fields: []string{"BitRate", "BitRate_Maximum"},
-		identities: map[string]struct{}{
-			"6026059976606815920160950923868267411/12227977421356886075": {},
-		},
-	},
-	{
-		fields: []string{"ChannelLayout", "ChannelPositions"},
-		identities: map[string]struct{}{
-			"/2864556435": {},
-			"175208480591352090567304222275503160284/706276513":            {},
-			"193846022130570669429965189470266967696/3350138809":           {},
-			"199931523398224088434405045799267039971/12894577728004814758": {},
-			"209597106630083227454695254516041614162/3597148298":           {},
-			"227040962074445048393809456684882606251/9542848740572520888":  {},
-			"227336523567815000881105104926235229145/1200022148":           {},
-			"233014709827933991764227548007236706820/585772070":            {},
-			"233717476760974987367990102347056411459/262698380":            {},
-			"235598020637687964483532655016670806275/4184788358":           {},
-			"235598020637687964483532655016670806275/443956368":            {},
-			"253019247215402864606385850431011180154/1308033170":           {},
-			"253019247215402864606385850431011180154/2115648174":           {},
-			"253019247215402864606385850431011180154/2455934374":           {},
-			"253019247215402864606385850431011180154/3954000559":           {},
-			"318211443937225148209429089995243812253/9354553041448280311":  {},
-			"319945222102542707837411843229254014102/9826214264200667624":  {},
-			"3715957675033425873865429855693850445/10576290965541547153":   {},
-			"74627418542911798546324821953433641200/4411769979572388483":   {},
-			"85270403255594798659656493441342952175/622040981096581920":    {},
-		},
-	},
-	{
-		fields: []string{"ChannelLayout", "ChannelPositions", "Compression_Mode"},
-		identities: map[string]struct{}{
-			"252500622441216666360227525453008833790/14758159173722750517": {},
-		},
-	},
-	{
-		fields: []string{"ChannelLayout", "ChannelPositions", "Compression_Mode", "FrameRate_Den", "FrameRate_Num"},
-		identities: map[string]struct{}{
-			"164465601036328158438317711821263666023/2": {},
-			"65364540277330267530421739970038369442/2":  {},
-		},
-	},
-	{
-		fields: []string{"colour_description_present", "colour_description_present_Source", "transfer_characteristics_Source"},
-		identities: map[string]struct{}{
-			"103308645553997177797616341640223857402/15281752063920096314": {},
-			"149850252197924362841753268227096650135/12431835424121214793": {},
-		},
-	},
-	{
-		fields: []string{"Compression_Mode", "FrameCount", "FrameRate", "FrameRate_Den", "FrameRate_Num", "SamplesPerFrame"},
-		identities: map[string]struct{}{
-			"250995523967597885859320780901778164451/11304833716160945322": {},
-		},
-	},
-	{
-		fields: []string{"Duration", "FrameCount"},
-		identities: map[string]struct{}{
-			"0/15018893693280564553": {},
-		},
-	},
-	{
-		fields: []string{"Duration", "FrameCount", "FrameRate_Mode_Original"},
-		identities: map[string]struct{}{
-			"172810291337041847750014288661546002123/1": {},
-		},
-	},
-	{
-		fields: []string{"extra:_00_00_00_097"},
-		identities: map[string]struct{}{
-			"209717945986001993440463738392825969807/": {},
-		},
-	},
-	{
-		fields: []string{"extra:cmixlev", "extra:dialnorm_Maximum", "extra:dmixmod", "extra:surmixlev", "FrameCount"},
-		identities: map[string]struct{}{
-			"185915378740837334372088824097428755339/1442407597": {},
-		},
-	},
-	{
-		fields: []string{"Format_Level"},
-		identities: map[string]struct{}{
-			"196319148793794342788101442035095590192/1654984328671705336": {},
-		},
-	},
-	{
-		fields: []string{"Format_Settings_PS"},
-		identities: map[string]struct{}{
-			"135315559492247824557334934421430921596/12552385954232663780": {},
-			"177894629664354133662288085935345340116/17679875539272370586": {},
-			"177894629664354133662288085935345340116/9461069139208828030":  {},
-			"24162727074487929056403190053428847870/18083380477145309790":  {},
-		},
-	},
-	{
-		fields: []string{"FrameCount"},
-		identities: map[string]struct{}{
-			"110597907629842442878016487962334632609/2":                    {},
-			"113701216767337669346795642691303127028/2":                    {},
-			"116474550834518576861602889786874438949/2":                    {},
-			"155710212500165582448344499697287547925/1877551753":           {},
-			"155710212500165582448344499697287547925/3014822313":           {},
-			"16851035657700595236758743438966265961/7221567213162265079":   {},
-			"173987668459775450027284050850972295121/9203345709604090496":  {},
-			"177345968163369930718889019093270448692/7147763219198164798":  {},
-			"180438607857746847067502302158339134042/598630022":            {},
-			"182417118402522262415924750338390012532/3413412738":           {},
-			"187410205005641658854487582421797919437/1248055979":           {},
-			"190046462572676986062824073701941468649/1426622868":           {},
-			"190488992299014451006178643791070786312/18036674164850921886": {},
-			"191730149166483768305329880438260251583/3896806875021666191":  {},
-			"192386688326399111812748137687024800578/18437169132424027288": {},
-			"199287314976522243721254556820427246774/2960468878":           {},
-			"199875943957975110650995217354497504734/4274349998":           {},
-			"209717945986001993440463738392825969807/1191297156":           {},
-			"219140685162430904884051026667585153318/1411034242":           {},
-			"233014709827933991764227548007236706820/1859787291":           {},
-			"238254325445507383106990986414332281868/2561807028":           {},
-			"239565141472415318893036736836581916609/12121760928727005001": {},
-			"243510220913414879041383749194986580928/2208036548753557644":  {},
-			"245438564500206277961307720548008506454/1515338653":           {},
-			"246979030130857560242775811098546504921/516496529":            {},
-			"250995523967597885859320780901778164451/17751479825245801897": {},
-			"253019247215402864606385850431011180154/2361995967":           {},
-			"25366231129890265661473946662877619358/207429512":             {},
-			"25366231129890265661473946662877619358/3380371329":            {},
-			"253851821553612662644699933006525077084/336033212":            {},
-			"312103605842292320922347479763135807272/6884831444094766873":  {},
-			"37076420026553846005398485628450386869/2316019134":            {},
-			"50469381227605987564368868835018624151/1145654555278608196":   {},
-			"8199247880654106320077909354029393156/12806499188313892430":   {},
-			"8199247880654106320077909354029393156/6589486521748685424":    {},
-			"97075743128489674712763293861383150218/1408368884211268003":   {},
-		},
-	},
-	{
-		fields: []string{"FrameCount", "FrameRate", "SamplesPerFrame"},
-		identities: map[string]struct{}{
-			"182668161095857617381894745615400511974/7328605039490204042":  {},
-			"192569937172381982662557597182884906503/13893169810011191685": {},
-		},
-	},
-	{
-		fields: []string{"FrameRate_Den", "FrameRate_Num"},
-		identities: map[string]struct{}{
-			"199415313276358354893098643352499815382/1":                    {},
-			"214555141493517637072720390969756530937/14923968323112416664": {},
-			"64292167393248443453306749547224767332/18229823285062969326":  {},
-		},
-	},
-	{
-		fields: []string{"FrameRate", "SamplesPerFrame"},
-		identities: map[string]struct{}{
-			"22165520771035717426677522631297930786/3024932759986631645": {},
-		},
-	},
-	{
-		fields: []string{"OverallBitRate_Mode"},
-		identities: map[string]struct{}{
-			"180733416804044160577937918120998291202/0": {},
-			"232460017791246606214352529602968161033/0": {},
-			"239565141472415318893036736836581916609/0": {},
-			"243510220913414879041383749194986580928/0": {},
-			"65364540277330267530421739970038369442/0":  {},
-			"97075743128489674712763293861383150218/0":  {},
-		},
-	},
-	{
-		fields: []string{"StreamSize"},
-		identities: map[string]struct{}{
-			"146240660841410204175873416482649042019/0": {},
-			"172810291337041847750014288661546002123/0": {},
-			"199209997991646668669368862507527190145/0": {},
-			"199287314976522243721254556820427246774/0": {},
-			"209717945986001993440463738392825969807/0": {},
-			"22165520771035717426677522631297930786/0":  {},
-			"239102895242246739853054993959889350829/0": {},
-			"245438564500206277961307720548008506454/0": {},
-			"37076420026553846005398485628450386869/0":  {},
-			"8199247880654106320077909354029393156/0":   {},
-		},
-	},
-}
-
-func applyMatroskaSnapshotSuppressions(general *Stream, streams []Stream) {
-	if general == nil {
-		return
-	}
-	segmentUID := matroskaStreamScalar(*general, "UniqueID")
-	apply := func(stream *Stream, identity string) {
-		for _, group := range matroskaSnapshotSuppressionGroups {
-			if _, ok := group.identities[identity]; !ok {
-				continue
-			}
-			for _, field := range group.fields {
-				if member, ok := strings.CutPrefix(field, "extra:"); ok {
-					removeCanonicalSeedObjectMember(stream, "extra", member)
-					continue
-				}
-				clearCanonicalSeedField(stream, fieldName(field), "")
-			}
-		}
-	}
-	apply(general, segmentUID+"/0")
-	zeroUIDOccurrences := map[StreamKind]int{}
-	for index := range streams {
-		trackUID := streamTrackUID(streams[index])
-		identity := segmentUID + "/"
-		if trackUID != 0 {
-			identity += strconv.FormatUint(trackUID, 10)
-		} else {
-			zeroUIDOccurrences[streams[index].Kind]++
-			if occurrence := zeroUIDOccurrences[streams[index].Kind]; occurrence > 1 {
-				identity += "#" + strconv.Itoa(occurrence)
-			}
-		}
-		apply(&streams[index], identity)
-	}
-	if segmentUID == "185915378740837334372088824097428755339" {
-		for index := range streams {
-			if streamTrackUID(streams[index]) == 1 {
-				setCanonicalSeedStructuredDecimals(&streams[index], "Duration", 3)
-			}
-		}
-	}
-}
-
-// applyMatroskaGeneralIdentityOverride preserves exact General accounting when
-// tag targeting or bounded scans cannot reconstruct MediaInfo's byte split
-// from container headers alone.
-func applyMatroskaGeneralIdentityOverride(general *Stream) {
-	if general == nil {
-		return
-	}
-	segmentUID, _ := canonicalSeedValue(*general, "UniqueID")
-	switch segmentUID {
-	case "279432490384478975316367262664809380522":
-		replaceCanonicalSeedFill(general, "StreamSize", "326474086", "", "")
-	case "250995523967597885859320780901778164451":
-		clearCanonicalSeedField(general, "Encoded_Application_Name", "")
-		clearCanonicalSeedField(general, "Encoded_Application_Version", "")
-		replaceCanonicalSeedFill(general, "OverallBitRate_Mode", "VBR", "", "")
-		replaceCanonicalSeedFill(general, "StreamSize", "376674059", "", "")
-	}
-}
-
-// applyMatroskaSegmentIdentityOverride records exact MediaInfo decisions for
-// encoder-specific or malformed tracks whose SegmentUID and TrackUID
-// disambiguate metadata unavailable to the bounded parser.
-func applyMatroskaSegmentIdentityOverride(segmentUID string, stream *Stream) {
-	if stream == nil {
-		return
-	}
-	uid := streamTrackUID(*stream)
-	switch segmentUID {
-	case "256831988852141542374207303932639545548":
-		switch uid {
-		case 12018648740920132687:
-			replaceMatroskaCanonicalOverrides(stream, map[string]string{
-				"Encoded_Library_Settings":          "preset=4 / crf=19 / tune=0 / grain=4",
-				"colour_description_present_Source": "Container / Stream", "colour_primaries_Source": "Container / Stream",
-				"colour_range_Source": "Container / Stream", "matrix_coefficients": "BT.709",
-				"matrix_coefficients_Source": "Container / Stream", "transfer_characteristics_Source": "Container / Stream",
-			})
-			setMatroskaJSONExtras(stream, map[string]string{"FilterChain": "crop=3840:1600:0:280,libplacebo=tonemapping=bt.2446a:peak_detect=true:color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv:format=yuv420p10le,eq=saturation=1.00:brightness=0.000:gamma=1.00,zscale=w=1920:h=800:filter=spline36"})
-		case 16888475828216027567:
-			replaceMatroskaCanonicalOverrides(stream, map[string]string{
-				"ChannelLayout": "L R C Ls Rs Lb Rb LFE", "ChannelPositions": "Front: L C R, Side: L R, Back: L R, LFE",
-			})
-		}
-	case "64292167393248443453306749547224767332":
-		switch uid {
-		case 18229823285062969326:
-			replaceMatroskaCanonicalOverrides(stream, map[string]string{
-				"colour_description_present": "Yes", "colour_description_present_Source": "Stream",
-				"colour_primaries": "BT.709", "colour_primaries_Source": "Stream", "colour_range": "Limited",
-				"colour_range_Source": "Stream", "matrix_coefficients": "BT.709", "matrix_coefficients_Source": "Stream",
-				"transfer_characteristics": "BT.709", "transfer_characteristics_Source": "Stream",
-			})
-		case 16323979082445038959:
-			replaceMatroskaCanonicalOverrides(stream, map[string]string{
-				"BitDepth": "32", "Delay": "0.007", "Video_Delay": "0.007",
-			})
-		}
-	case "172270496950442870347246698332115951643":
-		switch uid {
-		case 14208986170866393365:
-			replaceMatroskaCanonicalOverrides(stream, map[string]string{
-				"colour_range": "Limited", "colour_range_Source": "Stream",
-			})
-		case 3030000336554105738:
-			replaceMatroskaCanonicalOverrides(stream, map[string]string{
-				"ChannelLayout": "L R C Ls Rs Lb Rb LFE", "ChannelPositions": "Front: L C R, Side: L R, Back: L R, LFE",
-			})
-		}
-	case "60149672000941514751531143121781815719":
-		if uid == 1 {
-			replaceMatroskaCanonicalOverrides(stream, map[string]string{
-				"ChromaSubsampling": "4:2:0", "ChromaSubsampling_Position": "Type 1",
-				"colour_range_Source": "Container / Stream", "matrix_coefficients": "BT.709", "matrix_coefficients_Source": "Container / Stream",
-			})
-		}
-	case "207837434893731184985220851181582096005":
-		if uid == 4644394600604032296 {
-			replaceMatroskaCanonicalOverrides(stream, map[string]string{
-				"BitRate": "5529226", "ChromaSubsampling": "4:2:0", "ChromaSubsampling_Position": "Type 1",
-				"FrameRate_Num": "23976", "FrameRate_Den": "1000", "colour_range": "Limited", "colour_range_Source": "Stream",
-				"matrix_coefficients": "BT.709", "matrix_coefficients_Source": "Stream",
-			})
-		}
-	case "33497481125072114390281171191499692208":
-		if uid == 2421454994011981872 {
-			replaceMatroskaCanonicalOverrides(stream, map[string]string{
-				"Format_Settings_BVOP": "1", "Format_Settings_GMC": "0", "Format_Settings_Matrix": "Default (MPEG)",
-			})
-		}
-	case "65364540277330267530421739970038369442":
-		switch uid {
-		case 1:
-			replaceMatroskaCanonicalOverrides(stream, map[string]string{"BitRate": "4000000", "BitRate_Mode": "CBR"})
-		case 2:
-			replaceMatroskaCanonicalOverrides(stream, map[string]string{"FrameCount": "82015", "SamplingCount": "131223843"})
-		}
-	case "279432490384478975316367262664809380522":
-		switch uid {
-		case 1:
-			overrideCanonicalSeedStructured(stream, "Duration", "5965.966")
-			setCanonicalSeedStructuredDecimals(stream, "Duration", 3)
-			replaceMatroskaCanonicalOverrides(stream, map[string]string{"BitRate": "16314162", "StreamSize": "12166216740"})
-			removeMatroskaCanonicalField(stream, "Standard", "Standard")
-		case 2:
-			replaceMatroskaCanonicalJSONOnlyOverrides(stream, map[string]string{
-				"Format": "PCM", "CodecID": "A_MS/ACM / 00000001-0000-0010-8000-00AA00389B71", "BitDepth": "16",
-				"BitRate": "4608000", "BitRate_Mode": "CBR", "ChannelLayout": "L R C LFE Ls Rs",
-				"Format_Settings_Endianness": "Little", "Format_Settings_Sign": "Signed", "SamplingCount": "286366080", "StreamSize": "3436392960",
-			})
-		}
-	case "250995523967597885859320780901778164451":
-		switch uid {
-		case 1:
-			overrides := map[string]string{
-				"BitRate": "25433692", "BitRate_Maximum": "36999936", "BitRate_Mode": "VBR",
-				"BufferSize": "30000000 / 30000000", "Format_Level": "4.1", "Format_Profile": "High",
-				"MuxingMode": "Container profile=", "StreamSize": "17620252254", "TimeCode_FirstFrame": "00:59:46:00",
-			}
-			replaceMatroskaCanonicalOverrides(stream, overrides)
-		case 11304833716160945322:
-			overrides := map[string]string{
-				"BitRate": "1152000", "Channels": "1", "SamplingCount": "266032128", "StreamSize": "798096384",
-			}
-			replaceMatroskaCanonicalOverrides(stream, overrides)
-			clearCanonicalSeedField(stream, "FrameRate", "")
-			clearCanonicalSeedField(stream, "SamplesPerFrame", "")
-		}
-	case "241754502431753679144229697198754345483":
-		if uid == 1 {
-			library := "x264 - core 164 r3107+58M ae98796 t_mod_New ~ encoded by tm          "
-			replaceMatroskaCanonicalOverrides(stream, map[string]string{
-				"Encoded_Library": library, "Encoded_Library_Version": strings.TrimPrefix(library, "x264 - "),
-			})
-		}
-	case "130902239172959804913611997558835319173":
-		switch uid {
-		case 8475921735620292254:
-			replaceMatroskaCanonicalJSONOnlyOverrides(stream, map[string]string{"Delay": "0.011", "Video_Delay": "0.011"})
-		}
-	case "239404857918770256173222185279836104145":
-		if uid == 10278102918818764980 {
-			replaceCanonicalSeedFill(stream, "ChannelPositions", "Front: L C R, Back: C", "", "")
-		}
-	case "177894629664354133662288085935345340116":
-		switch uid {
-		case 13241287883843875093:
-			replaceMatroskaCanonicalOverrides(stream, map[string]string{
-				"ChannelLayout": "L R C Cb", "ChannelPositions": "Front: L C R, Back: C",
-			})
-			setMatroskaJSONExtras(stream, map[string]string{"compr_Average": "5.56", "compr_Count": "909"})
-		case 9461069139208828030:
-			clearCanonicalSeedField(stream, "Format_Settings_PS", "")
-		case 17679875539272370586:
-			replaceCanonicalSeedFill(stream, "BitRate", "66150", "", "")
-			clearCanonicalSeedField(stream, "Format_Settings_PS", "")
-		}
-	default:
-		duration, _ := projectedCanonicalSeedValue(*stream, "Duration")
-		if uid == 2864556435 && duration == "7070.105" {
-			replaceMatroskaCanonicalOverrides(stream, map[string]string{
-				"ChannelLayout_Original": "C L R Ls Rs LFE", "ChannelPositions_Original": "Front: L C R, Side: L R, LFE",
-			})
-		}
-	}
-}
-
-// applyMatroskaMeasuredVideoBitRate separates the measured payload rate from
-// the container's nominal target for tracks where MediaInfo reports both.
-func applyMatroskaMeasuredVideoBitRate(stream *Stream) {
-	if stream == nil || stream.Kind != StreamVideo || matroskaStreamScalar(*stream, "BitRate_Nominal") != "" {
-		return
-	}
-	switch streamTrackUID(*stream) {
-	case 6100087837121117761, 15932186074872022058, 1712110783050057374:
-	default:
-		return
-	}
-	current, currentErr := strconv.ParseFloat(matroskaStreamScalar(*stream, "BitRate"), 64)
-	streamSize, sizeErr := strconv.ParseFloat(matroskaStreamScalar(*stream, "StreamSize"), 64)
-	durationText, _ := projectedCanonicalSeedValue(*stream, "Duration")
-	duration, durationErr := strconv.ParseFloat(durationText, 64)
-	if currentErr != nil || sizeErr != nil || durationErr != nil || current <= 0 || streamSize <= 0 || duration <= 0 {
-		return
-	}
-	measured := math.Floor(streamSize * 8 / duration)
-	replaceCanonicalSeedFill(stream, "BitRate_Nominal", strconv.FormatInt(int64(current), 10), "Nominal bit rate", formatBitrate(current))
-	replaceCanonicalSeedFill(stream, "BitRate", strconv.FormatInt(int64(measured), 10), "Bit rate", formatBitrate(measured))
-}
-
 // replaceMatroskaDurationProjection stores canonical milliseconds while
 // retaining the exact seconds precision required by structured renderers.
 func replaceMatroskaDurationProjection(stream *Stream, seconds string, decimals uint8) {
@@ -3312,93 +2548,14 @@ func replaceMatroskaDurationProjection(stream *Stream, seconds string, decimals 
 	setCanonicalSeedStructuredDecimals(stream, "Duration", decimals)
 }
 
-// applyReusedMatroskaUIDOneIdentityOverride disambiguates old files whose
-// muxers reused numeric TrackUID 1 across unrelated codec conventions.
-func applyReusedMatroskaUIDOneIdentityOverride(stream *Stream) {
-	format := matroskaStreamDisplay(*stream, "Format")
-	duration := matroskaProjectedDuration(*stream)
-	streamSize := matroskaStreamScalar(*stream, "StreamSize")
-	switch format {
-	case "AVC":
-		if strings.HasPrefix(duration, "390.494") && streamSize == "66666378" {
-			replaceMatroskaDurationProjection(stream, "390.515000000", 9)
-			replaceCanonicalSeedFill(stream, "FrameCount", "9363", "", "")
-		}
-		if streamSize == "12361439264" {
-			replaceCanonicalSeedFill(stream, "BitRate", "19566770", "", "")
-			for _, key := range []string{"Encoded_Library", "Encoded_Library_Name", "Encoded_Library_Version", "Encoded_Library_Settings"} {
-				clearCanonicalSeedField(stream, fieldName(key), "")
-			}
-			clearCanonicalSeedText(stream, "Writing library")
-			clearCanonicalSeedText(stream, "Encoding settings")
-			replaceCanonicalSeedFill(stream, "FrameRate_Num", "24000", "", "")
-			replaceCanonicalSeedFill(stream, "FrameRate_Den", "1001", "", "")
-		}
-		if duration == "2519.061" {
-			replaceMatroskaDurationProjection(stream, "2519.059000000", 9)
-		}
-		if duration == "1605.560" {
-			replaceMatroskaDurationProjection(stream, "1605.560000000", 9)
-		}
-		if streamSize == "10623163230" {
-			replaceCanonicalSeedFill(stream, "DisplayAspectRatio", "2.398", "", "")
-		}
-		if matroskaStreamScalar(*stream, "TimeCode_FirstFrame") == "" && strings.HasPrefix(duration, "5341.341") {
-			replaceCanonicalSeedFill(stream, "TimeCode_FirstFrame", "01:00:00:00", "", "")
-		}
-	case "MPEG Video":
-		if strings.HasPrefix(duration, "1386.652") {
-			matrixData := "0808080908090B0B0B0B0B0B0D0C0D0D0D0D0D0D0D0D0D0D0D0E0E0E1111110E0E0E0D0D0E0E10101111121312111111111313141414181817171C1C1D222229 / 080808090909090909090A0A0A0A0A0A0A0A0A0A0A0B0B0B0B0B0B0B0B0B0B0B0B0B0B0B0C0C0C0C0C0C0C0C0D0D0D0D0C0D0D0D0D0D0E0E0E0E0F0F0F0F0F10"
-			replaceCanonicalSeedFill(stream, "Format_Settings_Matrix_Data", matrixData, "", "")
-			for key, field := range map[string]string{"Gop_OpenClosed": "GOP, Open/Closed", "Gop_OpenClosed_FirstFrame": "GOP, Open/Closed of first frame", "ScanOrder": "Scan order", "ScanType": "Scan type"} {
-				removeMatroskaCanonicalField(stream, key, field)
-			}
-			replaceCanonicalSeedFill(stream, "Standard", "Component", "", "")
-		}
-	case "HEVC":
-		if duration == "1605.560" {
-			replaceMatroskaDurationProjection(stream, "1605.560000000", 9)
-		}
-	}
-}
-
-// applyReusedMatroskaUIDTwoIdentityOverride disambiguates audio metadata
-// attached to the commonly reused numeric TrackUID 2.
-func applyReusedMatroskaUIDTwoIdentityOverride(segmentUID string, stream *Stream) {
-	format := matroskaStreamDisplay(*stream, "Format")
-	duration := matroskaProjectedDuration(*stream)
-	switch format {
-	case "AC-3":
-		if strings.HasPrefix(duration, "2519.040") {
-			replaceCanonicalSeedFill(stream, "BitDepth", "32", "", "")
-			replaceMatroskaDurationProjection(stream, "2519.040000000", 9)
-		}
-		if strings.HasPrefix(duration, "1605.568") {
-			replaceMatroskaDurationProjection(stream, "1605.568000000", 9)
-		}
-		if strings.HasPrefix(duration, "1324.800") {
-			setMatroskaJSONExtras(stream, map[string]string{"compr_Average": "1.19", "compr_Count": "1179", "dynrng_Average": "0.76", "dynrng_Count": "2051"})
-		}
-	case "PCM":
-		if segmentUID != "164465601036328158438317711821263666023" {
-			return
-		}
-		replaceCanonicalSeedFill(stream, "FrameRate", "30.002", "Frame rate", "30.002 FPS")
-		clearCanonicalSeedField(stream, "FrameRate_Num", "")
-		clearCanonicalSeedField(stream, "FrameRate_Den", "")
-		replaceCanonicalSeedFill(stream, "SamplingCount", "11949600", "", "")
-		replaceCanonicalSeedFill(stream, "BitDepth", "24", "", "")
-	}
-}
-
 // removeMatroskaCanonicalField removes one fact from both canonical
 // projections; the public adapter later publishes the removal.
 func removeMatroskaCanonicalField(stream *Stream, key string, field string) {
 	clearCanonicalSeedField(stream, fieldName(key), field)
 }
 
-// replaceMatroskaCanonicalOverrides stores exact content-identity corrections
-// as canonical scalars in stable key order.
+// replaceMatroskaCanonicalOverrides stores parsed canonical scalars in stable
+// key order.
 func replaceMatroskaCanonicalOverrides(stream *Stream, values map[string]string) {
 	keys := make([]string, 0, len(values))
 	for key := range values {
@@ -3410,7 +2567,7 @@ func replaceMatroskaCanonicalOverrides(stream *Stream, values map[string]string)
 	}
 }
 
-// replaceMatroskaCanonicalJSONOnlyOverrides stores exact identity corrections
+// replaceMatroskaCanonicalJSONOnlyOverrides stores parsed structured-only facts
 // that must remain absent from text and XML projections.
 func replaceMatroskaCanonicalJSONOnlyOverrides(stream *Stream, values map[string]string) {
 	keys := make([]string, 0, len(values))
@@ -3589,7 +2746,7 @@ func matroskaVideoHasX264Settings(stream Stream) bool {
 func matroskaX264HRDState(encoding string) (enabled, disabled bool) {
 	for token := range strings.SplitSeq(encoding, "/") {
 		switch strings.TrimSpace(token) {
-		case "nal_hrd=none":
+		case "nal_hrd=none", "nal_hrd=0":
 			disabled = true
 		case "nal_hrd=vbr", "nal_hrd=cbr":
 			enabled = true

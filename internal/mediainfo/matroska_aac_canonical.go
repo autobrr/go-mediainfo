@@ -66,7 +66,7 @@ func matroskaAACCanonicalSeed(facts matroskaAACCanonicalFacts) []fieldEntry {
 	}
 	if facts.psMode != "" {
 		builder.Structured("Format_Settings_PS", facts.psMode)
-	} else if facts.sbrMode == "Yes (Explicit)" {
+	} else if facts.sbrMode == "Yes (Explicit)" && facts.bitRate == 0 {
 		builder.Structured("Format_Settings_PS", "No (Explicit)")
 	}
 	if additional != "" {

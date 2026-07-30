@@ -18,6 +18,10 @@ func TestRenderTextWithOptionsUsesRawProjection(t *testing.T) {
 	attachCanonicalStore(&report)
 
 	raw := RenderTextWithOptions([]Report{report}, TextRenderOptions{Language: "raw"})
+	eol := "\n"
+	if runtime.GOOS == "windows" {
+		eol = "\r\n"
+	}
 	for _, row := range []string{
 		"Format/String                    : Matroska",
 		"Duration/String                  : 1h 1mn",
@@ -27,15 +31,19 @@ func TestRenderTextWithOptionsUsesRawProjection(t *testing.T) {
 			t.Fatalf("raw output missing %q:\n%s", row, raw)
 		}
 	}
-	if strings.Contains(raw, "\n") && strings.Contains(strings.ReplaceAll(raw, "\r\n", ""), "\n") {
+	if runtime.GOOS == "windows" && strings.Contains(strings.ReplaceAll(raw, "\r\n", ""), "\n") {
 		t.Fatalf("raw output contains bare LF line endings: %q", raw)
 	}
-	wantFooter := "\r\n\r\n" + padRight("ReportBy", 33) + ": " + AppName + " - " + FormatVersion(AppVersion)
-	if !strings.Contains(raw, wantFooter) {
-		t.Fatalf("raw output footer framing/alignment changed:\n%s", raw)
+	if strings.Contains(raw, "ReportBy") {
+		t.Fatalf("raw output includes Inform_Version footer by default:\n%s", raw)
 	}
-	if !strings.HasSuffix(raw, "\r\n\r\n") || strings.HasSuffix(raw, "\r\n\r\n\r\n") {
+	if !strings.HasSuffix(raw, strings.Repeat(eol, 3)) || strings.HasSuffix(raw, strings.Repeat(eol, 4)) {
 		t.Fatalf("raw output terminal line endings = %q", raw[len(raw)-min(len(raw), 12):])
+	}
+	versioned := RenderTextWithOptions([]Report{report}, TextRenderOptions{Language: "raw", InformVersion: true})
+	wantFooter := eol + padRight("ReportBy", 33) + ": " + AppName + " - " + FormatVersion(AppVersion)
+	if !strings.Contains(versioned, wantFooter) {
+		t.Fatalf("Inform_Version raw output omitted footer:\n%s", versioned)
 	}
 	friendly := RenderText([]Report{report})
 	if !strings.Contains(friendly, "Format                                   : Matroska") {
@@ -47,7 +55,7 @@ func TestRenderTextWithOptionsUsesRawProjection(t *testing.T) {
 	}
 }
 
-func TestRenderTextWithOptionsDVDProjectionOmitsStringSuffix(t *testing.T) {
+func TestRenderTextWithOptionsDVDProjectionPreservesStringSuffix(t *testing.T) {
 	builder := newCanonicalStreamBuilder(StreamGeneral)
 	builder.Fill("Format", "DVD Video", "Format", "DVD Video")
 	builder.Fill("Duration", "3661000", "Duration", "1 h 1 min 1 s")
@@ -60,20 +68,19 @@ func TestRenderTextWithOptionsDVDProjectionOmitsStringSuffix(t *testing.T) {
 	}
 	labels := make(map[string]bool, len(projected.Streams[0].Fields))
 	for _, field := range projected.Streams[0].Fields {
-		if strings.HasSuffix(field.Label, "/String") {
-			t.Fatalf("DVD raw label retained /String suffix: %q", field.Label)
-		}
 		labels[field.Label] = true
 	}
-	for _, label := range []string{"Format", "Duration"} {
+	for _, label := range []string{"Format/String", "Duration/String"} {
 		if !labels[label] {
 			t.Errorf("DVD raw projection missing %q: %#v", label, projected.Streams[0].Fields)
 		}
 	}
 
 	raw := RenderTextWithOptions([]Report{report}, TextRenderOptions{Language: "raw"})
-	if strings.Contains(raw, "/String") {
-		t.Fatalf("DVD raw output retained /String suffix:\n%s", raw)
+	for _, label := range []string{"Format/String", "Duration/String"} {
+		if !strings.Contains(raw, label) {
+			t.Fatalf("DVD raw output missing %s suffix:\n%s", label, raw)
+		}
 	}
 }
 
@@ -96,6 +103,44 @@ func TestRawTextExtraProjectionVisibilityAndFormatting(t *testing.T) {
 		if got := rawTextExtraValue(test.key, test.value); got != test.want {
 			t.Fatalf("rawTextExtraValue(%q, %q) = %q, want %q", test.key, test.value, got, test.want)
 		}
+	}
+}
+
+func TestRawTextAC3AggregateStatisticsFollowContainerPolicy(t *testing.T) {
+	for _, test := range []struct {
+		format  string
+		visible bool
+	}{
+		{format: "MPEG-4"},
+		{format: "MPEG-TS"},
+		{format: "BDAV", visible: true},
+		{format: "DVD Video", visible: true},
+	} {
+		t.Run(test.format, func(t *testing.T) {
+			general := newCanonicalStreamBuilder(StreamGeneral)
+			general.Fill("Format", test.format, "Format", test.format)
+			audio := newCanonicalStreamBuilder(StreamAudio)
+			audio.Fill("Format", "AC-3", "Format", "AC-3")
+			audio.Text("dialnorm_Average", "-24 dB")
+			audio.Text("compr_Average", "1.02 dB")
+			audio.Text("dynrng_Count", "32")
+			report := Report{
+				Ref:     "stats.bin",
+				General: general.Snapshot(canonicalStreamPolicy{}),
+				Streams: []Stream{audio.Snapshot(canonicalStreamPolicy{})},
+			}
+			attachCanonicalStore(&report)
+
+			raw := RenderTextWithOptions([]Report{report}, TextRenderOptions{Language: "raw"})
+			if !strings.Contains(raw, "dialnorm_Average") {
+				t.Fatalf("raw output omitted direct dialnorm statistic:\n%s", raw)
+			}
+			for _, label := range []string{"compr_Average", "dynrng_Count"} {
+				if got := strings.Contains(raw, label); got != test.visible {
+					t.Fatalf("%s visibility=%v, want %v:\n%s", label, got, test.visible, raw)
+				}
+			}
+		})
 	}
 }
 
@@ -143,8 +188,28 @@ func TestRawTextCanonicalValueFormatting(t *testing.T) {
 	if got := formatRawTextBitRate("64000"); got != "64.0 Kbps" {
 		t.Fatalf("formatRawTextBitRate = %q", got)
 	}
-	if got := formatRawTextLanguage("es-419", "Spanish"); got != "Spanish (419)" {
+	for value, want := range map[string]string{
+		"10000":  "10000 bps",
+		"10001":  "10.0 Kbps",
+		"100000": "100.0 Kbps",
+		"100001": "100 Kbps",
+		"23550":  "23.5 Kbps",
+	} {
+		if got := formatRawTextBitRate(value); got != want {
+			t.Errorf("formatRawTextBitRate(%s) = %q, want %q", value, got, want)
+		}
+	}
+	if got := formatRawTextLanguage("es-419", "Spanish"); got != "es (419)" {
 		t.Fatalf("formatRawTextLanguage = %q", got)
+	}
+	if got := formatRawTextLanguage("en", "English"); got != "en" {
+		t.Fatalf("formatRawTextLanguage(en) = %q", got)
+	}
+	if got := formatRawTextLanguage("yue-Hant-HK", "Cantonese (Traditional, Hong Kong)"); got != "yue-Hant-HK" {
+		t.Fatalf("formatRawTextLanguage(yue-Hant-HK) = %q", got)
+	}
+	if got := formatRawTextLanguage(" / en", " / English"); got != " / en" {
+		t.Fatalf("formatRawTextLanguage(empty/en list) = %q", got)
 	}
 	if got := formatRawTextServiceKind("CM / O / C"); got != "Complete Main / Original / Commentary" {
 		t.Fatalf("formatRawTextServiceKind = %q", got)
@@ -169,6 +234,9 @@ func TestRawTextCanonicalValueFormatting(t *testing.T) {
 	}
 	if got := formatRawTextEncodedLibrary("XviD0041"); got != "XviD 1.1.0 (2005-11-22)" {
 		t.Fatalf("formatRawTextEncodedLibrary(XviD) = %q", got)
+	}
+	if got := formatRawTextEncodedLibrary("XviD0064"); got != "XviD 64" {
+		t.Fatalf("formatRawTextEncodedLibrary(unknown-date XviD) = %q", got)
 	}
 	if got := rawTextValue(StreamVideo, "FrameRate_Original/String", "23.976 fps", map[string]string{"Format": "MPEG-4 Visual", "CodecID": "XVID"}, 0); got != "23.976 (23976/1000) fps" {
 		t.Fatalf("original frame rate = %q", got)
@@ -254,8 +322,23 @@ func TestRawTextBDAVStructuredFormatting(t *testing.T) {
 	if got := rawTextValue(StreamGeneral, "ID/String", "1 (0x1)", map[string]string{"Format": "BDAV"}, 0); got != "0 (0x0)" {
 		t.Fatalf("BDAV general ID/String = %q", got)
 	}
+	if got := rawTextValue(StreamAudio, "ID/String", "7", map[string]string{"Format": "Vorbis", "ID": "7"}, 0); got != "7 (0x7)" {
+		t.Fatalf("Ogg ID/String = %q", got)
+	}
+	if got := rawTextValue(StreamAudio, "ID/String", "7", map[string]string{"Format": "Vorbis", "CodecID": "A_VORBIS", "ID": "7"}, 0); got != "7" {
+		t.Fatalf("Matroska ID/String = %q", got)
+	}
+	if got := formatRawTextEncodedLibraryForStream("Xiph.Org libVorbis I 20200704 (Reducing Environment)", map[string]string{"Format": "Vorbis"}); !strings.HasPrefix(got, "libVorbis") {
+		t.Fatalf("Ogg encoded library = %q", got)
+	}
+	if rawTextOggStream(map[string]string{"Format": "Vorbis", "CodecID": "A_VORBIS"}) {
+		t.Fatal("Matroska Vorbis identified as Ogg")
+	}
 	if got := rawTextScanStoreMethod(map[string]string{"ScanType": "MBAFF"}); got != "InterleavedFields" {
 		t.Fatalf("MBAFF scan store method = %q", got)
+	}
+	if got := rawTextScanStoreMethod(map[string]string{"ScanType": "Interlaced"}); got != "" {
+		t.Fatalf("interlaced scan store method = %q; want no invented fallback", got)
 	}
 	if got := rawTextValue(StreamAudio, "BedChannelCount", "1", map[string]string{"BedChannelCount": "1"}, 0); got != "1 channel" {
 		t.Fatalf("BedChannelCount = %q", got)
@@ -322,6 +405,25 @@ func TestRawTextSliceCountKeepsNumericExtensionSeparate(t *testing.T) {
 		if got != test.want {
 			t.Errorf("count %s formatted sibling = %q, want %q", test.count, got, test.want)
 		}
+	}
+
+	general := newCanonicalStreamBuilder(StreamGeneral)
+	general.Fill("Format", "BDAV", "Format", "BDAV")
+	video := newCanonicalStreamBuilder(StreamVideo)
+	video.Fill("Format_Settings_SliceCount", "4", "Format settings, Slice count", "4 slices per frame")
+	video.Text("Format settings, Slice count", "4 slices per frame")
+	report := Report{
+		Ref:     "slice.m2ts",
+		General: general.Snapshot(canonicalStreamPolicy{}),
+		Streams: []Stream{video.Snapshot(canonicalStreamPolicy{})},
+	}
+	attachCanonicalStore(&report)
+	raw := RenderTextWithOptions([]Report{report}, TextRenderOptions{Language: "raw"})
+	if strings.Contains(raw, "Format settings, Slice count") {
+		t.Fatalf("raw output leaked friendly slice-count alias:\n%s", raw)
+	}
+	if strings.Count(raw, "Format_Settings_SliceCount/Strin") != 1 {
+		t.Fatalf("raw output did not retain exactly one canonical slice-count row:\n%s", raw)
 	}
 }
 
@@ -399,8 +501,9 @@ func TestRawTextFrameRateRatioPolicy(t *testing.T) {
 	}{
 		{StreamVideo, "AVC", "", "23976", "1000", true},
 		{StreamVideo, "AVC", "", "24000", "1001", false},
-		{StreamVideo, "AV1", "", "24000", "1001", true},
+		{StreamVideo, "AV1", "", "24000", "1001", false},
 		{StreamVideo, "AV1", "18229823285062969326", "24000", "1001", false},
+		{StreamVideo, "AV1", "", "", "", false},
 		{StreamVideo, "MPEG-4 Visual", "", "24000", "1001", true},
 		{StreamText, "ASS", "", "999", "1000", true},
 		{StreamVideo, "AVC", "", "24", "1", false},
@@ -409,6 +512,54 @@ func TestRawTextFrameRateRatioPolicy(t *testing.T) {
 		if got := rawTextFrameRateUsesRatio(test.kind, structured, test.numerator, test.denom); got != test.want {
 			t.Fatalf("rawTextFrameRateUsesRatio(%q, %q/%q) = %v, want %v", test.format, test.numerator, test.denom, got, test.want)
 		}
+	}
+}
+
+func TestRawTextFrameRateDropsUnexposedRatio(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		structured map[string]string
+		display    string
+		want       string
+	}{
+		{
+			name:       "integer denominator",
+			structured: map[string]string{"Format": "AVC", "FrameRate": "24.000", "FrameRate_Num": "24", "FrameRate_Den": "1"},
+			display:    "24.000 (24/1) fps",
+			want:       "24.000 fps",
+		},
+		{
+			name:       "av1 registry",
+			structured: map[string]string{"Format": "AV1", "FrameRate": "23.976"},
+			display:    "23.976 (24000/1001) fps",
+			want:       "23.976 fps",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := rawTextValue(StreamVideo, "FrameRate/String", test.display, test.structured, 0); got != test.want {
+				t.Fatalf("FrameRate/String = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
+func TestRawTextFormattingIgnoresCorpusUniqueIDs(t *testing.T) {
+	if got := rawTextScanStoreMethod(map[string]string{"UniqueID": "15018893693280564553"}); got != "" {
+		t.Fatalf("scan store method = %q; identity must not synthesize a value", got)
+	}
+	if rawTextAV1UsesFilmGrain(map[string]string{"UniqueID": "18229823285062969326"}) {
+		t.Fatal("identity must not synthesize AV1 film-grain signaling")
+	}
+	if got := rawTextValue(StreamVideo, "DisplayAspectRatio/String", "1.333", map[string]string{
+		"UniqueID": "1337866033", "DisplayAspectRatio": "1.333",
+	}, 0); got != "1.333" {
+		t.Fatalf("display aspect ratio = %q, want parsed value", got)
+	}
+	display := "Dolby Vision, Version 1.0, Profile 8.1, HDR10 compatible"
+	if got := formatRawTextHDR(display, map[string]string{
+		"UniqueID": "13465845542392905765", "HDR_Format": "Dolby Vision",
+	}); got != display {
+		t.Fatalf("HDR display = %q, want parsed display unchanged", got)
 	}
 }
 

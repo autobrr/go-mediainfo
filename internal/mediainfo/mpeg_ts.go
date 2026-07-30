@@ -272,6 +272,26 @@ func normalizeBDAVTextDuration(duration float64, durationTicks uint64) float64 {
 	return math.Floor(float64(durationTicks)/90) / 1000
 }
 
+// alignBDAVHeadBufferEnd includes MediaInfoLib's minimum 32 KiB subparser
+// refill, then completes the transport packet that straddles its end.
+func alignBDAVHeadBufferEnd(headScanEnd, syncOff, packetSize int64) int64 {
+	const readBlock = int64(64 << 10)
+	const subparserRefill = int64(32 << 10)
+	bufferEnd := ((headScanEnd + readBlock - 1) / readBlock) * readBlock
+	bufferEnd += subparserRefill
+	return syncOff + ((bufferEnd-syncOff+packetSize-1)/packetSize)*packetSize
+}
+
+// boundedTransportHeadScanEnd applies the BDAV reader/subparser refill only to
+// 192-byte transport streams. Ordinary 188-byte TS retains its parser-selected
+// head boundary.
+func boundedTransportHeadScanEnd(headScanEnd, syncOff, packetSize int64, isBDAV bool) int64 {
+	if !isBDAV {
+		return headScanEnd
+	}
+	return alignBDAVHeadBufferEnd(headScanEnd, syncOff, packetSize)
+}
+
 // recordH264SliceCount updates the dominant slices-per-picture value from one
 // complete AVC PES sample.
 func recordH264SliceCount(entry *tsStream, payload []byte) {
@@ -290,6 +310,49 @@ func recordH264SliceCount(entry *tsStream, payload []byte) {
 	if entry.h264SliceCounts[count] > bestFrequency || (entry.h264SliceCounts[count] == bestFrequency && count > entry.h264SliceCount) {
 		entry.h264SliceCount = count
 	}
+}
+
+func bdavH264SliceCount(entry *tsStream, isBDAV bool) int {
+	if !isBDAV || entry == nil || entry.format != "AVC" || entry.h264SliceCount <= 1 {
+		return 0
+	}
+	return entry.h264SliceCount
+}
+
+func preferTSDominantGOP(info mpeg2VideoInfo, isBDAV bool) bool {
+	exposeDominantGOP := isBDAV || mpeg2CommercialNameTS(info) != ""
+	return exposeDominantGOP && (!info.GOPVariable || isBDAV)
+}
+
+type tsGOPProjection struct {
+	Setting     string
+	OpenClosed  string
+	FirstClosed string
+}
+
+// projectTSGOP centralizes the bounded BDAV dominant-cadence projection. It
+// keeps ordinary variable-GOP TS variable and suppresses open/closed facts
+// unless a stable M/N cadence is available.
+func projectTSGOP(info mpeg2VideoInfo, isBDAV bool) tsGOPProjection {
+	preferDominant := preferTSDominantGOP(info, isBDAV)
+	if preferDominant {
+		if info.GOPM == 0 {
+			info.GOPM = info.GOPMDominant
+		}
+		if info.GOPN == 0 {
+			info.GOPN = info.GOPNDominant
+		}
+	}
+	setting := formatMPEG2GOPSetting(info)
+	if preferDominant && info.GOPM > 0 && info.GOPN > 0 {
+		setting = fmt.Sprintf("M=%d, N=%d", info.GOPM, info.GOPN)
+	}
+	projection := tsGOPProjection{Setting: setting}
+	if (!info.GOPVariable || isBDAV) && info.GOPM > 0 && info.GOPN > 0 {
+		projection.OpenClosed = info.GOPOpenClosed
+		projection.FirstClosed = info.GOPFirstClosed
+	}
+	return projection
 }
 
 // setEAC3CommercialFacts records E-AC-3 commercial labels.
@@ -699,10 +762,8 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 						headScanEnd += tsAcceptanceProbeBytes
 					}
 				}
-				if shrinkHead && ac3StatsHeadLocked && isBDAV {
-					const readBlock = int64(64 << 10)
-					bufferEnd := ((headScanEnd + readBlock - 1) / readBlock) * readBlock
-					headScanEnd = syncOff + ((bufferEnd-syncOff)/packetSize)*packetSize
+				if shrinkHead && ac3StatsHeadLocked {
+					headScanEnd = boundedTransportHeadScanEnd(headScanEnd, syncOff, packetSize, isBDAV)
 				}
 				fullTSHeadLimit := !isBDAV && ac3StatsHeadBytes == tsStatsMaxOffset && transportAcceptOffset >= 0
 				if shrinkHead && (ac3StatsHeadLocked || fullTSHeadLimit) && packetOffset >= headScanEnd {
@@ -1547,22 +1608,6 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 
 	var streamsOut []Stream
 	videoDuration := ptsDuration(videoPTS)
-	hasTrueHDAudio := false
-	hasDTSAudio := false
-	if isBDAV {
-		for _, pid := range streamOrder {
-			st := streams[pid]
-			if st == nil || st.kind != StreamAudio {
-				continue
-			}
-			if st.hasTrueHD || st.streamType == 0x83 {
-				hasTrueHDAudio = true
-			}
-			if st.format == "DTS" || st.streamType == 0x82 || st.streamType == 0x86 {
-				hasDTSAudio = true
-			}
-		}
-	}
 	for i, pid := range streamOrder {
 		st, ok := streams[pid]
 		if !ok {
@@ -1702,18 +1747,6 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 							streamFacts.Set("matrix_coefficients_Source", "Stream")
 						}
 					}
-				} else {
-					// Fallback for rare cases where SPS isn't reachable in the probe window.
-					if hasTrueHDAudio {
-						streamFacts.Set("BitRate_Maximum", "38999808")
-						streamFacts.Set("BufferSize", "30000000 / 30000000")
-					} else if hasDTSAudio {
-						streamFacts.Set("BitRate_Maximum", "35000000")
-						streamFacts.Set("BufferSize", "30000000")
-					} else {
-						streamFacts.Set("BitRate_Maximum", "39959808")
-						streamFacts.Set("BufferSize", "30000000 / 30000000")
-					}
 				}
 			}
 			if st.format == "HEVC" {
@@ -1792,15 +1825,7 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 		}
 		if st.kind == StreamVideo && hasMPEGVideo && st.format == "MPEG Video" && st.hasMPEG2Info {
 			info := st.mpeg2Info
-			exposeDominantGOP := isBDAV || mpeg2CommercialNameTS(info) != ""
-			if exposeDominantGOP && !info.GOPVariable {
-				if info.GOPM == 0 {
-					info.GOPM = info.GOPMDominant
-				}
-				if info.GOPN == 0 {
-					info.GOPN = info.GOPNDominant
-				}
-			}
+			gopProjection := projectTSGOP(info, isBDAV)
 			if name := mpeg2CommercialNameTS(info); name != "" {
 				fields = append(fields, Field{Name: "Commercial name", Value: name})
 			}
@@ -1820,28 +1845,22 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 			if info.Matrix == "Custom" && info.MatrixData != "" {
 				streamFacts.Set("Format_Settings_Matrix_Data", info.MatrixData)
 			}
-			gop := formatMPEG2GOPSetting(info)
-			if exposeDominantGOP && !info.GOPVariable && info.GOPM > 0 && info.GOPN > 0 {
-				// HD component and BDAV streams expose dominant M/N even when
-				// their progressive picture cadence made the first pass ambiguous.
-				gop = fmt.Sprintf("M=%d, N=%d", info.GOPM, info.GOPN)
-			}
-			if gop != "" {
-				fields = append(fields, Field{Name: "Format settings, GOP", Value: gop})
+			if gopProjection.Setting != "" {
+				fields = append(fields, Field{Name: "Format settings, GOP", Value: gopProjection.Setting})
 				if isBDAV {
-					streamFacts.Set("Format_Settings_GOP", gop)
+					streamFacts.Set("Format_Settings_GOP", gopProjection.Setting)
 				}
 			}
 			if info.ScanType == "Interlaced" && info.PictureStructure != "" {
 				fields = append(fields, Field{Name: "Format settings, Picture structure", Value: info.PictureStructure})
 			}
-			if !info.GOPVariable && info.GOPM > 0 && info.GOPN > 0 && info.GOPOpenClosed != "" {
-				fields = append(fields, Field{Name: "GOP, Open/Closed", Value: info.GOPOpenClosed})
-				streamFacts.Set("Gop_OpenClosed", info.GOPOpenClosed)
+			if gopProjection.OpenClosed != "" {
+				fields = append(fields, Field{Name: "GOP, Open/Closed", Value: gopProjection.OpenClosed})
+				streamFacts.Set("Gop_OpenClosed", gopProjection.OpenClosed)
 			}
-			if !info.GOPVariable && info.GOPM > 0 && info.GOPN > 0 && info.GOPFirstClosed != "" {
-				fields = append(fields, Field{Name: "GOP, Open/Closed of first frame", Value: info.GOPFirstClosed})
-				streamFacts.Set("Gop_OpenClosed_FirstFrame", info.GOPFirstClosed)
+			if gopProjection.FirstClosed != "" {
+				fields = append(fields, Field{Name: "GOP, Open/Closed of first frame", Value: gopProjection.FirstClosed})
+				streamFacts.Set("Gop_OpenClosed_FirstFrame", gopProjection.FirstClosed)
 			}
 		}
 		if st.kind == StreamVideo {
@@ -1855,6 +1874,11 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 				if st.h264TimeCode != "" {
 					fields = append(fields, Field{Name: "Time code of first frame", Value: st.h264TimeCode})
 					streamFacts.Set("TimeCode_FirstFrame", st.h264TimeCode)
+				}
+				if sliceCount := bdavH264SliceCount(st, isBDAV); sliceCount > 0 {
+					value := strconv.Itoa(sliceCount)
+					fields = append(fields, Field{Name: "Format settings, Slice count", Value: fmt.Sprintf("%d slices per frame", sliceCount)})
+					streamFacts.Set("Format_Settings_SliceCount", value)
 				}
 			}
 			if st.streamType != 0 {
@@ -2577,11 +2601,15 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 				extraFields := make([]jsonKV, 0, 32)
 				if isTrueHD && st.hasTrueHDInfo {
 					if atmos, ok := trueHDAtmosPresentationInfo(st.trueHDInfo); ok {
-						extraFields = append(extraFields,
-							jsonKV{Key: "NumberOfDynamicObjects", Val: strconv.Itoa(atmos.dynamicObjects)},
-							jsonKV{Key: "BedChannelCount", Val: strconv.FormatUint(atmos.bedChannelCount, 10)},
-							jsonKV{Key: "BedChannelConfiguration", Val: atmos.bedChannelConfigShort},
-						)
+						if atmos.hasDynamicObjects {
+							extraFields = append(extraFields, jsonKV{Key: "NumberOfDynamicObjects", Val: strconv.Itoa(atmos.dynamicObjects)})
+						}
+						if atmos.bedChannelCount > 0 && atmos.bedChannelConfigShort != "" {
+							extraFields = append(extraFields,
+								jsonKV{Key: "BedChannelCount", Val: strconv.FormatUint(atmos.bedChannelCount, 10)},
+								jsonKV{Key: "BedChannelConfiguration", Val: atmos.bedChannelConfigShort},
+							)
+						}
 					}
 				}
 				if st.ac3Info.bsid > 0 {
@@ -3485,14 +3513,15 @@ func parseCaptionServiceDescriptor(descriptors []byte) map[string]tsCaptionServi
 			language := normalizeLanguageCode(strings.TrimSpace(string(data[entry : entry+3])))
 			serviceByte := data[entry+3]
 			name := ""
-			if serviceByte&0x80 != 0 {
+			switch {
+			case serviceByte&0x80 != 0:
 				serviceNumber := int(serviceByte & 0x3F)
 				if serviceNumber > 0 {
 					name = strconv.Itoa(serviceNumber)
 				}
-			} else if serviceByte&0x01 != 0 {
+			case serviceByte&0x01 != 0:
 				name = "CC3"
-			} else {
+			default:
 				name = "CC1"
 			}
 			if name != "" {

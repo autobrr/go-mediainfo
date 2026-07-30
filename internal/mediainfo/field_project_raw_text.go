@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"math"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -167,7 +168,8 @@ var rawTextCanonicalFieldRules = func() map[fieldName]rawTextFieldRule {
 		"@type", "@typeorder", "StreamOrder", "FirstPacketOrder",
 		"FrameRate_Num", "FrameRate_Den", "Encoded_Application_Name", "Encoded_Application_Version",
 		"Encoded_Library_Name", "Encoded_Library_Version", "Encoded_Library_Date",
-		"Format_Settings_SliceCount", "format_identifier", "OverallBitRate_Precision_Min", "OverallBitRate_Precision_Max",
+		"Format_Settings_SliceCount", "Format settings, Slice count",
+		"format_identifier", "OverallBitRate_Precision_Min", "OverallBitRate_Precision_Max",
 	} {
 		rules[name] = rawTextFieldRule{Visible: false}
 	}
@@ -191,6 +193,7 @@ func projectRawTextReport(report Report) rawTextReportProjection {
 
 	projected := rawTextReportProjection{Ref: store.ref, Streams: make([]rawTextStreamProjection, 0, len(store.streams))}
 	dvd, dvdAggregate := rawTextDVDContext(store)
+	generalFormat := rawTextGeneralFormat(store)
 	totalFileSize := int64(0)
 	streamIndexes := make([]int, len(store.streams))
 	for index := range store.streams {
@@ -213,6 +216,9 @@ func projectRawTextReport(report Report) rawTextReportProjection {
 			}
 			rule, known := rawTextProjectionRule(stream.Kind, entry)
 			if !rule.Visible {
+				continue
+			}
+			if !rawTextContainerFieldVisible(generalFormat, entry, rule) {
 				continue
 			}
 			if stream.Kind == StreamVideo && structured["Format"] == "Theora" && rule.Label == "FrameCount" {
@@ -323,6 +329,38 @@ func projectRawTextReport(report Report) rawTextReportProjection {
 	return projected
 }
 
+// rawTextGeneralFormat returns the canonical container format used by
+// representation-specific visibility rules.
+func rawTextGeneralFormat(store *fieldStore) string {
+	if store == nil {
+		return ""
+	}
+	for index := range store.streams {
+		stream := &store.streams[index]
+		if stream.Kind == StreamGeneral {
+			return rawTextStructuredValues(stream)["Format"]
+		}
+	}
+	return ""
+}
+
+// rawTextContainerFieldVisible keeps aggregate AC-3 statistics in the raw
+// projections where MediaInfo exposes them (DVD) or where the reviewed BDAV
+// extension contract retains them. Other containers still expose the direct
+// dialnorm/compr/dynrng values, but not the aggregate statistic rows.
+func rawTextContainerFieldVisible(generalFormat string, entry fieldEntry, rule rawTextFieldRule) bool {
+	for _, name := range []string{string(entry.Name), entry.StructuredKey, rule.Label} {
+		switch name {
+		case "Format settings, Slice count":
+			return false
+		case "compr_Average", "compr_Minimum", "compr_Maximum", "compr_Count",
+			"dynrng_Average", "dynrng_Minimum", "dynrng_Maximum", "dynrng_Count":
+			return generalFormat == "BDAV" || generalFormat == "DVD Video"
+		}
+	}
+	return true
+}
+
 // rawTextDVDContext identifies DVD projections from canonical container facts.
 // Aggregate IFO reports are distinguished by payload-stream provenance, not by
 // input path or sample identity.
@@ -368,7 +406,8 @@ func rawTextDVDContext(store *fieldStore) (dvd, aggregate bool) {
 // normalizeDVDRawTextFields projects DVD raw text from the same canonical
 // values that already back JSON. Legacy friendly fields can contain the
 // pre-aggregation IFO values, so canonical values and the ordered extra object
-// are authoritative here. Projected DVD labels omit the raw /String suffix.
+// are authoritative here. Raw registry labels, including /String suffixes, are
+// preserved exactly.
 func normalizeDVDRawTextFields(stream *storedStream, fields []rawTextFieldProjection, structured map[string]string, aggregate bool) []rawTextFieldProjection {
 	if stream == nil {
 		return fields
@@ -489,9 +528,6 @@ func normalizeDVDRawTextFields(stream *storedStream, fields []rawTextFieldProjec
 			})
 			sequence++
 		}
-	}
-	for index := range normalized {
-		normalized[index].Label = strings.TrimSuffix(normalized[index].Label, "/String")
 	}
 	return normalized
 }
@@ -873,8 +909,7 @@ func formatRawTextActiveFormatDescription(value string) string {
 	}
 }
 
-// rawTextScanStoreMethod supplies raw-only interlace storage terminology for
-// stable tracks whose canonical JSON intentionally omits it.
+// rawTextScanStoreMethod exposes only parser-derived storage terminology.
 func rawTextScanStoreMethod(structured map[string]string) string {
 	if value := structured["ScanType_StoreMethod"]; value != "" {
 		return value
@@ -882,14 +917,7 @@ func rawTextScanStoreMethod(structured map[string]string) string {
 	if structured["ScanType"] == "MBAFF" {
 		return "InterleavedFields"
 	}
-	switch structured["UniqueID"] {
-	case "2714757033321985940", "15018893693280564553":
-		return "InterleavedFields"
-	case "14826273024089481058":
-		return "SeparatedFields"
-	default:
-		return ""
-	}
+	return ""
 }
 
 // formatRawTextProfile composes video profile, level, and tier tokens using
@@ -922,32 +950,20 @@ func rawTextFrameRateUsesRatio(kind StreamKind, structured map[string]string, nu
 	if numerator == "" || denominator == "" || denominator == "1" {
 		return false
 	}
-	if structured["UniqueID"] == "18229823285062969326" {
-		// The immutable reference omits this AV1 track's surviving 24000/1001 ratio.
-		return false
-	}
 	if kind == StreamText || structured["Format"] == "MPEG-4 Visual" {
 		return true
 	}
 	if kind == StreamVideo && structured["Format"] == "AVC" && numerator == "30000" && denominator == "1001" {
 		return true
 	}
-	return numerator == "23976" && denominator == "1000" || structured["Format"] == "AV1"
+	return numerator == "23976" && denominator == "1000"
 }
 
-// rawTextAV1UsesFilmGrain reports film-grain signaling retained by encoder
-// settings or stable AV1 track compatibility identities.
+// rawTextAV1UsesFilmGrain reports film-grain signaling retained by parsed
+// encoder settings.
 func rawTextAV1UsesFilmGrain(structured map[string]string) bool {
 	settings := structured["Encoded_Library_Settings"]
-	if strings.Contains(settings, "grain=") && !strings.Contains(settings, "grain=0") {
-		return true
-	}
-	switch structured["UniqueID"] {
-	case "18229823285062969326", "14208986170866393365":
-		return true
-	default:
-		return false
-	}
+	return strings.Contains(settings, "grain=") && !strings.Contains(settings, "grain=0")
 }
 
 // rawTextCodecIDHint derives MediaInfo's short raw codec hint from canonical
@@ -1057,11 +1073,12 @@ func formatRawTextMode(value, constant, variable string) string {
 // formatRawTextDerivedBitRate renders a structured-only raw bitrate using the
 // raw registry's unit convention.
 func formatRawTextDerivedBitRate(value string) string {
-	bitRate, err := strconv.ParseFloat(value, 64)
+	parsed, err := strconv.ParseFloat(value, 32)
+	bitRate := float32(parsed)
 	if err != nil || bitRate <= 0 {
 		return ""
 	}
-	if bitRate >= 100_000_000 {
+	if bitRate > 100_000_000 {
 		return fmt.Sprintf("%.0f Mbps", bitRate/1_000_000)
 	}
 	if bitRate > 10_000_000 {
@@ -1327,7 +1344,7 @@ func rawTextValue(kind StreamKind, label, display string, structured map[string]
 		if kind == StreamGeneral && structured["Format"] == "BDAV" {
 			return "0 (0x0)"
 		}
-		if format := structured["Format"]; structured["UniqueID"] == "" && structured["StreamOrder"] == "" && (format == "Theora" || format == "Vorbis" || format == "Opus") {
+		if rawTextOggStream(structured) {
 			if id, err := strconv.ParseUint(structured["ID"], 10, 64); err == nil {
 				return fmt.Sprintf("%d (0x%X)", id, id)
 			}
@@ -1361,11 +1378,6 @@ func rawTextValue(kind StreamKind, label, display string, structured map[string]
 		key := strings.TrimSuffix(label, "/String")
 		if value := structured[key]; value != "" {
 			if milliseconds, err := strconv.ParseFloat(value, 64); err == nil {
-				// This immutable reference retains seconds where the canonical field
-				// otherwise stores milliseconds.
-				if kind == StreamVideo && value == "5965.966" {
-					milliseconds *= 1000
-				}
 				return formatRawTextDuration(milliseconds)
 			}
 		}
@@ -1385,9 +1397,6 @@ func rawTextValue(kind StreamKind, label, display string, structured map[string]
 			if value := formatRawTextDerivedBitRate(structured[key]); value != "" {
 				return value
 			}
-		}
-		if value, err := strconv.ParseFloat(structured[key], 64); err == nil && value == 10_000_000 {
-			return "10000 Kbps"
 		}
 		if kind == StreamAudio || kind == StreamText {
 			if value := formatRawTextBitRate(structured[key]); value != "" {
@@ -1420,8 +1429,10 @@ func rawTextValue(kind StreamKind, label, display string, structured map[string]
 			if numerator, denominator := structured["FrameRate_Num"], structured["FrameRate_Den"]; rawTextFrameRateUsesRatio(kind, structured, numerator, denominator) {
 				return structured["FrameRate"] + " (" + numerator + "/" + denominator + ") fps"
 			}
-			if structured["UniqueID"] == "18229823285062969326" {
-				return structured["FrameRate"] + " fps"
+			if structured["FrameRate_Den"] == "" || structured["FrameRate_Den"] == "1" {
+				if frameRate := structured["FrameRate"]; frameRate != "" {
+					return frameRate + " fps"
+				}
 			}
 		}
 		if kind == StreamAudio && label == "FrameRate/String" {
@@ -1552,11 +1563,6 @@ func rawTextValue(kind StreamKind, label, display string, structured map[string]
 		if structured["Format"] == "Theora" {
 			return formatRawTextAspectRatio(structured["DisplayAspectRatio"])
 		}
-		// This immutable reference preserves a source ratio not derivable from
-		// the retained rounded display value.
-		if structured["UniqueID"] == "1337866033" {
-			return "1.398"
-		}
 		if value := structured["DisplayAspectRatio"]; value != "" && rawTextAVIVisual(structured) {
 			return formatRawTextAVIAspectRatio(value)
 		}
@@ -1593,7 +1599,7 @@ func rawTextValue(kind StreamKind, label, display string, structured map[string]
 
 func rawTextX264TargetBitRate(structured map[string]string) (float64, bool) {
 	codecID := strings.ToLower(structured["CodecID"])
-	if structured["Format"] != "AVC" || structured["UniqueID"] != "" || (!strings.HasPrefix(codecID, "avc1") && !strings.HasPrefix(codecID, "avc3")) {
+	if structured["Format"] != "AVC" || (!strings.HasPrefix(codecID, "avc1") && !strings.HasPrefix(codecID, "avc3")) {
 		return 0, false
 	}
 	target, ok := findX264Bitrate(structured["Encoded_Library_Settings"])
@@ -1676,15 +1682,6 @@ func trimRawTextHexPadding(display string) string {
 // appends to a Dolby Vision raw display.
 func formatRawTextHDR(display string, structured map[string]string) string {
 	format := structured["HDR_Format"]
-	// These immutable references expose suffix/profile spellings not represented
-	// by separate canonical HDR components.
-	switch structured["UniqueID"] {
-	case "10848778679934782213":
-		return strings.TrimSuffix(display, ", HDR10+ Profile B compatible")
-	case "13465845542392905765":
-		display = strings.Replace(display, "Profile 8.1", "Profile 8", 1)
-		return strings.TrimSuffix(display, ", HDR10 compatible")
-	}
 	if !strings.Contains(display, "Dolby Vision") {
 		return display
 	}
@@ -1735,17 +1732,15 @@ func rawTextDolbyVisionCommercialProfile(value string) string {
 // formatRawTextBitRate renders ungrouped raw rates using MediaInfo's bps/Kbps
 // boundary and precision.
 func formatRawTextBitRate(value string) string {
-	bitRate, err := strconv.ParseFloat(value, 64)
+	parsed, err := strconv.ParseFloat(value, 32)
+	bitRate := float32(parsed)
 	if err != nil || bitRate <= 0 {
 		return ""
 	}
-	if bitRate < 10_000 {
+	if bitRate <= 10_000 {
 		return fmt.Sprintf("%.0f bps", bitRate)
 	}
-	if bitRate < 100_000 {
-		if value == "23550" {
-			return "23.5 Kbps"
-		}
+	if bitRate <= 100_000 {
 		return fmt.Sprintf("%.1f Kbps", bitRate/1_000)
 	}
 	return fmt.Sprintf("%.0f Kbps", bitRate/1_000)
@@ -1781,22 +1776,30 @@ func stripRawTextDigitGrouping(value string) string {
 	}
 }
 
-// formatRawTextLanguage retains full language names while preserving region
-// and script subtags carried only by the canonical language code.
+// formatRawTextLanguage emits raw registry language codes and formats a single
+// region or script subtag as MediaInfo's parenthesized suffix.
 func formatRawTextLanguage(code, display string) string {
+	if strings.Contains(code, " / ") {
+		parts := strings.Split(code, " / ")
+		for index, part := range parts {
+			if part != "" {
+				parts[index] = formatRawTextLanguage(part, part)
+			}
+		}
+		return strings.Join(parts, " / ")
+	}
 	normalized := normalizeLanguageCode(code)
 	parts := strings.Split(normalized, "-")
 	if len(parts) < 2 {
-		return display
-	}
-	name := languageName(parts[0])
-	if name == "" {
-		if len(parts) > 2 {
+		if normalized != "" {
 			return normalized
 		}
-		name = parts[0]
+		return display
 	}
-	return fmt.Sprintf("%s (%s)", name, strings.Join(parts[1:], "-"))
+	if len(parts) == 2 {
+		return fmt.Sprintf("%s (%s)", parts[0], parts[1])
+	}
+	return normalized
 }
 
 // formatRawTextEncodedLibrary normalizes canonical encoder identifiers and
@@ -1808,22 +1811,22 @@ func formatRawTextEncodedLibrary(display string) string {
 	if suffix, ok := strings.CutPrefix(display, "x265 - "); ok {
 		return "x265 " + suffix
 	}
-	switch display {
-	case "XviD0050":
-		return "XviD 1.2.1 (2008-12-04)"
-	case "XviD0064":
-		return "XviD 64"
-	case "DivX503b2816p":
-		return "DivX 6.8.5 (2009-08-20)"
-	}
 	if strings.HasPrefix(display, "XviD") {
 		if version, date, ok := xvidLibraryVersionDate(display); ok {
-			return "XviD " + version + " (" + date + ")"
+			value := "XviD " + version
+			if date != "" {
+				value += " (" + date + ")"
+			}
+			return value
 		}
 	}
 	if strings.HasPrefix(display, "DivX") {
 		if version, date, ok := divxLibraryVersionDate(display); ok {
-			return "DivX " + version + " (" + date + ")"
+			value := "DivX " + version
+			if date != "" {
+				value += " (" + date + ")"
+			}
+			return value
 		}
 	}
 	if strings.HasPrefix(display, "libmakemkv v") {
@@ -1878,13 +1881,28 @@ func formatRawTextEncodedLibrary(display string) string {
 }
 
 func formatRawTextEncodedLibraryForStream(display string, structured map[string]string) string {
-	if structured["UniqueID"] == "" {
+	if rawTextOggStream(structured) {
 		switch structured["Format"] {
 		case "Theora", "Vorbis":
 			return formatOggLibraryDisplay(structured["Format"], display)
 		}
 	}
 	return formatRawTextEncodedLibrary(display)
+}
+
+// rawTextOggStream identifies Ogg codec streams from container projection
+// facts. Matroska uses explicit codec IDs and stream ordering for the same
+// codecs, so identity metadata is neither needed nor consulted.
+func rawTextOggStream(structured map[string]string) bool {
+	if structured["CodecID"] != "" || structured["StreamOrder"] != "" {
+		return false
+	}
+	switch structured["Format"] {
+	case "Theora", "Vorbis", "Opus":
+		return true
+	default:
+		return false
+	}
 }
 
 // rawTextFormatInfo returns the few compound audio descriptions whose raw
@@ -2009,7 +2027,7 @@ func rawTextFieldOrderPolicy(kind StreamKind) map[string]int {
 }
 
 // renderRawText serializes raw-language projections with MediaInfo's 33-column labels.
-func renderRawText(reports []Report) string {
+func renderRawText(reports []Report, informVersion bool) string {
 	const labelWidth = 33
 
 	var buffer bytes.Buffer
@@ -2033,12 +2051,17 @@ func renderRawText(reports []Report) string {
 			buffer.WriteByte('\n')
 			writeRawTextFields(&buffer, streamTitle(stream.Kind, kindIndexes[stream.Kind], counts[stream.Kind]), stream.Fields)
 		}
-		buffer.WriteByte('\n')
-		buffer.WriteString(reportByLine(labelWidth))
-		buffer.WriteByte('\n')
+		if informVersion {
+			buffer.WriteString(reportByLine(labelWidth))
+			buffer.WriteByte('\n')
+		}
 	}
 	output := strings.TrimRight(buffer.String(), "\n")
-	return strings.ReplaceAll(output+"\n\n", "\n", "\r\n")
+	eol := "\n"
+	if runtime.GOOS == "windows" {
+		eol = "\r\n"
+	}
+	return strings.ReplaceAll(output+"\n\n\n", "\n", eol)
 }
 
 // writeRawTextFields writes one raw stream section.
@@ -2046,8 +2069,9 @@ func writeRawTextFields(buffer *bytes.Buffer, title string, fields []rawTextFiel
 	buffer.WriteString(title)
 	buffer.WriteByte('\n')
 	for _, field := range fields {
-		buffer.WriteString(padRawTextLabel(field.Label, 33))
-		if utf8.RuneCountInString(field.Label) >= 33 {
+		label := escapeOutputControls(field.Label)
+		buffer.WriteString(padRawTextLabel(label, 33))
+		if utf8.RuneCountInString(label) >= 33 {
 			buffer.WriteByte(' ')
 		}
 		buffer.WriteString(": ")

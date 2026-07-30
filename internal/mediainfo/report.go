@@ -49,21 +49,30 @@ type Stream struct {
 	eac3Dec3              eac3Dec3Info
 	nalLengthSize         int
 	// mkvH264SPS retains CodecPrivate timing metadata needed to decode frame SEI.
-	mkvH264SPS          h264SPSInfo
+	mkvH264SPS h264SPSInfo
+	// mkvCodecPrivate retains elementary-stream headers that Matroska stores
+	// outside clusters and that must seed codec probing before frame payloads.
+	mkvCodecPrivate     []byte
 	mkvHeaderStripBytes []byte
 	mkvDolbyVision      dolbyVisionConfig
 	mkvHasDolbyVision   bool
+	mkvDolbyVisionCount int
 	// x265 writing library / encoding settings extracted from the HEVC
 	// DecoderConfigurationRecord (hvcC) SEI, when the muxer placed the x265
 	// user-data SEI in CodecPrivate rather than in frame data.
-	mkvHEVCX265Library   string
-	mkvHEVCX265Settings  string
-	mkvTrackOffsetNs     int64
-	mkvStereoMode        uint64
-	mkvTagFrameCount     bool
-	dvdMPEG2IntraDCFirst int
-	dvdMPEG2IntraDCLast  int
-	dvdMPEG2MaxBitRate   int64
+	mkvHEVCX265Library       string
+	mkvHEVCX265Settings      string
+	mkvTrackOffsetNs         int64
+	mkvStereoMode            uint64
+	mkvTagFrameCount         bool
+	mkvTagDuration           bool
+	mkvBareTagDuration       bool
+	mkvDefaultDuration       uint64
+	mkvTimecodeScale         uint64
+	mkvOmitDerivedFLACLayout bool
+	dvdMPEG2IntraDCFirst     int
+	dvdMPEG2IntraDCLast      int
+	dvdMPEG2MaxBitRate       int64
 	// matroskaDeferredFacts holds fallback TrackEntry values until all parser
 	// refinements have updated the canonical seed.
 	matroskaDeferredFacts *matroskaDeferredFacts
@@ -71,6 +80,10 @@ type Stream struct {
 	reportStore *fieldStore
 	// reportSnapshot detects caller mutation before a renderer reuses reportStore.
 	reportSnapshot *legacyReportState
+	// legacyJSONDeleted and legacyJSONRawDeleted preserve caller deletions while
+	// rebuilding structured output from the remaining legacy text projection.
+	legacyJSONDeleted    map[string]struct{}
+	legacyJSONRawDeleted map[string]struct{}
 	// canonicalSeed retains parser-direct entries until analysis attaches the report store.
 	canonicalSeed []fieldEntry
 	// canonicalPolicy retains format-neutral projection policy until adapters publish legacy flags.

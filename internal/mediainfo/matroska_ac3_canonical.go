@@ -88,7 +88,7 @@ func matroskaAC3CanonicalSeed(facts matroskaAC3CanonicalFacts) []fieldEntry {
 		raw := strconv.FormatFloat(facts.audioSampleRate, 'f', -1, 64)
 		builder.Fill("SamplingRate", raw, "Sampling rate", formatSampleRate(facts.audioSampleRate))
 	}
-	if facts.format == "E-AC-3" && facts.audioBitDepth > 0 {
+	if facts.audioBitDepth > 0 {
 		raw := strconv.FormatUint(facts.audioBitDepth, 10)
 		builder.Fill("BitDepth", raw, "Bit depth", raw+" bits")
 	}
@@ -151,7 +151,8 @@ func applyMatroskaAC3CanonicalProbe(stream *Stream, probe *matroskaAudioProbe, a
 		replaceCanonicalSeedFill(stream, "Channels", raw, "Channel(s)", formatChannels(ac3.channels))
 	}
 	if ac3.layout != "" {
-		replaceCanonicalSeedFill(stream, "ChannelLayout", ac3.layout, "Channel layout", ac3.layout)
+		layout := matroskaAC3ChannelLayout(ac3.layout)
+		replaceCanonicalSeedFill(stream, "ChannelLayout", layout, "Channel layout", layout)
 		positions := ac3ChannelPositions(ac3.layout)
 		if positions == "" {
 			positions = channelPositionsFromCount(strconv.FormatUint(ac3.channels, 10))
@@ -308,6 +309,18 @@ func applyMatroskaEAC3CanonicalText(stream *Stream, ac3 ac3Info) {
 	}
 }
 
+// matroskaAC3ChannelLayout keeps the AC-3 parser's upstream S/Cs vocabulary
+// separate from MediaInfo's Matroska-facing name for one back-center channel.
+func matroskaAC3ChannelLayout(layout string) string {
+	parts := strings.Fields(layout)
+	for index, part := range parts {
+		if part == "S" || part == "Cs" {
+			parts[index] = "Cb"
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
 // matroskaAC3JOCComplexity returns the signaled complexity or MediaInfo's
 // object-count fallback, and -1 when neither source is available.
 func matroskaAC3JOCComplexity(ac3 ac3Info) int {
@@ -361,10 +374,10 @@ func matroskaAC3CanonicalExtraFields(probe *matroskaAudioProbe, ac3 ac3Info, dep
 		}
 		fields = append(fields, jsonKV{Key: "lfeon", Val: value})
 	}
-	if ac3.hasCmixlev {
+	if ac3.acmod != 2 && ac3.hasCmixlev {
 		fields = append(fields, jsonKV{Key: "cmixlev", Val: fmt.Sprintf("%.1f", ac3.cmixlevDB)})
 	}
-	if ac3.hasSurmixlev {
+	if ac3.acmod != 2 && ac3.hasSurmixlev {
 		value := fmt.Sprintf("%.0f", ac3.surmixlevDB)
 		if probe.format == "AC-3" || dependentEAC3 {
 			value += " dB"
@@ -377,7 +390,7 @@ func matroskaAC3CanonicalExtraFields(probe *matroskaAudioProbe, ac3 ac3Info, dep
 	if ac3.hasRoomtyp && ac3.roomtypFirst && ac3.roomtyp != "Not indicated" {
 		fields = append(fields, jsonKV{Key: "roomtyp", Val: ac3.roomtyp})
 	}
-	if ac3.hasDmixmod {
+	if ac3.acmod != 2 && ac3.hasDmixmod {
 		fields = append(fields, jsonKV{Key: "dmixmod", Val: ac3.dmixmod})
 	}
 	if ac3.hasLtrtcmixlev {
@@ -398,15 +411,12 @@ func matroskaAC3CanonicalExtraFields(probe *matroskaAudioProbe, ac3 ac3Info, dep
 	if avg, minimum, maximum, ok := ac3.dialnormStats(); ok {
 		fields = append(fields, jsonKV{Key: "dialnorm_Average", Val: strconv.Itoa(avg)})
 		fields = append(fields, jsonKV{Key: "dialnorm_Minimum", Val: strconv.Itoa(minimum)})
-		if maximum != minimum {
+		if maximum != minimum && maximum != ac3.dialnorm {
 			fields = append(fields, jsonKV{Key: "dialnorm_Maximum", Val: strconv.Itoa(maximum)})
 		}
 	}
 	if avg, minimum, maximum, count, ok := ac3.comprStats(); ok {
 		if probe.dependentStats {
-			if probe.hasComprAverage {
-				avg = probe.comprAverage + 0.02
-			}
 			count += 3
 		}
 		fields = append(fields,
@@ -418,9 +428,6 @@ func matroskaAC3CanonicalExtraFields(probe *matroskaAudioProbe, ac3 ac3Info, dep
 	}
 	if avg, minimum, maximum, count, ok := ac3.dynrngStats(); ok {
 		if probe.dependentStats {
-			if probe.hasDynrngAverage {
-				avg = probe.dynrngAverage + 0.01
-			}
 			if adjusted := ac3.framesMerged - 130; adjusted > count {
 				count = adjusted
 			}

@@ -27,6 +27,25 @@ func TestParseHEVCSPSInterPredictedRPSKeepsVUIAlignment(t *testing.T) {
 	}
 }
 
+func TestParseHEVCVUIPreservesVideoFormat(t *testing.T) {
+	w := &hevcBitBuf{}
+	w.put(0, 1) // aspect_ratio_info_present_flag
+	w.put(0, 1) // overscan_info_present_flag
+	w.put(1, 1) // video_signal_type_present_flag
+	w.put(2, 3) // video_format: NTSC
+	w.put(0, 1) // video_full_range_flag
+	w.put(0, 1) // colour_description_present_flag
+	w.put(0, 1) // chroma_loc_info_present_flag
+	w.put(0, 3) // neutral_chroma, field_seq, frame_field_info
+	w.put(0, 1) // default_display_window_flag
+	w.put(0, 1) // vui_timing_info_present_flag
+	w.put(0, 1) // bitstream_restriction_flag
+	info := parseHEVCVUI(newBitReader(w.bytes()))
+	if !info.hasVideoFormat || info.videoFormat != 2 {
+		t.Fatalf("video format = %d, present=%v; want NTSC signal", info.videoFormat, info.hasVideoFormat)
+	}
+}
+
 // hevcBitBuf is a minimal MSB-first bit accumulator for crafting HEVC SPS RBSP in
 // tests, with an Exp-Golomb (ue) writer.
 type hevcBitBuf struct{ bits []byte }
@@ -138,5 +157,31 @@ func TestParseHEVCSPSRejectsHugeShortTermRPS(t *testing.T) {
 
 	if got.Width != 0 || got.ProfileID != 0 || got.ChromaFormat != "" {
 		t.Errorf("expected empty h264SPSInfo for rejected SPS, got %+v", got)
+	}
+}
+
+func TestParseHEVCSPSRejectsOversizedPicOrderCountWidth(t *testing.T) {
+	w := &hevcBitBuf{}
+	w.put(0, 4)
+	w.put(0, 3)
+	w.put(0, 1)
+	w.put(0, 2)
+	w.put(0, 1)
+	w.put(1, 5)
+	w.put(0xFFFFFFFF, 32)
+	w.put(0xFFFFFFFFFFFF, 48)
+	w.put(120, 8)
+	w.ue(0)
+	w.ue(1)
+	w.ue(16)
+	w.ue(16)
+	w.put(0, 1)
+	w.ue(0)
+	w.ue(0)
+	w.ue(13) // log2_max_pic_order_cnt_lsb_minus4; supported maximum is 12
+
+	info := parseHEVCSPS(append([]byte{0x42, 0x01}, w.bytes()...))
+	if info.ProfileID != 0 || info.Width != 0 || info.Height != 0 {
+		t.Fatalf("oversized POC width accepted: %+v", info)
 	}
 }

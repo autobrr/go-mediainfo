@@ -3,7 +3,7 @@ package mediainfo
 import (
 	"encoding/json"
 	"encoding/xml"
-	"fmt"
+	"errors"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -47,7 +47,7 @@ func TestCanonicalProjectionsCanRenderConcurrently(t *testing.T) {
 			render: func() string { return RenderJSON([]Report{report}) },
 			validate: func(output string) error {
 				if !json.Valid([]byte(output)) {
-					return fmt.Errorf("invalid JSON")
+					return errors.New("invalid JSON")
 				}
 				return nil
 			},
@@ -64,7 +64,7 @@ func TestCanonicalProjectionsCanRenderConcurrently(t *testing.T) {
 			render: func() string { return RenderText([]Report{report}) },
 			validate: func(output string) error {
 				if !strings.Contains(output, "Format                                   : Matroska") {
-					return fmt.Errorf("missing Matroska format field")
+					return errors.New("missing Matroska format field")
 				}
 				return nil
 			},
@@ -237,6 +237,27 @@ func TestCanonicalSnapshotFallsBackAfterLegacyMutation(t *testing.T) {
 	report.General.Fields[0].Value = "AVI"
 	if output := RenderJSON([]Report{report}); !strings.Contains(output, `"Format":"AVI"`) || strings.Contains(output, `"Format":"Matroska"`) {
 		t.Fatalf("mutated JSON = %s", output)
+	}
+}
+
+func TestCanonicalSnapshotPreservesLegacyJSONDeletion(t *testing.T) {
+	builder := newCanonicalStreamBuilder(StreamGeneral)
+	builder.Fill("Format", "Matroska", "Format", "Matroska")
+	builder.Fill("Title", "Delete me", "Title", "Delete me")
+	builder.StructuredNode("extra", structuredNode{Kind: structuredObject, Object: []structuredMember{{
+		Key: "Keep", Value: structuredNode{Kind: structuredString, Text: "yes"},
+	}}})
+	report := Report{Ref: "sample.mkv", General: builder.Snapshot(canonicalStreamPolicy{})}
+	attachCanonicalStore(&report)
+
+	delete(report.General.JSON, "Title")
+	delete(report.General.JSONRaw, "extra")
+	output := RenderJSON([]Report{report})
+	if strings.Contains(output, `"Title"`) || strings.Contains(output, `"extra"`) {
+		t.Fatalf("deleted compatibility keys were restored: %s", output)
+	}
+	if !strings.Contains(output, `"Format":"Matroska"`) {
+		t.Fatalf("sibling compatibility key was lost: %s", output)
 	}
 }
 

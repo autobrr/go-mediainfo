@@ -45,9 +45,9 @@ func renderHTMLFields(title string, kind StreamKind, sourceFields []Field) strin
 	buf.WriteString("</th></tr>")
 	for _, field := range fields {
 		buf.WriteString("<tr><td>")
-		buf.WriteString(html.EscapeString(field.Name))
+		buf.WriteString(html.EscapeString(escapeOutputControls(field.Name)))
 		buf.WriteString("</td><td>")
-		buf.WriteString(html.EscapeString(field.Value))
+		buf.WriteString(html.EscapeString(escapeOutputControls(field.Value)))
 		buf.WriteString("</td></tr>")
 	}
 	return buf.String()

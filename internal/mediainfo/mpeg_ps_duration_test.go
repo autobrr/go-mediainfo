@@ -2,7 +2,9 @@ package mediainfo
 
 import (
 	"bytes"
+	"fmt"
 	"testing"
+	"time"
 )
 
 func TestPSStreamParserAcceptsMPEG1PackAndPESHeaders(t *testing.T) {
@@ -53,6 +55,68 @@ func TestPSStreamParserRejectsMalformedMPEG1PESHeaders(t *testing.T) {
 				t.Fatalf("malformed PES produced %d streams, PTS=%v", len(parser.streams), parser.anyPTS.has())
 			}
 		})
+	}
+}
+
+func TestPSStreamParserRejectsTruncatedMPEG1PESSTDHeader(t *testing.T) {
+	data := []byte{0, 0, 1, 0xE0, 0, 2, 0x40, 0}
+	result := make(chan bool, 1)
+	parser := newPSStreamParser(mpegPSOptions{})
+	go func() {
+		result <- parser.parseReader(bytes.NewReader(data))
+	}()
+
+	select {
+	case parsed := <-result:
+		if parsed {
+			t.Fatal("parseReader() accepted truncated MPEG-1 PES")
+		}
+		if len(parser.streams) != 0 || parser.anyPTS.has() {
+			t.Fatalf("truncated PES produced %d streams, PTS=%v", len(parser.streams), parser.anyPTS.has())
+		}
+	case <-time.After(time.Second):
+		t.Fatal("parseReader() did not terminate for truncated MPEG-1 PES")
+	}
+}
+
+func TestPSStreamParserRejectsEveryTruncatedMPEG1PESHeaderPrefix(t *testing.T) {
+	packet := []byte{
+		0x00, 0x00, 0x01, 0xE0, 0x00, 0x0B,
+		0x40, 0x00,
+		0x21, 0x00, 0x01, 0x00, 0x01,
+		0x00, 0x00, 0x01, 0xB3,
+	}
+	type parseResult struct {
+		parsed  bool
+		streams int
+		hasPTS  bool
+	}
+	for cut := range len(packet) {
+		t.Run(fmt.Sprintf("cut_%02d", cut), func(t *testing.T) {
+			result := make(chan parseResult, 1)
+			go func() {
+				parser := newPSStreamParser(mpegPSOptions{})
+				parsed := parser.parseReader(bytes.NewReader(packet[:cut]))
+				result <- parseResult{parsed: parsed, streams: len(parser.streams), hasPTS: parser.anyPTS.has()}
+			}()
+
+			select {
+			case got := <-result:
+				if got.parsed || got.streams != 0 || got.hasPTS {
+					t.Fatalf("prefix %d accepted: %+v", cut, got)
+				}
+			case <-time.After(time.Second):
+				t.Fatalf("prefix %d did not terminate", cut)
+			}
+		})
+	}
+
+	parser := newPSStreamParser(mpegPSOptions{})
+	if !parser.parseReader(bytes.NewReader(packet)) {
+		t.Fatal("complete MPEG-1 PES packet was rejected")
+	}
+	if parser.streams[psStreamKey(0xE0, psSubstreamNone)] == nil {
+		t.Fatal("complete MPEG-1 PES packet did not register video")
 	}
 }
 

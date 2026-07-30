@@ -1,6 +1,100 @@
 package mediainfo
 
-import "testing"
+import (
+	"encoding/binary"
+	"math"
+	"testing"
+)
+
+func TestTrueHDChannelsEveryAssignmentBit(t *testing.T) {
+	wantWeights := [...]int{2, 1, 1, 2, 2, 2, 2, 1, 1, 2, 2, 1, 1}
+	if trueHDChannelCountPerBit != wantWeights {
+		t.Fatalf("trueHDChannelCountPerBit=%v; want %v", trueHDChannelCountPerBit, wantWeights)
+	}
+	tests := []struct {
+		channelMap uint16
+		channels   uint64
+		layout     string
+	}{
+		{channelMap: 1 << 0, channels: 2, layout: "L R"},
+		{channelMap: 1 << 1, channels: 1, layout: "C"},
+		{channelMap: 1 << 2, channels: 1, layout: "LFE"},
+		{channelMap: 1 << 3, channels: 2, layout: "Ls Rs"},
+		{channelMap: 1 << 4, channels: 2, layout: "Tfl Tfr"},
+		{channelMap: 1 << 5, channels: 2, layout: "Lsc Rsc"},
+		{channelMap: 1 << 6, channels: 2, layout: "Lb Rb"},
+		{channelMap: 1 << 7, channels: 1, layout: "Cb"},
+		{channelMap: 1 << 8, channels: 1, layout: "Tc"},
+		{channelMap: 1 << 9, channels: 2, layout: "Lsd Rsd"},
+		{channelMap: 1 << 10, channels: 2, layout: "Lw Rw"},
+		{channelMap: 1 << 11, channels: 1, layout: "Tfc"},
+		{channelMap: 1 << 12, channels: 1, layout: "LFE2"},
+	}
+	for _, test := range tests {
+		t.Run(test.layout, func(t *testing.T) {
+			if got := trueHDChannels(test.channelMap); got != test.channels {
+				t.Errorf("trueHDChannels(%#x) = %d; want %d", test.channelMap, got, test.channels)
+			}
+			if got := trueHDChannelLayout(test.channelMap); got != test.layout {
+				t.Errorf("trueHDChannelLayout(%#x) = %q; want %q", test.channelMap, got, test.layout)
+			}
+		})
+	}
+}
+
+func TestTrueHDChannelsRepresentativePresentations(t *testing.T) {
+	tests := []struct {
+		name       string
+		channelMap uint16
+		channels   uint64
+	}{
+		{name: "mono", channelMap: 0x0002, channels: 1},
+		{name: "stereo", channelMap: 0x0001, channels: 2},
+		{name: "5.1", channelMap: 0x000F, channels: 6},
+		{name: "7.1", channelMap: 0x004F, channels: 8},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := trueHDChannels(test.channelMap); got != test.channels {
+				t.Fatalf("trueHDChannels(%#x) = %d; want %d", test.channelMap, got, test.channels)
+			}
+		})
+	}
+}
+
+func TestMatroskaTrueHDTrackUIDThreeKeepsOwnFacts(t *testing.T) {
+	audioPayload := buildMatroskaElement(mkvIDChannels, encodeMatroskaUint(6))
+	samplingRate := make([]byte, 8)
+	binary.BigEndian.PutUint64(samplingRate, math.Float64bits(48_000))
+	audioPayload = append(audioPayload, buildMatroskaElement(mkvIDSamplingRate, samplingRate)...)
+	audioPayload = append(audioPayload, buildMatroskaElement(mkvIDAudioBitDepth, encodeMatroskaUint(20))...)
+
+	payload := buildMatroskaElement(mkvIDTrackNumber, encodeMatroskaUint(2))
+	payload = append(payload, buildMatroskaElement(mkvIDTrackUID, encodeMatroskaUint(3))...)
+	payload = append(payload, buildMatroskaElement(mkvIDTrackType, encodeMatroskaUint(2))...)
+	payload = append(payload, buildMatroskaElement(mkvIDCodecID, []byte("A_TRUEHD"))...)
+	payload = append(payload, buildMatroskaElement(mkvIDBitRate, encodeMatroskaUint(1_234_567))...)
+	payload = append(payload, buildMatroskaElement(mkvIDTrackAudio, audioPayload)...)
+
+	stream, ok := parseMatroskaTrackEntry(payload, 2.5, 3)
+	if !ok {
+		t.Fatal("TrueHD TrackEntry did not parse")
+	}
+	streams := []Stream{stream}
+	general := Stream{Kind: StreamGeneral}
+	applyMatroskaWriterRules("", &general, streams)
+
+	for key, want := range map[fieldName]string{
+		"UniqueID": "3",
+		"BitRate":  "1234567",
+		"BitDepth": "20",
+	} {
+		got, found := canonicalSeedValue(streams[0], key)
+		if !found || got != want {
+			t.Fatalf("%s = %q, %v; want %q from this track", key, got, found, want)
+		}
+	}
+}
 
 func TestParseTrueHDFrameAtmosMajorSync(t *testing.T) {
 	frame := []byte{
@@ -42,6 +136,9 @@ func TestParseTrueHDFrameAtmosMajorSync(t *testing.T) {
 	if info.dynamicObjects != 11 {
 		t.Fatalf("dynamicObjects=%d want 11", info.dynamicObjects)
 	}
+	if !info.hasDynamicObjects {
+		t.Fatal("parsed Atmos object count is not marked present")
+	}
 	atmos, ok := trueHDAtmosPresentationInfo(info)
 	if !ok {
 		t.Fatal("expected Atmos presentation details")
@@ -54,6 +151,56 @@ func TestParseTrueHDFrameAtmosMajorSync(t *testing.T) {
 	}
 	if atmos.bedChannelCount != 1 || atmos.bedChannelConfig != "LFE" {
 		t.Fatalf("bed=%d/%q want 1/LFE", atmos.bedChannelCount, atmos.bedChannelConfig)
+	}
+}
+
+func TestParseTrueHDProgramAssignmentBedAndObjects(t *testing.T) {
+	data := make([]byte, 8)
+	bw := ac3BitWriter{buf: data}
+	bw.writeBits(0, 1)     // not dynamic-object-only
+	bw.writeBits(0x5, 4)   // bed + dynamic objects
+	bw.writeBits(0, 1)     // b_bed_object_chan_distribute
+	bw.writeBits(0, 1)     // one bed instance
+	bw.writeBits(0, 1)     // not LFE-only
+	bw.writeBits(0, 1)     // nonstandard channel assignment
+	bw.writeBits(0x3F, 17) // L R C LFE Ls Rs
+	bw.writeBits(3, 5)     // four dynamic objects
+
+	br := ac3BitReader{data: data}
+	info := trueHDInfo{dynamicObjects: 16, hasDynamicObjects: true}
+	if !parseTrueHDProgramAssignment(&br, &info) {
+		t.Fatal("program_assignment parse failed")
+	}
+	if info.dynamicObjects != 4 || !info.hasDynamicObjects {
+		t.Fatalf("dynamic objects = %d, present=%v", info.dynamicObjects, info.hasDynamicObjects)
+	}
+	if info.atmosBedChannels != 6 || info.atmosBedLayout != "L R C LFE Ls Rs" {
+		t.Fatalf("bed = %d/%q", info.atmosBedChannels, info.atmosBedLayout)
+	}
+}
+
+func TestParseTrueHDProgramAssignmentAlignedExtension(t *testing.T) {
+	data := make([]byte, 4)
+	bw := ac3BitWriter{buf: data}
+	bw.writeBits(0, 1)    // not dynamic-object-only
+	bw.writeBits(0xD, 4)  // bed + dynamic objects + extension
+	bw.writeBits(0, 1)    // b_bed_object_chan_distribute
+	bw.writeBits(0, 1)    // one bed instance
+	bw.writeBits(1, 1)    // LFE-only bed
+	bw.writeBits(3, 5)    // four dynamic objects
+	bw.writeBits(8, 4)    // byte-aligned extension size
+	bw.writeBits(0xAB, 8) // extension payload
+
+	br := ac3BitReader{data: data}
+	info := trueHDInfo{dynamicObjects: 16, hasDynamicObjects: true}
+	if !parseTrueHDProgramAssignment(&br, &info) {
+		t.Fatal("aligned program_assignment extension parse failed")
+	}
+	if info.dynamicObjects != 4 || !info.hasDynamicObjects {
+		t.Fatalf("dynamic objects = %d, present=%v", info.dynamicObjects, info.hasDynamicObjects)
+	}
+	if info.atmosBedChannels != 1 || info.atmosBedLayout != "LFE" {
+		t.Fatalf("bed = %d/%q", info.atmosBedChannels, info.atmosBedLayout)
 	}
 }
 
@@ -98,7 +245,7 @@ func TestParseTrueHDFrame96KHzWithoutAtmos(t *testing.T) {
 	}
 }
 
-func TestApplyMatroskaAudioProbes_TrueHDAtmosKeepsSevenOneLayout(t *testing.T) {
+func TestApplyMatroskaAudioProbes_TrueHDAtmosWithoutExtensionOmitsObjectCounts(t *testing.T) {
 	info := &MatroskaInfo{Tracks: []Stream{{
 		Kind:   StreamAudio,
 		Fields: []Field{{Name: "ID", Value: "2"}},
@@ -134,8 +281,13 @@ func TestApplyMatroskaAudioProbes_TrueHDAtmosKeepsSevenOneLayout(t *testing.T) {
 	if got := stream.JSON["Format_AdditionalFeatures"]; got != "16-ch" {
 		t.Fatalf("Format_AdditionalFeatures=%q want 16-ch", got)
 	}
-	if got := stream.JSONRaw["extra"]; got != `{"NumberOfDynamicObjects":"11","BedChannelCount":"1","BedChannelConfiguration":"LFE"}` {
-		t.Fatalf("extra=%s", got)
+	if got := stream.JSONRaw["extra"]; got != "" {
+		t.Fatalf("fabricated Atmos object metadata: %s", got)
+	}
+	for _, field := range []string{"Number of dynamic objects", "Bed channel count", "Bed channel configuration"} {
+		if got := findField(stream.Fields, field); got != "" {
+			t.Fatalf("%s=%q without parsed extension", field, got)
+		}
 	}
 }
 
@@ -247,5 +399,28 @@ func TestApplyMatroskaTagStatsPreservesTrueHDFrameCount(t *testing.T) {
 
 	if got := info.Tracks[0].JSON["FrameCount"]; got != "8856498" {
 		t.Fatalf("FrameCount=%q want trusted Statistics Tags value", got)
+	}
+}
+
+func TestApplyMatroskaTagStatsPreservesTrueHDBitRate(t *testing.T) {
+	info := &MatroskaInfo{Tracks: []Stream{{
+		Kind: StreamAudio,
+		Fields: []Field{
+			{Name: "ID", Value: "3"},
+			{Name: "Format", Value: "MLP FBA"},
+		},
+		JSON: map[string]string{
+			"UniqueID":   "3",
+			"Duration":   "248.948708333",
+			"StreamSize": "78964338",
+		},
+	}}}
+	seedMatroskaLegacyTestStream(&info.Tracks[0])
+	applyMatroskaTagStats(info, map[uint64]matroskaTagStats{3: {
+		trusted: true, hasBitRate: true, bitRate: 2537536,
+	}}, 0)
+	refreshCanonicalCompatibilitySnapshot(&info.Tracks[0])
+	if got := info.Tracks[0].JSON["BitRate"]; got != "2537536" {
+		t.Fatalf("BitRate=%q want trusted TrueHD Statistics Tags value", got)
 	}
 }

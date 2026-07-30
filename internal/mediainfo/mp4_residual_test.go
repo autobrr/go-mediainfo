@@ -2,7 +2,9 @@ package mediainfo
 
 import (
 	"encoding/binary"
+	"fmt"
 	"math"
+	"path/filepath"
 	"testing"
 )
 
@@ -28,6 +30,74 @@ func TestParseMP4TimingRetainsIntegerDurations(t *testing.T) {
 	seconds, ticks, timescale, _, ok := parseMdhdMeta(mdhd)
 	if !ok || ticks != 23832976 || timescale != 29970 {
 		t.Fatalf("parseMdhdMeta = %.9f, %d/%d, ok=%v", seconds, ticks, timescale, ok)
+	}
+}
+
+func TestParseSttsClassifiesDeltaVariability(t *testing.T) {
+	tests := []struct {
+		name         string
+		entries      [][2]uint32
+		wantCount    uint64
+		wantDuration uint64
+		wantVariable bool
+	}{
+		{
+			name:         "single entry constant",
+			entries:      [][2]uint32{{5, 1000}},
+			wantCount:    5,
+			wantDuration: 5000,
+		},
+		{
+			name:         "multiple equal entries constant",
+			entries:      [][2]uint32{{3, 1000}, {2, 1000}},
+			wantCount:    5,
+			wantDuration: 5000,
+		},
+		{
+			name:         "multiple unequal entries variable",
+			entries:      [][2]uint32{{3, 1000}, {2, 1001}},
+			wantCount:    5,
+			wantDuration: 5002,
+			wantVariable: true,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			payload := make([]byte, 8+len(test.entries)*8)
+			binary.BigEndian.PutUint32(payload[4:8], uint32(len(test.entries)))
+			for i, entry := range test.entries {
+				offset := 8 + i*8
+				binary.BigEndian.PutUint32(payload[offset:offset+4], entry[0])
+				binary.BigEndian.PutUint32(payload[offset+4:offset+8], entry[1])
+			}
+
+			count, duration, firstDelta, lastDelta, ok, variable := parseStts(payload)
+			if !ok || variable != test.wantVariable {
+				t.Fatalf("parseStts ok=%v variable=%v, want true/%v", ok, variable, test.wantVariable)
+			}
+			if count != test.wantCount || duration != test.wantDuration {
+				t.Fatalf("parseStts count/duration = %d/%d, want %d/%d", count, duration, test.wantCount, test.wantDuration)
+			}
+
+			if test.name == "multiple equal entries constant" {
+				track := MP4Track{
+					Timescale:           30000,
+					SampleCount:         count,
+					SampleBytes:         1000,
+					SampleDelta:         firstDelta,
+					LastSampleDelta:     lastDelta,
+					VariableDeltas:      variable,
+					sampleDurationTicks: duration,
+				}
+				rate := mp4FrameRate(track, 0)
+				if rate != 30 {
+					t.Fatalf("frame rate = %v, want 30", rate)
+				}
+				if bitRate := mp4VideoBitRate(track, rate); bitRate != 48000 {
+					t.Fatalf("bit rate = %v, want 48000", bitRate)
+				}
+			}
+		})
 	}
 }
 
@@ -76,6 +146,266 @@ func TestMP4PresentationAndMediaHeaderDurations(t *testing.T) {
 	if got := mp4RoundedDurationMilliseconds(6377.0 + 1.0/12.0); got != 6377084 {
 		t.Fatalf("float32 mdhd duration = %d, want 6377084", got)
 	}
+}
+
+func TestParseElstRetainsSignedEntriesAndRejectsTruncation(t *testing.T) {
+	want := []mp4EditEntry{
+		{duration: 1_000, mediaTime: -1, rate: 0x00010000},
+		{duration: 3_000, mediaTime: 1_024, rate: 0x00010000},
+	}
+	for _, version := range []byte{0, 1} {
+		t.Run(fmt.Sprintf("version_%d", version), func(t *testing.T) {
+			payload := buildMP4ElstPayload(version, want)
+			got := parseElst(payload)
+			if len(got) != len(want) {
+				t.Fatalf("entries = %d; want %d", len(got), len(want))
+			}
+			for index := range want {
+				if got[index] != want[index] {
+					t.Fatalf("entry %d = %+v; want %+v", index, got[index], want[index])
+				}
+			}
+			for cut := range len(payload) {
+				if parsed := parseElst(payload[:cut]); len(parsed) != 0 {
+					t.Fatalf("accepted %d-byte truncated elst: %+v", cut, parsed)
+				}
+			}
+		})
+	}
+}
+
+func TestSummarizeMP4EditListBoundaries(t *testing.T) {
+	tests := []struct {
+		name           string
+		entries        []mp4EditEntry
+		movieTimescale uint32
+		wantDuration   float64
+		wantMediaTime  int64
+	}{
+		{
+			name: "positive media time",
+			entries: []mp4EditEntry{
+				{duration: 3_000, mediaTime: 1_024, rate: 0x00010000},
+			},
+			movieTimescale: 1_000,
+			wantDuration:   3,
+			wantMediaTime:  1_024,
+		},
+		{
+			name: "leading empty edit",
+			entries: []mp4EditEntry{
+				{duration: 1_000, mediaTime: -1, rate: 0x00010000},
+				{duration: 3_000, mediaTime: 1_024, rate: 0x00010000},
+			},
+			movieTimescale: 1_000,
+			wantDuration:   3,
+			wantMediaTime:  1_024,
+		},
+		{
+			name: "multiple media edits do not select a source offset",
+			entries: []mp4EditEntry{
+				{duration: 1_000, mediaTime: 0, rate: 0x00010000},
+				{duration: 2_000, mediaTime: 2_000, rate: 0x00010000},
+				{duration: 3_000, mediaTime: 4_000, rate: 0x00010000},
+			},
+			movieTimescale: 1_000,
+			wantDuration:   6,
+		},
+		{
+			name: "non-unit media rate unsupported",
+			entries: []mp4EditEntry{
+				{duration: 3_000, mediaTime: 1_024, rate: 0x00008000},
+			},
+			movieTimescale: 1_000,
+		},
+		{
+			name: "zero duration",
+			entries: []mp4EditEntry{
+				{duration: 0, mediaTime: 1_024, rate: 0x00010000},
+			},
+			movieTimescale: 1_000,
+		},
+		{
+			name: "zero timescale",
+			entries: []mp4EditEntry{
+				{duration: 3_000, mediaTime: 1_024, rate: 0x00010000},
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			duration, mediaTime := summarizeMP4EditList(test.entries, test.movieTimescale)
+			if duration != test.wantDuration || mediaTime != test.wantMediaTime {
+				t.Fatalf("summary = %.9f/%d; want %.9f/%d", duration, mediaTime, test.wantDuration, test.wantMediaTime)
+			}
+		})
+	}
+}
+
+func TestMP4EditListSourceDelayForms(t *testing.T) {
+	positive := MP4Track{
+		Timescale:          48_000,
+		trackDurationTicks: 3_000,
+		movieTimescale:     1_000,
+		editList: []mp4EditEntry{
+			{duration: 3_000, mediaTime: 1_024, rate: 0x00010000},
+		},
+	}
+	if got := mp4EditSourceDelaySeconds(positive); math.Abs(got-(-float64(1_024)/48_000)) > 1e-12 {
+		t.Fatalf("positive-media source delay = %.12f", got)
+	}
+	if got := mp4PresentationDurationSeconds(positive); got != 3 {
+		t.Fatalf("positive-media presentation duration = %v; want 3", got)
+	}
+
+	empty := MP4Track{
+		Timescale:          48_000,
+		trackDurationTicks: 4_000,
+		movieTimescale:     1_000,
+		editList: []mp4EditEntry{
+			{duration: 1_000, mediaTime: -1, rate: 0x00010000},
+			{duration: 3_000, mediaTime: 0, rate: 0x00010000},
+		},
+	}
+	if got := mp4EditSourceDelaySeconds(empty); got != 1 {
+		t.Fatalf("empty-edit source delay = %v; want 1", got)
+	}
+	if got := mp4PresentationDurationSeconds(empty); got != 3 {
+		t.Fatalf("empty-edit presentation duration = %v; want 3", got)
+	}
+
+	for _, track := range []MP4Track{
+		{
+			Timescale: 48_000, trackDurationTicks: 3_000, movieTimescale: 1_000,
+			editList: []mp4EditEntry{{duration: 3_000, mediaTime: 1_024, rate: 0x00008000}},
+		},
+		{
+			Timescale: 48_000, trackDurationTicks: 6_000, movieTimescale: 1_000,
+			editList: []mp4EditEntry{
+				{duration: 2_000, mediaTime: 0, rate: 0x00010000},
+				{duration: 2_000, mediaTime: 2_000, rate: 0x00010000},
+				{duration: 2_000, mediaTime: 4_000, rate: 0x00010000},
+			},
+		},
+		{
+			Timescale: 48_000, trackDurationTicks: 3_000, movieTimescale: 1_000,
+			editList: []mp4EditEntry{{duration: 0, mediaTime: 1_024, rate: 0x00010000}},
+		},
+		{
+			Timescale: 48_000, movieTimescale: 1_000,
+			editList: []mp4EditEntry{
+				{duration: 1_000, mediaTime: -1, rate: 0x00010000},
+				{duration: 3_000, mediaTime: 0, rate: 0x00010000},
+			},
+		},
+	} {
+		if got := mp4EditSourceDelaySeconds(track); got != 0 {
+			t.Fatalf("unsupported edit source delay = %v; want 0", got)
+		}
+	}
+}
+
+func TestMP4UneditedTrackKindsKeepPresentationTiming(t *testing.T) {
+	for _, kind := range []StreamKind{StreamAudio, StreamVideo, StreamText, StreamMenu} {
+		t.Run(string(kind), func(t *testing.T) {
+			track := MP4Track{
+				Kind:               kind,
+				DurationSeconds:    4,
+				trackDurationTicks: 4_000,
+				movieTimescale:     1_000,
+			}
+			if got := mp4PresentationDurationSeconds(track); got != 4 {
+				t.Fatalf("duration = %v; want 4", got)
+			}
+			if got := mp4EditSourceDelaySeconds(track); got != 0 {
+				t.Fatalf("source delay = %v; want 0", got)
+			}
+		})
+	}
+}
+
+func TestMP4PositiveAudioEditRetainsSourceTimeline(t *testing.T) {
+	report, err := AnalyzeFile(filepath.Join("samples", "sample.mp4"))
+	if err != nil {
+		t.Fatalf("AnalyzeFile: %v", err)
+	}
+
+	var audio *Stream
+	for index := range report.Streams {
+		if report.Streams[index].Kind == StreamAudio {
+			audio = &report.Streams[index]
+			break
+		}
+	}
+	if audio == nil {
+		t.Fatal("audio stream not found")
+	}
+
+	media := buildJSONMedia(report)
+	var audioFields []jsonKV
+	for _, track := range media.Tracks {
+		if jsonFieldValue(track.Fields, "@type") == string(StreamAudio) {
+			audioFields = track.Fields
+			break
+		}
+	}
+	if audioFields == nil {
+		t.Fatal("projected audio stream not found")
+	}
+
+	want := map[string]string{
+		"Source_Duration":           "4.021",
+		"Source_Duration_LastFrame": "-0.011",
+		"FrameCount":                "188",
+		"Source_FrameCount":         "189",
+		"StreamSize":                "48301",
+		"Source_StreamSize":         "48544",
+	}
+	for key, expected := range want {
+		if got := jsonFieldValue(audioFields, key); got != expected {
+			t.Errorf("%s = %q; want %q", key, got, expected)
+		}
+	}
+
+	extra := canonicalSeedStructuredNode(audio, "extra")
+	if extra == nil || extra.Kind != structuredObject {
+		t.Fatal("audio extra object not found")
+	}
+	extraValues := make(map[string]string, len(extra.Object))
+	for _, member := range extra.Object {
+		extraValues[member.Key] = member.Value.Text
+	}
+	if got := extraValues["Source_Delay"]; got != "-21" {
+		t.Errorf("Source_Delay = %q, want -21", got)
+	}
+	if got := extraValues["Source_Delay_Source"]; got != "Container" {
+		t.Errorf("Source_Delay_Source = %q, want Container", got)
+	}
+}
+
+func buildMP4ElstPayload(version byte, entries []mp4EditEntry) []byte {
+	entrySize := 12
+	if version == 1 {
+		entrySize = 20
+	}
+	payload := make([]byte, 8+entrySize*len(entries))
+	payload[0] = version
+	binary.BigEndian.PutUint32(payload[4:8], uint32(len(entries)))
+	offset := 8
+	for _, entry := range entries {
+		if version == 1 {
+			binary.BigEndian.PutUint64(payload[offset:offset+8], entry.duration)
+			binary.BigEndian.PutUint64(payload[offset+8:offset+16], uint64(entry.mediaTime))
+			binary.BigEndian.PutUint32(payload[offset+16:offset+20], uint32(entry.rate))
+			offset += 20
+			continue
+		}
+		binary.BigEndian.PutUint32(payload[offset:offset+4], uint32(entry.duration))
+		binary.BigEndian.PutUint32(payload[offset+4:offset+8], uint32(entry.mediaTime))
+		binary.BigEndian.PutUint32(payload[offset+8:offset+12], uint32(entry.rate))
+		offset += 12
+	}
+	return payload
 }
 
 func TestMP4FrameRateRatioAndBitRateAccounting(t *testing.T) {

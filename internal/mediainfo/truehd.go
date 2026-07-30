@@ -9,16 +9,19 @@ import (
 // trueHDInfo carries major-sync metadata needed to render MediaInfo-compatible
 // TrueHD and Atmos fields.
 type trueHDInfo struct {
-	atmos           bool
-	dynamicObjects  int
-	sampleRate      int
-	samplesPerFrame int
-	maxBitRate      int64
-	channelMap      uint16
+	atmos             bool
+	dynamicObjects    int
+	hasDynamicObjects bool
+	atmosBedChannels  uint64
+	atmosBedLayout    string
+	sampleRate        int
+	samplesPerFrame   int
+	maxBitRate        int64
+	channelMap        uint16
 }
 
 // trueHDChannelCountPerBit maps each assignment-map bit to its channel count.
-var trueHDChannelCountPerBit = [...]int{1, 2, 1, 2, 2, 2, 2, 1, 1, 2, 2, 1, 1}
+var trueHDChannelCountPerBit = [...]int{2, 1, 1, 2, 2, 2, 2, 1, 1, 2, 2, 1, 1}
 
 // trueHDChannelLayoutPerBit maps each assignment-map bit to its layout token.
 var trueHDChannelLayoutPerBit = [...]string{
@@ -100,26 +103,27 @@ func trueHDChannelLayout(channelMap uint16) string {
 type trueHDAtmosPresentation struct {
 	additionalFeatures    string
 	dynamicObjects        int
+	hasDynamicObjects     bool
 	bedChannelCount       uint64
 	bedChannelConfig      string
 	bedChannelConfigShort string
 }
 
-// trueHDAtmosPresentationInfo returns the MediaInfo-style summary for the
-// Dolby TrueHD Atmos home-theater spatial-coding presentation. These values do
-// not describe physical height speaker channels; the base stream still exposes
-// a backward-compatible 7.1 channel render, while Atmos-capable decoders recover
-// spatially coded objects plus the LFE bed.
+// trueHDAtmosPresentationInfo returns only the Atmos presentation metadata that
+// was decoded from the major-sync extension. The Atmos signal itself is enough
+// for the 16-channel commercial/profile fields, but it does not imply a fixed
+// object count or LFE bed.
 func trueHDAtmosPresentationInfo(info trueHDInfo) (trueHDAtmosPresentation, bool) {
 	if !info.atmos {
 		return trueHDAtmosPresentation{}, false
 	}
 	return trueHDAtmosPresentation{
 		additionalFeatures:    "16-ch",
-		dynamicObjects:        max(info.dynamicObjects, 11),
-		bedChannelCount:       1,
-		bedChannelConfig:      "LFE",
-		bedChannelConfigShort: "LFE",
+		dynamicObjects:        info.dynamicObjects,
+		hasDynamicObjects:     info.hasDynamicObjects,
+		bedChannelCount:       info.atmosBedChannels,
+		bedChannelConfig:      info.atmosBedLayout,
+		bedChannelConfigShort: info.atmosBedLayout,
 	}, true
 }
 
@@ -193,22 +197,153 @@ func parseTrueHDFrame(payload []byte) (trueHDInfo, bool) {
 	info.atmos = numSubstreams == 4 && substreamInfo&0x80 != 0
 	if info.atmos && data[25]&1 != 0 && len(data) >= 29 {
 		// extra_channel_meaning starts with its 4-bit length, followed by the
-		// 16-channel dialogue norm, mix level, and channel/object count. For the
-		// dynamic-object-only presentation used by TrueHD Atmos, an LFE bed is
-		// included in that count and MediaInfo subtracts it from dynamic objects.
+		// 16-channel dialogue norm, mix level, and channel/object count.
 		ext := ac3BitReader{data: data[26 : headerSize-2]}
 		if _, ok := ext.readBits(4); ok && ext.skipBits(5+6) {
 			if count, ok := ext.readBits(5); ok {
 				info.dynamicObjects = int(count) + 1
-				if dynamicOnly, ok := ext.readBits(1); ok && dynamicOnly == 1 {
-					if lfePresent, ok := ext.readBits(1); ok && lfePresent == 1 {
-						info.dynamicObjects--
-					}
+				info.hasDynamicObjects = true
+				if !parseTrueHDProgramAssignment(&ext, &info) {
+					info.dynamicObjects = 0
+					info.hasDynamicObjects = false
+					info.atmosBedChannels = 0
+					info.atmosBedLayout = ""
 				}
 			}
 		}
 	}
 	return info, true
+}
+
+func parseTrueHDProgramAssignment(br *ac3BitReader, info *trueHDInfo) bool {
+	if br == nil || info == nil {
+		return false
+	}
+	dynamicOnly, ok := br.readBits(1)
+	if !ok {
+		return false
+	}
+	if dynamicOnly == 1 {
+		lfePresent, ok := br.readBits(1)
+		if !ok {
+			return false
+		}
+		if lfePresent == 1 {
+			if info.dynamicObjects > 0 {
+				info.dynamicObjects--
+			}
+			info.atmosBedChannels = 1
+			info.atmosBedLayout = "LFE"
+		}
+		return true
+	}
+
+	contentMask, ok := br.readBits(4)
+	if !ok {
+		return false
+	}
+	if contentMask&0x1 != 0 {
+		if !br.skipBits(1) { // b_bed_object_chan_distribute
+			return false
+		}
+		multipleBeds, ok := br.readBits(1)
+		if !ok {
+			return false
+		}
+		bedCount := 1
+		if multipleBeds == 1 {
+			count, ok := br.readBits(3)
+			if !ok {
+				return false
+			}
+			bedCount = int(count) + 2
+		}
+		for range bedCount {
+			lfeOnly, ok := br.readBits(1)
+			if !ok {
+				return false
+			}
+			mask := uint32(1 << 3)
+			if lfeOnly == 0 {
+				standard, ok := br.readBits(1)
+				if !ok {
+					return false
+				}
+				if standard == 1 {
+					value, ok := br.readBits(10)
+					if !ok {
+						return false
+					}
+					mask = trueHDStandardBedMaskToNonstandard(uint16(value))
+				} else {
+					value, ok := br.readBits(17)
+					if !ok {
+						return false
+					}
+					mask = uint32(value)
+				}
+			}
+			info.atmosBedLayout, info.atmosBedChannels = trueHDBedLayout(mask)
+		}
+	}
+	if contentMask&0x2 != 0 && !br.skipBits(3) {
+		return false
+	}
+	if contentMask&0x4 != 0 {
+		count, ok := br.readBits(5)
+		if !ok {
+			return false
+		}
+		if count == 0x1F {
+			extended, ok := br.readBits(7)
+			if !ok {
+				return false
+			}
+			count += extended
+		}
+		info.dynamicObjects = int(count) + 1
+	} else {
+		info.dynamicObjects = 0
+	}
+	info.hasDynamicObjects = true
+	if contentMask&0x8 != 0 {
+		size, ok := br.readBits(4)
+		if !ok || !br.skipBits(int(size)) {
+			return false
+		}
+		padding := (8 - int(size)%8) % 8
+		if !br.skipBits(padding) {
+			return false
+		}
+	}
+	return true
+}
+
+func trueHDStandardBedMaskToNonstandard(mask uint16) uint32 {
+	contributions := [...]int{2, 1, 1, 2, 2, 2, 2, 2, 2, 1}
+	var result uint32
+	bit := 0
+	for index, count := range contributions {
+		if mask&(1<<index) != 0 {
+			for offset := range count {
+				result |= 1 << (bit + offset)
+			}
+		}
+		bit += count
+	}
+	return result
+}
+
+func trueHDBedLayout(mask uint32) (string, uint64) {
+	tokens := [...]string{"L", "R", "C", "LFE", "Ls", "Rs", "Lrs", "Rrs", "Lvh", "Rvh", "Lts", "Rts", "Lrh", "Rrh", "Lw", "Rw", "LFE2"}
+	order := [...]int{0, 1, 2, 3, 4, 5, 6, 7, 14, 15, 8, 9, 10, 11, 12, 13, 16}
+	layout := make([]string, 0, len(tokens))
+	for _, bit := range order {
+		if mask&(1<<bit) != 0 {
+			layout = append(layout, tokens[bit])
+		}
+	}
+	return strings.Join(layout, " "), uint64(len(layout))
 }
 
 // trueHDSampleRate maps MLP/TrueHD rate bits to Hz.

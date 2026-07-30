@@ -52,7 +52,8 @@ func TestParseID3RejectsOverBudgetTagBeforeRead(t *testing.T) {
 }
 
 func TestParseID3AcceptedTagUsesObservedAllocation(t *testing.T) {
-	header := []byte{'I', 'D', '3', 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0A}
+	header := make([]byte, 0, 20)
+	header = append(header, 'I', 'D', '3', 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0A)
 	reader := bytes.NewReader(append(header, make([]byte, 10)...))
 	allocations := 0
 	id3, ok := parseID3v2WithAllocator(reader, int64(reader.Len()), &embeddedAssetBudget{}, func(size int) []byte {

@@ -42,6 +42,8 @@ Format                                   : AAC LC
 Format/Info                              : Advanced Audio Codec Low Complexity
 Codec ID                                 : mp4a-40-2
 Duration                                 : 4 s 0 ms
+Source duration                          : 4 s 21 ms
+Source_Duration_LastFrame                : -11 ms
 Bit rate mode                            : Constant
 Bit rate                                 : 96 kb/s
 Channel(s)                               : 1 channel
@@ -49,7 +51,8 @@ Channel layout                           : M
 Sampling rate                            : 48.0 kHz
 Frame rate                               : 46.875 FPS (1024 SPF)
 Compression mode                         : Lossy
-Stream size                              : 47.4 KiB (17%)
+Stream size                              : 47.2 KiB (17%)
+Source stream size                       : 47.4 KiB (17%)
 Default                                  : Yes
 Alternate group                          : 1
 

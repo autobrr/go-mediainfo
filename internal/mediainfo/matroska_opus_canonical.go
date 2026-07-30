@@ -20,6 +20,7 @@ type matroskaOpusCanonicalFacts struct {
 	contentCompAlgo uint64
 	audioChannels   uint64
 	audioSampleRate float64
+	audioBitDepth   uint64
 	bitRate         uint64
 	segmentDuration float64
 	durationPrec    int
@@ -70,9 +71,13 @@ func matroskaOpusCanonicalSeed(facts matroskaOpusCanonicalFacts) []fieldEntry {
 		builder.Fill("Channels", value, "Channel(s)", formatChannels(facts.audioChannels))
 		layout := channelLayout(facts.audioChannels)
 		positions := channelPositionsFromCount(value)
-		if facts.audioChannels == 6 {
+		switch facts.audioChannels {
+		case 6:
 			layout = "L R C Lb Rb LFE"
 			positions = "Front: L C R, Back: L R, LFE"
+		case 8:
+			layout = "L R C Ls Rs Lb Rb LFE"
+			positions = "Front: L C R, Side: L R, Back: L R, LFE"
 		}
 		if layout != "" {
 			builder.Fill("ChannelLayout", layout, "Channel layout", layout)
@@ -82,6 +87,10 @@ func matroskaOpusCanonicalSeed(facts matroskaOpusCanonicalFacts) []fieldEntry {
 	if facts.audioSampleRate > 0 {
 		value := strconv.FormatFloat(facts.audioSampleRate, 'f', -1, 64)
 		builder.Fill("SamplingRate", value, "Sampling rate", formatSampleRate(facts.audioSampleRate))
+	}
+	if facts.audioBitDepth > 0 {
+		value := strconv.FormatUint(facts.audioBitDepth, 10)
+		builder.Fill("BitDepth", value, "Bit depth", value+" bits")
 	}
 	builder.Fill("Compression_Mode", "Lossy", "Compression mode", "Lossy")
 	builder.Structured("Delay", "0.000")

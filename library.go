@@ -78,6 +78,8 @@ type RenderOptions struct {
 	// and values; the zero value and other languages retain friendly text.
 	// Non-text renderers ignore Language.
 	Language string
+	// InformVersion appends MediaInfo's ReportBy footer to raw-language text output.
+	InformVersion bool
 }
 
 const (
@@ -118,7 +120,7 @@ func Render(reports []Report, format OutputFormat) (string, error) {
 func RenderWithOptions(reports []Report, format OutputFormat, options RenderOptions) (string, error) {
 	switch normalizeOutputFormat(format) {
 	case "", OutputText:
-		return core.RenderTextWithOptions(reports, core.TextRenderOptions{Language: options.Language}), nil
+		return core.RenderTextWithOptions(reports, core.TextRenderOptions{Language: options.Language, InformVersion: options.InformVersion}), nil
 	case OutputJSON:
 		return core.RenderJSON(reports), nil
 	case OutputXML, OutputOldXML:

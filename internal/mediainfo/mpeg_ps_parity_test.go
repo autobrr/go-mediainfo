@@ -256,6 +256,50 @@ func TestMPEG2FinalizeRecordsLastGOPOnce(t *testing.T) {
 	}
 }
 
+func TestMPEG2FinalizeRecordsAvailableGOPSample(t *testing.T) {
+	parser := &mpeg2VideoParser{}
+	for _, closed := range []bool{true, false, false} {
+		parser.parseGOPHeader(makeMPEG2GOPHeader(closed))
+	}
+	if info := parser.finalize(); info.GOPOpenClosed != "Open" || info.GOPFirstClosed != "Closed" {
+		t.Fatalf("available GOP classification = %q, %q; want Open, Closed", info.GOPOpenClosed, info.GOPFirstClosed)
+	}
+	parser.parseGOPHeader(makeMPEG2GOPHeader(false))
+	info := parser.finalize()
+	if info.GOPOpenClosed != "Open" || info.GOPFirstClosed != "Closed" {
+		t.Fatalf("coherent GOP classification = %q, %q; want Open, Closed", info.GOPOpenClosed, info.GOPFirstClosed)
+	}
+}
+
+func TestMPEG2FinalizeKeepsDominantScanMetadata(t *testing.T) {
+	parser := &mpeg2VideoParser{
+		gotSeqExt: true, pictureCount: 10, progressiveFrames: 9,
+		topFieldFirst: 9, bottomFieldFirst: 1,
+	}
+	info := parser.finalize()
+	if info.ScanType != "Interlaced" || info.ScanOrder != "TFF" {
+		t.Fatalf("dominant scan metadata = %q, %q; want Interlaced, TFF", info.ScanType, info.ScanOrder)
+	}
+}
+
+func makeMPEG2GOPHeader(closed bool) []byte {
+	data := make([]byte, 4)
+	writer := bitWriter{b: data}
+	writer.writeBits(1, 1) // drop_frame_flag; nonzero timecode keeps it trustworthy
+	writer.writeBits(0, 5)
+	writer.writeBits(0, 6)
+	writer.writeBits(1, 1)
+	writer.writeBits(1, 6)
+	writer.writeBits(1, 6)
+	if closed {
+		writer.writeBits(1, 1)
+	} else {
+		writer.writeBits(0, 1)
+	}
+	writer.writeBits(0, 1)
+	return data
+}
+
 func TestRawTextTMPGEncLibraryNormalization(t *testing.T) {
 	const input = "encoded by TMPGEnc (ver. 2.59.47.155)"
 	if got := formatRawTextEncodedLibrary(input); got != "TMPGEnc 2.59.47.155" {

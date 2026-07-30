@@ -9,6 +9,7 @@ type ContainerInfo struct {
 	// (e.g. TS headers, BDAV timestamps, adaptation fields).
 	StreamOverheadBytes int64
 	containerFrameCount uint64
+	generalExtra        *structuredNode
 }
 
 func (c ContainerInfo) HasDuration() bool {

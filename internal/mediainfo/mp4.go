@@ -86,12 +86,21 @@ type MP4Track struct {
 	menuForTrackID         uint32
 	sampleStartsHead       []uint64
 	trackTitle             string
+	editList               []mp4EditEntry
 }
 
 // mp4SampleToChunkEntry describes one stsc run for bounded sample reads.
 type mp4SampleToChunkEntry struct {
 	firstChunk      uint32
 	samplesPerChunk uint32
+}
+
+// mp4EditEntry retains one elst entry so final timing logic can distinguish
+// simple unit-rate edits from empty or unsupported complex edit lists.
+type mp4EditEntry struct {
+	duration  uint64
+	mediaTime int64
+	rate      int32
 }
 
 // MP4Info contains parsed movie-level metadata and tracks.
@@ -303,6 +312,7 @@ func parseTrak(buf []byte, movieTimescale uint32) (MP4Track, bool) {
 	var hasTkhd bool
 	var editDuration float64
 	var editMediaTime int64
+	var editList []mp4EditEntry
 	var chapterTrackRefs []uint32
 	var trackTitle string
 	var mediaTrack MP4Track
@@ -322,7 +332,10 @@ func parseTrak(buf []byte, movieTimescale uint32) (MP4Track, bool) {
 		}
 		if boxType == "edts" && movieTimescale > 0 {
 			payload := sliceBox(buf, dataOffset, boxSize-headerSize)
-			if duration, mediaTime := parseEdts(payload, movieTimescale); duration > 0 {
+			if entries := parseEdts(payload); len(entries) > 0 {
+				editList = entries
+			}
+			if duration, mediaTime := summarizeMP4EditList(editList, movieTimescale); duration > 0 {
 				editDuration = duration
 				editMediaTime = mediaTime
 			}
@@ -354,6 +367,7 @@ func parseTrak(buf []byte, movieTimescale uint32) (MP4Track, bool) {
 		mediaTrack.EditDuration = editDuration
 		mediaTrack.EditMediaTime = editMediaTime
 	}
+	mediaTrack.editList = append([]mp4EditEntry(nil), editList...)
 	if hasTkhd {
 		mediaTrack.Default = tkhdInfo.Default
 		mediaTrack.AlternateGroup = tkhdInfo.AlternateGroup
@@ -524,13 +538,9 @@ func parseTkhd(payload []byte) (tkhdInfo, bool) {
 	return tkhdInfo{}, false
 }
 
-func parseEdts(payload []byte, movieTimescale uint32) (float64, int64) {
-	if movieTimescale == 0 {
-		return 0, 0
-	}
+func parseEdts(payload []byte) []mp4EditEntry {
 	var offset int64
-	var duration float64
-	var mediaTime int64
+	var entries []mp4EditEntry
 	for offset+8 <= int64(len(payload)) {
 		boxSize, boxType, headerSize := readMP4BoxHeaderFrom(payload, offset)
 		if boxSize <= 0 {
@@ -539,61 +549,81 @@ func parseEdts(payload []byte, movieTimescale uint32) (float64, int64) {
 		dataOffset := offset + headerSize
 		if boxType == "elst" {
 			elstPayload := sliceBox(payload, dataOffset, boxSize-headerSize)
-			if parsedDuration, parsedMediaTime := parseElst(elstPayload, movieTimescale); parsedDuration > 0 {
-				duration = parsedDuration
-				mediaTime = parsedMediaTime
+			if parsed := parseElst(elstPayload); len(parsed) > 0 {
+				entries = parsed
 			}
 		}
 		offset += boxSize
 	}
-	return duration, mediaTime
+	return entries
 }
 
-func parseElst(payload []byte, movieTimescale uint32) (float64, int64) {
-	if len(payload) < 8 || movieTimescale == 0 {
-		return 0, 0
+func parseElst(payload []byte) []mp4EditEntry {
+	if len(payload) < 8 {
+		return nil
 	}
 	version := payload[0]
-	entryCount := binary.BigEndian.Uint32(payload[4:8])
+	entryCount := uint64(binary.BigEndian.Uint32(payload[4:8]))
 	offset := 8
-	var total uint64
-	var mediaTime int64
+	entrySize := uint64(0)
 	switch version {
 	case 0:
-		for i := 0; i < int(entryCount); i++ {
-			if offset+12 > len(payload) {
-				break
-			}
-			segmentDuration := binary.BigEndian.Uint32(payload[offset : offset+4])
-			mediaTimeValue := int32(binary.BigEndian.Uint32(payload[offset+4 : offset+8]))
-			if mediaTimeValue >= 0 && segmentDuration > 0 {
-				total += uint64(segmentDuration)
-				if mediaTime == 0 {
-					mediaTime = int64(mediaTimeValue)
-				}
-			}
-			offset += 12
-		}
+		entrySize = 12
 	case 1:
-		for i := 0; i < int(entryCount); i++ {
-			if offset+20 > len(payload) {
-				break
-			}
-			segmentDuration := binary.BigEndian.Uint64(payload[offset : offset+8])
-			mediaTimeValue := int64(binary.BigEndian.Uint64(payload[offset+8 : offset+16]))
-			if mediaTimeValue >= 0 && segmentDuration > 0 {
-				total += segmentDuration
-				if mediaTime == 0 {
-					mediaTime = mediaTimeValue
-				}
-			}
+		entrySize = 20
+	default:
+		return nil
+	}
+	if entryCount == 0 || entryCount > uint64(len(payload)-offset)/entrySize {
+		return nil
+	}
+	entries := make([]mp4EditEntry, 0, entryCount)
+	for range entryCount {
+		switch version {
+		case 0:
+			entries = append(entries, mp4EditEntry{
+				duration:  uint64(binary.BigEndian.Uint32(payload[offset : offset+4])),
+				mediaTime: int64(int32(binary.BigEndian.Uint32(payload[offset+4 : offset+8]))),
+				rate:      int32(binary.BigEndian.Uint32(payload[offset+8 : offset+12])),
+			})
+			offset += 12
+		case 1:
+			entries = append(entries, mp4EditEntry{
+				duration:  binary.BigEndian.Uint64(payload[offset : offset+8]),
+				mediaTime: int64(binary.BigEndian.Uint64(payload[offset+8 : offset+16])),
+				rate:      int32(binary.BigEndian.Uint32(payload[offset+16 : offset+20])),
+			})
 			offset += 20
 		}
-	default:
+	}
+	return entries
+}
+
+func summarizeMP4EditList(entries []mp4EditEntry, movieTimescale uint32) (float64, int64) {
+	if len(entries) == 0 || movieTimescale == 0 {
 		return 0, 0
 	}
+	var total uint64
+	mediaEntryCount := 0
+	mediaTime := int64(0)
+	for _, entry := range entries {
+		if entry.rate != 0x00010000 {
+			return 0, 0
+		}
+		if entry.mediaTime >= 0 && entry.duration > 0 {
+			if ^uint64(0)-total < entry.duration {
+				return 0, 0
+			}
+			total += entry.duration
+			mediaEntryCount++
+			mediaTime = entry.mediaTime
+		}
+	}
 	if total == 0 {
-		return 0, mediaTime
+		return 0, 0
+	}
+	if mediaEntryCount != 1 {
+		mediaTime = 0
 	}
 	return float64(total) / float64(movieTimescale), mediaTime
 }

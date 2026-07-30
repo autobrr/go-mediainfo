@@ -519,10 +519,7 @@ func TestParseEAC3FrameWithOptions_MixDef3MetadataAlignment(t *testing.T) {
 	bw.writeBits(0, 1) // extpgmaux2scle
 	bw.writeBits(1, 1) // mixdata3e
 	bw.writeBits(0, 5) // spchdat
-	bw.writeBits(1, 1) // addspchdate
-	bw.writeBits(0, 7) // spchdat1 + spchan1att
-	bw.writeBits(1, 1) // addspdat1e
-	bw.writeBits(0, 7) // spchdat2 + spchan2att
+	bw.writeBits(0, 1) // addspchdate; nested speech fields are absent
 	bw.writeBits(0, 16)
 	bw.writeBits(0, 1) // frmmixcfginfoe
 	bw.writeBits(1, 1) // infomdate
@@ -545,7 +542,7 @@ func TestParseEAC3FrameWithOptions_MixDef3MetadataAlignment(t *testing.T) {
 	}
 }
 
-func TestParseEAC3FrameWithOptions_Acmod4ReadsSurroundMixLevels(t *testing.T) {
+func TestParseEAC3FrameWithOptions_Acmod4SkipsSurroundMixLevels(t *testing.T) {
 	const frameSize = 32
 	buf := make([]byte, frameSize)
 	bw := ac3BitWriter{buf: buf}
@@ -563,8 +560,6 @@ func TestParseEAC3FrameWithOptions_Acmod4ReadsSurroundMixLevels(t *testing.T) {
 	bw.writeBits(0, 1)                // compre
 	bw.writeBits(1, 1)                // mixmdate
 	bw.writeBits(3, 2)                // dmixmod: reserved literal
-	bw.writeBits(4, 3)                // ltrtsurmixlev: -3.0 dB
-	bw.writeBits(4, 3)                // lorosurmixlev: -3.0 dB
 	bw.writeBits(0, 1)                // pgmscle
 	bw.writeBits(0, 1)                // extpgmscle
 	bw.writeBits(0, 2)                // mixdef
@@ -583,11 +578,35 @@ func TestParseEAC3FrameWithOptions_Acmod4ReadsSurroundMixLevels(t *testing.T) {
 	if !info.hasDmixmod || info.dmixmod != "3" {
 		t.Fatalf("dmixmod mismatch: present=%v value=%q", info.hasDmixmod, info.dmixmod)
 	}
-	if !info.hasLtrtsurmixlev || !info.hasLorosurmixlev {
-		t.Fatal("acmod=4 must read surround mix-level fields")
+	if info.hasLtrtsurmixlev || info.hasLorosurmixlev {
+		t.Fatal("acmod=4 must not read acmod>4 surround mix-level fields")
 	}
 	if info.bsmod != 5 || info.serviceKind != "Commentary" {
 		t.Fatalf("service kind mismatch: bsmod=%d serviceKind=%q", info.bsmod, info.serviceKind)
+	}
+}
+
+func TestAC3ChannelLayoutsMatchUpstreamTables(t *testing.T) {
+	wantWithoutLFE := [...]string{"M M", "M", "L R", "L R C", "L R S", "L R C Cs", "L R Ls Rs", "L R C Ls Rs"}
+	wantWithLFE := [...]string{"1+1 LFE", "C LFE", "L R LFE", "L R C LFE", "L R S LFE", "L R C LFE Cs", "L R LFE Ls Rs", "L R C LFE Ls Rs"}
+	if ac3ChannelLayoutsWithoutLFE != wantWithoutLFE {
+		t.Fatalf("AC-3 layouts without LFE = %#v", ac3ChannelLayoutsWithoutLFE)
+	}
+	if ac3ChannelLayoutsWithLFE != wantWithLFE {
+		t.Fatalf("AC-3 layouts with LFE = %#v", ac3ChannelLayoutsWithLFE)
+	}
+	for _, test := range []struct {
+		layout string
+		want   string
+	}{
+		{"L R Ls Rs", "Front: L R, Side: L R"},
+		{"L R LFE Ls Rs", "Front: L R, Side: L R, LFE"},
+		{"L R C Cs", "Front: L C R, Back: C"},
+		{"L R C LFE Cs", "Front: L C R, Back: C, LFE"},
+	} {
+		if got := ac3ChannelPositions(test.layout); got != test.want {
+			t.Errorf("ac3ChannelPositions(%q) = %q, want %q", test.layout, got, test.want)
+		}
 	}
 }
 
@@ -642,4 +661,16 @@ func buildEMDFJOCPayload() []byte {
 	bw.writeBits(0, 3)  // joc_ext_config_idx
 	bw.writeBits(0, 5)  // payload_id terminator
 	return append([]byte{0x58, 0x38, 0x00, byte(len(body))}, body...)
+}
+
+func TestAC3FrameCRCValid(t *testing.T) {
+	frame := make([]byte, 128)
+	frame[0], frame[1] = 0x0B, 0x77
+	if !ac3FrameCRCValid(frame, 8) {
+		t.Fatal("zero-remainder AC-3 frame rejected")
+	}
+	frame[10] = 1
+	if ac3FrameCRCValid(frame, 8) {
+		t.Fatal("corrupt AC-3 frame accepted")
+	}
 }

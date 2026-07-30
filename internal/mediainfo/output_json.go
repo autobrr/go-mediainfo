@@ -159,9 +159,8 @@ func renderJSONObject(fields []jsonKV, multiline bool) string {
 }
 
 func writeJSONField(buf *bytes.Buffer, key, value string, raw bool) {
-	buf.WriteString("\"")
-	buf.WriteString(key)
-	buf.WriteString("\":")
+	buf.WriteString(renderJSONString(key))
+	buf.WriteString(":")
 	if raw {
 		buf.WriteString(value)
 		return

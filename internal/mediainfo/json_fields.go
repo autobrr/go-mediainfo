@@ -142,7 +142,7 @@ func buildJSONStreamFields(stream Stream, order int, typeOrder int, containerFor
 	fields = applyJSONExtras(fields, stream.JSON, rawExtras)
 	fields = normalizeContainerComputedJSON(stream.Kind, fields, containerFormat, stream.JSONPreserveDisplayAR)
 	if !stream.JSONSkipComputed {
-		fields = append(fields, buildJSONComputedFields(stream.Kind, fields, containerFormat, stream.JSONSkipFrameRateRatio)...)
+		fields = append(fields, buildJSONComputedFields(stream.Kind, fields, containerFormat, stream.JSONSkipFrameRateRatio, stream.mkvOmitDerivedFLACLayout)...)
 	}
 	return sortJSONFieldsForContainer(stream.Kind, fields, containerFormat)
 }
@@ -433,7 +433,7 @@ func mapStreamFieldsToJSON(kind StreamKind, fields []Field) []jsonKV {
 
 // buildJSONComputedFields derives MediaInfo-compatible JSON values that are not
 // already present in the parsed field set.
-func buildJSONComputedFields(kind StreamKind, fields []jsonKV, containerFormat string, skipFrameRateRatio bool) []jsonKV {
+func buildJSONComputedFields(kind StreamKind, fields []jsonKV, containerFormat string, skipFrameRateRatio, omitDerivedFLACLayout bool) []jsonKV {
 	out := []jsonKV{}
 	format := jsonFieldValue(fields, "Format")
 	duration, _ := strconv.ParseFloat(jsonFieldValue(fields, "Duration"), 64)
@@ -461,8 +461,7 @@ func buildJSONComputedFields(kind StreamKind, fields []jsonKV, containerFormat s
 	if kind == StreamAudio {
 		if channels != "" && jsonFieldValue(fields, "ChannelPositions") == "" && jsonFieldValue(fields, "Channels_Original") == "" {
 			omitDerivedFLACPositions := containerFormat == "Matroska" && format == "FLAC" &&
-				jsonFieldValue(fields, "ChannelLayout") == "" &&
-				flacDerivedLayoutIsOmitted(jsonFieldValue(fields, "Encoded_Library"))
+				jsonFieldValue(fields, "ChannelLayout") == "" && omitDerivedFLACLayout
 			omitDerivedMatroskaPositions := containerFormat == "Matroska" &&
 				(format == "MPEG Audio" || format == "Vorbis" || format == "PCM") && jsonFieldValue(fields, "ChannelLayout") == ""
 			// Official mediainfo does not emit ChannelPositions for MPEG Audio in MPEG-PS (e.g. VOB).
@@ -559,6 +558,7 @@ func applyJSONExtras(fields []jsonKV, extras map[string]string, rawExtras map[st
 			continue
 		}
 		fields = append(fields, jsonKV{Key: key, Val: value})
+		index[key] = len(fields) - 1
 	}
 	if len(rawExtras) > 0 {
 		rawKeys := make([]string, 0, len(rawExtras))
@@ -574,6 +574,7 @@ func applyJSONExtras(fields []jsonKV, extras map[string]string, rawExtras map[st
 				continue
 			}
 			fields = append(fields, jsonKV{Key: key, Val: value, Raw: true})
+			index[key] = len(fields) - 1
 		}
 	}
 	return fields
@@ -700,7 +701,7 @@ func splitEncodedLibrary(value string) (string, string) {
 	if strings.HasPrefix(value, "x264") {
 		trimmed := strings.TrimPrefix(value, "x264 - ")
 		trimmed = strings.TrimPrefix(trimmed, "x264 ")
-		return "x264", strings.TrimSpace(trimmed)
+		return "x264", strings.TrimLeft(trimmed, " \t\r\n")
 	}
 	if strings.HasPrefix(value, "x265") {
 		if rest, ok := strings.CutPrefix(value, "x265 - "); ok {

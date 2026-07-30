@@ -174,8 +174,12 @@ func matroskaPCMCanonicalSeed(facts matroskaPCMCanonicalFacts) []fieldEntry {
 	if facts.audioChannels > 0 {
 		value := strconv.FormatUint(facts.audioChannels, 10)
 		builder.Fill("Channels", value, "Channel(s)", formatChannels(facts.audioChannels))
-		if facts.audioChannelsFromTrack {
-			if layout := channelLayout(facts.audioChannels); layout != "" {
+		if facts.audioChannelsFromTrack && strings.HasPrefix(facts.codecID, "A_MS/ACM / 00000001-") {
+			layout := channelLayout(facts.audioChannels)
+			if facts.audioChannels == 6 {
+				layout = "L R C LFE Ls Rs"
+			}
+			if layout != "" {
 				builder.StructuredJSONOnly("ChannelLayout", layout)
 			}
 			if positions := matroskaGoChannelPositions(facts.audioChannels); positions != "" {
@@ -187,28 +191,27 @@ func matroskaPCMCanonicalSeed(facts matroskaPCMCanonicalFacts) []fieldEntry {
 		value := strconv.FormatFloat(facts.audioSampleRate, 'f', -1, 64)
 		builder.Fill("SamplingRate", value, "Sampling rate", formatSampleRate(facts.audioSampleRate))
 	}
-	if facts.defaultDuration > 0 && facts.audioSampleRate > 0 {
+	if facts.audioChannelsFromTrack && facts.defaultDuration > 0 && facts.audioSampleRate > 0 && facts.audioChannels > 0 && facts.audioBitDepth > 0 && !strings.HasPrefix(facts.codecID, "A_MS/ACM") {
 		samplesPerFrame := int64(math.Round(facts.audioSampleRate * float64(facts.defaultDuration) / 1e9))
 		if samplesPerFrame > 0 {
 			frameRate := facts.audioSampleRate / float64(samplesPerFrame)
 			builder.Structured("SamplesPerFrame", strconv.FormatInt(samplesPerFrame, 10))
 			builder.Structured("FrameRate", fmt.Sprintf("%.3f", frameRate))
-			if math.Abs(frameRate-math.Round(frameRate)) < 0.0005 {
+			declaredRate := 1e9 / float64(facts.defaultDuration)
+			if math.Abs(declaredRate-math.Round(declaredRate)) < 1e-9 {
 				builder.Structured("FrameRate_Num", strconv.FormatInt(int64(math.Round(frameRate)), 10))
 				builder.Structured("FrameRate_Den", "1")
 			}
-			if facts.segmentDuration > 0 {
-				frameCount := int64(math.Round(facts.segmentDuration * frameRate))
-				builder.Structured("FrameCount", strconv.FormatInt(frameCount, 10))
-				builder.Structured("SamplingCount", strconv.FormatInt(frameCount*samplesPerFrame, 10))
-			}
 		}
+	}
+	if facts.segmentDuration > 0 && facts.audioSampleRate > 0 {
+		samplingCount := int64(math.RoundToEven(facts.segmentDuration * facts.audioSampleRate))
+		builder.Structured("SamplingCount", strconv.FormatInt(samplingCount, 10))
 	}
 	if facts.audioBitDepth > 0 {
 		value := strconv.FormatUint(facts.audioBitDepth, 10)
 		builder.Fill("BitDepth", value, "Bit depth", fmt.Sprintf("%d bits", facts.audioBitDepth))
 	}
-	builder.StructuredJSONOnly("Compression_Mode", "Lossless")
 	builder.Structured("BitRate_Mode", "CBR")
 	switch {
 	case strings.Contains(facts.codecID, "/LIT"):

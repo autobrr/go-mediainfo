@@ -58,9 +58,9 @@ func parseMP3(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, *canonic
 	}
 	vbr := xingTag == "Xing"
 
-	samplesPerFrame := 1152.0
-	if header.versionID != 0x03 {
-		samplesPerFrame = 576.0
+	samplesPerFrame := float64(mpegAudioSamplesPerFrame(header.versionID, header.layerID))
+	if samplesPerFrame == 0 {
+		return ContainerInfo{}, nil, nil, nil, false
 	}
 
 	generalDuration := 0.0

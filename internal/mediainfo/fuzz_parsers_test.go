@@ -125,6 +125,20 @@ func FuzzParseMP4Containers(f *testing.F) {
 	})
 }
 
+func FuzzParseMP4EditList(f *testing.F) {
+	entries := []mp4EditEntry{
+		{duration: 1_000, mediaTime: -1, rate: 0x00010000},
+		{duration: 3_000, mediaTime: 1_024, rate: 0x00010000},
+	}
+	f.Add([]byte{})
+	f.Add(buildMP4ElstPayload(0, entries))
+	f.Add(buildMP4ElstPayload(1, entries))
+
+	f.Fuzz(func(_ *testing.T, data []byte) {
+		_ = parseElst(fuzzLimit(data))
+	})
+}
+
 func FuzzParseAVIContainers(f *testing.F) {
 	// Minimal RIFF AVI header.
 	f.Add([]byte{
@@ -146,6 +160,8 @@ func FuzzParseMPEGPSContainers(f *testing.F) {
 	f.Add([]byte{0x00, 0x00, 0x01, 0xBA, 0x44, 0x00, 0x04, 0x00})
 	// Program stream map start code.
 	f.Add([]byte{0x00, 0x00, 0x01, 0xBC, 0x00, 0x00})
+	// Truncated MPEG-1 PES STD buffer header: formerly failed to advance.
+	f.Add([]byte{0x00, 0x00, 0x01, 0xE0, 0x00, 0x02, 0x40, 0x00})
 
 	f.Fuzz(func(t *testing.T, data []byte) {
 		data = fuzzLimit(data)
@@ -163,6 +179,15 @@ func FuzzParseOggContainers(f *testing.F) {
 	seed[27] = 19
 	seed = append(seed, []byte("OpusHead\x01\x01\x00\x00\x80\xBB\x00\x00\x00\x00\x00")...)
 	f.Add(seed)
+
+	manySerials := make([]byte, 0, 27*(maxOggLogicalStreams+1))
+	for serial := uint32(1); serial <= uint32(maxOggLogicalStreams+1); serial++ {
+		header := make([]byte, 27)
+		copy(header, "OggS")
+		binary.LittleEndian.PutUint32(header[14:18], serial)
+		manySerials = append(manySerials, header...)
+	}
+	f.Add(manySerials)
 
 	f.Fuzz(func(_ *testing.T, data []byte) {
 		data = fuzzLimit(data)
@@ -248,7 +273,7 @@ func FuzzScanMatroskaClusters(f *testing.F) {
 		needFirstTimes := map[uint64]struct{}{1: {}}
 		applyScan := mode&0x40 != 0
 		collectBytes := mode&0x80 != 0
-		_, _ = scanMatroskaClusters(bytes.NewReader(blob), 0, int64(len(blob)), 1000000, audio, video, applyScan, collectBytes, parseSpeed, 1, needFirstTimes)
+		_, _ = scanMatroskaClusters(bytes.NewReader(blob), 0, int64(len(blob)), 1000000, audio, video, applyScan, collectBytes, parseSpeed, 1, nil, needFirstTimes)
 	})
 }
 

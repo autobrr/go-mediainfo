@@ -147,6 +147,8 @@ type mpeg2VideoParser struct {
 	maxBitRateMixed     bool
 	firstGOPClosed      *bool
 	anyOpenGOP          bool
+	closedGOPCount      int
+	openGOPCount        int
 	gotSeqExt           bool
 	sawSequence         bool
 	progressiveSeq      bool
@@ -154,6 +156,7 @@ type mpeg2VideoParser struct {
 	progressiveFrames   int
 	repeatFirstField    int
 	topFieldFirst       int
+	bottomFieldFirst    int
 	intraDCCounts       map[int]int
 	pictureStructures   map[int]int
 	sequenceAspectCode  uint64
@@ -563,6 +566,8 @@ func (p *mpeg2VideoParser) parseExtension(data []byte) {
 			}
 			if topFieldFirst == 1 {
 				p.topFieldFirst++
+			} else {
+				p.bottomFieldFirst++
 			}
 		}
 	default:
@@ -627,9 +632,6 @@ func (p *mpeg2VideoParser) parseGOPHeader(data []byte) {
 	closedBool := closed == 1
 	if p.firstGOPClosed == nil {
 		p.firstGOPClosed = &closedBool
-		if closedBool {
-			p.info.GOPFirstClosed = "Closed"
-		}
 	}
 	if p.info.GOPDropFrame == nil {
 		val := dropFrame == 1
@@ -645,6 +647,9 @@ func (p *mpeg2VideoParser) parseGOPHeader(data []byte) {
 	}
 	if !closedBool {
 		p.anyOpenGOP = true
+		p.openGOPCount++
+	} else {
+		p.closedGOPCount++
 	}
 
 	if p.sawGOP && p.currentGOPCount > 0 {
@@ -716,6 +721,10 @@ func (p *mpeg2VideoParser) parsePictureHeader(data []byte) {
 }
 
 func (p *mpeg2VideoParser) finalize() mpeg2VideoInfo {
+	return p.finalizeWithProgressivePictureThreshold(false)
+}
+
+func (p *mpeg2VideoParser) finalizeWithProgressivePictureThreshold(useProgressivePictures bool) mpeg2VideoInfo {
 	// Record the final GOP length if the stream ends without a following GOP header.
 	if p.sawGOP && p.currentGOPCount > 0 && !p.finalGOPRecorded {
 		if p.gopLength == 0 {
@@ -799,6 +808,9 @@ func (p *mpeg2VideoParser) finalize() mpeg2VideoInfo {
 	if p.info.GOPOpenClosed == "" {
 		if p.anyOpenGOP {
 			p.info.GOPOpenClosed = "Open"
+			if p.firstGOPClosed != nil && *p.firstGOPClosed {
+				p.info.GOPFirstClosed = "Closed"
+			}
 		} else if p.firstGOPClosed != nil {
 			p.info.GOPOpenClosed = "Closed"
 		}
@@ -835,7 +847,7 @@ func (p *mpeg2VideoParser) finalize() mpeg2VideoInfo {
 		p.info.Version = "Version 1"
 		p.info.AspectRatio = mapMPEG1DisplayAspectRatio(p.info.Width, p.info.Height, p.sequenceAspectCode)
 	}
-	progressivePictures := p.pictureCount > 0 && p.progressiveFrames*100 >= p.pictureCount*95
+	progressivePictures := useProgressivePictures && p.pictureCount > 0 && p.progressiveFrames*100 >= p.pictureCount*95
 	if (p.sawSequence && !p.gotSeqExt) || p.progressiveSeq || progressivePictures {
 		p.info.ScanType = "Progressive"
 	} else if p.info.ScanType == "" {
@@ -845,7 +857,6 @@ func (p *mpeg2VideoParser) finalize() mpeg2VideoInfo {
 		p.info.PictureStructure = ""
 	}
 	if p.info.ScanOrder == "" && p.topFieldFirst > 0 && p.pictureCount > 0 {
-		// Official mediainfo still surfaces TFF in some Progressive streams (e.g. DVD menu VOBs).
 		p.info.ScanOrder = "TFF"
 	}
 	if (p.progressiveSeq || progressivePictures) && p.repeatFirstField > 0 && p.info.FrameRate > 0 {
@@ -861,7 +872,7 @@ func (p *mpeg2VideoParser) finalize() mpeg2VideoInfo {
 }
 
 func (p *mpeg2VideoParser) finalizeTS() mpeg2VideoInfo {
-	info := p.finalize()
+	info := p.finalizeWithProgressivePictureThreshold(true)
 	if len(p.gopMCounts) > 0 {
 		info.GOPMDominant, _ = modeValue(p.gopMCounts)
 	}

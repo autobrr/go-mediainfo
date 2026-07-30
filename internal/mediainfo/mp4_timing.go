@@ -145,9 +145,6 @@ func parseStts(payload []byte) (uint64, uint64, uint32, uint32, bool, bool) {
 	if total == 0 {
 		return 0, 0, 0, 0, false, false
 	}
-	if entryCount > 1 {
-		variable = true
-	}
 	return total, duration, firstDelta, lastDelta, true, variable
 }
 
@@ -175,16 +172,55 @@ func parseSttsDeltaRange(payload []byte) (uint32, uint32) {
 	return minimum, maximum
 }
 
+func matchMP4LeadingEmptyEdit(track MP4Track) (empty, media mp4EditEntry, ok bool) {
+	if len(track.editList) != 2 || track.trackDurationTicks == 0 {
+		return mp4EditEntry{}, mp4EditEntry{}, false
+	}
+	empty, media = track.editList[0], track.editList[1]
+	if empty.mediaTime != -1 || empty.duration == 0 || empty.rate != 0x00010000 ||
+		media.mediaTime < 0 || media.duration == 0 || media.rate != 0x00010000 ||
+		empty.duration > ^uint64(0)-media.duration ||
+		empty.duration+media.duration != track.trackDurationTicks {
+		return mp4EditEntry{}, mp4EditEntry{}, false
+	}
+	return empty, media, true
+}
+
 // mp4PresentationDurationSeconds returns the track-header presentation span,
 // falling back to edit-list and media-header durations for incomplete files.
 func mp4PresentationDurationSeconds(track MP4Track) float64 {
 	if track.trackDurationTicks > 0 && track.movieTimescale > 0 {
+		if _, media, ok := matchMP4LeadingEmptyEdit(track); ok {
+			return float64(media.duration) / float64(track.movieTimescale)
+		}
 		return float64(track.trackDurationTicks) / float64(track.movieTimescale)
 	}
 	if track.EditDuration > 0 {
 		return track.EditDuration
 	}
 	return track.DurationSeconds
+}
+
+// mp4EditSourceDelaySeconds returns the source-timeline offset for the two
+// edit-list forms handled by MediaInfoLib v26.05: one unit-rate media edit, or
+// one leading empty unit-rate edit followed by media.
+func mp4EditSourceDelaySeconds(track MP4Track) float64 {
+	switch len(track.editList) {
+	case 1:
+		entry := track.editList[0]
+		if entry.duration == 0 || entry.mediaTime <= 0 || entry.rate != 0x00010000 || track.Timescale == 0 {
+			return 0
+		}
+		return -float64(entry.mediaTime) / float64(track.Timescale)
+	case 2:
+		empty, _, ok := matchMP4LeadingEmptyEdit(track)
+		if !ok || track.movieTimescale == 0 {
+			return 0
+		}
+		return float64(empty.duration) / float64(track.movieTimescale)
+	default:
+		return 0
+	}
 }
 
 // mp4SampleDurationSeconds returns the complete decode span represented by

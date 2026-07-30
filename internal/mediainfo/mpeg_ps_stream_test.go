@@ -2,6 +2,8 @@ package mediainfo
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -42,6 +44,117 @@ func TestMPEGPSDVDEdgeWindows(t *testing.T) {
 	_, tail := mpegPSEdgeWindows(4<<10, mpegPSOptions{dvdParsing: true, dvdWideWindow: true})
 	if tail != 0 {
 		t.Fatalf("small wide tail = %d, want 0", tail)
+	}
+}
+
+func TestParseMPEGPSFileEdgesDoesNotRescanShortFile(t *testing.T) {
+	data := []byte{
+		0x00, 0x00, 0x01, 0xBA,
+		0x21, 0x00, 0x01, 0x00, 0x01, 0x80, 0x1B, 0x91,
+		0x00, 0x00, 0x01, 0xE0, 0x00, 0x09,
+		0x21, 0x00, 0x01, 0x00, 0x01,
+		0x00, 0x00, 0x01, 0xB3,
+	}
+	path := filepath.Join(t.TempDir(), "short.mpg")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	single := newPSStreamParser(mpegPSOptions{})
+	if !single.parseReader(bytes.NewReader(data)) {
+		t.Fatal("single parse did not find MPEG-PS data")
+	}
+
+	parser, sampled, parsed := parseMPEGPSFileEdges([]string{path}, int64(len(data)), mpegPSOptions{})
+	if !parsed {
+		t.Fatal("edge parse did not find MPEG-PS data")
+	}
+	if sampled != int64(len(data)) {
+		t.Fatalf("sampled bytes = %d, want %d", sampled, len(data))
+	}
+	if parser.section != 0 {
+		t.Fatalf("parser section = %d, want no tail section", parser.section)
+	}
+	key := psStreamKey(0xE0, psSubstreamNone)
+	if parser.streams[key].bytes != single.streams[key].bytes {
+		t.Fatalf("stream bytes = %d, want single-pass %d", parser.streams[key].bytes, single.streams[key].bytes)
+	}
+}
+
+func TestParseMPEGPSFileEdgesStillSamplesNonOverlappingTail(t *testing.T) {
+	data := []byte{
+		0x00, 0x00, 0x01, 0xBA,
+		0x21, 0x00, 0x01, 0x00, 0x01, 0x80, 0x1B, 0x91,
+		0x00, 0x00, 0x01, 0xE0, 0x00, 0x09,
+		0x21, 0x00, 0x01, 0x00, 0x01,
+		0x00, 0x00, 0x01, 0xB3,
+	}
+	payload := append(append(append([]byte(nil), data...), bytes.Repeat([]byte{0xFF}, len(data))...), data...)
+	path := filepath.Join(t.TempDir(), "long.mpg")
+	if err := os.WriteFile(path, payload, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	single := newPSStreamParser(mpegPSOptions{})
+	if !single.parseReader(bytes.NewReader(data)) {
+		t.Fatal("single parse did not find MPEG-PS data")
+	}
+
+	parser, sampled, parsed := parseMPEGPSFileEdges([]string{path}, int64(len(data)), mpegPSOptions{})
+	if !parsed {
+		t.Fatal("edge parse did not find MPEG-PS data")
+	}
+	if sampled != int64(2*len(data)) {
+		t.Fatalf("sampled bytes = %d, want %d", sampled, 2*len(data))
+	}
+	if parser.section != 1 {
+		t.Fatalf("parser section = %d, want tail section", parser.section)
+	}
+	key := psStreamKey(0xE0, psSubstreamNone)
+	if parser.streams[key].bytes != 2*single.streams[key].bytes {
+		t.Fatalf("stream bytes = %d, want two passes of %d", parser.streams[key].bytes, single.streams[key].bytes)
+	}
+}
+
+func TestParseMPEGPSFileSampleBoundsHeadAndTail(t *testing.T) {
+	packet := []byte{
+		0x00, 0x00, 0x01, 0xBA,
+		0x21, 0x00, 0x01, 0x00, 0x01, 0x80, 0x1B, 0x91,
+		0x00, 0x00, 0x01, 0xE0, 0x00, 0x09,
+		0x21, 0x00, 0x01, 0x00, 0x01,
+		0x00, 0x00, 0x01, 0xB3,
+	}
+	const fileSize = int64(20 << 20)
+	path := filepath.Join(t.TempDir(), "sampled.mpg")
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_TRUNC, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	if err := file.Truncate(fileSize); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.WriteAt(packet, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.WriteAt(packet, fileSize-int64(len(packet))); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.Seek(0, 0); err != nil {
+		t.Fatal(err)
+	}
+
+	parser := newPSStreamParser(mpegPSOptions{parseSpeed: 0.5})
+	parsed, consumed := parseMPEGPSFileSample(parser, file, mpegPSOptions{parseSpeed: 0.5})
+	if !parsed {
+		t.Fatal("bounded file sample did not parse head/tail MPEG-1 PES")
+	}
+	if consumed != 8<<20 {
+		t.Fatalf("consumed=%d; want 8 MiB", consumed)
+	}
+	if !parser.sampled || parser.section != 1 {
+		t.Fatalf("sampled=%v section=%d; want true/1", parser.sampled, parser.section)
+	}
+	if parser.streams[psStreamKey(0xE0, psSubstreamNone)] == nil {
+		t.Fatal("sampled parser did not retain video stream")
 	}
 }
 

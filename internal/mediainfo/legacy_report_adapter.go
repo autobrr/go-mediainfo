@@ -152,6 +152,22 @@ func publicReportMutationDelta(report Report, snapshot legacyReportState) Report
 
 // stripUnchangedSnapshotMaps keeps only compatibility-map values changed by a caller.
 func stripUnchangedSnapshotMaps(stream *Stream, snapshot legacyStreamState) {
+	for key := range snapshot.JSON {
+		if _, exists := stream.JSON[key]; !exists {
+			if stream.legacyJSONDeleted == nil {
+				stream.legacyJSONDeleted = make(map[string]struct{})
+			}
+			stream.legacyJSONDeleted[key] = struct{}{}
+		}
+	}
+	for key := range snapshot.JSONRaw {
+		if _, exists := stream.JSONRaw[key]; !exists {
+			if stream.legacyJSONRawDeleted == nil {
+				stream.legacyJSONRawDeleted = make(map[string]struct{})
+			}
+			stream.legacyJSONRawDeleted[key] = struct{}{}
+		}
+	}
 	for key, value := range stream.JSON {
 		if snapshot.JSON[key] == value {
 			delete(stream.JSON, key)
@@ -197,7 +213,8 @@ func reportToFieldStore(report Report, useCanonicalSeeds bool) *fieldStore {
 	} else {
 		appendLegacyTextFields(store, generalRef, report.General.Fields)
 		if len(legacyMedia.Tracks) > 0 {
-			appendLegacyStructuredFields(store, generalRef, legacyMedia.Tracks[0].Fields, structuredProjectionJSON)
+			fields := filterDeletedLegacyJSONFields(legacyMedia.Tracks[0].Fields, report.General)
+			appendLegacyStructuredFields(store, generalRef, fields, structuredProjectionJSON)
 		}
 	}
 
@@ -245,6 +262,7 @@ func reportToFieldStore(report Report, useCanonicalSeeds bool) *fieldStore {
 		if stored.DirectCanonical {
 			continue
 		}
+		fields = filterDeletedLegacyJSONFields(fields, report.Streams[originalIndex])
 		appendLegacyStructuredFields(store, refs[originalIndex], fields, structuredProjectionJSON)
 	}
 	if needsLegacyInput {
@@ -507,6 +525,26 @@ func appendLegacyStructuredFields(store *fieldStore, ref streamRef, fields []jso
 	}
 }
 
+// filterDeletedLegacyJSONFields removes compatibility-map keys that callers
+// explicitly deleted without suppressing their independent text projection.
+func filterDeletedLegacyJSONFields(fields []jsonKV, stream Stream) []jsonKV {
+	if len(stream.legacyJSONDeleted) == 0 && len(stream.legacyJSONRawDeleted) == 0 {
+		return fields
+	}
+	filtered := make([]jsonKV, 0, len(fields))
+	for _, field := range fields {
+		deleted := stream.legacyJSONDeleted
+		if field.Raw {
+			deleted = stream.legacyJSONRawDeleted
+		}
+		if _, exists := deleted[field.Key]; exists {
+			continue
+		}
+		filtered = append(filtered, field)
+	}
+	return filtered
+}
+
 // jsonKVValue returns the first field value with key.
 func jsonKVValue(fields []jsonKV, key string) string {
 	for _, field := range fields {
@@ -589,6 +627,8 @@ func cloneLegacyStream(stream Stream) Stream {
 	stream.Fields = append([]Field(nil), stream.Fields...)
 	stream.JSON = maps.Clone(stream.JSON)
 	stream.JSONRaw = maps.Clone(stream.JSONRaw)
+	stream.legacyJSONDeleted = maps.Clone(stream.legacyJSONDeleted)
+	stream.legacyJSONRawDeleted = maps.Clone(stream.legacyJSONRawDeleted)
 	stream.mkvHeaderStripBytes = append([]byte(nil), stream.mkvHeaderStripBytes...)
 	return stream
 }

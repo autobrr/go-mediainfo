@@ -64,11 +64,18 @@ func TestParseHEVCUserDataUnregistered(t *testing.T) {
 }
 
 func TestParseHEVCUserDataUnregisteredATEME(t *testing.T) {
-	payload := append(make([]byte, 16), []byte("ATEME Titan KFE 3.7.3 (4.7.3.1001)\x00")...)
+	uuid := []byte{0x42, 0x7F, 0xCC, 0x9B, 0xB8, 0x92, 0x48, 0x21, 0, 0, 0, 0, 0, 0, 0, 0}
+	payload := append(uuid, []byte("ATEME Titan KFE 3.7.3 (4.7.3.1001)\x00")...)
 	var info hevcHDRInfo
 	parseHEVCUserDataUnregistered(payload, &info)
 	if info.encoderLibrary != "ATEME Titan KFE 3.7.3 (4.7.3.1001)" || info.encoderName != "ATEME Titan KFE" || info.encoderVersion != "3.7.3 (4.7.3.1001)" {
 		t.Fatalf("unexpected ATEME metadata: %+v", info)
+	}
+	wrongUUID := append(make([]byte, 16), payload[16:]...)
+	var ignored hevcHDRInfo
+	parseHEVCUserDataUnregistered(wrongUUID, &ignored)
+	if ignored.encoderLibrary != "" {
+		t.Fatalf("ATEME text with unrelated UUID was accepted: %+v", ignored)
 	}
 }
 
@@ -137,7 +144,7 @@ func TestMapStreamFieldsToJSONX265EncodedLibrary(t *testing.T) {
 
 func TestApplyMatroskaVideoProbesX265OutranksGenericEncoder(t *testing.T) {
 	var hdr hevcHDRInfo
-	atemePayload := append(make([]byte, 16), []byte("ATEME Titan KFE 3.7.3 (4.7.3.1001)\x00")...)
+	atemePayload := append([]byte{0x42, 0x7F, 0xCC, 0x9B, 0xB8, 0x92, 0x48, 0x21, 0, 0, 0, 0, 0, 0, 0, 0}, []byte("ATEME Titan KFE 3.7.3 (4.7.3.1001)\x00")...)
 	parseHEVCUserDataUnregistered(atemePayload, &hdr)
 	x265Payload := make([]byte, 0, 16+len(x265RealInfo))
 	x265Payload = append(x265Payload, 0x2C, 0xA2, 0xDE, 0x09, 0xB5, 0x17, 0x47, 0xDB, 0xBB, 0x55, 0xA4, 0xFE, 0x7F, 0xC2, 0xFC, 0x4E)

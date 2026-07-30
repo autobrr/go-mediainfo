@@ -39,3 +39,20 @@ func TestMP3ModeExtensionUsesSecondFrameWhenAvailable(t *testing.T) {
 		t.Fatalf("Format_Settings_ModeExtension=%q want %q", got, "MS Stereo")
 	}
 }
+
+func TestMPEGAudioSamplesPerFrameUsesVersionAndLayer(t *testing.T) {
+	for _, test := range []struct {
+		version, layer byte
+		want           int
+	}{
+		{0x03, 0x03, 384},  // MPEG-1 Layer I
+		{0x02, 0x02, 1152}, // MPEG-2 Layer II
+		{0x03, 0x01, 1152}, // MPEG-1 Layer III
+		{0x02, 0x01, 576},  // MPEG-2 Layer III
+		{0x00, 0x01, 576},  // MPEG-2.5 Layer III
+	} {
+		if got := mpegAudioSamplesPerFrame(test.version, test.layer); got != test.want {
+			t.Errorf("mpegAudioSamplesPerFrame(%d, %d) = %d, want %d", test.version, test.layer, got, test.want)
+		}
+	}
+}

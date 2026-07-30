@@ -20,13 +20,16 @@ type flacTagKV struct {
 // flacStreamInfo contains the lossless stream properties encoded by a FLAC
 // STREAMINFO metadata block.
 type flacStreamInfo struct {
-	minBlockSize  uint16
-	maxBlockSize  uint16
-	sampleRate    uint32
-	channels      uint8
-	bitsPerSample uint8
-	totalSamples  uint64
-	md5           string
+	minBlockSize   uint16
+	maxBlockSize   uint16
+	sampleRate     uint32
+	channels       uint8
+	bitsPerSample  uint8
+	detectedBits   uint8
+	channelMask    uint32
+	hasChannelMask bool
+	totalSamples   uint64
+	md5            string
 }
 
 // parseFLAC parses FLAC metadata into canonical stream and General facts.
@@ -50,6 +53,9 @@ func parseFLAC(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, *canoni
 	var bitsPerSample uint8
 	var totalSamples uint64
 	var md5Hex string
+	var detectedBits uint8
+	var channelMask uint32
+	var hasChannelMask bool
 	var audioStart int64
 	var encoder string
 	tags := map[string]string{}
@@ -98,6 +104,12 @@ func parseFLAC(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, *canoni
 					for _, kv := range pairs {
 						if kv.Key == "" || kv.Val == "" {
 							continue
+						}
+						if kv.Key == "VALID_BITS" {
+							detectedBits = parseFLACDetectedBits(kv.Val)
+						}
+						if kv.Key == "WAVEFORMATEXTENSIBLE_CHANNEL_MASK" {
+							channelMask, hasChannelMask = parseFLACChannelMask(kv.Val)
 						}
 						if tags[kv.Key] == "" {
 							tags[kv.Key] = kv.Val
@@ -197,70 +209,128 @@ func parseFLAC(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, *canoni
 		}
 	}
 
-	audioStream := canonicalFLACAudioStream(channels, sampleRate, bitsPerSample, totalSamples, duration, bitrate, rawBitrate, streamSize, encoder, encodedLibraryName, encodedLibraryVersion, encodedLibraryDate, md5Hex)
+	audioStream := canonicalFLACAudioStream(flacAudioStreamParams{
+		channels:              channels,
+		sampleRate:            sampleRate,
+		bitsPerSample:         bitsPerSample,
+		detectedBits:          detectedBits,
+		totalSamples:          totalSamples,
+		duration:              duration,
+		displayBitrate:        bitrate,
+		rawBitrate:            rawBitrate,
+		streamSize:            streamSize,
+		encoder:               encoder,
+		encodedLibraryName:    encodedLibraryName,
+		encodedLibraryVersion: encodedLibraryVersion,
+		encodedLibraryDate:    encodedLibraryDate,
+		md5Hex:                md5Hex,
+		channelMask:           channelMask,
+		hasChannelMask:        hasChannelMask,
+		omitDerivedLayout: flacDerivedLayoutIsOmitted(flacStreamInfo{
+			hasChannelMask: hasChannelMask,
+			channelMask:    channelMask,
+		}),
+	})
 	return info, []Stream{audioStream}, generalFacts, generalExtra, true
+}
+
+type flacAudioStreamParams struct {
+	channels              uint8
+	sampleRate            uint32
+	bitsPerSample         uint8
+	detectedBits          uint8
+	totalSamples          uint64
+	duration              float64
+	displayBitrate        float64
+	rawBitrate            string
+	streamSize            int64
+	encoder               string
+	encodedLibraryName    string
+	encodedLibraryVersion string
+	encodedLibraryDate    string
+	md5Hex                string
+	channelMask           uint32
+	hasChannelMask        bool
+	omitDerivedLayout     bool
 }
 
 // canonicalFLACAudioStream records FLAC audio facts in canonical units before
 // publishing the public compatibility snapshot.
-func canonicalFLACAudioStream(channels uint8, sampleRate uint32, bitsPerSample uint8, totalSamples uint64, duration, displayBitrate float64, rawBitrate string, streamSize int64, encoder, encodedLibraryName, encodedLibraryVersion, encodedLibraryDate, md5Hex string) Stream {
+func canonicalFLACAudioStream(params flacAudioStreamParams) Stream {
 	store := &fieldStore{}
 	ref := store.Prepare(StreamAudio)
 	store.streams[ref].SkipStreamOrder = true
 	store.Fill(ref, "Format", "FLAC", fillReplace)
-	if duration > 0 {
-		store.Fill(ref, "Duration", strconv.FormatInt(int64(math.Round(duration*1000)), 10), fillReplace)
+	if params.duration > 0 {
+		store.Fill(ref, "Duration", strconv.FormatInt(int64(math.Round(params.duration*1000)), 10), fillReplace)
 	}
 	store.Fill(ref, "BitRate_Mode", "Variable", fillReplace)
-	if rawBitrate != "" {
-		store.Fill(ref, "BitRate", rawBitrate, fillReplace)
-		if displayBitrate > 0 {
-			store.Fill(ref, "BitRate/String", formatBitrate(displayBitrate), fillReplace)
+	if params.rawBitrate != "" {
+		store.Fill(ref, "BitRate", params.rawBitrate, fillReplace)
+		if params.displayBitrate > 0 {
+			store.Fill(ref, "BitRate/String", formatBitrate(params.displayBitrate), fillReplace)
 		}
-	} else if displayBitrate > 0 {
-		store.Fill(ref, "BitRate", strconv.FormatInt(int64(math.Round(displayBitrate)), 10), fillReplace)
+	} else if params.displayBitrate > 0 {
+		store.Fill(ref, "BitRate", strconv.FormatInt(int64(math.Round(params.displayBitrate)), 10), fillReplace)
 	}
-	if channels > 0 {
-		channelText := strconv.Itoa(int(channels))
+	if params.channels > 0 {
+		channelText := strconv.Itoa(int(params.channels))
 		store.Fill(ref, "Channels", channelText, fillReplace)
-		if positions := channelPositionsFromCount(channelText); positions != "" {
-			fillGeneratedStructured(store, ref, "ChannelPositions", positions)
-		}
-		if layout := channelLayout(uint64(channels)); layout != "" {
-			store.Fill(ref, "ChannelLayout", layout, fillReplace)
+		if !params.omitDerivedLayout {
+			positions := ""
+			layout := ""
+			if params.hasChannelMask {
+				positions = flacChannelPositionsFromMask(params.channelMask)
+				layout = flacChannelLayoutFromMask(params.channelMask)
+			}
+			if positions == "" {
+				positions = channelPositionsFromCount(channelText)
+			}
+			if positions != "" {
+				fillGeneratedStructured(store, ref, "ChannelPositions", positions)
+			}
+			if layout == "" {
+				layout = channelLayout(uint64(params.channels))
+			}
+			if layout != "" {
+				store.Fill(ref, "ChannelLayout", layout, fillReplace)
+			}
 		}
 	}
-	if sampleRate > 0 {
-		store.Fill(ref, "SamplingRate", strconv.FormatUint(uint64(sampleRate), 10), fillReplace)
+	if params.sampleRate > 0 {
+		store.Fill(ref, "SamplingRate", strconv.FormatUint(uint64(params.sampleRate), 10), fillReplace)
 	}
-	if bitsPerSample > 0 {
-		store.Fill(ref, "BitDepth", strconv.Itoa(int(bitsPerSample)), fillReplace)
+	if params.bitsPerSample > 0 {
+		store.Fill(ref, "BitDepth", strconv.Itoa(int(params.bitsPerSample)), fillReplace)
+	}
+	if params.detectedBits > 0 {
+		fillGeneratedStructured(store, ref, "BitDepth_Detected", strconv.Itoa(int(params.detectedBits)))
 	}
 
 	overrides := []jsonKV{{Key: "Compression_Mode", Val: "Lossless"}}
-	if duration > 0 {
-		overrides = append(overrides, jsonKV{Key: "Duration", Val: formatJSONSeconds(duration)})
+	if params.duration > 0 {
+		overrides = append(overrides, jsonKV{Key: "Duration", Val: formatJSONSeconds(params.duration)})
 	}
-	if totalSamples > 0 {
-		overrides = append(overrides, jsonKV{Key: "SamplingCount", Val: strconv.FormatUint(totalSamples, 10)})
+	if params.totalSamples > 0 {
+		overrides = append(overrides, jsonKV{Key: "SamplingCount", Val: strconv.FormatUint(params.totalSamples, 10)})
 	}
-	if rawBitrate != "" {
-		overrides = append(overrides, jsonKV{Key: "BitRate", Val: rawBitrate})
+	if params.rawBitrate != "" {
+		overrides = append(overrides, jsonKV{Key: "BitRate", Val: params.rawBitrate})
 	}
-	if streamSize > 0 {
-		overrides = append(overrides, jsonKV{Key: "StreamSize", Val: strconv.FormatInt(streamSize, 10)})
+	if params.streamSize > 0 {
+		overrides = append(overrides, jsonKV{Key: "StreamSize", Val: strconv.FormatInt(params.streamSize, 10)})
 	}
-	if encoder != "" {
-		overrides = append(overrides, jsonKV{Key: "Encoded_Library", Val: encoder})
+	if params.encoder != "" {
+		overrides = append(overrides, jsonKV{Key: "Encoded_Library", Val: params.encoder})
 	}
-	if encodedLibraryName != "" {
-		overrides = append(overrides, jsonKV{Key: "Encoded_Library_Name", Val: encodedLibraryName})
+	if params.encodedLibraryName != "" {
+		overrides = append(overrides, jsonKV{Key: "Encoded_Library_Name", Val: params.encodedLibraryName})
 	}
-	if encodedLibraryVersion != "" {
-		overrides = append(overrides, jsonKV{Key: "Encoded_Library_Version", Val: encodedLibraryVersion})
+	if params.encodedLibraryVersion != "" {
+		overrides = append(overrides, jsonKV{Key: "Encoded_Library_Version", Val: params.encodedLibraryVersion})
 	}
-	if encodedLibraryDate != "" {
-		overrides = append(overrides, jsonKV{Key: "Encoded_Library_Date", Val: encodedLibraryDate})
+	if params.encodedLibraryDate != "" {
+		overrides = append(overrides, jsonKV{Key: "Encoded_Library_Date", Val: params.encodedLibraryDate})
 	}
 	sort.Slice(overrides, func(left, right int) bool { return overrides[left].Key < overrides[right].Key })
 	for _, override := range overrides {
@@ -269,8 +339,8 @@ func canonicalFLACAudioStream(channels uint8, sampleRate uint32, bitsPerSample u
 			fillGeneratedStructured(store, ref, name, override.Val)
 		}
 	}
-	if md5Hex != "" {
-		node := structuredObjectFromKVs([]jsonKV{{Key: "MD5_Unencoded", Val: md5Hex}})
+	if params.md5Hex != "" {
+		node := structuredObjectFromKVs([]jsonKV{{Key: "MD5_Unencoded", Val: params.md5Hex}})
 		raw := structuredNodeText(node)
 		_, known := structuredFieldSpec(StreamAudio, "extra")
 		store.appendEntry(store.stream(ref), fieldEntry{
@@ -447,9 +517,17 @@ func parseMatroskaFLACPrivate(data []byte) (flacStreamInfo, string, bool) {
 			info = parsed
 			hasStreamInfo = true
 		case 4:
-			parsedVendor, _ := parseFLACVorbisComment(block)
+			parsedVendor, pairs := parseFLACVorbisComment(block)
 			if parsedVendor != "" {
 				vendor = parsedVendor
+			}
+			for _, pair := range pairs {
+				switch pair.Key {
+				case "VALID_BITS":
+					info.detectedBits = parseFLACDetectedBits(pair.Val)
+				case "WAVEFORMATEXTENSIBLE_CHANNEL_MASK":
+					info.channelMask, info.hasChannelMask = parseFLACChannelMask(pair.Val)
+				}
 			}
 		}
 		pos += blockSize
@@ -458,6 +536,26 @@ func parseMatroskaFLACPrivate(data []byte) (flacStreamInfo, string, bool) {
 		}
 	}
 	return flacStreamInfo{}, "", false
+}
+
+// parseFLACDetectedBits decodes the VALID_BITS Vorbis comment used by FLAC
+// encoders to report the effective source precision stored in the stream.
+func parseFLACDetectedBits(value string) uint8 {
+	bits, err := strconv.ParseUint(strings.TrimSpace(value), 10, 8)
+	if err != nil || bits == 0 {
+		return 0
+	}
+	return uint8(bits)
+}
+
+func parseFLACChannelMask(value string) (uint32, bool) {
+	value = strings.TrimSpace(value)
+	value = strings.TrimPrefix(strings.TrimPrefix(value, "0x"), "0X")
+	mask, err := strconv.ParseUint(value, 16, 32)
+	if err != nil {
+		return 0, false
+	}
+	return uint32(mask), true
 }
 
 func parseFLACVorbisComment(buf []byte) (string, []flacTagKV) {
@@ -527,31 +625,63 @@ func splitFLACEncodedLibrary(value string) (name, version, date string) {
 	return "", "", ""
 }
 
-// flacDerivedLayoutIsOmitted reports whether MediaInfo omits synthesized FLAC
-// channel positions for the supplied libFLAC vendor. Unknown versions,
-// libFLAC 1.3, and libFLAC 1.5 or later use the omission behavior observed in
-// MediaInfo; 1.2 and 1.4 retain their derived layouts.
-func flacDerivedLayoutIsOmitted(vendor string) bool {
-	if strings.HasPrefix(vendor, "Lavf") {
-		return false
+// flacDerivedLayoutIsOmitted reports an explicit zero speaker mask. MediaInfo
+// preserves that Vorbis-comment signal instead of synthesizing a layout from
+// channel count.
+func flacDerivedLayoutIsOmitted(info flacStreamInfo) bool {
+	return info.hasChannelMask && info.channelMask == 0
+}
+
+type flacSpeaker struct {
+	mask  uint32
+	token string
+}
+
+var flacSpeakers = [...]flacSpeaker{
+	{0x00001, "L"}, {0x00002, "R"}, {0x00004, "C"}, {0x00008, "LFE"},
+	{0x00010, "Lb"}, {0x00020, "Rb"}, {0x00040, "Lc"}, {0x00080, "Rc"},
+	{0x00100, "Cb"}, {0x00200, "Ls"}, {0x00400, "Rs"}, {0x00800, "Tc"},
+	{0x01000, "Tfl"}, {0x02000, "Tfc"}, {0x04000, "Tfr"},
+	{0x08000, "Tbl"}, {0x10000, "Tbc"}, {0x20000, "Tbr"},
+}
+
+func flacChannelLayoutFromMask(mask uint32) string {
+	layout := make([]string, 0, len(flacSpeakers))
+	for _, speaker := range flacSpeakers {
+		if mask&speaker.mask != 0 {
+			layout = append(layout, speaker.token)
+		}
 	}
-	if strings.TrimSpace(vendor) == "" {
-		return true
+	return strings.Join(layout, " ")
+}
+
+func flacChannelPositionsFromMask(mask uint32) string {
+	groups := make([]string, 0, 6)
+	appendGroup := func(name string, speakers ...flacSpeaker) {
+		values := make([]string, 0, len(speakers))
+		for _, speaker := range speakers {
+			if mask&speaker.mask != 0 {
+				values = append(values, speaker.token)
+			}
+		}
+		if len(values) > 0 {
+			groups = append(groups, name+": "+strings.Join(values, " "))
+		}
 	}
-	name, version, _ := splitFLACEncodedLibrary(vendor)
-	if name == "" {
-		return false
+	appendGroup("Front",
+		flacSpeaker{0x00001, "L"}, flacSpeaker{0x00004, "C"}, flacSpeaker{0x00002, "R"},
+		flacSpeaker{0x00040, "Lc"}, flacSpeaker{0x00080, "Rc"},
+	)
+	appendGroup("Side", flacSpeaker{0x00200, "L"}, flacSpeaker{0x00400, "R"})
+	appendGroup("Back", flacSpeaker{0x00010, "L"}, flacSpeaker{0x00100, "C"}, flacSpeaker{0x00020, "R"})
+	appendGroup("Top",
+		flacSpeaker{0x01000, "L"}, flacSpeaker{0x02000, "C"}, flacSpeaker{0x04000, "R"},
+		flacSpeaker{0x00800, "Cs"}, flacSpeaker{0x08000, "Lb"}, flacSpeaker{0x10000, "Cb"}, flacSpeaker{0x20000, "Rb"},
+	)
+	if mask&0x00008 != 0 {
+		groups = append(groups, "LFE")
 	}
-	parts := strings.Split(version, ".")
-	if len(parts) < 2 {
-		return true
-	}
-	major, majorErr := strconv.Atoi(parts[0])
-	minor, minorErr := strconv.Atoi(parts[1])
-	if majorErr != nil || minorErr != nil {
-		return true
-	}
-	return major > 1 || major == 1 && (minor == 3 || version == "1.4.2" || minor >= 5)
+	return strings.Join(groups, ", ")
 }
 
 // flacTagsToGeneralFacts maps Vorbis comments to canonical General scalars and
@@ -560,6 +690,12 @@ func flacTagsToGeneralFacts(tags map[string]string, encoder string) (*canonicalS
 	general := &canonicalStructuredFacts{}
 
 	mapped := map[string]bool{}
+	if tags["VALID_BITS"] != "" {
+		mapped["VALID_BITS"] = true
+	}
+	if tags["WAVEFORMATEXTENSIBLE_CHANNEL_MASK"] != "" {
+		mapped["WAVEFORMATEXTENSIBLE_CHANNEL_MASK"] = true
+	}
 	set := func(key, val string) {
 		if val == "" {
 			return

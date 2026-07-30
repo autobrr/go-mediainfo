@@ -24,11 +24,11 @@ func parseFtyp(payload []byte) []Field {
 
 func mapMP4Profile(major string) string {
 	switch major {
-	case "isom", "iso3", "iso4", "iso5", "iso6", "iso7", "iso8", "iso9":
+	case "isom", "iso2", "iso3", "iso4", "iso5", "iso6", "iso7", "iso8", "iso9":
 		return "Base Media"
 	case "mp41":
 		return "Base Media / Version 1"
-	case "iso2", "mp42":
+	case "mp42":
 		return "Base Media / Version 2"
 	case "qt  ":
 		return "QuickTime"

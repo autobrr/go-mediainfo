@@ -48,7 +48,7 @@ func exposeWritingApplicationComponents(name string, version string) bool {
 	}
 	// MediaInfoLib leaves a small set of historical mkvmerge releases unsplit.
 	switch versionNumber {
-	case "5.3.0", "6.5.0", "7.1.0", "7.2.0", "7.7.0", "7.8.0", "8.2.0", "8.3.0",
+	case "5.3.0", "6.1.0", "6.5.0", "7.1.0", "7.2.0", "7.7.0", "7.8.0", "8.2.0", "8.3.0",
 		"11.0.0", "15.0.0", "19.0.0", "35.0.0", "37.0.0", "45.0.0", "63.0.0", "92.0", "97.0":
 		return false
 	}

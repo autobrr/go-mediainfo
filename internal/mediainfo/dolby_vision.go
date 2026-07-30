@@ -88,6 +88,36 @@ func parseDolbyVisionConfigFromPrivateRaw(codecPrivate []byte) (dolbyVisionConfi
 	return parseDolbyVisionConfig(payload)
 }
 
+// parseDolbyVisionConfigsFromPrivate returns every valid dvcC/dvvC signal in
+// one container region. Matroska may carry equivalent configuration in both
+// CodecPrivate and block-addition metadata.
+func parseDolbyVisionConfigsFromPrivate(data []byte) []dolbyVisionConfig {
+	configs := []dolbyVisionConfig{}
+	for index := 0; index+4 <= len(data); index++ {
+		tag := string(data[index : index+4])
+		if tag != "dvcC" && tag != "dvvC" {
+			continue
+		}
+		var payload []byte
+		if index >= 4 {
+			size := int(binary.BigEndian.Uint32(data[index-4 : index]))
+			if size >= 8 && index-4+size <= len(data) {
+				payload = data[index+4 : index-4+size]
+			}
+		}
+		if len(payload) == 0 {
+			payload = findDolbyVisionExtraData(data, index+4)
+		}
+		if len(payload) == 0 && index == 0 {
+			payload = data[4:]
+		}
+		if config, ok := parseDolbyVisionConfig(payload); ok {
+			configs = append(configs, config)
+		}
+	}
+	return configs
+}
+
 func findDolbyVisionConfig(data []byte) []byte {
 	if len(data) < 4 {
 		return nil
@@ -172,6 +202,14 @@ func parseDolbyVisionConfig(payload []byte) (dolbyVisionConfig, bool) {
 }
 
 func formatDolbyVisionHDR(cfg dolbyVisionConfig) string {
+	return formatDolbyVisionHDRDetails(cfg, true)
+}
+
+func formatDolbyVisionHDRWithoutCompatibility(cfg dolbyVisionConfig) string {
+	return formatDolbyVisionHDRDetails(cfg, false)
+}
+
+func formatDolbyVisionHDRDetails(cfg dolbyVisionConfig, includeCompatibility bool) string {
 	parts := []string{"Dolby Vision"}
 	if cfg.versionMajor > 0 {
 		parts = append(parts, fmt.Sprintf("Version %d.%d", cfg.versionMajor, cfg.versionMinor))
@@ -180,7 +218,7 @@ func formatDolbyVisionHDR(cfg dolbyVisionConfig) string {
 	profileDisplay := ""
 	if profilePrefix != "" {
 		profileDisplay = fmt.Sprintf("Profile %d", cfg.profile)
-		if compatIndex := dolbyVisionCompatibilityIndex(cfg.compatibilityID); compatIndex >= 0 {
+		if compatIndex := dolbyVisionCompatibilityIndex(cfg.compatibilityID); includeCompatibility && compatIndex >= 0 {
 			profileDisplay = fmt.Sprintf("Profile %d.%s", cfg.profile, strings.TrimPrefix(strconv.FormatInt(int64(compatIndex), 16), "0"))
 		}
 	}
@@ -198,7 +236,7 @@ func formatDolbyVisionHDR(cfg dolbyVisionConfig) string {
 		parts = append(parts, compression)
 	}
 	result := strings.Join(parts, ", ")
-	if compat := dolbyVisionCompatibilityName(cfg.compatibilityID); compat != "" {
+	if compat := dolbyVisionCompatibilityName(cfg.compatibilityID); includeCompatibility && compat != "" {
 		result += ", " + compat + " compatible"
 	}
 	return result

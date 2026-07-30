@@ -9,7 +9,13 @@ import (
 	"strings"
 )
 
-const maxOggHeaderPacket = 1 << 20
+const (
+	maxOggHeaderPacket = 1 << 20
+	// Ogg serial numbers are untrusted 32-bit identifiers. A media report cannot
+	// usefully expose an arbitrary number of logical streams, so cap retained
+	// parser state independently of the packet-size limit.
+	maxOggLogicalStreams = 256
+)
 
 type oggLogicalStream struct {
 	serial         uint32
@@ -71,6 +77,14 @@ func parseOgg(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, []Field,
 		serial := binary.LittleEndian.Uint32(header[14:18])
 		stream := logical[serial]
 		if stream == nil {
+			if len(logical) >= maxOggLogicalStreams {
+				if _, err := io.CopyN(io.Discard, file, int64(bodySize)); err != nil {
+					return ContainerInfo{}, nil, nil, nil, nil, false
+				}
+				pageOverhead += int64(len(header) + len(segments) + bodySize)
+				pageIndex++
+				continue
+			}
 			stream = &oggLogicalStream{serial: serial, tags: make(map[string]string)}
 			logical[serial] = stream
 			order = append(order, serial)

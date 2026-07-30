@@ -102,3 +102,39 @@ func TestChannelPositionsFromCountMapsThreeChannelFront(t *testing.T) {
 		t.Fatalf("channelPositionsFromCount(3) = %q; want Front: L C R", got)
 	}
 }
+
+func TestApplyJSONExtrasRawPrecedenceDoesNotDuplicateKeys(t *testing.T) {
+	fields := []jsonKV{
+		{Key: "Canonical", Val: "unchanged"},
+		{Key: "Shared", Val: "canonical"},
+	}
+	got := applyJSONExtras(
+		fields,
+		map[string]string{"Added": "json", "Shared": "json"},
+		map[string]string{"Added": `{"source":"raw"}`, "Shared": `"raw"`},
+	)
+
+	if len(got) != 3 {
+		t.Fatalf("field count = %d, want 3: %#v", len(got), got)
+	}
+	for _, key := range []string{"Added", "Shared"} {
+		count := 0
+		for _, field := range got {
+			if field.Key == key {
+				count++
+				if !field.Raw {
+					t.Errorf("%s Raw = false, want JSONRaw precedence", key)
+				}
+			}
+		}
+		if count != 1 {
+			t.Errorf("%s count = %d, want 1", key, count)
+		}
+	}
+	if value := jsonFieldValue(got, "Added"); value != `{"source":"raw"}` {
+		t.Errorf("Added = %q, want raw value", value)
+	}
+	if value := jsonFieldValue(got, "Shared"); value != `"raw"` {
+		t.Errorf("Shared = %q, want raw value", value)
+	}
+}
