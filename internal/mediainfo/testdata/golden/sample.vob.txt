@@ -49,5 +49,5 @@ Frame rate                               : 41.667 FPS (1152 SPF)
 Compression mode                         : Lossy
 Stream size                              : 93.9 KiB (8%)
 
-ReportBy : go-mediainfo - dev
+ReportBy                                 : go-mediainfo - dev
 

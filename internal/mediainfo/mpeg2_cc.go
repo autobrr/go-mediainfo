@@ -2,6 +2,8 @@ package mediainfo
 
 import "strings"
 
+// consumeMPEG2Captions incrementally scans MPEG-2 user data for DVD or GA94
+// caption headers and updates the stream's CC timing observations.
 func consumeMPEG2Captions(entry *psStream, payload []byte, pts uint64, hasPTS bool) {
 	if entry == nil || len(payload) == 0 {
 		return
@@ -17,7 +19,11 @@ func consumeMPEG2Captions(entry *psStream, payload []byte, pts uint64, hasPTS bo
 			if end < 0 {
 				end = len(buf)
 			}
-			if hasCC, ccType, hasCommand, hasDisplay := parseMPEG2UserData(buf[i+4 : end]); hasCC {
+			userData := buf[i+4 : end]
+			if hasMPEG2CaptionHeader(userData) {
+				entry.ccHeaderFound = true
+			}
+			if hasCC, ccType, hasCommand, hasDisplay := parseMPEG2UserData(userData); hasCC {
 				framesBefore := entry.videoFrameCount
 				entry.ccFound = true
 				track := &entry.ccOdd
@@ -56,6 +62,20 @@ func consumeMPEG2Captions(entry *psStream, payload []byte, pts uint64, hasPTS bo
 	} else {
 		entry.videoCCCarry = append(entry.videoCCCarry[:0], buf...)
 	}
+}
+
+// hasMPEG2CaptionHeader reports whether user data contains a DVD CC or GA94
+// caption-data header, even when no renderable caption pair is present.
+func hasMPEG2CaptionHeader(data []byte) bool {
+	for i := 0; i+2 < len(data); i++ {
+		if data[i] == 'C' && data[i+1] == 'C' && data[i+2] == 0x01 {
+			return true
+		}
+		if i+4 < len(data) && data[i] == 'G' && data[i+1] == 'A' && data[i+2] == '9' && data[i+3] == '4' && data[i+4] == 0x03 {
+			return true
+		}
+	}
+	return false
 }
 
 func parseGA94UserData(data []byte) (bool, int, bool, bool) {

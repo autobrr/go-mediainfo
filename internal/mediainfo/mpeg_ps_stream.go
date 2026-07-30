@@ -43,7 +43,7 @@ func newPSStreamParser(opts mpegPSOptions) *psStreamParser {
 		streams:      map[uint16]*psStream{},
 		streamOrder:  []uint16{},
 		videoParsers: map[uint16]*mpeg2VideoParser{},
-		quickAC3:     parseSpeed < 1 && !opts.dvdExtras,
+		quickAC3:     parseSpeed < 1 && !opts.dvdExtras && !opts.dvdParsing,
 		quickAC3Max:  128,
 	}
 }
@@ -453,11 +453,16 @@ parseLoop:
 				payloadOffset = 1
 				if subID >= 0x80 && subID <= 0x87 && len(payload) > 4 {
 					payloadOffset = 4
+				} else if subID >= 0xA0 && subID <= 0xAF && len(payload) > 7 {
+					payloadOffset = 7
 				}
 			}
 			kind, format := mapPSStream(streamID, subID)
 			if kind != "" {
 				entry := p.ensureStream(streamID, subID, kind, format)
+				if format == "PCM" {
+					consumeDVDLPCMHeader(entry, payload)
+				}
 				if entry.kind != StreamMenu && entry.firstPacketOrder < 0 {
 					entry.firstPacketOrder = p.packetOrder
 					p.packetOrder++
@@ -471,8 +476,8 @@ parseLoop:
 				}
 			}
 			pos = payloadEnd
-			if pos <= payloadStart {
-				pos = payloadStart + 1
+			if pos <= payloadStart && pos < len(buf) {
+				pos++
 			}
 			compact()
 			continue
@@ -491,6 +496,8 @@ parseLoop:
 			payloadOffset = 1
 			if subID >= 0x80 && subID <= 0x87 {
 				payloadOffset = 4
+			} else if subID >= 0xA0 && subID <= 0xAF {
+				payloadOffset = 7
 			}
 		}
 		kind, format := mapPSStream(streamID, subID)
@@ -499,6 +506,9 @@ parseLoop:
 			continue
 		}
 		entry := p.ensureStream(streamID, subID, kind, format)
+		if format == "PCM" && payloadStart+7 <= len(buf) {
+			consumeDVDLPCMHeader(entry, buf[payloadStart:])
+		}
 		if entry.kind != StreamMenu && entry.firstPacketOrder < 0 {
 			entry.firstPacketOrder = p.packetOrder
 			p.packetOrder++
@@ -586,6 +596,21 @@ func (p *psStreamParser) consumePayload(entry *psStream, key uint16, flags byte,
 	}
 }
 
+// consumeDVDLPCMHeader decodes bit depth, sampling rate, and channel count from
+// the first complete DVD LPCM private-stream header.
+func consumeDVDLPCMHeader(entry *psStream, payload []byte) {
+	if entry == nil || len(payload) < 7 || entry.hasAudioInfo {
+		return
+	}
+	config := payload[5]
+	bitDepths := [...]int{16, 20, 24, 0}
+	rates := [...]float64{48000, 96000, 0, 0}
+	entry.pcmBitDepth = bitDepths[(config>>6)&0x03]
+	entry.audioRate = rates[(config>>4)&0x03]
+	entry.audioChannels = uint64(config&0x07) + 1
+	entry.hasAudioInfo = entry.pcmBitDepth > 0 && entry.audioRate > 0 && entry.audioChannels > 0
+}
+
 func findPESStart(data []byte, start int) int {
 	if start < 0 {
 		start = 0
@@ -608,18 +633,106 @@ func findPESStart(data []byte, start int) int {
 	return -1
 }
 
+// ParseMPEGPSFiles parses an ordered MPEG program-stream file set as one
+// logical input. It returns false when a required file cannot be read or no
+// sampled region contains a valid program stream.
 func ParseMPEGPSFiles(paths []string, size int64, opts mpegPSOptions) (ContainerInfo, []Stream, bool) {
 	if len(paths) == 0 {
 		return ContainerInfo{}, nil, false
 	}
+	parseSpeed := opts.parseSpeed
+	if parseSpeed == 0 {
+		parseSpeed = 1
+	}
+	if parseSpeed < 1 {
+		captionHeaderOnlyMode := false
+		first, err := os.Open(paths[0]) //nolint:gosec // callers supply validated analysis paths or root-bounded DVD members
+		if err != nil {
+			return ContainerInfo{}, nil, false
+		}
+		firstInfo, err := first.Stat()
+		if err != nil || firstInfo.Size() <= 0 {
+			_ = first.Close()
+			return ContainerInfo{}, nil, false
+		}
+		window := min(mpegPSBoundedWindow(first, firstInfo.Size()), firstInfo.Size())
+		if opts.dvdMenu {
+			_ = first.Close()
+			timingWindow := min(int64(4_200_000), firstInfo.Size())
+			parser, sampledBytes, parsedAny := parseMPEGPSFileHead(paths[0], timingWindow, opts)
+			if !parsedAny {
+				return ContainerInfo{}, nil, false
+			}
+			statsOpts := opts
+			statsOpts.dvdExtras = true
+			statsParser, _, statsParsed := parseMPEGPSFileEdges(paths[:1], window, statsOpts)
+			if statsParsed {
+				copyMPEGPSAC3Stats(parser, statsParser)
+				copyMPEGPSMissingStreams(parser, statsParser)
+			}
+			opts2 := opts
+			opts2.sampled = size > sampledBytes
+			opts2.sampledBytes = sampledBytes
+			return finalizeMPEGPS(parser.streams, parser.streamOrder, parser.videoParsers, parser.videoPTS, parser.anyPTS, size, opts2)
+		}
+		if opts.dvdWideWindow {
+			// MediaInfo's DVD-Video bounded pass covers sixteen seconds at the
+			// DVD maximum mux rate (10.08 Mb/s): 20,160,000 bytes per edge.
+			window = min(int64(20_160_000), firstInfo.Size())
+		}
+		_ = first.Close()
+		parser, sampledBytes, parsedAny := parseMPEGPSFileEdges(paths, window, opts)
+		if !parsedAny {
+			return ContainerInfo{}, nil, false
+		}
+		if (opts.dvdExtras || opts.dvdParsing) && !opts.dvdWideWindow {
+			captionHeaderOnly := false
+			for _, stream := range parser.streams {
+				if stream.ccFound {
+					opts.dvdWideWindow = true
+					return ParseMPEGPSFiles(paths, size, opts)
+				}
+				captionHeaderOnly = captionHeaderOnly || stream.ccHeaderFound
+			}
+			if captionHeaderOnly {
+				// MediaInfo validates a slightly longer timing interval when DVD
+				// caption user_data is present, even if it contains no renderable
+				// captions. AC-3 statistics still use the full DVD-wide interval.
+				const captionTimingWindow = int64(6_155_000)
+				timingParser, timingBytes, timingParsed := parseMPEGPSFileEdges(paths, captionTimingWindow, opts)
+				statsParser, statsBytes, statsParsed := parseMPEGPSFileEdges(paths, 20_170_000, opts)
+				if timingParsed {
+					parser = timingParser
+					sampledBytes = timingBytes
+					captionHeaderOnlyMode = true
+				}
+				if statsParsed {
+					if parserHasClosedCaptions(statsParser) {
+						parser = statsParser
+						sampledBytes = statsBytes
+					} else {
+						copyMPEGPSAC3Stats(parser, statsParser)
+					}
+				}
+			}
+		}
+		opts2 := opts
+		opts2.sampled = size > sampledBytes
+		opts2.sampledBytes = sampledBytes
+		opts2.dvdCaptionHeaderOnly = captionHeaderOnlyMode
+		return finalizeMPEGPS(parser.streams, parser.streamOrder, parser.videoParsers, parser.videoPTS, parser.anyPTS, size, opts2)
+	}
 	parser := newPSStreamParser(opts)
 	parsedAny := false
+	var sampledBytes int64
 	for _, path := range paths {
 		file, err := os.Open(path)
 		if err != nil {
 			return ContainerInfo{}, nil, false
 		}
-		if parseMPEGPSFileSample(parser, file, opts) {
+		parsed, consumed := parseMPEGPSFileSample(parser, file, opts)
+		sampledBytes += consumed
+		if parsed {
 			parsedAny = true
 		}
 		_ = file.Close()
@@ -629,17 +742,136 @@ func ParseMPEGPSFiles(paths []string, size int64, opts mpegPSOptions) (Container
 	}
 	opts2 := opts
 	opts2.sampled = parser.sampled
+	opts2.sampledBytes = sampledBytes
 	return finalizeMPEGPS(parser.streams, parser.streamOrder, parser.videoParsers, parser.videoPTS, parser.anyPTS, size, opts2)
 }
 
-func parseMPEGPSFileSample(parser *psStreamParser, file *os.File, opts mpegPSOptions) bool {
+// parseMPEGPSFileHead parses at most window bytes from one file's beginning and
+// returns the parser, consumed byte count, and whether any stream data parsed.
+func parseMPEGPSFileHead(path string, window int64, opts mpegPSOptions) (*psStreamParser, int64, bool) {
+	parser := newPSStreamParser(opts)
+	if window <= 0 {
+		return parser, 0, false
+	}
+	file, err := os.Open(path) //nolint:gosec // caller supplies a validated DVD member path
+	if err != nil {
+		return parser, 0, false
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil || info.Size() <= 0 {
+		return parser, 0, false
+	}
+	headWindow := min(window, info.Size())
+	parsed := parser.parseReader(bufio.NewReaderSize(io.NewSectionReader(file, 0, headWindow), 1<<20))
+	return parser, headWindow, parsed
+}
+
+// parseMPEGPSFileEdges parses bounded head and tail regions from an ordered file
+// set into one parser and reports the total sampled bytes.
+func parseMPEGPSFileEdges(paths []string, window int64, opts mpegPSOptions) (*psStreamParser, int64, bool) {
+	parser := newPSStreamParser(opts)
+	if len(paths) == 0 || window <= 0 {
+		return parser, 0, false
+	}
+	first, err := os.Open(paths[0]) //nolint:gosec // callers supply validated analysis paths or root-bounded DVD members
+	if err != nil {
+		return parser, 0, false
+	}
+	firstInfo, err := first.Stat()
+	if err != nil || firstInfo.Size() <= 0 {
+		_ = first.Close()
+		return parser, 0, false
+	}
+	headWindow, tailWindow := mpegPSEdgeWindows(window, opts)
+	headWindow = min(headWindow, firstInfo.Size())
+	parsedAny := parser.parseReader(bufio.NewReaderSize(io.NewSectionReader(first, 0, headWindow), 1<<20))
+	_ = first.Close()
+
+	last, err := os.Open(paths[len(paths)-1]) //nolint:gosec // callers supply validated analysis paths or root-bounded DVD members
+	if err != nil {
+		return parser, 0, false
+	}
+	lastInfo, err := last.Stat()
+	if err != nil || lastInfo.Size() <= 0 {
+		_ = last.Close()
+		return parser, 0, false
+	}
+	tailWindow = min(tailWindow, lastInfo.Size())
+	parser.beginSection()
+	if parser.parseReader(bufio.NewReaderSize(io.NewSectionReader(last, lastInfo.Size()-tailWindow, tailWindow), 1<<20)) {
+		parsedAny = true
+	}
+	_ = last.Close()
+	return parser, headWindow + tailWindow, parsedAny
+}
+
+// mpegPSEdgeWindows adjusts requested head and tail windows to match DVD parser
+// buffering and wide-window tail behavior.
+func mpegPSEdgeWindows(window int64, opts mpegPSOptions) (head, tail int64) {
+	head, tail = window, window
+	if opts.dvdParsing && !opts.dvdMenu {
+		const inputBufferSize = int64(64 << 10)
+		head = ((head + inputBufferSize - 1) / inputBufferSize) * inputBufferSize
+	}
+	if opts.dvdParsing && opts.dvdWideWindow {
+		tail = max(tail-int64(8<<10), 0)
+	}
+	return head, tail
+}
+
+// parserHasClosedCaptions reports whether any parsed program stream contains
+// renderable closed captions.
+func parserHasClosedCaptions(parser *psStreamParser) bool {
+	for _, stream := range parser.streams {
+		if stream.ccFound {
+			return true
+		}
+	}
+	return false
+}
+
+// copyMPEGPSAC3Stats replaces matching destination AC-3 statistics with those
+// collected by a wider source parser pass.
+func copyMPEGPSAC3Stats(dst, src *psStreamParser) {
+	for key, srcStream := range src.streams {
+		dstStream := dst.streams[key]
+		if dstStream == nil || !srcStream.hasAC3 || !dstStream.hasAC3 {
+			continue
+		}
+		dstStream.ac3Info.dialnormSum = srcStream.ac3Info.dialnormSum
+		dstStream.ac3Info.dialnormCount = srcStream.ac3Info.dialnormCount
+		dstStream.ac3Info.dialnormMin = srcStream.ac3Info.dialnormMin
+		dstStream.ac3Info.dialnormMax = srcStream.ac3Info.dialnormMax
+		dstStream.ac3Info.hasDialnorm = srcStream.ac3Info.hasDialnorm
+		dstStream.ac3Info.comprs = append([]uint32(nil), srcStream.ac3Info.comprs...)
+		dstStream.ac3Info.dynrngs = append([]uint32(nil), srcStream.ac3Info.dynrngs...)
+		dstStream.ac3Info.dynrngeSeen = srcStream.ac3Info.dynrngeSeen
+	}
+}
+
+// copyMPEGPSMissingStreams adds text and menu streams observed only by the
+// source parser while preserving source discovery order.
+func copyMPEGPSMissingStreams(dst, src *psStreamParser) {
+	for key, stream := range src.streams {
+		if stream == nil || (stream.kind != StreamText && stream.kind != StreamMenu) || dst.streams[key] != nil {
+			continue
+		}
+		dst.streams[key] = stream
+		dst.streamOrder = append(dst.streamOrder, key)
+	}
+}
+
+// parseMPEGPSFileSample parses either the whole file or bounded sections chosen
+// from parse speed and DVD options, returning whether data parsed and bytes read.
+func parseMPEGPSFileSample(parser *psStreamParser, file *os.File, opts mpegPSOptions) (bool, int64) {
 	info, err := file.Stat()
 	if err != nil {
-		return false
+		return false, 0
 	}
 	size := info.Size()
 	if size <= 0 {
-		return false
+		return false, 0
 	}
 	reader := func(r io.Reader) bool {
 		buf := bufio.NewReaderSize(r, 1<<20)
@@ -651,7 +883,7 @@ func parseMPEGPSFileSample(parser *psStreamParser, file *os.File, opts mpegPSOpt
 		parseSpeed = 1
 	}
 	if parseSpeed >= 1 {
-		return reader(file)
+		return reader(file), size
 	}
 
 	sampleSize := int64(8 << 20)
@@ -662,7 +894,7 @@ func parseMPEGPSFileSample(parser *psStreamParser, file *os.File, opts mpegPSOpt
 		sampleSize = 8 << 20
 	}
 	if size <= sampleSize {
-		return reader(file)
+		return reader(file), size
 	}
 
 	parsedAny := false
@@ -683,7 +915,11 @@ func parseMPEGPSFileSample(parser *psStreamParser, file *os.File, opts mpegPSOpt
 			parsedAny = true
 		}
 	}
-	return parsedAny
+	consumed := sampleSize
+	if size > sampleSize*2 {
+		consumed += min(sampleSize, int64(8<<20))
+	}
+	return parsedAny, consumed
 }
 
 // appendTerminalBytes retains only the bounded tail needed to detect a final

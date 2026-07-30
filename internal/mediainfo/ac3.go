@@ -1282,11 +1282,6 @@ func (info *ac3Info) mergeFrame(frame ac3Info) {
 			info.dynrngFirst = true
 		}
 	}
-	if !info.hasDynrng && frame.dynrnge {
-		info.hasDynrng = true
-		info.dynrngDB = frame.dynrngDB
-	}
-
 	if frame.bitRateKbps > 0 && info.bitRateKbps == 0 {
 		info.bitRateKbps = frame.bitRateKbps
 	}
@@ -1613,6 +1608,9 @@ func (info ac3Info) comprStats() (float64, float64, float64, int, bool) {
 	}
 	if count == 0 {
 		return 0, 0, 0, 0, false
+	}
+	if info.comprs[0] > 0 && minVal == 0 {
+		minVal = math.Copysign(0, -1)
 	}
 	avg := 10.0 * math.Log10(sumIntensity/float64(count))
 	return avg, minVal, maxVal, count, true

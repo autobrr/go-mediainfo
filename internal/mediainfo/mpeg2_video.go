@@ -115,55 +115,61 @@ type mpeg2VideoInfo struct {
 }
 
 type mpeg2VideoParser struct {
-	carry              []byte
-	info               mpeg2VideoInfo
-	rescanFromZero     bool
-	expectPictureExt   bool
-	intraFrozen        bool
-	intraFreezeAfterI  int
-	firstIntraDCOk     bool
-	firstIntraDC       int
-	lastIntraDCOk      bool
-	lastIntraDC        int
-	currentGOPCount    int
-	finalGOPRecorded   bool
-	sawGOP             bool
-	gopLength          int
-	gopLengthCounts    map[int]int
-	gopM               int
-	gopN               int
-	gopMVariable       bool
-	gopNVariable       bool
-	gopMCounts         map[int]int
-	gopNCounts         map[int]int
-	framesSinceI       int
-	framesSinceAnchor  int
-	lastISeen          bool
-	lastAnchorSeen     bool
-	iFrameCount        int
-	pFrameCount        int
-	maxBitRateKbps     int64
-	maxBitRateSet      bool
-	maxBitRateMixed    bool
-	firstGOPClosed     *bool
-	anyOpenGOP         bool
-	gotSeqExt          bool
-	sawSequence        bool
-	progressiveSeq     bool
-	pictureCount       int
-	progressiveFrames  int
-	repeatFirstField   int
-	topFieldFirst      int
-	intraDCCounts      map[int]int
-	pictureStructures  map[int]int
-	sequenceAspectCode uint64
-	vbvDelaySeen       bool
-	vbvDelayVariable   bool
+	carry               []byte
+	info                mpeg2VideoInfo
+	rescanFromZero      bool
+	expectPictureExt    bool
+	intraFrozen         bool
+	intraFreezeAfterI   int
+	firstIntraDCOk      bool
+	firstIntraDC        int
+	lastIntraDCOk       bool
+	lastIntraDC         int
+	currentGOPCount     int
+	finalGOPRecorded    bool
+	sawGOP              bool
+	gopLength           int
+	gopLengthCounts     map[int]int
+	gopM                int
+	gopN                int
+	gopMVariable        bool
+	gopNVariable        bool
+	gopMCounts          map[int]int
+	gopNCounts          map[int]int
+	framesSinceI        int
+	framesSinceAnchor   int
+	lastISeen           bool
+	lastAnchorSeen      bool
+	iFrameCount         int
+	pFrameCount         int
+	maxBitRateKbps      int64
+	maxBitRateSet       bool
+	maxBitRateMixed     bool
+	firstGOPClosed      *bool
+	anyOpenGOP          bool
+	gotSeqExt           bool
+	sawSequence         bool
+	progressiveSeq      bool
+	pictureCount        int
+	progressiveFrames   int
+	repeatFirstField    int
+	topFieldFirst       int
+	intraDCCounts       map[int]int
+	pictureStructures   map[int]int
+	sequenceAspectCode  uint64
+	sequenceFactsFrozen bool
+	intraMatrixData     string
+	nonIntraMatrixData  string
+	vbvDelaySeen        bool
+	vbvDelayVariable    bool
 }
 
 // startSegment drops elementary-stream carry and cross-GOP counters at a
 // bounded-read jump while retaining codec evidence accumulated so far.
 func (p *mpeg2VideoParser) startSegment() {
+	if p.info.Width > 0 && p.info.Height > 0 {
+		p.sequenceFactsFrozen = true
+	}
 	p.carry = nil
 	p.rescanFromZero = false
 	p.expectPictureExt = false
@@ -219,7 +225,7 @@ func (p *mpeg2VideoParser) consume(data []byte) {
 		case 0xB3:
 			p.parseSequenceHeader(payload)
 		case 0xB2:
-			if library, name, version := parseMPEGVideoWritingLibrary(payload); library != "" && p.info.EncodedLibrary == "" {
+			if library, name, version := parseMPEGVideoWritingLibrary(payload); !p.sequenceFactsFrozen && library != "" && p.info.EncodedLibrary == "" {
 				p.info.EncodedLibrary = library
 				p.info.EncodedLibraryName = name
 				p.info.EncodedLibraryVersion = version
@@ -339,22 +345,23 @@ func (p *mpeg2VideoParser) parseSequenceHeader(data []byte) {
 			}
 		}
 	}
-	if p.info.MatrixData == "" {
-		switch {
-		case intraMatrixData != "" && nonIntraMatrixData != "":
-			p.info.MatrixData = intraMatrixData + " / " + nonIntraMatrixData
-		case intraMatrixData != "":
-			p.info.MatrixData = intraMatrixData
-		case nonIntraMatrixData != "":
-			p.info.MatrixData = nonIntraMatrixData
+	if !p.sequenceFactsFrozen {
+		if p.intraMatrixData == "" && intraMatrixData != "" {
+			p.intraMatrixData = intraMatrixData
 		}
+		if p.nonIntraMatrixData == "" && nonIntraMatrixData != "" {
+			p.nonIntraMatrixData = nonIntraMatrixData
+		}
+		p.refreshMatrixData()
 	}
 
-	if width > 0 && height > 0 {
+	if width > 0 && height > 0 && !p.sequenceFactsFrozen {
 		p.info.Width = width
 		p.info.Height = height
 	}
-	p.sequenceAspectCode = aspect
+	if !p.sequenceFactsFrozen {
+		p.sequenceAspectCode = aspect
+	}
 	if p.info.FrameRate == 0 {
 		if rate, num, den := mapMPEG2FrameRate(frameRateCode); rate > 0 {
 			p.info.FrameRate = rate
@@ -362,7 +369,7 @@ func (p *mpeg2VideoParser) parseSequenceHeader(data []byte) {
 			p.info.FrameRateDenom = den
 		}
 	}
-	if p.info.Matrix == "" {
+	if p.info.Matrix == "" && !p.sequenceFactsFrozen {
 		if loadIntra == 1 || loadNonIntra == 1 {
 			if customMatrix {
 				p.info.Matrix = "Custom"
@@ -427,7 +434,9 @@ func (p *mpeg2VideoParser) parseExtension(data []byte) {
 		_ = br.readBitsValue(5)
 		p.info.Profile = mapMPEG2Profile(profileLevel)
 		p.info.Version = "Version 2"
-		p.progressiveSeq = progressive == 1
+		if !p.sequenceFactsFrozen {
+			p.progressiveSeq = progressive == 1
+		}
 		p.info.ChromaSubsampling = mapMPEG2Chroma(chromaFormat)
 		p.gotSeqExt = true
 	case 2:
@@ -455,6 +464,48 @@ func (p *mpeg2VideoParser) parseExtension(data []byte) {
 			p.info.TransferCharacteristics = mapMPEG2TransferCharacteristics(byte(transfer))
 			p.info.MatrixCoefficients = mapMPEG2MatrixCoefficients(byte(matrix))
 		}
+	case 3:
+		if p.sequenceFactsFrozen {
+			return
+		}
+		// MediaInfo keeps quant-matrix extensions only after a sequence header
+		// has established the matrix set. Pre-header extension residue from a
+		// bounded section is not promoted to stream metadata.
+		if !p.sawSequence {
+			return
+		}
+		custom := false
+		if br.readBitsValue(1) == 1 {
+			matrix, ok := readMPEG2QuantMatrix(br)
+			if !ok {
+				return
+			}
+			if p.intraMatrixData == "" && !isDefaultMPEG2IntraMatrix(matrix) {
+				p.intraMatrixData = formatMPEG2MatrixHex(matrix)
+				custom = true
+			}
+		}
+		if br.readBitsValue(1) == 1 {
+			matrix, ok := readMPEG2QuantMatrix(br)
+			if !ok {
+				return
+			}
+			if p.nonIntraMatrixData == "" && !isDefaultMPEG2Matrix(matrix, mpeg2DefaultNonIntraMatrix) {
+				p.nonIntraMatrixData = formatMPEG2MatrixHex(matrix)
+				custom = true
+			}
+		}
+		for range 2 {
+			if br.readBitsValue(1) == 1 {
+				if _, ok := readMPEG2QuantMatrix(br); !ok {
+					return
+				}
+			}
+		}
+		if custom {
+			p.info.Matrix = "Custom"
+		}
+		p.refreshMatrixData()
 	case 8:
 		if !p.expectPictureExt {
 			return
@@ -516,6 +567,35 @@ func (p *mpeg2VideoParser) parseExtension(data []byte) {
 		}
 	default:
 		return
+	}
+}
+
+// readMPEG2QuantMatrix reads one complete 64-byte quantization matrix. The
+// boolean is false when the bitstream ends before the matrix is complete.
+func readMPEG2QuantMatrix(br *bitReader) ([64]byte, bool) {
+	var matrix [64]byte
+	for i := range matrix {
+		value := br.readBitsValue(8)
+		if value == ^uint64(0) {
+			return matrix, false
+		}
+		matrix[i] = byte(value)
+	}
+	return matrix, true
+}
+
+// refreshMatrixData rebuilds the projected matrix string from the latest
+// decoded intra and non-intra matrices.
+func (p *mpeg2VideoParser) refreshMatrixData() {
+	switch {
+	case p.intraMatrixData != "" && p.nonIntraMatrixData != "":
+		p.info.MatrixData = p.intraMatrixData + " / " + p.nonIntraMatrixData
+	case p.intraMatrixData != "":
+		p.info.MatrixData = p.intraMatrixData
+	case p.nonIntraMatrixData != "":
+		p.info.MatrixData = p.nonIntraMatrixData
+	default:
+		p.info.MatrixData = ""
 	}
 }
 
@@ -693,7 +773,7 @@ func (p *mpeg2VideoParser) finalize() mpeg2VideoInfo {
 	}
 	if p.maxBitRateSet {
 		if p.maxBitRateMixed {
-			if p.info.Width == 720 && (p.info.Height == 480 || p.info.Height == 576) {
+			if (p.info.Width == 352 || p.info.Width == 704 || p.info.Width == 720) && (p.info.Height == 480 || p.info.Height == 576) {
 				p.info.MaxBitRateKbps = p.maxBitRateKbps
 			} else {
 				p.info.MaxBitRateKbps = 0
@@ -734,6 +814,12 @@ func (p *mpeg2VideoParser) finalize() mpeg2VideoInfo {
 		mode, _ := modeValue(p.intraDCCounts)
 		p.info.IntraDCPrecision = 8 + mode
 	}
+	if p.lastIntraDCOk {
+		p.info.IntraDCPrecisionLast = 8 + p.lastIntraDC
+	}
+	if p.firstIntraDCOk {
+		p.info.IntraDCPrecisionFirst = 8 + p.firstIntraDC
+	}
 	if p.info.ColorSpace == "" {
 		p.info.ColorSpace = "YUV"
 	}
@@ -749,16 +835,20 @@ func (p *mpeg2VideoParser) finalize() mpeg2VideoInfo {
 		p.info.Version = "Version 1"
 		p.info.AspectRatio = mapMPEG1DisplayAspectRatio(p.info.Width, p.info.Height, p.sequenceAspectCode)
 	}
-	if p.sawSequence && !p.gotSeqExt || p.progressiveSeq || p.progressiveFrames > 0 {
+	progressivePictures := p.pictureCount > 0 && p.progressiveFrames*100 >= p.pictureCount*95
+	if (p.sawSequence && !p.gotSeqExt) || p.progressiveSeq || progressivePictures {
 		p.info.ScanType = "Progressive"
 	} else if p.info.ScanType == "" {
 		p.info.ScanType = "Interlaced"
+	}
+	if p.info.ScanType == "Interlaced" && p.repeatFirstField > 0 {
+		p.info.PictureStructure = ""
 	}
 	if p.info.ScanOrder == "" && p.topFieldFirst > 0 && p.pictureCount > 0 {
 		// Official mediainfo still surfaces TFF in some Progressive streams (e.g. DVD menu VOBs).
 		p.info.ScanOrder = "TFF"
 	}
-	if p.progressiveSeq && p.repeatFirstField > 0 && p.info.FrameRate > 0 {
+	if (p.progressiveSeq || progressivePictures) && p.repeatFirstField > 0 && p.info.FrameRate > 0 {
 		if (p.info.FrameRateNumer == 30000 && p.info.FrameRateDenom == 1001) || math.Abs(p.info.FrameRate-29.97) < 0.02 {
 			p.info.FrameRate = 24000.0 / 1001.0
 			p.info.FrameRateNumer = 24000

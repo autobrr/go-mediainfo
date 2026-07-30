@@ -17,6 +17,34 @@ func TestNewPSStreamParserQuickAC3(t *testing.T) {
 	}
 }
 
+func TestMPEGPSDVDEdgeWindows(t *testing.T) {
+	const window = int64((1 << 20) + 1)
+	tests := []struct {
+		name     string
+		opts     mpegPSOptions
+		wantHead int64
+		wantTail int64
+	}{
+		{name: "non-DVD", wantHead: window, wantTail: window},
+		{name: "DVD title", opts: mpegPSOptions{dvdParsing: true}, wantHead: 17 << 16, wantTail: window},
+		{name: "DVD menu", opts: mpegPSOptions{dvdParsing: true, dvdMenu: true}, wantHead: window, wantTail: window},
+		{name: "DVD wide title", opts: mpegPSOptions{dvdParsing: true, dvdWideWindow: true}, wantHead: 17 << 16, wantTail: window - (8 << 10)},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			head, tail := mpegPSEdgeWindows(window, test.opts)
+			if head != test.wantHead || tail != test.wantTail {
+				t.Fatalf("mpegPSEdgeWindows() = (%d, %d), want (%d, %d)", head, tail, test.wantHead, test.wantTail)
+			}
+		})
+	}
+
+	_, tail := mpegPSEdgeWindows(4<<10, mpegPSOptions{dvdParsing: true, dvdWideWindow: true})
+	if tail != 0 {
+		t.Fatalf("small wide tail = %d, want 0", tail)
+	}
+}
+
 func TestPSStreamParserBeginSectionDropsDiscontinuousState(t *testing.T) {
 	parser := newPSStreamParser(mpegPSOptions{})
 	stream := parser.ensureStream(0xE0, psSubstreamNone, StreamVideo, "MPEG Video")
@@ -75,6 +103,12 @@ func TestPSStreamParserBoundsProgramEndTailForEveryStream(t *testing.T) {
 			t.Fatalf("%s terminal bytes = %x", name, stream.terminalBytes)
 		}
 	}
+}
+
+func TestPSStreamParserZeroLengthPayloadAtBufferEnd(_ *testing.T) {
+	data := []byte{0x00, 0x00, 0x01, 0xDE, 0x00, 0x04, 0xAC, 0x30, 0x01, 0x30}
+	parser := newPSStreamParser(mpegPSOptions{})
+	parser.parseReader(bytes.NewReader(data))
 }
 
 func TestPSConsumePayloadQuickAC3SkipsDecode(t *testing.T) {

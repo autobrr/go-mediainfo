@@ -1622,6 +1622,39 @@ func TestApplyMatroskaMPEG2ProbeEmitsDropFrameFlag(t *testing.T) {
 	}
 }
 
+func TestApplyMatroskaMPEG2ProbeSuppressesMixedPictureStructure(t *testing.T) {
+	for _, test := range []struct {
+		name              string
+		progressiveFrames int
+		want              bool
+	}{
+		{name: "interlaced only", want: true},
+		{name: "mixed pictures", progressiveFrames: 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			stream := Stream{Kind: StreamVideo, JSON: map[string]string{}}
+			parser := mpeg2VideoParser{
+				info: mpeg2VideoInfo{
+					Version:          "2",
+					Width:            720,
+					Height:           576,
+					ScanType:         "Interlaced",
+					PictureStructure: "Frame",
+				},
+				progressiveFrames: test.progressiveFrames,
+			}
+			applyMatroskaMPEG2Probe(&stream, &parser)
+			got, found := canonicalSeedValue(stream, "Format_Settings_PictureStructure")
+			if found != test.want {
+				t.Fatalf("picture structure found = %v, want %v (value %q)", found, test.want, got)
+			}
+			if found && got != "Frame" {
+				t.Fatalf("picture structure = %q, want Frame", got)
+			}
+		})
+	}
+}
+
 func minimalPNG(width, height uint32, colorType byte) []byte {
 	data := make([]byte, 33)
 	copy(data, []byte{0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A})

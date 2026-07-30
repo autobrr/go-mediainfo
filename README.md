@@ -88,7 +88,8 @@ mediainfo version
 Path is required (file or directory).
 
 Default output: text.
-Footer includes `ReportBy : go-mediainfo - vX.Y.Z`.
+Footer is separated from media details by a blank line and uses the projection's
+aligned label column: `ReportBy ... : go-mediainfo - vX.Y.Z`.
 
 ## Options
 

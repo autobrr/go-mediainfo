@@ -149,12 +149,12 @@ func textFieldOrderPolicy(kind StreamKind) map[string]int {
 // structuredGeneralFieldOrder is the shared structured order for General keys.
 var structuredGeneralFieldOrder = map[string]int{
 	"@type": 0, "ID": 1, "UniqueID": 1, "VideoCount": 2, "AudioCount": 3, "TextCount": 4, "ImageCount": 5, "MenuCount": 6,
-	"FileExtension": 7, "CompleteName_Last": 7, "Format": 8, "Format_Settings": 9, "Format_Version": 10, "Format_Profile": 11,
-	"CodecID": 12, "CodecID_Compatible": 13, "FileSize": 14, "Duration": 15, "OverallBitRate_Mode": 16, "OverallBitRate": 17,
-	"FrameRate": 18, "FrameCount": 19, "StreamSize": 20, "HeaderSize": 21, "DataSize": 22, "FooterSize": 23, "IsStreamable": 24,
-	"File_Created_Date": 25, "File_Created_Date_Local": 26, "File_Modified_Date": 27, "File_Modified_Date_Local": 28,
-	"Encoded_Application": 29, "Encoded_Application_Name": 30, "Encoded_Application_Version": 31,
-	"Encoded_Library": 32, "Encoded_Library_Name": 33, "Encoded_Library_Version": 34, "Encoded_Library_Settings": 35, "extra": 36,
+	"FileExtension": 7, "CompleteName_Last": 8, "Format": 9, "Format_Settings": 10, "Format_Version": 11, "Format_Profile": 12,
+	"CodecID": 13, "CodecID_Compatible": 14, "FileSize": 15, "Duration": 16, "OverallBitRate_Mode": 17, "OverallBitRate": 18,
+	"FrameRate": 19, "FrameCount": 20, "StreamSize": 21, "HeaderSize": 22, "DataSize": 23, "FooterSize": 24, "IsStreamable": 25,
+	"File_Created_Date": 26, "File_Created_Date_Local": 27, "File_Modified_Date": 28, "File_Modified_Date_Local": 29,
+	"Encoded_Application": 30, "Encoded_Application_Name": 31, "Encoded_Application_Version": 32,
+	"Encoded_Library": 33, "Encoded_Library_Name": 34, "Encoded_Library_Version": 35, "Encoded_Library_Settings": 36, "extra": 37,
 }
 
 // structuredVideoFieldOrder is the shared structured order for video and image keys.
@@ -189,6 +189,38 @@ var structuredAudioFieldOrder = map[string]int{
 	"Delay": 32, "Delay_Source": 33, "Video_Delay": 34, "Encoded_Library": 35, "StreamSize": 36,
 	"Source_StreamSize": 37, "Title": 38, "Language": 39, "ServiceKind": 40, "Default": 41, "Forced": 42,
 	"AlternateGroup": 43, "extra": 44,
+}
+
+// structuredDVDAudioFieldOrder defines MediaInfo's structured DVD audio key order.
+var structuredDVDAudioFieldOrder = makeStructuredFieldOrder(
+	"@type", "@typeorder", "StreamOrder", "FirstPacketOrder", "ID", "MenuID", "UniqueID",
+	"Format", "Format_Commercial_IfAny", "Format_Version", "Format_Profile", "Format_Settings_Mode", "Format_Settings_Endianness", "Format_Settings_Sign",
+	"Format_Settings_SBR", "Format_AdditionalFeatures", "MuxingMode", "CodecID", "Duration", "Source_Duration", "Source_Duration_LastFrame",
+	"BitRate_Mode", "BitRate", "BitRate_Maximum", "Channels", "ChannelPositions", "ChannelLayout", "SamplesPerFrame", "SamplingRate", "SamplingCount",
+	"BitDepth", "FrameRate", "FrameCount", "Source_FrameCount", "Compression_Mode", "Delay", "Delay_Source", "Video_Delay", "Encoded_Library",
+	"StreamSize", "Source_StreamSize", "Title", "Language", "Language_More", "ServiceKind", "Default", "Forced", "AlternateGroup", "extra",
+)
+
+// structuredDVDTextFieldOrder defines MediaInfo's structured DVD text key order.
+var structuredDVDTextFieldOrder = makeStructuredFieldOrder(
+	"@type", "@typeorder", "StreamOrder", "FirstPacketOrder", "ID", "MenuID", "UniqueID", "Format", "MuxingMode", "MuxingMode_MoreInfo",
+	"Duration", "Duration_Start_Command", "Duration_Start", "Duration_End", "Duration_End_Command", "Duration_Start2End", "BitRate_Mode", "BitRate",
+	"Width", "Height", "BitDepth", "Delay", "Delay_Source", "Video_Delay", "StreamSize", "FirstDisplay_Delay_Frames", "FirstDisplay_Type",
+	"Title", "Language", "Language_More", "Default", "Forced", "extra",
+)
+
+// structuredDVDFieldOrderPolicy returns the DVD-specific structured key order
+// for audio and text, and the shared container order for other stream kinds.
+func structuredDVDFieldOrderPolicy(kind StreamKind) map[string]int {
+	switch kind {
+	case StreamAudio:
+		return structuredDVDAudioFieldOrder
+	case StreamText:
+		return structuredDVDTextFieldOrder
+	case StreamGeneral, StreamVideo, StreamImage, StreamMenu:
+		return structuredFieldOrderPolicy(kind)
+	}
+	return structuredFieldOrderPolicy(kind)
 }
 
 var structuredOggGeneralFieldOrder = makeStructuredFieldOrder(

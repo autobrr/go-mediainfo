@@ -20,5 +20,5 @@ Bit depth                                : 16 bits
 Format settings, Endianness              : Little
 Format settings, Sign                    : Signed
 
-ReportBy : go-mediainfo - dev
+ReportBy                                 : go-mediainfo - dev
 

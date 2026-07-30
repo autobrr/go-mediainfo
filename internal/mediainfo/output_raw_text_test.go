@@ -30,11 +30,50 @@ func TestRenderTextWithOptionsUsesRawProjection(t *testing.T) {
 	if strings.Contains(raw, "\n") && strings.Contains(strings.ReplaceAll(raw, "\r\n", ""), "\n") {
 		t.Fatalf("raw output contains bare LF line endings: %q", raw)
 	}
-	if !strings.HasSuffix(raw, "\r\n\r\n\r\n") {
+	wantFooter := "\r\n\r\n" + padRight("ReportBy", 33) + ": " + AppName + " - " + FormatVersion(AppVersion)
+	if !strings.Contains(raw, wantFooter) {
+		t.Fatalf("raw output footer framing/alignment changed:\n%s", raw)
+	}
+	if !strings.HasSuffix(raw, "\r\n\r\n") || strings.HasSuffix(raw, "\r\n\r\n\r\n") {
 		t.Fatalf("raw output terminal line endings = %q", raw[len(raw)-min(len(raw), 12):])
 	}
-	if friendly := RenderText([]Report{report}); !strings.Contains(friendly, "Format                                   : Matroska") {
+	friendly := RenderText([]Report{report})
+	if !strings.Contains(friendly, "Format                                   : Matroska") {
 		t.Fatalf("friendly output changed:\n%s", friendly)
+	}
+	wantFriendlyFooter := "\n\n" + padRight("ReportBy", textLabelWidth) + ": " + AppName + " - " + FormatVersion(AppVersion)
+	if !strings.Contains(friendly, wantFriendlyFooter) {
+		t.Fatalf("friendly output footer framing/alignment changed:\n%s", friendly)
+	}
+}
+
+func TestRenderTextWithOptionsDVDProjectionOmitsStringSuffix(t *testing.T) {
+	builder := newCanonicalStreamBuilder(StreamGeneral)
+	builder.Fill("Format", "DVD Video", "Format", "DVD Video")
+	builder.Fill("Duration", "3661000", "Duration", "1 h 1 min 1 s")
+	report := Report{Ref: "VTS_01_0.IFO", General: builder.Snapshot(canonicalStreamPolicy{DVDOrder: true})}
+	attachCanonicalStore(&report)
+
+	projected := projectRawTextReport(report)
+	if len(projected.Streams) != 1 {
+		t.Fatalf("DVD raw stream count = %d, want 1", len(projected.Streams))
+	}
+	labels := make(map[string]bool, len(projected.Streams[0].Fields))
+	for _, field := range projected.Streams[0].Fields {
+		if strings.HasSuffix(field.Label, "/String") {
+			t.Fatalf("DVD raw label retained /String suffix: %q", field.Label)
+		}
+		labels[field.Label] = true
+	}
+	for _, label := range []string{"Format", "Duration"} {
+		if !labels[label] {
+			t.Errorf("DVD raw projection missing %q: %#v", label, projected.Streams[0].Fields)
+		}
+	}
+
+	raw := RenderTextWithOptions([]Report{report}, TextRenderOptions{Language: "raw"})
+	if strings.Contains(raw, "/String") {
+		t.Fatalf("DVD raw output retained /String suffix:\n%s", raw)
 	}
 }
 
