@@ -149,7 +149,7 @@ func TestImpl001ERAACResilienceFlagsParsing(t *testing.T) {
 		t.Fatalf("ERAAC objType=%d sbrMode=%q sampleRate=%d, want 17, Yes (Explicit), 44100", objectType, sbrMode, sampleRate)
 	}
 
-	// Truncated payload: only 1 bit of resilience flags available after extFlag.
+	// Truncated payload: 16 bits (2 bytes), truncated after extFlag before resilience flags.
 	truncated := packImpl001Bits(
 		impl001Bits{17, 5},
 		impl001Bits{4, 4},
@@ -157,11 +157,25 @@ func TestImpl001ERAACResilienceFlagsParsing(t *testing.T) {
 		impl001Bits{0, 1},
 		impl001Bits{0, 1},
 		impl001Bits{1, 1},
-		impl001Bits{1, 1},
 	)
 	_, objectTypeTrunc, sbrModeTrunc, _, _ := parseMatroskaAACProfile(truncated)
 	if objectTypeTrunc != 17 || sbrModeTrunc != "" {
 		t.Fatalf("truncated ERAAC objType=%d sbrMode=%q, want 17, empty sbrMode", objectTypeTrunc, sbrModeTrunc)
+	}
+
+	// Truncated payload: 19 bits (3 bytes), contains resilience flags but truncated before syncExtensionType.
+	truncatedSync := packImpl001Bits(
+		impl001Bits{17, 5},
+		impl001Bits{4, 4},
+		impl001Bits{2, 4},
+		impl001Bits{0, 1},
+		impl001Bits{0, 1},
+		impl001Bits{1, 1},
+		impl001Bits{7, 3},
+	)
+	_, objectTypeSync, sbrModeSync, _, _ := parseMatroskaAACProfile(truncatedSync)
+	if objectTypeSync != 17 || sbrModeSync != "" {
+		t.Fatalf("truncated sync extension ERAAC objType=%d sbrMode=%q, want 17, empty sbrMode", objectTypeSync, sbrModeSync)
 	}
 }
 
