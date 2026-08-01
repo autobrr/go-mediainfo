@@ -114,6 +114,60 @@ func buildTrackWithStsd(handler, sample string) []byte {
 	return trak.Bytes()
 }
 
+func TestParseMP4CodecAV1FromStsd(t *testing.T) {
+	var buf bytes.Buffer
+	writeMP4Box(&buf, "ftyp", []byte{'i', 's', 'o', 'm'})
+	mvhd := make([]byte, 20)
+	mvhd[0] = 0
+	binary.BigEndian.PutUint32(mvhd[12:16], 1000)
+	binary.BigEndian.PutUint32(mvhd[16:20], 10000)
+
+	trak := buildTrackWithStsd("vide", "av01")
+	var moov bytes.Buffer
+	writeMP4Box(&moov, "mvhd", mvhd)
+	writeMP4Box(&moov, "trak", trak)
+	writeMP4Box(&buf, "moov", moov.Bytes())
+
+	file, err := os.CreateTemp(t.TempDir(), "sample-av1-*.mp4")
+	if err != nil {
+		t.Fatalf("temp: %v", err)
+	}
+	if _, err := file.Write(buf.Bytes()); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	stat, err := os.Stat(file.Name())
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+
+	f, err := os.Open(file.Name())
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer f.Close()
+
+	info, ok := ParseMP4(f, stat.Size())
+	if !ok {
+		t.Fatalf("expected mp4 info")
+	}
+	if len(info.Tracks) != 1 {
+		t.Fatalf("expected 1 track, got %d", len(info.Tracks))
+	}
+	if info.Tracks[0].Format != "AV1" {
+		t.Fatalf("format=%q, want AV1", info.Tracks[0].Format)
+	}
+	if v := findField(info.Tracks[0].Fields, "Format/Info"); v != "AOMedia Video 1" {
+		t.Fatalf("Format/Info=%q, want AOMedia Video 1", v)
+	}
+	if v := findField(info.Tracks[0].Fields, "Codec ID/Info"); v != "AOMedia Video 1" {
+		t.Fatalf("Codec ID/Info=%q, want AOMedia Video 1", v)
+	}
+}
+
 func buildMdhdBox() []byte {
 	payload := make([]byte, 24)
 	payload[0] = 0

@@ -5226,7 +5226,7 @@ func skipAACGASpecificConfig(br *bitReader, channelConfig uint64, objType int) b
 		}
 		switch objType {
 		case 17, 19, 20, 21, 23:
-			if br.readBitsValue(1) == ^uint64(0) {
+			if br.readBitsValue(3) == ^uint64(0) {
 				return false
 			}
 		}
