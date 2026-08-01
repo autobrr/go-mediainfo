@@ -1869,9 +1869,9 @@ func parseCanonicalMatroskaTrackEntry(buf []byte, segmentDuration float64, durat
 	if trackLanguage == "" && trackLanguageIETF == "" {
 		trackLanguage = "eng"
 	}
-	displayLanguage := trackLanguage
+	displayLanguage := trackLanguageIETF
 	if displayLanguage == "" {
-		displayLanguage = trackLanguageIETF
+		displayLanguage = trackLanguage
 	}
 	kind, format := mapMatroskaCodecID(codecID, trackType)
 	if kind == "" {
@@ -5226,7 +5226,7 @@ func skipAACGASpecificConfig(br *bitReader, channelConfig uint64, objType int) b
 		}
 		switch objType {
 		case 17, 19, 20, 21, 23:
-			if br.readBitsValue(1) == ^uint64(0) || br.readBitsValue(1) == ^uint64(0) || br.readBitsValue(1) == ^uint64(0) {
+			if br.readBitsValue(1) == ^uint64(0) {
 				return false
 			}
 		}

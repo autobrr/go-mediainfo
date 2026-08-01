@@ -67,6 +67,8 @@ func mapMatroskaCodecID(codecID string, trackType uint64) (StreamKind, string) {
 
 func mapMatroskaFormatInfo(format string) string {
 	switch format {
+	case "AV1":
+		return "AOMedia Video 1"
 	case "AVC":
 		return "Advanced Video Codec"
 	case "HEVC":
