@@ -135,6 +135,28 @@ func TestParseMatroskaChapterDisplayPrefersIETF(t *testing.T) {
 	}
 }
 
+func TestParseMatroskaTrackLanguageIETFUndDoesNotFallback(t *testing.T) {
+	payload := buildMatroskaElement(mkvIDTrackNumber, []byte{0x01})
+	payload = append(payload, buildMatroskaElement(mkvIDTrackType, []byte{0x11})...)
+	payload = append(payload, buildMatroskaElement(mkvIDCodecID, []byte("S_TEXT/UTF8"))...)
+	payload = append(payload, buildMatroskaElement(mkvIDTrackLanguage, []byte("eng"))...)
+	payload = append(payload, buildMatroskaElement(mkvIDTrackLanguageIETF, []byte("und"))...)
+
+	stream, ok := parseMatroskaTrackEntry(payload, 0, 0)
+	if !ok {
+		t.Fatal("expected valid Matroska text track")
+	}
+	if got := findField(stream.Fields, "Language"); got != "" {
+		t.Fatalf("display Language = %q, want omitted", got)
+	}
+	if got := stream.JSON["Language"]; got != "" {
+		t.Fatalf("structured Language = %q, want omitted", got)
+	}
+	if got, found := canonicalSeedValue(stream, "Language"); found || got != "" {
+		t.Fatalf("canonical Language = %q, found=%v; want omitted", got, found)
+	}
+}
+
 func TestParseMatroskaTrackAccessibilityFlags(t *testing.T) {
 	payload := buildMatroskaElement(mkvIDTrackNumber, []byte{0x01})
 	payload = append(payload, buildMatroskaElement(mkvIDTrackType, []byte{0x11})...)

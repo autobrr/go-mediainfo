@@ -160,8 +160,6 @@ func mapMP4SampleEntry(sample string) string {
 		return "AVC"
 	case "hvc1", "hev1":
 		return "HEVC"
-	case "av01":
-		return "AV1"
 	case "mp4v":
 		return "MPEG-4 Visual"
 	case "vp09":
@@ -192,7 +190,7 @@ func mapMP4SampleEntry(sample string) string {
 // isVideoSampleEntry reports whether sample is a supported MP4 video entry.
 func isVideoSampleEntry(sample string) bool {
 	switch sample {
-	case "avc1", "avc3", "hvc1", "hev1", "av01", "mp4v", "vp09":
+	case "avc1", "avc3", "hvc1", "hev1", "mp4v", "vp09":
 		return true
 	default:
 		return false
@@ -1206,8 +1204,6 @@ func mapVideoFormatInfo(sampleType string) string {
 		return "Advanced Video Codec"
 	case "hvc1", "hev1":
 		return "High Efficiency Video Coding"
-	case "av01":
-		return "AOMedia Video 1"
 	case "mp4v":
 		return "MPEG-4 Visual"
 	default:
@@ -1221,8 +1217,6 @@ func mapVideoCodecIDInfo(sampleType string) string {
 		return "Advanced Video Coding"
 	case "hvc1", "hev1":
 		return "High Efficiency Video Coding"
-	case "av01":
-		return "AOMedia Video 1"
 	case "mp4v":
 		return "MPEG-4 Visual"
 	default:
