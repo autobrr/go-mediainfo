@@ -419,3 +419,17 @@ Owner: soup
   - `Nickelodeon - Generic Halloween Promo.ts`: diff `0`.
   - `Nickelodeon - Saturday Morning Promo.ts`: diff `0` (AC-3 `compr_*`/`dynrng_*`).
   - `Disney Channel - Evermoor Behind The Scenes.ts`: diff `0` (AC-3 stats on both audio tracks).
+
+## Agent skills
+
+### Issue tracker
+
+Issues live as GitHub issues in `autobrr/go-mediainfo`, managed with the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five canonical triage roles, using the default label strings. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
