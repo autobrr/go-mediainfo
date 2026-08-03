@@ -6,190 +6,200 @@ import (
 )
 
 var languageNames = map[string]string{
-	"aa": "Afar",
-	"ab": "Abkhazian",
-	"ae": "Avestan",
-	"af": "Afrikaans",
-	"ak": "Akan",
-	"am": "Amharic",
-	"an": "Aragonese",
-	"ar": "Arabic",
-	"as": "Assamese",
-	"av": "Avaric",
-	"ay": "Aymara",
-	"az": "Azerbaijani",
-	"ba": "Bashkir",
-	"be": "Belarusian",
-	"bg": "Bulgarian",
-	"bh": "Bihari languages",
-	"bi": "Bislama",
-	"bm": "Bambara",
-	"bn": "Bengali",
-	"bo": "Tibetan",
-	"br": "Breton",
-	"bs": "Bosnian",
-	"ca": "Catalan",
-	"ce": "Chechen",
-	"ch": "Chamorro",
-	"co": "Corsican",
-	"cr": "Cree",
-	"cs": "Czech",
-	"cu": "Church Slavic",
-	"cv": "Chuvash",
-	"cy": "Welsh",
-	"da": "Danish",
-	"de": "German",
-	"dv": "Divehi",
-	"dz": "Dzongkha",
-	"ee": "Ewe",
-	"el": "Greek",
-	"en": "English",
-	"eo": "Esperanto",
-	"es": "Spanish",
-	"et": "Estonian",
-	"eu": "Basque",
-	"fa": "Persian",
-	"ff": "Fulah",
-	"fi": "Finnish",
-	"fj": "Fijian",
-	"fo": "Faroese",
-	"fr": "French",
-	"fy": "Western Frisian",
-	"ga": "Irish",
-	"gd": "Gaelic",
-	"gl": "Galician",
-	"gn": "Guarani",
-	"gu": "Gujarati",
-	"gv": "Manx",
-	"ha": "Hausa",
-	"he": "Hebrew",
-	"hi": "Hindi",
-	"ho": "Hiri Motu",
-	"hr": "Croatian",
-	"ht": "Haitian",
-	"hu": "Hungarian",
-	"hy": "Armenian",
-	"hz": "Herero",
-	"ia": "Interlingua",
-	"id": "Indonesian",
-	"ie": "Interlingue",
-	"ig": "Igbo",
-	"ii": "Sichuan Yi",
-	"ik": "Inupiaq",
-	"io": "Ido",
-	"is": "Icelandic",
-	"it": "Italian",
-	"iu": "Inuktitut",
-	"ja": "Japanese",
-	"jv": "Javanese",
-	"ka": "Georgian",
-	"kg": "Kongo",
-	"ki": "Kikuyu",
-	"kj": "Kuanyama",
-	"kk": "Kazakh",
-	"kl": "Kalaallisut",
-	"km": "Central Khmer",
-	"kn": "Kannada",
-	"ko": "Korean",
-	"kr": "Kanuri",
-	"ks": "Kashmiri",
-	"ku": "Kurdish",
-	"kv": "Komi",
-	"kw": "Cornish",
-	"ky": "Kirghiz",
-	"la": "Latin",
-	"lb": "Luxembourgish",
-	"lg": "Ganda",
-	"li": "Limburgan",
-	"ln": "Lingala",
-	"lo": "Lao",
-	"lt": "Lithuanian",
-	"lu": "Luba-Katanga",
-	"lv": "Latvian",
-	"mg": "Malagasy",
-	"mh": "Marshallese",
-	"mi": "Maori",
-	"mk": "Macedonian",
-	"ml": "Malayalam",
-	"mn": "Mongolian",
-	"mr": "Marathi",
-	"ms": "Malay",
-	"mt": "Maltese",
-	"my": "Burmese",
-	"na": "Nauru",
-	"nb": "Norwegian Bokmal",
-	"nd": "North Ndebele",
-	"ne": "Nepali",
-	"ng": "Ndonga",
-	"nl": "Dutch",
-	"nn": "Norwegian Nynorsk",
-	"no": "Norwegian",
-	"nr": "South Ndebele",
-	"nv": "Navajo",
-	"ny": "Chichewa",
-	"oc": "Occitan",
-	"oj": "Ojibwa",
-	"om": "Oromo",
-	"or": "Oriya",
-	"os": "Ossetian",
-	"pa": "Panjabi",
-	"pi": "Pali",
-	"pl": "Polish",
-	"ps": "Pashto",
-	"pt": "Portuguese",
-	"qu": "Quechua",
-	"rm": "Romansh",
-	"rn": "Rundi",
-	"ro": "Romanian",
-	"ru": "Russian",
-	"rw": "Kinyarwanda",
-	"sa": "Sanskrit",
-	"sc": "Sardinian",
-	"sd": "Sindhi",
-	"se": "Northern Sami",
-	"sg": "Sango",
-	"si": "Sinhala",
-	"sk": "Slovak",
-	"sl": "Slovenian",
-	"sm": "Samoan",
-	"sn": "Shona",
-	"so": "Somali",
-	"sq": "Albanian",
-	"sr": "Serbian",
-	"ss": "Swati",
-	"st": "Southern Sotho",
-	"su": "Sundanese",
-	"sv": "Swedish",
-	"sw": "Swahili",
-	"ta": "Tamil",
-	"te": "Telugu",
-	"tg": "Tajik",
-	"th": "Thai",
-	"ti": "Tigrinya",
-	"tk": "Turkmen",
-	"tl": "Tagalog",
-	"tn": "Tswana",
-	"to": "Tonga",
-	"tr": "Turkish",
-	"ts": "Tsonga",
-	"tt": "Tatar",
-	"tw": "Twi",
-	"ty": "Tahitian",
-	"ug": "Uighur",
-	"uk": "Ukrainian",
-	"ur": "Urdu",
-	"uz": "Uzbek",
-	"ve": "Venda",
-	"vi": "Vietnamese",
-	"vo": "Volapuk",
-	"wa": "Walloon",
-	"wo": "Wolof",
-	"xh": "Xhosa",
-	"yi": "Yiddish",
-	"yo": "Yoruba",
-	"za": "Zhuang",
-	"zh": "Chinese",
-	"zu": "Zulu",
+	"aa":  "Afar",
+	"ab":  "Abkhazian",
+	"ae":  "Avestan",
+	"af":  "Afrikaans",
+	"ak":  "Akan",
+	"am":  "Amharic",
+	"an":  "Aragonese",
+	"ar":  "Arabic",
+	"as":  "Assamese",
+	"av":  "Avaric",
+	"ay":  "Aymara",
+	"az":  "Azerbaijani",
+	"ba":  "Bashkir",
+	"be":  "Belarusian",
+	"bg":  "Bulgarian",
+	"bh":  "Bihari languages",
+	"bi":  "Bislama",
+	"bm":  "Bambara",
+	"bn":  "Bengali",
+	"bo":  "Tibetan",
+	"br":  "Breton",
+	"bs":  "Bosnian",
+	"ca":  "Catalan",
+	"ce":  "Chechen",
+	"ch":  "Chamorro",
+	"cmn": "Mandarin",
+	"co":  "Corsican",
+	"cr":  "Cree",
+	"cs":  "Czech",
+	"cu":  "Church Slavic",
+	"cv":  "Chuvash",
+	"cy":  "Welsh",
+	"da":  "Danish",
+	"de":  "German",
+	"dv":  "Divehi",
+	"dz":  "Dzongkha",
+	"ee":  "Ewe",
+	"el":  "Greek",
+	"en":  "English",
+	"eo":  "Esperanto",
+	"es":  "Spanish",
+	"et":  "Estonian",
+	"eu":  "Basque",
+	"fa":  "Persian",
+	"ff":  "Fulah",
+	"fi":  "Finnish",
+	"fil": "Filipino",
+	"fj":  "Fijian",
+	"fo":  "Faroese",
+	"fr":  "French",
+	"fy":  "Western Frisian",
+	"ga":  "Irish",
+	"gd":  "Gaelic",
+	"gl":  "Galician",
+	"gn":  "Guarani",
+	"gu":  "Gujarati",
+	"gv":  "Manx",
+	"ha":  "Hausa",
+	"he":  "Hebrew",
+	"hi":  "Hindi",
+	"ho":  "Hiri Motu",
+	"hr":  "Croatian",
+	"ht":  "Haitian",
+	"hu":  "Hungarian",
+	"hy":  "Armenian",
+	"hz":  "Herero",
+	"ia":  "Interlingua",
+	"id":  "Indonesian",
+	"ie":  "Interlingue",
+	"ig":  "Igbo",
+	"ii":  "Sichuan Yi",
+	"ik":  "Inupiaq",
+	"io":  "Ido",
+	"is":  "Icelandic",
+	"it":  "Italian",
+	"iu":  "Inuktitut",
+	"ja":  "Japanese",
+	"jv":  "Javanese",
+	"ka":  "Georgian",
+	"kg":  "Kongo",
+	"ki":  "Kikuyu",
+	"kj":  "Kuanyama",
+	"kk":  "Kazakh",
+	"kl":  "Kalaallisut",
+	"km":  "Central Khmer",
+	"kn":  "Kannada",
+	"ko":  "Korean",
+	"kr":  "Kanuri",
+	"ks":  "Kashmiri",
+	"ku":  "Kurdish",
+	"kv":  "Komi",
+	"kw":  "Cornish",
+	"ky":  "Kirghiz",
+	"la":  "Latin",
+	"lb":  "Luxembourgish",
+	"lg":  "Ganda",
+	"li":  "Limburgan",
+	"ln":  "Lingala",
+	"lo":  "Lao",
+	"lt":  "Lithuanian",
+	"lu":  "Luba-Katanga",
+	"lv":  "Latvian",
+	"mg":  "Malagasy",
+	"mh":  "Marshallese",
+	"mi":  "Maori",
+	"mk":  "Macedonian",
+	"ml":  "Malayalam",
+	"mn":  "Mongolian",
+	"mr":  "Marathi",
+	"ms":  "Malay",
+	"mt":  "Maltese",
+	"my":  "Burmese",
+	"na":  "Nauru",
+	"nb":  "Norwegian Bokmal",
+	"nd":  "North Ndebele",
+	"ne":  "Nepali",
+	"ng":  "Ndonga",
+	"nl":  "Dutch",
+	"nn":  "Norwegian Nynorsk",
+	"no":  "Norwegian",
+	"nr":  "South Ndebele",
+	"nv":  "Navajo",
+	"ny":  "Chichewa",
+	"oc":  "Occitan",
+	"oj":  "Ojibwa",
+	"om":  "Oromo",
+	"or":  "Oriya",
+	"os":  "Ossetian",
+	"pa":  "Panjabi",
+	"pi":  "Pali",
+	"pl":  "Polish",
+	"ps":  "Pashto",
+	"pt":  "Portuguese",
+	"qu":  "Quechua",
+	"rm":  "Romansh",
+	"rn":  "Rundi",
+	"ro":  "Romanian",
+	"ru":  "Russian",
+	"rw":  "Kinyarwanda",
+	"sa":  "Sanskrit",
+	"sc":  "Sardinian",
+	"sd":  "Sindhi",
+	"se":  "Northern Sami",
+	"sg":  "Sango",
+	"si":  "Sinhala",
+	"sk":  "Slovak",
+	"sl":  "Slovenian",
+	"sm":  "Samoan",
+	"sn":  "Shona",
+	"so":  "Somali",
+	"sq":  "Albanian",
+	"sr":  "Serbian",
+	"ss":  "Swati",
+	"st":  "Southern Sotho",
+	"su":  "Sundanese",
+	"sv":  "Swedish",
+	"sw":  "Swahili",
+	"ta":  "Tamil",
+	"te":  "Telugu",
+	"tg":  "Tajik",
+	"th":  "Thai",
+	"ti":  "Tigrinya",
+	"tk":  "Turkmen",
+	"tl":  "Tagalog",
+	"tn":  "Tswana",
+	"to":  "Tonga",
+	"tr":  "Turkish",
+	"ts":  "Tsonga",
+	"tt":  "Tatar",
+	"tw":  "Twi",
+	"ty":  "Tahitian",
+	"ug":  "Uighur",
+	"uk":  "Ukrainian",
+	"ur":  "Urdu",
+	"uz":  "Uzbek",
+	"ve":  "Venda",
+	"vi":  "Vietnamese",
+	"vo":  "Volapuk",
+	"wa":  "Walloon",
+	"wo":  "Wolof",
+	"xh":  "Xhosa",
+	"yi":  "Yiddish",
+	"yo":  "Yoruba",
+	"yue": "Cantonese",
+	"za":  "Zhuang",
+	"zh":  "Chinese",
+	"zu":  "Zulu",
+}
+
+var languageDisplayOverrides = map[string]string{
+	"es-419":  "Spanish (Latin America)",
+	"zh-Hans": "Chinese (Simplified)",
+	"zh-Hant": "Chinese (Traditional)",
+	"zh-TW":   "Chinese (Taiwan)",
 }
 
 var languageMap3To2 = map[string]string{
@@ -415,36 +425,82 @@ func normalizeLanguageCode(code string) string {
 	if code == "" {
 		return ""
 	}
-	code = strings.ReplaceAll(code, "_", "-")
-	parts := strings.Split(code, "-")
-	if len(parts) == 0 {
+	candidate := strings.ReplaceAll(code, "_", "-")
+	parts := strings.Split(candidate, "-")
+	if len(parts) == 0 || hasEmptyLanguageSubtag(parts) {
 		return code
 	}
 	lang := strings.ToLower(parts[0])
 	if lang == "und" {
 		return ""
 	}
+	if !isAlpha(lang) || len(lang) < 2 || len(lang) > 8 {
+		return code
+	}
 	if mapped, ok := languageMap3To2[lang]; ok {
 		lang = mapped
 	}
 	out := []string{lang}
-	for i := 1; i < len(parts); i++ {
-		part := strings.TrimSpace(parts[i])
-		if part == "" {
-			continue
+	i := 1
+	for extlangCount := 0; i < len(parts) && extlangCount < 3; extlangCount++ {
+		part := strings.ToLower(parts[i])
+		if len(part) != 3 || !isAlpha(part) {
+			break
 		}
-		// BCP-47-ish casing:
-		// - script: 4 alpha, Title Case (Hans)
-		// - region: 2 alpha or 3 digit, upper case (US / 419)
-		if len(part) == 4 && isAlpha(part) {
-			out = append(out, strings.ToUpper(part[:1])+strings.ToLower(part[1:]))
-			continue
+		out = append(out, part)
+		i++
+	}
+	if i < len(parts) && len(parts[i]) == 4 && isAlpha(parts[i]) {
+		part := parts[i]
+		out = append(out, strings.ToUpper(part[:1])+strings.ToLower(part[1:]))
+		i++
+	}
+	if i < len(parts) && isLanguageRegionSubtag(parts[i]) {
+		out = append(out, strings.ToUpper(parts[i]))
+		i++
+	}
+	seenVariants := map[string]struct{}{}
+	for i < len(parts) && isLanguageVariantSubtag(parts[i]) {
+		variant := strings.ToLower(parts[i])
+		if _, ok := seenVariants[variant]; ok {
+			return code
 		}
-		if (len(part) == 2 && isAlpha(part)) || (len(part) == 3 && isDigit(part)) {
-			out = append(out, strings.ToUpper(part))
-			continue
+		seenVariants[variant] = struct{}{}
+		out = append(out, variant)
+		i++
+	}
+	seenExtensions := map[string]struct{}{}
+	for i < len(parts) && isLanguageExtensionSingleton(parts[i]) {
+		singleton := strings.ToLower(parts[i])
+		if _, ok := seenExtensions[singleton]; ok {
+			return code
 		}
-		out = append(out, strings.ToLower(part))
+		seenExtensions[singleton] = struct{}{}
+		out = append(out, singleton)
+		i++
+		start := i
+		for i < len(parts) && isLanguageExtensionSubtag(parts[i]) {
+			out = append(out, strings.ToLower(parts[i]))
+			i++
+		}
+		if i == start {
+			return code
+		}
+	}
+	if i < len(parts) && strings.EqualFold(parts[i], "x") {
+		out = append(out, "x")
+		i++
+		start := i
+		for i < len(parts) && isLanguagePrivateUseSubtag(parts[i]) {
+			out = append(out, strings.ToLower(parts[i]))
+			i++
+		}
+		if i == start {
+			return code
+		}
+	}
+	if i != len(parts) {
+		return code
 	}
 	return strings.Join(out, "-")
 }
@@ -454,6 +510,11 @@ func formatLanguage(code string) string {
 	if normalized == "" {
 		return ""
 	}
+
+	if name := languageDisplayOverrides[normalized]; name != "" {
+		return name
+	}
+
 	parts := strings.Split(normalized, "-")
 	name := languageName(parts[0])
 	if name == "" {
@@ -490,4 +551,42 @@ func isDigit(s string) bool {
 		}
 	}
 	return true
+}
+func hasEmptyLanguageSubtag(parts []string) bool {
+	for _, part := range parts {
+		if part == "" || strings.TrimSpace(part) != part {
+			return true
+		}
+	}
+	return false
+}
+
+func isAlphaNum(s string) bool {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if (c < 'A' || c > 'Z') && (c < 'a' || c > 'z') && (c < '0' || c > '9') {
+			return false
+		}
+	}
+	return true
+}
+
+func isLanguageRegionSubtag(s string) bool {
+	return len(s) == 2 && isAlpha(s) || len(s) == 3 && isDigit(s)
+}
+
+func isLanguageVariantSubtag(s string) bool {
+	return len(s) >= 5 && len(s) <= 8 && isAlphaNum(s) || len(s) == 4 && isDigit(s[:1]) && isAlphaNum(s)
+}
+
+func isLanguageExtensionSingleton(s string) bool {
+	return len(s) == 1 && isAlphaNum(s) && !strings.EqualFold(s, "x")
+}
+
+func isLanguageExtensionSubtag(s string) bool {
+	return len(s) >= 2 && len(s) <= 8 && isAlphaNum(s)
+}
+
+func isLanguagePrivateUseSubtag(s string) bool {
+	return len(s) >= 1 && len(s) <= 8 && isAlphaNum(s)
 }

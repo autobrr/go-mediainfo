@@ -1869,9 +1869,9 @@ func parseCanonicalMatroskaTrackEntry(buf []byte, segmentDuration float64, durat
 	if trackLanguage == "" && trackLanguageIETF == "" {
 		trackLanguage = "eng"
 	}
-	displayLanguage := trackLanguage
+	displayLanguage := trackLanguageIETF
 	if displayLanguage == "" {
-		displayLanguage = trackLanguageIETF
+		displayLanguage = trackLanguage
 	}
 	kind, format := mapMatroskaCodecID(codecID, trackType)
 	if kind == "" {
@@ -2406,7 +2406,7 @@ func parseCanonicalMatroskaTrackEntry(buf []byte, segmentDuration float64, durat
 		fields = append(fields, Field{Name: "Forced", Value: "No"})
 	}
 	languageCode := normalizeLanguageCode(trackLanguageIETF)
-	if languageCode == "" {
+	if trackLanguageIETF == "" {
 		languageCode = normalizeLanguageCode(trackLanguage)
 	}
 	if language := formatLanguage(displayLanguage); language != "" {
