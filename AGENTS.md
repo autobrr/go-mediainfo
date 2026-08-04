@@ -3,7 +3,10 @@
 Owner: soup
 
 ## Scope
-- Goal: 1:1 feature parity with MediaInfo CLI
+- Goal: be better than MediaInfo CLI. Parity is the test method, not the target.
+  - Diffing against official MediaInfo is how we find our bugs, because it is usually right.
+  - Where official is wrong or gives up, fixing it is the point. "MediaInfoLib does it this way" is not a reason to close an improvement.
+  - Prove any deliberate difference with a real file before shipping it, and say why in the commit.
 - Pure Go implementation, no CGO
 - Cross-platform
 
