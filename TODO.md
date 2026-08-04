@@ -1,7 +1,7 @@
 # TODO
 
-## Parity (1:1 MediaInfo CLI)
-- Goal: 1:1 MediaInfo CLI parity (fields + values + ordering) across text/JSON/XML/CSV
+## Parity (vs MediaInfo CLI)
+- Match MediaInfo CLI (fields + values + ordering) across text/JSON/XML/CSV, until we have reason to be better. See `AGENTS.md` for the goal: parity is the test method, not the target.
 - Expand format coverage + field parity across CLI outputs
 - Samples: generated fixtures in `samples/` (see `samples/README.md` + `samples/generate.sh`)
 - Real-world spot checks (2026-02-09): JSON 1:1 vs official at `--ParseSpeed=0.5` for:
