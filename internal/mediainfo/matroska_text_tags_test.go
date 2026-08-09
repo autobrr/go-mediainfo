@@ -23,9 +23,12 @@ func writeMatroskaTaggedFixture(t *testing.T) string {
 	simpleTags = append(simpleTags, buildMatroskaSimpleTag("IMDB", "tt0111161")...)
 	simpleTags = append(simpleTags, buildMatroskaSimpleTag("TMDB", "movie/278")...)
 	simpleTags = append(simpleTags, buildMatroskaSimpleTag("TVDB", "12345")...)
-	tags := buildMatroskaElement(mkvIDTags, buildMatroskaElement(mkvIDTag, simpleTags))
+	trackTags := buildMatroskaElement(mkvIDTagTargets, buildMatroskaElement(mkvIDTagTrackUID, encodeMatroskaUint(9)))
+	trackTags = append(trackTags, buildMatroskaSimpleTag("FILENAME", "source.avc")...)
+	trackTags = append(trackTags, buildMatroskaSimpleTag("MIMETYPE", "video/avc")...)
+	tags := buildMatroskaElement(mkvIDTags, append(buildMatroskaElement(mkvIDTag, simpleTags), buildMatroskaElement(mkvIDTag, trackTags)...))
 
-	segment := append(buildMatroskaInfo(), buildMatroskaTracks()...)
+	segment := append(buildMatroskaInfo(), buildMatroskaVideoTrackWithUID(9)...)
 	segment = append(segment, tags...)
 	segment = append(segment, attachments...)
 	file := buildMatroskaElement(mkvIDEBML, nil)
@@ -73,6 +76,13 @@ func TestRenderTextIncludesMatroskaTagsAndAttachments(t *testing.T) {
 	}
 	if strings.Contains(general, "\nTitle ") {
 		t.Fatalf("General text still shows Title label:\n%s", general)
+	}
+	video := text[len(general):]
+	for label, value := range map[string]string{"FILENAME": "source.avc", "MIMETYPE": "video/avc"} {
+		line := "\n" + label + strings.Repeat(" ", 41-len(label)) + ": " + value
+		if !strings.Contains(video, line) {
+			t.Fatalf("Video text lacks track tag %q = %q:\n%s", label, value, video)
+		}
 	}
 }
 
