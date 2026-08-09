@@ -17,13 +17,15 @@ var textGeneralFieldOrder = map[string]int{
 	"Overall bit rate mode": 9,
 	"Overall bit rate":      10,
 	"Frame rate":            11,
-	"Writing application":   12,
-	"Writing library":       13,
-	"Encoded date":          14,
-	"Tagged date":           15,
-	"FileExtension_Invalid": 16,
-	"Conformance warnings":  17,
-	" General compliance":   18,
+	"Movie name":            12,
+	"Encoded date":          13,
+	"Tagged date":           14,
+	"Writing application":   15,
+	"Writing library":       16,
+	"Cover":                 17,
+	"FileExtension_Invalid": 18,
+	"Conformance warnings":  19,
+	" General compliance":   20,
 }
 
 // textStreamFieldOrder is the registered display order shared by media fields.

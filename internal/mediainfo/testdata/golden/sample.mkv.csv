@@ -45,9 +45,8 @@ Duration,4 s 21 ms
 Channel(s),1 channel
 Channel layout,M
 Sampling rate,48.0 kHz
-Frame rate,46.8750 FPS (1024 SPF)
+Frame rate,46.875 FPS (1024 SPF)
 Compression mode,Lossy
 Writing library,Lavc62.11.100 aac
 Default,No
 Forced,No
-

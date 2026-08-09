@@ -111,7 +111,7 @@ func matroskaAACCanonicalSeed(facts matroskaAACCanonicalFacts) []fieldEntry {
 		raw := strconv.FormatFloat(facts.audioSampleRate, 'f', -1, 64)
 		builder.Fill("SamplingRate", raw, "Sampling rate", formatSampleRate(facts.audioSampleRate))
 		frameRate := facts.audioSampleRate / float64(samplesPerFrame)
-		builder.Fill("FrameRate", fmt.Sprintf("%.3f", frameRate), "Frame rate", fmt.Sprintf("%.4f FPS (%d SPF)", frameRate, samplesPerFrame))
+		builder.Fill("FrameRate", fmt.Sprintf("%.3f", frameRate), "Frame rate", fmt.Sprintf("%.3f FPS (%d SPF)", frameRate, samplesPerFrame))
 		builder.Structured("SamplesPerFrame", strconv.FormatInt(samplesPerFrame, 10))
 		if facts.segmentDuration > 0 {
 			samplingCount := int64(math.Round(facts.segmentDuration * facts.audioSampleRate))
