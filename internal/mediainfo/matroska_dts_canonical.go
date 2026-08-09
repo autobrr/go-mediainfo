@@ -157,10 +157,11 @@ func applyMatroskaDTSCanonicalProbe(stream *Stream, dts dtsInfo, preserveContain
 			commercial = "DTS-ES Discrete"
 			features = "ES XCh"
 		}
+		replaceCanonicalSeedFill(stream, "Format", "DTS", "Format", "DTS "+features)
 		replaceCanonicalSeedFill(stream, "Format_AdditionalFeatures", features, "", "")
 		replaceCanonicalSeedFill(stream, "Format_Commercial_IfAny", commercial, "Commercial name", commercial)
-		replaceCanonicalSeedFill(stream, "Channels_Original", strconv.Itoa(dts.channels+1), "", "")
-		replaceCanonicalSeedFill(stream, "ChannelLayout_Original", "C L R Ls Rs Cb LFE", "", "")
+		replaceCanonicalSeedFill(stream, "Channels_Original", strconv.Itoa(dts.channels+1), "Channel(s)_Original", formatChannels(uint64(dts.channels+1)))
+		replaceCanonicalSeedFill(stream, "ChannelLayout_Original", "C L R Ls Rs Cb LFE", "ChannelLayout_Original", "C L R Ls Rs Cb LFE")
 		replaceCanonicalSeedFill(stream, "ChannelPositions_Original", "Front: L C R, Side: L R, Back: C, LFE", "", "")
 		clearCanonicalSeedField(stream, "ChannelLayout", "Channel layout")
 		clearCanonicalSeedField(stream, "ChannelPositions", "")

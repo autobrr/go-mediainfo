@@ -39,3 +39,12 @@ func makeTSHeader() []byte {
 	buf[376] = 0x47
 	return buf
 }
+
+func TestFormatFrameRateRatioDisplaysIntegralRatesPlain(t *testing.T) {
+	if got := formatFrameRateRatio(25, 1); got != "25.000 FPS" {
+		t.Fatalf("25/1 = %q", got)
+	}
+	if got := formatFrameRateRatio(24000, 1001); got != "23.976 (24000/1001) FPS" {
+		t.Fatalf("24000/1001 = %q", got)
+	}
+}

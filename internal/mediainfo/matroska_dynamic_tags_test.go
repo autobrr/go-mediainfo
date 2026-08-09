@@ -20,7 +20,7 @@ func TestParseMatroskaTagsRetainsArbitraryGeneralMetadata(t *testing.T) {
 	body = append(body, buildMatroskaElement(mkvIDSimpleTag, parent)...)
 	tags := buildMatroskaElement(mkvIDTag, body)
 
-	_, _, _, _, raw, scoped := parseMatroskaTags(tags, "")
+	_, _, _, _, raw, scoped := parseMatroskaTags(tags, "", "")
 	if raw["NEW_DATABASE_ID"] != "db-42" || raw["DUPLICATE"] != "second" {
 		t.Fatalf("raw General tags = %#v", raw)
 	}
@@ -103,7 +103,7 @@ func TestMatroskaGeneralTagAliasesUseMediaInfoJSONNames(t *testing.T) {
 	}
 	tags := buildMatroskaElement(mkvIDTag, body)
 
-	_, _, _, _, _, scoped := parseMatroskaTags(tags, "")
+	_, _, _, _, _, scoped := parseMatroskaTags(tags, "", "")
 	general := Stream{Kind: StreamGeneral, JSON: map[string]string{}}
 	applyMatroskaGeneralTags(&general, scoped.general)
 	refreshCanonicalCompatibilitySnapshot(&general)
@@ -130,7 +130,7 @@ func TestMatroskaGeneralTagAliasesUseMediaInfoJSONNames(t *testing.T) {
 func TestApplyMatroskaGeneralTagsKeepsTitleAndMovieAligned(t *testing.T) {
 	body := buildMatroskaElement(mkvIDTagTargets, nil)
 	body = append(body, buildMatroskaSimpleTag("TITLE", "Tag title")...)
-	_, _, _, _, _, scoped := parseMatroskaTags(buildMatroskaElement(mkvIDTag, body), "")
+	_, _, _, _, _, scoped := parseMatroskaTags(buildMatroskaElement(mkvIDTag, body), "", "")
 	general := Stream{Kind: StreamGeneral}
 	replaceCanonicalSeedFill(&general, "Title", "Container title", "Title", "Container title")
 
@@ -144,7 +144,7 @@ func TestApplyMatroskaGeneralTagsKeepsTitleAndMovieAligned(t *testing.T) {
 
 func TestParseMatroskaTagsUsesTargetsAndIgnoresMissingTargets(t *testing.T) {
 	untargeted := buildMatroskaElement(mkvIDTag, buildMatroskaSimpleTag("IGNORED", "value"))
-	_, _, _, _, _, scoped := parseMatroskaTags(untargeted, "")
+	_, _, _, _, _, scoped := parseMatroskaTags(untargeted, "", "")
 	if len(scoped.general.values) != 0 || len(scoped.tracks) != 0 {
 		t.Fatalf("tag without Targets was retained: %#v", scoped)
 	}
@@ -154,7 +154,7 @@ func TestParseMatroskaTagsUsesTargetsAndIgnoresMissingTargets(t *testing.T) {
 	body = append(body, buildMatroskaSimpleTag("NEW_TRACK_ID", "track-42")...)
 	body = append(body, buildMatroskaSimpleTag("COMMENT", "track comment")...)
 	targeted := buildMatroskaElement(mkvIDTag, body)
-	_, _, _, _, general, scoped := parseMatroskaTags(targeted, "")
+	_, _, _, _, general, scoped := parseMatroskaTags(targeted, "", "")
 	if len(general) != 0 || scoped.tracks[42] == nil {
 		t.Fatalf("targeted tags were promoted or dropped: general=%#v scoped=%#v", general, scoped)
 	}
@@ -211,7 +211,7 @@ func TestMatroskaTagBlockAdditionTargetIsNotProjected(t *testing.T) {
 	body = append(body, buildMatroskaSimpleTag("BLOCK_TAG", "value")...)
 	tags := buildMatroskaElement(mkvIDTag, body)
 
-	_, _, _, _, _, scoped := parseMatroskaTags(tags, "")
+	_, _, _, _, _, scoped := parseMatroskaTags(tags, "", "")
 	if len(scoped.general.values) != 0 || len(scoped.tracks) != 0 {
 		t.Fatalf("block-addition tag was projected: %#v", scoped)
 	}

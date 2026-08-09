@@ -290,18 +290,6 @@ func applyMatroskaEAC3CanonicalText(stream *Stream, ac3 ac3Info) {
 	if ac3.hasDmixmod {
 		replaceCanonicalSeedText(stream, "dmixmod", ac3.dmixmod)
 	}
-	if ac3.hasLtrtcmixlev {
-		replaceCanonicalSeedText(stream, "ltrtcmixlev", fmt.Sprintf("%.1f dB", ac3.ltrtcmixlevDB))
-	}
-	if ac3.hasLtrtsurmixlev {
-		replaceCanonicalSeedText(stream, "ltrtsurmixlev", fmt.Sprintf("%.1f dB", ac3.ltrtsurmixlevDB))
-	}
-	if ac3.hasLorocmixlev {
-		replaceCanonicalSeedText(stream, "lorocmixlev", fmt.Sprintf("%.1f dB", ac3.lorocmixlevDB))
-	}
-	if ac3.hasLorosurmixlev {
-		replaceCanonicalSeedText(stream, "lorosurmixlev", fmt.Sprintf("%.1f dB", ac3.lorosurmixlevDB))
-	}
 	if avg, minimum, maximum, ok := ac3.dialnormStats(); ok {
 		replaceCanonicalSeedText(stream, "dialnorm_Average", formatDialnorm(avg))
 		replaceCanonicalSeedText(stream, "dialnorm_Minimum", formatDialnorm(minimum))
@@ -392,18 +380,6 @@ func matroskaAC3CanonicalExtraFields(probe *matroskaAudioProbe, ac3 ac3Info, dep
 	}
 	if ac3.acmod != 2 && ac3.hasDmixmod {
 		fields = append(fields, jsonKV{Key: "dmixmod", Val: ac3.dmixmod})
-	}
-	if ac3.hasLtrtcmixlev {
-		fields = append(fields, jsonKV{Key: "ltrtcmixlev", Val: fmt.Sprintf("%.1f", ac3.ltrtcmixlevDB)})
-	}
-	if ac3.hasLtrtsurmixlev {
-		fields = append(fields, jsonKV{Key: "ltrtsurmixlev", Val: fmt.Sprintf("%.1f", ac3.ltrtsurmixlevDB)})
-	}
-	if ac3.hasLorocmixlev {
-		fields = append(fields, jsonKV{Key: "lorocmixlev", Val: fmt.Sprintf("%.1f", ac3.lorocmixlevDB)})
-	}
-	if ac3.hasLorosurmixlev {
-		fields = append(fields, jsonKV{Key: "lorosurmixlev", Val: fmt.Sprintf("%.1f", ac3.lorosurmixlevDB)})
 	}
 	if ac3.hasAdconvtyp {
 		fields = append(fields, jsonKV{Key: "adconvtyp", Val: "HDCD"})

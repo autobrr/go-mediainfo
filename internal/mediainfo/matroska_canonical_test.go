@@ -2180,3 +2180,55 @@ func matroskaCanonicalSeedText(stream Stream, label string) string {
 	}
 	return ""
 }
+
+func TestMatroskaAACCanonicalSeedShowsExplicitSBRInText(t *testing.T) {
+	seed := matroskaAACCanonicalSeed(matroskaAACCanonicalFacts{
+		profile: "LC", codecID: "A_AAC-2", trackNumber: 3,
+		audioChannels: 2, audioSampleRate: 48_000, audioBaseRate: 24_000,
+		sbrMode: "Yes (Explicit)",
+	})
+	wantText := map[string]string{
+		"Format":          "AAC LC SBR",
+		"Format/Info":     "Advanced Audio Codec Low Complexity with Spectral Band Replication",
+		"Format settings": "Explicit",
+		"Commercial name": "HE-AAC",
+	}
+	for _, entry := range seed {
+		if want, ok := wantText[entry.TextLabel]; ok && entry.Options.ShowText {
+			if entry.Value.Text != want {
+				t.Fatalf("%s = %q, want %q", entry.TextLabel, entry.Value.Text, want)
+			}
+			delete(wantText, entry.TextLabel)
+		}
+	}
+	if len(wantText) != 0 {
+		t.Fatalf("missing SBR text entries: %v", wantText)
+	}
+}
+
+func TestMatroskaDTSCanonicalProbeShowsESXChInText(t *testing.T) {
+	stream := Stream{Kind: StreamAudio, canonicalSeed: matroskaDTSCanonicalSeed(matroskaDTSCanonicalFacts{
+		audioChannels: 6, audioSampleRate: 48_000,
+	})}
+	applyMatroskaDTSCanonicalProbe(&stream, dtsInfo{
+		coreES: true, coreXCh: true, channels: 6, sampleRate: 48_000, samplesPerFrame: 512,
+	}, false)
+
+	wantText := map[string]string{
+		"Format":                 "DTS ES XCh",
+		"Channel(s)_Original":    "7 channels",
+		"ChannelLayout_Original": "C L R Ls Rs Cb LFE",
+		"Commercial name":        "DTS-ES Discrete",
+	}
+	for _, entry := range stream.canonicalSeed {
+		if want, ok := wantText[entry.TextLabel]; ok && entry.Options.ShowText {
+			if entry.Value.Text != want {
+				t.Fatalf("%s = %q, want %q", entry.TextLabel, entry.Value.Text, want)
+			}
+			delete(wantText, entry.TextLabel)
+		}
+	}
+	if len(wantText) != 0 {
+		t.Fatalf("missing DTS ES text entries: %v", wantText)
+	}
+}
