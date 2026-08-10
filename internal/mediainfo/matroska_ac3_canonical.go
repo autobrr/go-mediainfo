@@ -229,9 +229,6 @@ func applyMatroskaAC3CanonicalProbe(stream *Stream, probe *matroskaAudioProbe, a
 	if hasJOC {
 		applyMatroskaAC3CanonicalJOCText(stream, ac3)
 	}
-	if probe.format == "E-AC-3" {
-		applyMatroskaEAC3CanonicalText(stream, ac3)
-	}
 	if ac3.sampleRate > 0 {
 		if durationMilliseconds, ok := canonicalSeedValue(*stream, "Duration"); ok {
 			if milliseconds, err := strconv.ParseFloat(durationMilliseconds, 64); err == nil && milliseconds > 0 {
@@ -269,31 +266,6 @@ func applyMatroskaAC3CanonicalJOCText(stream *Stream, ac3 ac3Info) {
 	if ac3.hasJOCBed {
 		replaceCanonicalSeedText(stream, "Bed channel count", formatChannels(ac3.jocBedCount))
 		replaceCanonicalSeedText(stream, "Bed channel configuration", ac3.jocBedLayout)
-	}
-}
-
-// applyMatroskaEAC3CanonicalText records E-AC-3 mixing and statistics labels
-// directly from parsed frame facts.
-func applyMatroskaEAC3CanonicalText(stream *Stream, ac3 ac3Info) {
-	if ac3.hasDialnorm {
-		replaceCanonicalSeedText(stream, "Dialog Normalization", formatDialnorm(ac3.dialnorm))
-	}
-	if ac3.hasCompr {
-		replaceCanonicalSeedText(stream, "compr", formatCompr(ac3.comprDB))
-	}
-	if ac3.hasCmixlev {
-		replaceCanonicalSeedText(stream, "cmixlev", fmt.Sprintf("%.1f dB", ac3.cmixlevDB))
-	}
-	if ac3.hasSurmixlev {
-		replaceCanonicalSeedText(stream, "surmixlev", fmt.Sprintf("%.0f dB", ac3.surmixlevDB))
-	}
-	if ac3.hasDmixmod {
-		replaceCanonicalSeedText(stream, "dmixmod", ac3.dmixmod)
-	}
-	if avg, minimum, maximum, ok := ac3.dialnormStats(); ok {
-		replaceCanonicalSeedText(stream, "dialnorm_Average", formatDialnorm(avg))
-		replaceCanonicalSeedText(stream, "dialnorm_Minimum", formatDialnorm(minimum))
-		replaceCanonicalSeedText(stream, "dialnorm_Maximum", formatDialnorm(maximum))
 	}
 }
 

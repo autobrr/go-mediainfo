@@ -228,16 +228,20 @@ func TestApplyMatroskaAudioProbes_EAC3JOCTextMetadata(t *testing.T) {
 		"Number of dynamic objects": "15",
 		"Bed channel count":         "1 channel",
 		"Bed channel configuration": "LFE",
-		"Dialog Normalization":      "-31 dB",
-		"compr":                     "-0.28 dB",
-		"dmixmod":                   "Lo/Ro",
-		"dialnorm_Average":          "-31 dB",
-		"dialnorm_Minimum":          "-31 dB",
-		"dialnorm_Maximum":          "-31 dB",
 	}
 	for name, want := range checks {
 		if got := findField(stream.Fields, name); got != want {
 			t.Fatalf("%s=%q, want %q", name, got, want)
+		}
+	}
+	// Official keeps raw AC-3 mixing and dialnorm metadata under extra only, so
+	// the friendly text projection must not carry them.
+	for _, name := range []string{
+		"Dialog Normalization", "compr", "dmixmod",
+		"dialnorm_Average", "dialnorm_Minimum", "dialnorm_Maximum",
+	} {
+		if got := findField(stream.Fields, name); got != "" {
+			t.Fatalf("%s=%q, want omitted from text", name, got)
 		}
 	}
 	if got := findField(stream.Fields, "Format profile"); got != "" {
@@ -252,7 +256,7 @@ func TestApplyMatroskaAudioProbes_EAC3JOCTextMetadata(t *testing.T) {
 	if got := stream.JSON["Format_AdditionalFeatures"]; got != "JOC" {
 		t.Fatalf("JSON Format_AdditionalFeatures=%q, want JOC", got)
 	}
-	if got := stream.JSONRaw["extra"]; !strings.Contains(got, `"acmod":"7","lfeon":"1","dmixmod":"Lo/Ro"`) {
+	if got := stream.JSONRaw["extra"]; !strings.Contains(got, `"dialnorm":"-31","compr":"-0.28","acmod":"7","lfeon":"1","dmixmod":"Lo/Ro"`) {
 		t.Fatalf("extra missing or misordering E-AC-3 mixing metadata: %s", got)
 	}
 	if got := stream.JSONRaw["extra"]; !strings.Contains(got, `"ComplexityIndex":"16"`) {

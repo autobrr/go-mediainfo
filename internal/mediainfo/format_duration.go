@@ -27,13 +27,12 @@ func formatDuration(seconds float64) string {
 		return fmt.Sprintf("%d s %d ms", totalSec, remMs)
 	}
 
-	hours := totalSec / 3600
-	minutes := (totalSec % 3600) / 60
-	secondsOnly := totalSec % 60
-	if hours > 0 {
-		return fmt.Sprintf("%d h %d min %d s", hours, minutes, secondsOnly)
+	// Only the two most significant units are shown, so seconds drop out once
+	// the duration reaches an hour.
+	if totalSec >= 3600 {
+		return fmt.Sprintf("%d h %d min", totalSec/3600, totalSec%3600/60)
 	}
-	return fmt.Sprintf("%d min %d s", minutes, secondsOnly)
+	return fmt.Sprintf("%d min %d s", totalSec/60, totalSec%60)
 }
 
 func formatBitrate(bitsPerSecond float64) string {
