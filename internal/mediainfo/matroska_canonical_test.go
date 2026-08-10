@@ -1380,6 +1380,64 @@ func TestMatroskaAC3CanonicalSeedTracksJOCProbe(t *testing.T) {
 	assertMatroskaDirectStreamMatchesLegacy(t, stream, "canonical-eac3-joc.mkv")
 }
 
+// TestMatroskaAC3CanonicalProbeShowsDependentStreamAsEAC3 pins the text rule
+// from MediaInfoLib HighestFormat (MediaInfo_Internal.cpp): a raw Format of
+// AC-3 with a "Dep" additional feature displays as E-AC-3, while the
+// structured value stays AC-3.
+func TestMatroskaAC3CanonicalProbeShowsDependentStreamAsEAC3(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		ac3      ac3Info
+		wantText string
+		wantInfo string
+		wantFeat string
+	}{
+		{
+			name:     "dependent",
+			wantText: "E-AC-3",
+			wantInfo: "Enhanced AC-3",
+			wantFeat: "Dep",
+		},
+		{
+			name:     "dependent with joc",
+			ac3:      ac3Info{hasJOC: true},
+			wantText: "E-AC-3 JOC",
+			wantInfo: "Enhanced AC-3 with Joint Object Coding",
+			wantFeat: "Dep JOC",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			stream := Stream{
+				Kind: StreamAudio,
+				canonicalSeed: matroskaAC3CanonicalSeed(matroskaAC3CanonicalFacts{
+					format: "E-AC-3", audioChannels: 6,
+				}),
+			}
+			probe := &matroskaAudioProbe{format: "E-AC-3", ok: true}
+			applyMatroskaAC3CanonicalProbe(&stream, probe, test.ac3, true)
+			refreshCanonicalCompatibilitySnapshot(&stream)
+
+			// stream.Fields is the default-text projection that RenderText reads.
+			text := map[string]string{}
+			for _, field := range stream.Fields {
+				text[field.Name] = field.Value
+			}
+			if got := text["Format"]; got != test.wantText {
+				t.Errorf("text Format = %q, want %q", got, test.wantText)
+			}
+			if got := text["Format/Info"]; got != test.wantInfo {
+				t.Errorf("text Format/Info = %q, want %q", got, test.wantInfo)
+			}
+			if got, found := canonicalSeedValue(stream, "Format"); !found || got != "AC-3" {
+				t.Errorf("canonical Format = %q, %v; want %q", got, found, "AC-3")
+			}
+			if got, found := canonicalSeedValue(stream, "Format_AdditionalFeatures"); !found || got != test.wantFeat {
+				t.Errorf("canonical Format_AdditionalFeatures = %q, %v; want %q", got, found, test.wantFeat)
+			}
+		})
+	}
+}
+
 func TestMatroskaAC3CanonicalProbeProjectsCenterSurroundLayout(t *testing.T) {
 	stream := Stream{
 		Kind: StreamAudio,

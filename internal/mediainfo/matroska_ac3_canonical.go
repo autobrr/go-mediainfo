@@ -128,12 +128,16 @@ func applyMatroskaAC3CanonicalProbe(stream *Stream, probe *matroskaAudioProbe, a
 	}
 	hasJOC := probe.format == "E-AC-3" && ac3HasJOCInfo(ac3)
 	if dependentEAC3 {
-		additional := "Dep"
+		// A dependent substream keeps the raw Format of AC-3, but MediaInfoLib
+		// HighestFormat (MediaInfo_Internal.cpp) turns the "Dep" feature into a
+		// displayed E-AC-3 and drops "Dep" from the text.
+		suffix := ""
 		if hasJOC {
-			additional += " JOC"
+			suffix = " JOC"
 		}
-		replaceCanonicalSeedFill(stream, "Format", "AC-3", "Format", "AC-3")
-		replaceCanonicalSeedText(stream, "Format/Info", "Audio Coding 3")
+		additional := "Dep" + suffix
+		replaceCanonicalSeedFill(stream, "Format", "AC-3", "Format", "E-AC-3"+suffix)
+		replaceCanonicalSeedText(stream, "Format/Info", mapMatroskaFormatInfo("E-AC-3"+suffix))
 		replaceCanonicalSeedFill(stream, "Format_Profile", "Blu-ray Disc", "Format profile", "Blu-ray Disc")
 		replaceCanonicalSeedFill(stream, "Format_AdditionalFeatures", additional, "", "")
 		if hasJOC {
