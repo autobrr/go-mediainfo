@@ -333,6 +333,7 @@ func parseMatroskaWithOptions(r io.ReaderAt, size int64, opts AnalyzeOptions, pu
 		}
 		if (!matroskaHasCompleteTagStats(info.Tracks, info.tagStats) || needEncoders || needLangs || info.generalTags["ENCODER"] == "") && size > scanSize {
 			encodedDate := findField(info.General, "Encoded date")
+			writingApp := findField(info.General, "Writing application")
 			var tagEncoders map[uint64]string
 			var tagSettings map[uint64]string
 			var tagLangs map[uint64]string
@@ -347,7 +348,7 @@ func parseMatroskaWithOptions(r io.ReaderAt, size int64, opts AnalyzeOptions, pu
 					if tagsSize > 0 {
 						tagsBuf := make([]byte, tagsSize)
 						if n, err := r.ReadAt(tagsBuf, tagsOffset); n == len(tagsBuf) && (err == nil || err == io.EOF) {
-							tagEncoders, tagSettings, tagLangs, tagStats, generalTags, scopedTags = parseMatroskaTagsFromBuffer(tagsBuf, encodedDate)
+							tagEncoders, tagSettings, tagLangs, tagStats, generalTags, scopedTags = parseMatroskaTagsFromBuffer(tagsBuf, encodedDate, writingApp)
 							tagsRead = matroskaTagsHaveData(tagEncoders, tagSettings, tagLangs, tagStats, generalTags)
 						}
 					}
@@ -366,7 +367,7 @@ func parseMatroskaWithOptions(r io.ReaderAt, size int64, opts AnalyzeOptions, pu
 							head = buf
 						}
 					}
-					headEncoders, headSettings, headLangs, headStats, headGeneralTags, headScopedTags := parseMatroskaTagsFromBuffer(head, encodedDate)
+					headEncoders, headSettings, headLangs, headStats, headGeneralTags, headScopedTags := parseMatroskaTagsFromBuffer(head, encodedDate, writingApp)
 					tagEncoders = headEncoders
 					tagSettings = headSettings
 					tagLangs = headLangs
@@ -386,7 +387,7 @@ func parseMatroskaWithOptions(r io.ReaderAt, size int64, opts AnalyzeOptions, pu
 				if tailSize > 0 {
 					tail := make([]byte, tailSize)
 					if n, err := r.ReadAt(tail, size-tailSize); n == len(tail) && (err == nil || err == io.EOF) {
-						enc, settings, langs, tailStats, tailGeneralTags, tailScopedTags := parseMatroskaTagsFromBuffer(tail, encodedDate)
+						enc, settings, langs, tailStats, tailGeneralTags, tailScopedTags := parseMatroskaTagsFromBuffer(tail, encodedDate, writingApp)
 						tagEncoders = mergeMatroskaTagEncoders(tagEncoders, enc)
 						tagSettings = mergeMatroskaTagValues(tagSettings, settings)
 						tagLangs = mergeMatroskaTagValues(tagLangs, langs)
@@ -1135,7 +1136,8 @@ func parseMatroskaSegmentWithBudget(buf []byte, assetBudget *embeddedAssetBudget
 		}
 		if id == mkvIDTags {
 			encodedDate := findField(info.General, "Encoded date")
-			tagEncoders, tagSettings, tagLangs, tagStats, generalTags, scopedTags := parseMatroskaTags(buf[dataStart:dataEnd], encodedDate)
+			writingApp := findField(info.General, "Writing application")
+			tagEncoders, tagSettings, tagLangs, tagStats, generalTags, scopedTags := parseMatroskaTags(buf[dataStart:dataEnd], encodedDate, writingApp)
 			for uid, enc := range tagEncoders {
 				if enc != "" {
 					encodersByTrackUID[uid] = enc
@@ -1465,8 +1467,8 @@ func formatSegmentUID(payload []byte) string {
 		return ""
 	}
 	value := new(big.Int).SetBytes(payload)
-	hex := fmt.Sprintf("%X", payload)
-	return fmt.Sprintf("%s (0x%s)", value.String(), hex)
+	// MediaInfoLib prints the numeric value in hex without leading zeros.
+	return fmt.Sprintf("%s (0x%X)", value, value)
 }
 
 // matroskaSegmentInfo stores decoded Segment Info timing and display metadata.
@@ -1537,7 +1539,7 @@ func parseMatroskaInfo(buf []byte) (matroskaSegmentInfo, bool) {
 				fields = append(fields, Field{Name: "Title", Value: strings.TrimSpace(strings.TrimRight(string(payload), "\x00"))})
 			}
 		case mkvIDDateUTC:
-			if value, ok := readSigned(payload); ok {
+			if value, ok := readUnsigned(payload); ok {
 				fields = append(fields, Field{Name: "Encoded date", Value: formatMatroskaDateUTC(value)})
 			}
 		case mkvIDErrorDetection:
@@ -1562,14 +1564,12 @@ func parseMatroskaInfo(buf []byte) (matroskaSegmentInfo, bool) {
 }
 
 // formatMatroskaDateUTC converts a Matroska nanosecond offset from the 2001
-// epoch to a whole-second UTC timestamp.
-func formatMatroskaDateUTC(deltaNs int64) string {
-	base := time.Date(2001, time.January, 1, 0, 0, 0, 0, time.UTC)
-	value := base.Add(time.Duration(deltaNs))
-	if value.Nanosecond() != 0 {
-		value = value.Truncate(time.Second).Add(time.Second)
-	}
-	return value.Format("2006-01-02 15:04:05 UTC")
+// epoch to a whole-second UTC timestamp. MediaInfoLib treats the offset as
+// unsigned and truncates the Unix seconds to 32 bits, so out-of-range values
+// (e.g. mkvmerge "no_variable_data" writing the Unix epoch) wrap the same way.
+func formatMatroskaDateUTC(deltaNs uint64) string {
+	seconds := uint32(deltaNs/1e9 + 978307200)
+	return time.Unix(int64(seconds), 0).UTC().Format("2006-01-02 15:04:05 UTC")
 }
 
 // formatMatroskaTagEncodedDate trims a tag date and appends the UTC suffix
@@ -3655,7 +3655,7 @@ func matroskaColorSource(value string, fallback string) string {
 // parseMatroskaTags extracts legacy parser metadata, file-level fields, and
 // TrackUID-scoped fields from a Tags payload. encodedDate rejects stale
 // Matroska statistics tags.
-func parseMatroskaTags(buf []byte, encodedDate string) (map[uint64]string, map[uint64]string, map[uint64]string, map[uint64]matroskaTagStats, map[string]string, matroskaScopedTags) {
+func parseMatroskaTags(buf []byte, encodedDate, writingApp string) (map[uint64]string, map[uint64]string, map[uint64]string, map[uint64]matroskaTagStats, map[string]string, matroskaScopedTags) {
 	encodersByTrackUID := map[uint64]string{}
 	settingsByTrackUID := map[uint64]string{}
 	langsByTrackUID := map[uint64]string{}
@@ -3720,7 +3720,7 @@ func parseMatroskaTags(buf []byte, encodedDate string) (map[uint64]string, map[u
 				if tagLanguage = strings.TrimSpace(tagLanguage); tagLanguage != "" && tags["LANGUAGE"] != "" && langsByTrackUID[trackUID] == "" {
 					langsByTrackUID[trackUID] = tagLanguage
 				}
-				stats, hasStats := parseMatroskaTagStats(tags, encodedDate)
+				stats, hasStats := parseMatroskaTagStats(tags, encodedDate, writingApp)
 				if creationTime := formatMatroskaTagEncodedDate(tags["CREATION_TIME"]); creationTime != "" {
 					stats.encodedDate = creationTime
 					stats.hasEncodedDate = true
@@ -3777,7 +3777,7 @@ func parseMatroskaTags(buf []byte, encodedDate string) (map[uint64]string, map[u
 
 // parseMatroskaTagsFromBuffer finds complete Tags elements in buf and merges
 // their legacy metadata, statistics, General fields, and TrackUID-scoped fields.
-func parseMatroskaTagsFromBuffer(buf []byte, encodedDate string) (map[uint64]string, map[uint64]string, map[uint64]string, map[uint64]matroskaTagStats, map[string]string, matroskaScopedTags) {
+func parseMatroskaTagsFromBuffer(buf []byte, encodedDate, writingApp string) (map[uint64]string, map[uint64]string, map[uint64]string, map[uint64]matroskaTagStats, map[string]string, matroskaScopedTags) {
 	encodersByTrackUID := map[uint64]string{}
 	settingsByTrackUID := map[uint64]string{}
 	langsByTrackUID := map[uint64]string{}
@@ -3803,7 +3803,7 @@ func parseMatroskaTagsFromBuffer(buf []byte, encodedDate string) (map[uint64]str
 			searchPos = start + 1
 			continue
 		}
-		tagEncoders, tagSettings, tagLangs, tagStats, tagGeneral, tagScoped := parseMatroskaTags(buf[dataStart:dataEnd], encodedDate)
+		tagEncoders, tagSettings, tagLangs, tagStats, tagGeneral, tagScoped := parseMatroskaTags(buf[dataStart:dataEnd], encodedDate, writingApp)
 		for uid, enc := range tagEncoders {
 			if enc == "" {
 				continue
@@ -4539,7 +4539,7 @@ func parseMatroskaSimpleTagTree(buf []byte, parent []string, tags map[string]str
 	}
 }
 
-func parseMatroskaTagStats(tags map[string]string, encodedDate string) (matroskaTagStats, bool) {
+func parseMatroskaTagStats(tags map[string]string, encodedDate, writingApp string) (matroskaTagStats, bool) {
 	if len(tags) == 0 {
 		return matroskaTagStats{}, false
 	}
@@ -4554,40 +4554,41 @@ func parseMatroskaTagStats(tags map[string]string, encodedDate string) (matroska
 		return matroskaTagStats{}, false
 	}
 	statsDateUTC := strings.TrimSpace(tags["_STATISTICS_WRITING_DATE_UTC"])
-	if statsDateUTC != "" && !parseMatroskaStatsUTC(statsDateUTC) {
-		return matroskaTagStats{}, false
-	}
 	hasWritingDate := statsDateUTC != ""
 	headerUTC := strings.TrimSpace(strings.TrimSuffix(encodedDate, " UTC"))
 	if before, _, ok := strings.Cut(headerUTC, " / "); ok {
 		headerUTC = strings.TrimSpace(before)
 	}
 	statsUTC := strings.TrimSpace(strings.TrimSuffix(statsDateUTC, " UTC"))
-	trusted := true
-	if headerUTC != "" && statsUTC != "" {
-		trusted = statsUTC >= headerUTC
-	}
+	// MediaInfoLib compares the dates as plain strings; a stats date older
+	// than the segment date means the file was remuxed after the stats were
+	// written, so the values are reported but not used.
+	trusted := statsUTC >= headerUTC
 	if !trusted {
-		extras := make([]jsonKV, 0, 5)
 		statsApp := strings.TrimSpace(tags["_STATISTICS_WRITING_APP"])
-		if statsApp != "" && statsUTC != "" && headerUTC != "" {
-			extras = append(extras, jsonKV{Key: "Statistics_Tags_Issue", Val: statsApp + " " + statsUTC + " / " + statsApp + " " + headerUTC})
-		}
-		for _, item := range []struct {
-			tag string
-			key string
-		}{
-			{tag: "BPS", key: "FromStats_BitRate"},
-			{tag: "DURATION", key: "FromStats_Duration"},
-			{tag: "NUMBER_OF_FRAMES", key: "FromStats_FrameCount"},
-			{tag: "NUMBER_OF_BYTES", key: "FromStats_StreamSize"},
-		} {
-			if value := strings.TrimSpace(tags[item.tag]); value != "" {
-				extras = append(extras, jsonKV{Key: item.key, Val: value})
+		extras := make([]jsonKV, 0, len(list)+1)
+		extras = append(extras, jsonKV{Key: "Statistics_Tags_Issue", Val: statsApp + " " + statsUTC + " / " + writingApp + " " + headerUTC})
+		for _, name := range list {
+			value := strings.TrimSpace(strings.TrimRight(tags[name], "\x00"))
+			if value == "" {
+				continue
 			}
-		}
-		if len(extras) == 0 {
-			return matroskaTagStats{}, false
+			key := name
+			switch name {
+			case "BPS":
+				key = "BitRate"
+			case "DURATION":
+				key = "Duration"
+			case "NUMBER_OF_FRAMES":
+				key = "FrameCount"
+			case "NUMBER_OF_BYTES":
+				key = "StreamSize"
+			case "NUMBER_OF_BYTES_UNCOMPRESSED":
+				key = "Stream Size (Uncompressed)"
+			case "SOURCE_ID":
+				key = "OriginalSourceMedium_ID"
+			}
+			extras = append(extras, jsonKV{Key: "FromStats_" + key, Val: value})
 		}
 		return matroskaTagStats{extras: extras}, true
 	}
@@ -4663,26 +4664,6 @@ func parseMatroskaStatisticsDuration(value string) (float64, int, bool) {
 		return 0, 0, false
 	}
 	return total, prec, true
-}
-
-func parseMatroskaStatsUTC(value string) bool {
-	value = strings.TrimSpace(strings.TrimSuffix(value, " UTC"))
-	if value == "" {
-		return false
-	}
-	layouts := []string{
-		"2006-01-02 15:04:05",
-		"2006-01-02 15:04:05.000000",
-		"2006-01-02 15:04:05.000000000",
-		time.RFC3339,
-		"2006-01-02T15:04:05",
-	}
-	for _, layout := range layouts {
-		if _, err := time.Parse(layout, value); err == nil {
-			return true
-		}
-	}
-	return false
 }
 
 func matroskaStatsAppMatches(statsApp string, writingApp string, muxingApp string) bool {

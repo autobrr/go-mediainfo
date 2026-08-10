@@ -44,7 +44,7 @@ func TestParseMatroskaTracks(t *testing.T) {
 
 func TestParseMatroskaStatsTags(t *testing.T) {
 	tagsPayload := buildMatroskaTagForStats(123)
-	encoders, settings, langs, stats, _, _ := parseMatroskaTags(tagsPayload, "")
+	encoders, settings, langs, stats, _, _ := parseMatroskaTags(tagsPayload, "", "")
 	if got := encoders[123]; got != "Lavf60.3.100" {
 		t.Fatalf("unexpected encoder: %q", got)
 	}
@@ -78,7 +78,7 @@ func TestParseMatroskaGeneralTags(t *testing.T) {
 	targets := buildMatroskaElement(mkvIDTagTargets, nil)
 	tagsPayload := buildMatroskaElement(mkvIDTag, append(targets, body...))
 
-	_, _, _, _, generalTags, _ := parseMatroskaTags(tagsPayload, "")
+	_, _, _, _, generalTags, _ := parseMatroskaTags(tagsPayload, "", "")
 	if got := generalTags["IMDB"]; got != "tt32612507" {
 		t.Fatalf("IMDB = %q, want tt32612507", got)
 	}
@@ -95,7 +95,7 @@ func TestParseMatroskaTrackSourceTags(t *testing.T) {
 	targets := buildMatroskaElement(mkvIDTagTargets, buildMatroskaElement(mkvIDTagTrackUID, encodeMatroskaUint(123)))
 	tagsPayload := buildMatroskaElement(mkvIDTag, append(targets, body...))
 
-	_, _, _, stats, _, _ := parseMatroskaTags(tagsPayload, "")
+	_, _, _, stats, _, _ := parseMatroskaTags(tagsPayload, "", "")
 	got := stats[123]
 	if len(got.extras) != 1 || got.extras[0] != (jsonKV{Key: "SOURCE", Val: "UHD Blu-ray"}) {
 		t.Fatalf("extras = %#v", got.extras)
@@ -891,7 +891,7 @@ func TestMatroskaTagCompletenessIsPerTrack(t *testing.T) {
 
 func TestParseMatroskaTagsCarriesTagLanguage(t *testing.T) {
 	tag := buildMatroskaLanguageTag(7, "jpn")
-	_, _, langs, _, _, _ := parseMatroskaTags(tag, "")
+	_, _, langs, _, _, _ := parseMatroskaTags(tag, "", "")
 	if got := langs[7]; got != "jpn" {
 		t.Fatalf("TagLanguage = %q, want jpn", got)
 	}
@@ -1052,7 +1052,7 @@ func TestParseMatroskaTagStatsWithoutDate(t *testing.T) {
 		"DURATION":                "00:42:01.080000000",
 		"NUMBER_OF_FRAMES":        "63027",
 		"NUMBER_OF_BYTES":         "1863676305",
-	}, "")
+	}, "", "")
 	if !ok || !stats.trusted {
 		t.Fatalf("expected trusted stats, got: %+v", stats)
 	}
@@ -1064,7 +1064,7 @@ func TestParseMatroskaTagStatsWithoutDate(t *testing.T) {
 func TestParseMatroskaTagStatsBareDurationIsAuthoritative(t *testing.T) {
 	bare, ok := parseMatroskaTagStats(map[string]string{
 		"DURATION": "00:42:01.080000000",
-	}, "")
+	}, "", "")
 	if !ok || !bare.hasDuration || !bare.trusted || !bare.bareDuration {
 		t.Fatalf("bare DURATION not parsed: ok=%v stats=%+v", ok, bare)
 	}
@@ -1075,7 +1075,7 @@ func TestParseMatroskaTagStatsBareDurationIsAuthoritative(t *testing.T) {
 	listed, ok := parseMatroskaTagStats(map[string]string{
 		"_STATISTICS_TAGS": "DURATION",
 		"DURATION":         "00:42:01.080000000",
-	}, "")
+	}, "", "")
 	if !ok || !listed.trusted || listed.bareDuration || !listed.hasDuration || listed.durationSeconds <= 0 {
 		t.Fatalf("listed DURATION did not produce trusted statistics: ok=%v stats=%+v", ok, listed)
 	}
@@ -2248,4 +2248,47 @@ func makeMPEG2SequenceHeaderWithFlatMatrices(intra, nonIntra uint32) []byte {
 	}
 	payload = payload[:(writer.bit+7)/8]
 	return append([]byte{0x00, 0x00, 0x01, 0xB3}, payload...)
+}
+
+func TestParseMatroskaTagStatsDistrustsOlderDate(t *testing.T) {
+	stats, ok := parseMatroskaTagStats(map[string]string{
+		"_STATISTICS_TAGS":             "BPS DURATION NUMBER_OF_FRAMES NUMBER_OF_BYTES",
+		"_STATISTICS_WRITING_APP":      "no_variable_data",
+		"_STATISTICS_WRITING_DATE_UTC": "1970-01-01 00:00:00",
+		"BPS":                          "7969978",
+		"DURATION":                     "00:37:47.268000000",
+		"NUMBER_OF_FRAMES":             "54360",
+		"NUMBER_OF_BYTES":              "2258759550",
+	}, "2010-02-22 21:41:29 UTC", "no_variable_data")
+	if !ok || stats.trusted {
+		t.Fatalf("expected distrusted stats, got ok=%v stats=%+v", ok, stats)
+	}
+	want := []jsonKV{
+		{Key: "Statistics_Tags_Issue", Val: "no_variable_data 1970-01-01 00:00:00 / no_variable_data 2010-02-22 21:41:29"},
+		{Key: "FromStats_BitRate", Val: "7969978"},
+		{Key: "FromStats_Duration", Val: "00:37:47.268000000"},
+		{Key: "FromStats_FrameCount", Val: "54360"},
+		{Key: "FromStats_StreamSize", Val: "2258759550"},
+	}
+	if len(stats.extras) != len(want) {
+		t.Fatalf("extras mismatch: %+v", stats.extras)
+	}
+	for i, kv := range want {
+		if stats.extras[i] != kv {
+			t.Fatalf("extras[%d] = %+v, want %+v", i, stats.extras[i], kv)
+		}
+	}
+}
+
+func TestFormatMatroskaDateUTCWrapsLikeMediaInfo(t *testing.T) {
+	// mkvmerge "no_variable_data" writes the Unix epoch as a negative offset
+	// from the 2001 epoch; MediaInfoLib's unsigned 32-bit decode wraps it.
+	unixEpochOffset := uint64(978307200000000000)
+	raw := -unixEpochOffset
+	if got := formatMatroskaDateUTC(raw); got != "2010-02-22 21:41:29 UTC" {
+		t.Fatalf("wrapped date = %q", got)
+	}
+	if got := formatMatroskaDateUTC(387252489000000000); got != "2013-04-10 02:08:09 UTC" {
+		t.Fatalf("normal date = %q", got)
+	}
 }

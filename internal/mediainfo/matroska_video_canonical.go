@@ -625,6 +625,10 @@ func applyMatroskaStaticVideoTiming(builder *canonicalStreamBuilder, facts matro
 	if facts.invalidAVCHRD {
 		displayRate = formatFrameRate(rate)
 	}
+	if !emitRatio {
+		// Without FrameRate_Num/Den, MediaInfo displays the plain rate.
+		displayRate = formatFrameRate(rate)
+	}
 	builder.Fill("FrameRate", structuredRate, "Frame rate", displayRate)
 	if emitRatio && ratioNum > 0 && ratioDen > 0 {
 		setRatio("FrameRate_Num", strconv.Itoa(ratioNum))

@@ -25,5 +25,9 @@ func formatFrameRateRatio(numer, denom uint32) string {
 		return ""
 	}
 	rate := float64(numer) / float64(denom)
+	// MediaInfo only decorates fractional cadences; x/1 displays plain.
+	if denom == 1 {
+		return formatFrameRate(rate)
+	}
 	return fmt.Sprintf("%.3f (%d/%d) FPS", rate, numer, denom)
 }

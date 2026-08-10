@@ -1444,6 +1444,16 @@ func applyMatroskaTagStats(info *MatroskaInfo, tagStats map[uint64]matroskaTagSt
 		tag := tagStats[trackUID]
 		if len(tag.extras) > 0 {
 			prependCanonicalSeedObjectMembers(stream, "extra", structuredObjectFromKVs(tag.extras).Object)
+			// MediaInfo's Inform output shows distrusted statistics tags as
+			// plain fields after the schema-backed ones.
+			for _, kv := range tag.extras {
+				switch {
+				case kv.Key == "Statistics_Tags_Issue":
+					replaceCanonicalSeedText(stream, "Statistics Tags Issue", kv.Val)
+				case strings.HasPrefix(kv.Key, "FromStats_"):
+					replaceCanonicalSeedText(stream, kv.Key, kv.Val)
+				}
+			}
 		}
 		if tag.hasEncodedDate && tag.encodedDate != "" {
 			replaceCanonicalSeedFill(stream, "Encoded_Date", tag.encodedDate, "Encoded date", tag.encodedDate)
@@ -1545,9 +1555,10 @@ func applyMatroskaTagStats(info *MatroskaInfo, tagStats map[uint64]matroskaTagSt
 				// Statistics Tags cannot identify a standard cadence, the merged
 				// parser value remains authoritative.
 				frameRate, _ = strconv.ParseFloat(matroskaStreamScalar(*stream, "FrameRate"), 64)
-				recognized = frameRate > 0
 			}
-			if recognized {
+			// MediaInfoLib always replaces FrameRate with the statistics-derived
+			// rate; the ratio survives only when the exact value matches one.
+			if frameRate > 0 {
 				numerator, denominator := matroskaFrameRateRatio(frameRate)
 				display := formatFrameRate(frameRate)
 				if numerator > 0 && denominator > 0 {
@@ -2132,7 +2143,12 @@ func applyMatroskaTrackDelays(info *MatroskaInfo, stats map[uint64]*matroskaTrac
 			// MediaInfo: audio Delay is relative to the earliest stream; Video_Delay is relative to video.
 			videoDelaySeconds := float64(stat.minTimeNs+stream.mkvTrackOffsetNs-videoBaseNs-videoBaseOffsetNs) / 1e9
 			videoDelay := fmt.Sprintf("%.3f", videoDelaySeconds)
-			replaceCanonicalSeedFill(stream, "Video_Delay", videoDelay, "", "")
+			// MediaInfo hides the display line when the delay is zero.
+			label, display := "", ""
+			if ms := int64(math.Round(videoDelaySeconds * 1000)); ms != 0 {
+				label, display = "Delay relative to video", formatDelayMs(ms)
+			}
+			replaceCanonicalSeedFill(stream, "Video_Delay", videoDelay, label, display)
 		}
 	}
 }
@@ -4020,4 +4036,31 @@ func streamTrackUID(stream Stream) uint64 {
 	}
 	parsed, _ := strconv.ParseUint(value, 10, 64)
 	return parsed
+}
+
+// applyMatroskaBitsPerPixelFrame emits the text-only coded-pixel density for
+// video tracks that still lack it. MediaInfoLib derives it from BitRate,
+// falling back to BitRate_Nominal, whenever geometry and frame rate are known.
+func applyMatroskaBitsPerPixelFrame(streams []Stream) {
+	for i := range streams {
+		stream := &streams[i]
+		if stream.Kind != StreamVideo {
+			continue
+		}
+		if _, found := canonicalSeedTextValue(*stream, "Bits/(Pixel*Frame)"); found {
+			continue
+		}
+		bitrate, ok := parseInt(matroskaStreamScalar(*stream, "BitRate"))
+		if !ok || bitrate <= 0 {
+			if bitrate, ok = parseInt(matroskaStreamScalar(*stream, "BitRate_Nominal")); !ok || bitrate <= 0 {
+				continue
+			}
+		}
+		width, _ := parsePixels(matroskaStreamScalar(*stream, "Width"))
+		height, _ := parsePixels(matroskaStreamScalar(*stream, "Height"))
+		fps, _ := matroskaCanonicalFrameRate(*stream)
+		if bits := formatBitsPerPixelFrame(float64(bitrate), width, height, fps); bits != "" {
+			replaceCanonicalSeedText(stream, "Bits/(Pixel*Frame)", bits)
+		}
+	}
 }

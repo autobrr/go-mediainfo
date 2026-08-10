@@ -1170,6 +1170,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			_, matroskaRetainedGeneral.streamSize = projectedCanonicalSeedValue(general, "StreamSize")
 			_, matroskaRetainedGeneral.overallBitRateMode = projectedCanonicalSeedValue(general, "OverallBitRate_Mode")
 			applyMatroskaWriterRules(rawWritingApp, &general, streams)
+			applyMatroskaBitsPerPixelFrame(streams)
 		}
 	case "MPEG-TS":
 		if parsedInfo, parsedStreams, generalFields, ok := ParseMPEGTS(file, stat.Size(), opts.ParseSpeed); ok {

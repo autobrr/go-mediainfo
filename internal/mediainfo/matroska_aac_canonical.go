@@ -36,9 +36,18 @@ type matroskaAACCanonicalFacts struct {
 // AudioSpecificConfig facts, including structured-only SBR and PS signaling.
 func matroskaAACCanonicalSeed(facts matroskaAACCanonicalFacts) []fieldEntry {
 	builder := newCanonicalStreamBuilder(StreamAudio)
+	hasSBR := strings.HasPrefix(facts.sbrMode, "Yes")
+	hasPS := strings.HasPrefix(facts.psMode, "Yes")
+	additional := facts.profile
+	if hasSBR {
+		additional = strings.TrimSpace(facts.profile + " SBR")
+		if hasPS {
+			additional += " PS"
+		}
+	}
 	displayFormat := "AAC"
-	if facts.profile != "" {
-		displayFormat += " " + facts.profile
+	if additional != "" {
+		displayFormat += " " + additional
 	}
 	builder.Fill("Format", "AAC", "Format", displayFormat)
 	if facts.trackNumber > 0 {
@@ -51,15 +60,32 @@ func matroskaAACCanonicalSeed(facts matroskaAACCanonicalFacts) []fieldEntry {
 	if facts.codecID != "" {
 		builder.Fill("CodecID", facts.codecID, "Codec ID", facts.codecID)
 	}
-	if facts.profile == "LC" {
+	switch {
+	case facts.profile == "LC" && hasSBR && hasPS:
+		builder.Text("Format/Info", "Advanced Audio Codec Low Complexity with Spectral Band Replication and Parametric Stereo")
+	case facts.profile == "LC" && hasSBR:
+		builder.Text("Format/Info", "Advanced Audio Codec Low Complexity with Spectral Band Replication")
+	case facts.profile == "LC":
 		builder.Text("Format/Info", "Advanced Audio Codec Low Complexity")
-	} else {
+	default:
 		builder.Text("Format/Info", "Advanced Audio Codec")
 	}
-	additional := facts.profile
-	if strings.HasPrefix(facts.sbrMode, "Yes") {
-		additional = strings.TrimSpace(facts.profile + " SBR")
-		builder.Fill("Format_Commercial_IfAny", "HE-AAC", "Commercial name", "HE-AAC")
+	if hasSBR {
+		commercial := "HE-AAC"
+		if hasPS {
+			commercial = "HE-AACv2"
+		}
+		builder.Fill("Format_Commercial_IfAny", commercial, "Commercial name", commercial)
+		// File_Aac: Format_Settings reflects the outermost signaling.
+		mode := facts.sbrMode
+		if hasPS {
+			mode = facts.psMode
+		}
+		if strings.Contains(mode, "Explicit") {
+			builder.Text("Format settings", "Explicit")
+		} else if strings.Contains(mode, "NBC") {
+			builder.Text("Format settings", "NBC")
+		}
 	}
 	if facts.sbrMode != "" {
 		builder.Structured("Format_Settings_SBR", facts.sbrMode)
