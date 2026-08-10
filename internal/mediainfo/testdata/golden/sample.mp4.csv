@@ -45,7 +45,7 @@ Duration,4 s 0 ms
 Source duration,4 s 21 ms
 Source_Duration_LastFrame,-11 ms
 Bit rate mode,Constant
-Bit rate,96 kb/s
+Bit rate,96.0 kb/s
 Channel(s),1 channel
 Channel layout,M
 Sampling rate,48.0 kHz
