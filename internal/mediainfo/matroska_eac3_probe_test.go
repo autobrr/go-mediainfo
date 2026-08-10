@@ -262,6 +262,12 @@ func TestApplyMatroskaAudioProbes_EAC3JOCTextMetadata(t *testing.T) {
 	if got := stream.JSONRaw["extra"]; !strings.Contains(got, `"ComplexityIndex":"16"`) {
 		t.Fatalf("extra missing JOC ComplexityIndex: %s", got)
 	}
+
+	// --language=raw must still carry the mixing metadata the text output drops.
+	raw := RenderTextWithOptions([]Report{{Ref: "eac3.mkv", Streams: []Stream{stream}}}, TextRenderOptions{Language: "raw"})
+	if !strings.Contains(raw, "dialnorm") {
+		t.Fatalf("raw text lost dialnorm:\n%s", raw)
+	}
 }
 
 func TestApplyMatroskaAudioProbes_EAC3TypeAOnlyOmitsAtmosFields(t *testing.T) {
