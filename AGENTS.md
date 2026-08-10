@@ -14,7 +14,13 @@ Owner: soup
 - Don't ask for "continue": run parity + perf loops automatically, then commit/push once verified.
 - Before committing: run `gofmt -w` on touched `.go` files.
 - For `/mnt/storage/...` scans: be polite to disks (sample files; avoid full-tree scans; use `ionice -c3 nice -n 10` when doing bulk comparisons).
+- The parity compare scripts and their sample lists live outside the repo, in `~/.local/share/go-mediainfo-parity/`. They hold media-library paths, so they must stay out of git.
 - Never put release names or media-library paths in anything that lands on GitHub (issues, PRs, commits, this file). Refer to parity samples by ID; the ID -> path map is `docs/agents/parity-samples.md`, kept local-only via `.git/info/exclude`.
+
+## Status (2026-08-10, regression check of `main` against `v0.6.0`)
+- Checked `main` at `1cf5904` against tag `v0.6.0` (`8e6a4d3`), with official MediaInfo v23.04 as the reference. Both builds ran on the same 32 real files, for default text and for `--language=raw` JSON.
+- Result: 22 better, 10 same, 0 worse. No release since `v0.6.0` made any file worse. The 10 unchanged files are the TS, BDAV, and DVD controls, which the recent work does not touch.
+- The per-file text-diff baseline is in `docs/agents/parity-samples.md`, next to the sample IDs. Keep it there, not here, so there is one place to update.
 
 ## Status (2026-08-10, bit rate units + dependent E-AC-3)
 - Fixed: the three bit rate formatters each used a different rule, and none matched official. One function now follows MediaInfoLib `Kilo_Kilo123` (`File__Analyze_Streams.cpp`). Each unit tier keeps one decimal until the source value passes ten times the tier. The division runs in float32, and every boundary is a strict "greater than". `10000000` prints as `10 000 kb/s`, `10414978` prints as `10.4 Mb/s`, and any rate above `100000000` loses the decimal (`100 Mb/s`).
