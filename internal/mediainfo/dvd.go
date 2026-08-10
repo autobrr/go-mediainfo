@@ -338,7 +338,7 @@ func parseDVDVideo(path string, file *os.File, size int64, opts AnalyzeOptions) 
 			bitRateSize = payloadFileSize
 		}
 		overall := (float64(bitRateSize) * 8) / bitRateDuration
-		generalFields = append(generalFields, Field{Name: "Overall bit rate", Value: formatBitrateSmall(overall)})
+		generalFields = append(generalFields, Field{Name: "Overall bit rate", Value: formatBitrate(overall)})
 		info.GeneralFacts.SetSame("OverallBitRate", strconv.FormatInt(int64(overall+0.5), 10))
 	}
 	if videoAttrs.FrameRate > 0 && !titleSetParsed {

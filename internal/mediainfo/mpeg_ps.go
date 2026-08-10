@@ -930,7 +930,7 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 							fields = appendFieldUnique(fields, Field{Name: "Bit rate", Value: value})
 						}
 					case useHeaderBytes:
-						if value := formatBitratePrecise(bitrate); value != "" {
+						if value := formatBitrate(bitrate); value != "" {
 							fields = appendFieldUnique(fields, Field{Name: "Bit rate", Value: value})
 						}
 					default:

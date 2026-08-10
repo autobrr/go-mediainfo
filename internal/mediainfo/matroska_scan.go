@@ -1364,12 +1364,7 @@ func applyMatroskaStats(info *MatroskaInfo, stats map[uint64]*matroskaTrackStats
 			}
 			if durationSeconds > 0 && stat.dataBytes > 0 {
 				bitrate := (float64(stat.dataBytes) * 8) / durationSeconds
-				display := ""
-				if bitrate < 1000 {
-					display = fmt.Sprintf("%.0f b/s", math.Floor(bitrate))
-				} else {
-					display = formatBitrateSmall(bitrate)
-				}
+				display := formatBitrate(bitrate)
 				raw := strconv.FormatInt(int64(bitrate), 10)
 				replaceCanonicalSeedFill(stream, "BitRate", raw, "Bit rate", display)
 			}
@@ -1655,12 +1650,7 @@ func applyMatroskaTagStats(info *MatroskaInfo, tagStats map[uint64]matroskaTagSt
 		bitrate := float64(tag.bitRate)
 		switch stream.Kind {
 		case StreamText:
-			display := ""
-			if bitrate < 1000 {
-				display = fmt.Sprintf("%.0f b/s", math.Floor(bitrate))
-			} else {
-				display = formatBitrateSmall(bitrate)
-			}
+			display := formatBitrate(bitrate)
 			raw := strconv.FormatInt(tag.bitRate, 10)
 			replaceCanonicalSeedFill(stream, "BitRate", raw, "Bit rate", display)
 		case StreamVideo:
