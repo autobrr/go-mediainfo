@@ -1415,11 +1415,17 @@ func TestMatroskaAC3CanonicalProbeShowsDependentStreamAsEAC3(t *testing.T) {
 			}
 			probe := &matroskaAudioProbe{format: "E-AC-3", ok: true}
 			applyMatroskaAC3CanonicalProbe(&stream, probe, test.ac3, true)
+			refreshCanonicalCompatibilitySnapshot(&stream)
 
-			if got := matroskaCanonicalSeedText(stream, "Format"); got != test.wantText {
+			// stream.Fields is the default-text projection that RenderText reads.
+			text := map[string]string{}
+			for _, field := range stream.Fields {
+				text[field.Name] = field.Value
+			}
+			if got := text["Format"]; got != test.wantText {
 				t.Errorf("text Format = %q, want %q", got, test.wantText)
 			}
-			if got := matroskaCanonicalSeedText(stream, "Format/Info"); got != test.wantInfo {
+			if got := text["Format/Info"]; got != test.wantInfo {
 				t.Errorf("text Format/Info = %q, want %q", got, test.wantInfo)
 			}
 			if got, found := canonicalSeedValue(stream, "Format"); !found || got != "AC-3" {
