@@ -2337,8 +2337,7 @@ func parseCanonicalMatroskaTrackEntry(buf []byte, segmentDuration float64, durat
 					spf = 2048.0
 				}
 				frameRate := audioSampleRate / spf
-				// Keep enough precision so duration from FrameCount/FrameRate matches official JSON rounding.
-				fields = append(fields, Field{Name: "Frame rate", Value: fmt.Sprintf("%.4f FPS (%.0f SPF)", frameRate, spf)})
+				fields = append(fields, Field{Name: "Frame rate", Value: fmt.Sprintf("%.3f FPS (%.0f SPF)", frameRate, spf)})
 			}
 		}
 		if flacInfo.bitsPerSample > 0 {

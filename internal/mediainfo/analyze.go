@@ -940,7 +940,9 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 					rawWritingLibrary = field.Value
 				}
 				if field.Name == "Title" {
+					// MediaInfo displays the resolved title as "Movie name" after tag merge.
 					replaceCanonicalSeedFill(&general, "Title", field.Value, "", "")
+					continue
 				}
 				if field.Name == "Encoded date" {
 					replaceCanonicalSeedFill(&general, "Encoded_Date", field.Value, "", "")
@@ -978,6 +980,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 					"Cover": strings.Join(values, " / "), "Cover_Description": strings.Join(coverNames, " / "),
 					"Cover_Mime": strings.Join(coverMimes, " / "), "Cover_Type": strings.Join(coverTypes, " / "),
 				})
+				general.Fields = appendFieldUnique(general.Fields, Field{Name: "Cover", Value: strings.Join(values, " / ")})
 			}
 			applyLegacyMatroskaFrameRateRatio(rawWritingApp, streams)
 			generalExtras := []jsonKV{}
@@ -986,6 +989,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			}
 			if len(parsed.attachments) > 0 {
 				generalExtras = append(generalExtras, jsonKV{Key: "Attachments", Val: strings.Join(parsed.attachments, " / ")})
+				general.Fields = appendFieldUnique(general.Fields, Field{Name: "Attachments", Value: strings.Join(parsed.attachments, " / ")})
 			}
 			if len(generalExtras) > 0 {
 				node := structuredObjectFromKVs(generalExtras)
@@ -1024,6 +1028,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 			if title := canonicalTitle; title != "" {
 				replaceCanonicalSeedFill(&general, "Title", title, "", "")
 				replaceCanonicalSeedFill(&general, "Movie", title, "", "")
+				general.Fields = appendFieldUnique(general.Fields, Field{Name: "Movie name", Value: title})
 			}
 			generalValues := map[string]string{"IsStreamable": "Yes"}
 			if info.DurationSeconds > 0 {

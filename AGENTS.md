@@ -15,6 +15,12 @@ Owner: soup
 - Before committing: run `gofmt -w` on touched `.go` files.
 - For `/mnt/storage/...` scans: be polite to disks (sample files; avoid full-tree scans; use `ionice -c3 nice -n 10` when doing bulk comparisons).
 
+## Status (2026-08-09)
+- Default TEXT output (what upbrr posts) was missing Matroska metadata that official shows: General `extra` tags (IMDB/TMDB/TVDB, any dynamic tag), `Attachments`, `Cover`, track-scoped tags (FILENAME/MIMETYPE), and `Movie name`. Reported by a darkpeers moderator (uploads flagged as modified). Never worked in any commit; JSON and `--language=raw` were always complete.
+- Fixed on this pass: dynamic tags + Attachments + Cover now emitted as display fields; General `Title` renders as `Movie name` after tag merge; `Movie name`/`Encoded date`/`Tagged date` now order before `Writing application` (official template order); ASS/SSA `Codec ID/Info`; Matroska AAC text frame rate 4 -> 3 decimals (`46.875 FPS`).
+- Verified vs official v23.04 on root@media: synthetic tag/attachment mkvs now text-identical (sans our `ReportBy` trailer + our Image track for covers, which official v23.04 lacks); 9 real mkv sweep `improved=9 worse=0`; mp4/ts text and all JSON byte-identical to main.
+- Known remaining text gaps (pre-existing, separate work): `Statistics Tags Issue`/`FromStats_*` text lines, fake stats-date handling (`no_variable_data` -> Encoded date), HE-AAC SBR detection on some files, `Delay relative to video`, `Bits/(Pixel*Frame)` rounding on one sample, `Count of elements` emitted for tiny text tracks where official omits, mkv `Nominal bit rate` vs `Bit rate` labeling with stats tags.
+
 ## Status (2026-02-16)
 - CI: `gofmt` clean; `go test ./...` green.
 - Parity target: official `/usr/bin/mediainfo --Output=JSON --Language=raw --ParseSpeed=0.5` (MediaInfoLib v23.04).

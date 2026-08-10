@@ -30,8 +30,13 @@ func matroskaTextCanonicalSeed(
 	if codecID != "" {
 		builder.Fill("CodecID", codecID, "Codec ID", codecID)
 	}
-	if codecID == "S_TEXT/UTF8" {
+	switch codecID {
+	case "S_TEXT/UTF8":
 		builder.Text("Codec ID/Info", "UTF-8 Plain Text")
+	case "S_TEXT/ASS":
+		builder.Text("Codec ID/Info", "Advanced Sub Station Alpha")
+	case "S_TEXT/SSA":
+		builder.Text("Codec ID/Info", "Sub Station Alpha")
 	}
 	if trackUID > 0 {
 		builder.Structured("UniqueID", strconv.FormatUint(trackUID, 10))

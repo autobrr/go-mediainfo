@@ -404,6 +404,14 @@ func applyMatroskaTrackTags(info *MatroskaInfo) {
 			}
 		}
 		mergeMatroskaDynamicCanonicalExtras(stream, dynamic)
+		// MediaInfo's Inform output lists unrecognized tags after the
+		// schema-backed stream fields.
+		for _, member := range dynamic {
+			if member.Key == "" || member.Value.Kind != structuredString || member.Value.Text == "" {
+				continue
+			}
+			replaceCanonicalSeedText(stream, member.Key, member.Value.Text)
+		}
 	}
 }
 
@@ -444,6 +452,12 @@ func applyMatroskaGeneralTags(general *Stream, set matroskaTagSet) {
 		replaceCanonicalSeedFill(general, "Movie_More", titleMore, "", "")
 	}
 	mergeMatroskaDynamicCanonicalExtras(general, dynamic)
+	for _, member := range dynamic {
+		if member.Key == "" || member.Value.Kind != structuredString || member.Value.Text == "" {
+			continue
+		}
+		general.Fields = appendFieldUnique(general.Fields, Field{Name: member.Key, Value: member.Value.Text})
+	}
 }
 
 // mergeMatroskaTitle mirrors MediaInfo's repeated-value handling: retain the
