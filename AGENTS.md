@@ -16,6 +16,12 @@ Owner: soup
 - For `/mnt/storage/...` scans: be polite to disks (sample files; avoid full-tree scans; use `ionice -c3 nice -n 10` when doing bulk comparisons).
 - Never put release names or media-library paths in anything that lands on GitHub (issues, PRs, commits, this file). Refer to parity samples by ID; the ID -> path map is `docs/agents/parity-samples.md`, kept local-only via `.git/info/exclude`.
 
+## Status (2026-08-10, issue #34)
+- Added an AAC `raw_data_block` walker ported from MediaInfoLib `File_Aac_GeneralAudio.cpp` (all syntactic elements plus huffman section, scale-factor, and spectral decode; tables generated into `aac_huffman_tables.go`). Matroska AAC tracks walk their first 128 frames (official `Frame_Count_Valid` at ParseSpeed >= 0.5). A frame that does not end with an `ID_END` element fills `Errors: Missing ID_END` in text and JSON extra.
+- Finding: official v23.04 reports `Missing ID_END` on sample `mkv-07`, but that report is a false positive. The official trace reads the fill element at the same offset we do, then its SBR parser overruns the fill's declared 32-byte payload and stops with "Wrong size". The `ID_END` element is present at the declared boundary on all 128 frames (our walk consumes each frame bit-exactly), and ffmpeg decodes the whole HE-AAC track with zero warnings. We keep the correct answer and do not port the SBR overrun, so `mkv-07` keeps a 1-line text diff by design.
+- Field test vs official v23.04: `mkv-01`..`mkv-10` text diff `0` except `mkv-07` = `1` (the false-positive line above); JSON diffs unchanged (known `Encoded_Application_Name/Version` split, env-only `File_Created_Date`, `mkv-08` pre-existing off-by-one `BitRate`). `mp4-01` output byte-identical to main.
+- New fuzz target `FuzzAACRawDataBlock` added to the CI fuzz smoke and the scheduled fuzz workflow (20s local run clean).
+
 ## Status (2026-08-10)
 - Follow-up to the 2026-08-09 text-gap pass: fixed almost all remaining pre-existing Matroska default-text gaps.
 - Root-cause find: Matroska `DateUTC` must be decoded like MediaInfoLib (unsigned ns since 2001, Unix seconds truncated to 32 bits). mkvmerge `no_variable_data` files wrap to `2010-02-22 21:41:29`; our signed decode gave `1970-01-01`, which made the Statistics Tags date comparison pass and trust stats official rejects.

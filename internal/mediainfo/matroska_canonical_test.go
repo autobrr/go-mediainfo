@@ -2232,3 +2232,67 @@ func TestMatroskaDTSCanonicalProbeShowsESXChInText(t *testing.T) {
 		t.Fatalf("missing DTS ES text entries: %v", wantText)
 	}
 }
+
+// buildMatroskaAACStreamForTest parses a minimal stereo A_AAC TrackEntry.
+func buildMatroskaAACStreamForTest(t *testing.T) Stream {
+	t.Helper()
+	audioPayload := buildMatroskaElement(mkvIDChannels, encodeMatroskaUint(2))
+	samplingRate := make([]byte, 8)
+	binary.BigEndian.PutUint64(samplingRate, math.Float64bits(48_000))
+	audioPayload = append(audioPayload, buildMatroskaElement(mkvIDSamplingRate, samplingRate)...)
+
+	payload := buildMatroskaElement(mkvIDTrackNumber, encodeMatroskaUint(2))
+	payload = append(payload, buildMatroskaElement(mkvIDTrackUID, encodeMatroskaUint(456))...)
+	payload = append(payload, buildMatroskaElement(mkvIDTrackType, encodeMatroskaUint(2))...)
+	payload = append(payload, buildMatroskaElement(mkvIDCodecID, []byte("A_AAC"))...)
+	payload = append(payload, buildMatroskaElement(mkvIDCodecPrivate, []byte{0x11, 0x90})...)
+	payload = append(payload, buildMatroskaElement(mkvIDTrackAudio, audioPayload)...)
+
+	stream, ok := parseMatroskaTrackEntry(payload, 2.5, 3)
+	if !ok {
+		t.Fatal("AAC TrackEntry did not parse")
+	}
+	return stream
+}
+
+func TestMatroskaAACProbeEmitsMissingIDEndError(t *testing.T) {
+	stream := buildMatroskaAACStreamForTest(t)
+	info := MatroskaInfo{Tracks: []Stream{stream}}
+	applyMatroskaAudioProbes(&info, map[uint64]*matroskaAudioProbe{2: {
+		format: "AAC", ok: true, aacMissingEnd: true,
+	}})
+	stream = info.Tracks[0]
+	foundText := false
+	for _, entry := range stream.canonicalSeed {
+		if entry.TextLabel == "Errors" {
+			foundText = true
+			if !entry.Options.ShowText || entry.Value.Text != "Missing ID_END" {
+				t.Fatalf("Errors seed entry = %#v", entry)
+			}
+		}
+	}
+	if !foundText {
+		t.Fatal("Errors text entry missing from canonical seed")
+	}
+	extra := matroskaCanonicalSeedNode(stream, "extra")
+	if extra == nil || extra.Kind != structuredObject || len(extra.Object) == 0 {
+		t.Fatalf("canonical extra = %#v", extra)
+	}
+	if extra.Object[0].Key != "Errors" || extra.Object[0].Value.Text != "Missing ID_END" {
+		t.Fatalf("extra[0] = %#v", extra.Object[0])
+	}
+}
+
+func TestMatroskaAACProbeCleanFramesEmitNoError(t *testing.T) {
+	stream := buildMatroskaAACStreamForTest(t)
+	info := MatroskaInfo{Tracks: []Stream{stream}}
+	applyMatroskaAudioProbes(&info, map[uint64]*matroskaAudioProbe{2: {
+		format: "AAC", ok: true, aacFrames: 128,
+	}})
+	stream = info.Tracks[0]
+	for _, field := range stream.Fields {
+		if field.Name == "Errors" {
+			t.Fatalf("clean AAC track has Errors field: %q", field.Value)
+		}
+	}
+}

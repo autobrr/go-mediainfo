@@ -38,6 +38,7 @@ jobs:
           go test ./internal/mediainfo -run=^$ -fuzz=FuzzMatroskaAttachmentSecurity -fuzztime=2m
           go test ./internal/mediainfo -run=^$ -fuzz=FuzzReadMatroskaBlockHeader -fuzztime=2m
           go test ./internal/mediainfo -run=^$ -fuzz=FuzzScanMatroskaClusters -fuzztime=2m
+          go test ./internal/mediainfo -run=^$ -fuzz=FuzzAACRawDataBlock -fuzztime=2m
 
       - name: Upload fuzz crashers/corpus
         if: failure()

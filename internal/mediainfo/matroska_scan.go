@@ -77,6 +77,12 @@ type matroskaAudioProbe struct {
 	dependentEAC3     bool
 	dependentStats    bool
 	headerStrip       []byte
+	// AAC raw_data_block walk (File_Aac parses Frame_Count_Valid frames and
+	// reports "Missing ID_END" when a frame does not end with an END element).
+	aacState        *aacRDBState
+	aacFrames       int
+	aacTargetFrames int
+	aacMissingEnd   bool
 }
 
 // matroskaPayloadState models File_Mk's per-track Searching_Payload lifecycle.
@@ -1007,6 +1013,11 @@ func readMatroskaBlockHeader(er *ebmlReader, size int64, audioProbes map[uint64]
 							peek = min(peek, remaining-prefixBytes)
 						}
 					}
+				case needAudio && audioProbe != nil && audioProbe.format == "AAC":
+					// The raw_data_block walk needs the complete frame; AAC frames
+					// are bounded at 6144 bits per channel, so 32 KB covers any
+					// valid lace while still capping malformed sizes.
+					peek = 32768
 				case needAudio && audioProbe != nil && audioProbe.format == "DTS":
 					// DTS-HD extension substream (ExSS) follows the core frame, which can be several KB.
 					// Cap at 32 KB to avoid large allocations on oversized blocks.
@@ -1869,6 +1880,13 @@ func applyMatroskaAudioProbes(info *MatroskaInfo, probes map[uint64]*matroskaAud
 		trackID := streamTrackNumber(*stream)
 		probe := probes[trackID]
 		if probe == nil || !probe.ok {
+			continue
+		}
+		if probe.format == "AAC" {
+			if probe.aacMissingEnd {
+				replaceCanonicalSeedText(stream, "Errors", "Missing ID_END")
+				prependCanonicalSeedObjectMembers(stream, "extra", structuredObjectFromKVs([]jsonKV{{Key: "Errors", Val: "Missing ID_END"}}).Object)
+			}
 			continue
 		}
 		if probe.format == "MPEG Audio" {
@@ -2834,6 +2852,28 @@ func probeMatroskaAudio(probes map[uint64]*matroskaAudioProbe, track uint64, pay
 	}
 	probe := probes[track]
 	if probe == nil || (probe.ok && !probe.collect) {
+		return
+	}
+	if probe.format == "AAC" {
+		if probe.aacState == nil {
+			return
+		}
+		// Only walk complete frames; a truncated peek would misread element
+		// boundaries and flag a false Missing ID_END.
+		if packetBytes > 0 && int64(len(payload)) < packetBytes {
+			return
+		}
+		if !probe.aacState.walkFrame(payload) {
+			probe.aacMissingEnd = true
+			probe.ok = true
+			probe.exhausted = true
+			return
+		}
+		probe.aacFrames++
+		if probe.aacFrames >= probe.aacTargetFrames {
+			probe.ok = true
+			probe.exhausted = true
+		}
 		return
 	}
 	if probe.format == "TrueHD" {
