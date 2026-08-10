@@ -416,3 +416,22 @@ func mkvProbeMaps(mode uint8) (map[uint64]*matroskaAudioProbe, map[uint64]*matro
 			}
 	}
 }
+
+func FuzzAACRawDataBlock(f *testing.F) {
+	f.Add([]byte{0x11, 0x90}, []byte{})
+	f.Add([]byte{0x11, 0x90}, []byte{0xE0})
+	f.Add([]byte{0x11, 0x90}, []byte{0x00, 0x00, 0x00, 0x00})
+	f.Add([]byte{0x2B, 0x11, 0x88, 0x00}, []byte{0x01, 0x40, 0x20, 0x06, 0xFF, 0xE1})
+
+	f.Fuzz(func(t *testing.T, asc []byte, frame []byte) {
+		asc = fuzzLimit(asc)
+		frame = fuzzLimit(frame)
+		cfg, ok := parseAACRDBConfig(asc)
+		if !ok || !cfg.walkable() {
+			return
+		}
+		state := newAACRDBState(cfg)
+		_ = state.walkFrame(frame)
+		_ = state.walkFrame(frame)
+	})
+}

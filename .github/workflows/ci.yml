@@ -48,6 +48,7 @@ jobs:
           go test ./internal/mediainfo -run=^$ -fuzz=FuzzMatroskaAttachmentSecurity -fuzztime=3s
           go test ./internal/mediainfo -run=^$ -fuzz=FuzzReadMatroskaBlockHeader -fuzztime=3s
           go test ./internal/mediainfo -run=^$ -fuzz=FuzzScanMatroskaClusters -fuzztime=3s
+          go test ./internal/mediainfo -run=^$ -fuzz=FuzzAACRawDataBlock -fuzztime=3s
 
       - name: go mod tidy
         run: |

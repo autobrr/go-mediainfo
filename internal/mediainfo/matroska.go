@@ -442,6 +442,26 @@ func parseMatroskaWithOptions(r io.ReaderAt, size int64, opts AnalyzeOptions, pu
 				switch stream.Kind {
 				case StreamAudio:
 					format := matroskaStreamScalar(stream, "Format")
+					if strings.HasPrefix(format, "AAC") {
+						// File_Aac walks raw_data_block on the first
+						// Frame_Count_Valid frames and reports Missing ID_END
+						// when one does not terminate with an END element.
+						if cfg, ok := parseAACRDBConfig(stream.mkvCodecPrivate); ok && cfg.walkable() {
+							probe := &matroskaAudioProbe{
+								format:          "AAC",
+								aacState:        newAACRDBState(cfg),
+								aacTargetFrames: 128,
+							}
+							if opts.ParseSpeed < 0.5 {
+								probe.aacTargetFrames = 32
+								if opts.ParseSpeed < 0.3 {
+									probe.aacTargetFrames = 8
+								}
+							}
+							audioProbes[id] = probe
+						}
+						continue
+					}
 					if format != "AC-3" && format != "E-AC-3" && format != "DTS" && format != "TrueHD" && format != "MPEG Audio" {
 						continue
 					}
@@ -2782,6 +2802,9 @@ func parseCanonicalMatroskaTrackEntry(buf []byte, segmentDuration float64, durat
 		mkvOmitDerivedFLACLayout: flacChannelsFromPrivate,
 	}
 	if kind == StreamVideo && format == "MPEG Video" {
+		stream.mkvCodecPrivate = append([]byte(nil), codecPrivate...)
+	}
+	if kind == StreamAudio && strings.HasPrefix(codecID, "A_AAC") {
 		stream.mkvCodecPrivate = append([]byte(nil), codecPrivate...)
 	}
 	switch {
