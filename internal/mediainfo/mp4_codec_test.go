@@ -82,17 +82,20 @@ func TestParseMP4CodecFromStsd(t *testing.T) {
 	}
 }
 
-func buildTrackWithStsd(handler, sample string) []byte {
+func buildTrackWithStsd(handler, sample string, childBoxes ...[]byte) []byte {
 	var stsd bytes.Buffer
 	stsd.Write([]byte{0x00, 0x00, 0x00, 0x00})
 	if err := binary.Write(&stsd, binary.BigEndian, uint32(1)); err != nil {
 		panic(err)
 	}
 	entry := make([]byte, 86)
-	binary.BigEndian.PutUint32(entry[0:4], uint32(len(entry)))
 	copy(entry[4:8], []byte(sample))
 	binary.BigEndian.PutUint16(entry[32:34], 1920)
 	binary.BigEndian.PutUint16(entry[34:36], 1080)
+	for _, child := range childBoxes {
+		entry = append(entry, child...)
+	}
+	binary.BigEndian.PutUint32(entry[0:4], uint32(len(entry)))
 	stsd.Write(entry)
 
 	var stbl bytes.Buffer
@@ -138,7 +141,9 @@ func TestParseMP4CodecAV1FromStsd(t *testing.T) {
 	binary.BigEndian.PutUint32(mvhd[12:16], 1000)
 	binary.BigEndian.PutUint32(mvhd[16:20], 10000)
 
-	trak := buildTrackWithStsd("vide", "av01")
+	var av1CBuf bytes.Buffer
+	writeMP4Box(&av1CBuf, "av1C", []byte{0x81, 0x05, 0x0C, 0x00})
+	trak := buildTrackWithStsd("vide", "av01", av1CBuf.Bytes())
 	var moov bytes.Buffer
 	writeMP4Box(&moov, "mvhd", mvhd)
 	writeMP4Box(&moov, "trak", trak)
