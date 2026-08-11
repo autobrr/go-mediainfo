@@ -184,7 +184,7 @@ func TestParseMP4CodecAV1FromStsd(t *testing.T) {
 	if v := findField(info.Tracks[0].Fields, "Format/Info"); v != "AOMedia Video 1" {
 		t.Fatalf("Format/Info=%q, want AOMedia Video 1", v)
 	}
-	if v := findField(info.Tracks[0].Fields, "Codec ID/Info"); v != "AOMedia Video 1" {
-		t.Fatalf("Codec ID/Info=%q, want AOMedia Video 1", v)
+	if v := findField(info.Tracks[0].Fields, "Codec ID/Info"); v != "" {
+		t.Fatalf("Codec ID/Info=%q, want absent", v)
 	}
 }

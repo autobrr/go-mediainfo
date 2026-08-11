@@ -1217,8 +1217,7 @@ func mapVideoFormatInfo(sampleType string) string {
 
 func mapVideoCodecIDInfo(sampleType string) string {
 	switch sampleType {
-	case "av01":
-		return "AOMedia Video 1"
+	// av01: info column in MediaInfoLib CodecID_Video_Mpeg4.csv is empty.
 	case "avc1", "avc3":
 		return "Advanced Video Coding"
 	case "hvc1", "hev1":
