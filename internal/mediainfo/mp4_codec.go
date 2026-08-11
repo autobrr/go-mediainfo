@@ -156,6 +156,8 @@ func parseStsdForSample(buf []byte) (SampleInfo, bool) {
 // codec format.
 func mapMP4SampleEntry(sample string) string {
 	switch sample {
+	case "av01":
+		return "AV1"
 	case "avc1", "avc3":
 		return "AVC"
 	case "hvc1", "hev1":
@@ -190,7 +192,7 @@ func mapMP4SampleEntry(sample string) string {
 // isVideoSampleEntry reports whether sample is a supported MP4 video entry.
 func isVideoSampleEntry(sample string) bool {
 	switch sample {
-	case "avc1", "avc3", "hvc1", "hev1", "mp4v", "vp09":
+	case "av01", "avc1", "avc3", "hvc1", "hev1", "mp4v", "vp09":
 		return true
 	default:
 		return false
@@ -1200,6 +1202,8 @@ func parseBtrt(entry []byte, start int) (uint32, uint32, uint32, bool) {
 
 func mapVideoFormatInfo(sampleType string) string {
 	switch sampleType {
+	case "av01":
+		return "AOMedia Video 1"
 	case "avc1", "avc3":
 		return "Advanced Video Codec"
 	case "hvc1", "hev1":
@@ -1213,6 +1217,7 @@ func mapVideoFormatInfo(sampleType string) string {
 
 func mapVideoCodecIDInfo(sampleType string) string {
 	switch sampleType {
+	// av01: info column in MediaInfoLib CodecID_Video_Mpeg4.csv is empty.
 	case "avc1", "avc3":
 		return "Advanced Video Coding"
 	case "hvc1", "hev1":

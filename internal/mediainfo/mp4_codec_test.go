@@ -82,17 +82,20 @@ func TestParseMP4CodecFromStsd(t *testing.T) {
 	}
 }
 
-func buildTrackWithStsd(handler, sample string) []byte {
+func buildTrackWithStsd(handler, sample string, childBoxes ...[]byte) []byte {
 	var stsd bytes.Buffer
 	stsd.Write([]byte{0x00, 0x00, 0x00, 0x00})
 	if err := binary.Write(&stsd, binary.BigEndian, uint32(1)); err != nil {
 		panic(err)
 	}
 	entry := make([]byte, 86)
-	binary.BigEndian.PutUint32(entry[0:4], uint32(len(entry)))
 	copy(entry[4:8], []byte(sample))
 	binary.BigEndian.PutUint16(entry[32:34], 1920)
 	binary.BigEndian.PutUint16(entry[34:36], 1080)
+	for _, child := range childBoxes {
+		entry = append(entry, child...)
+	}
+	binary.BigEndian.PutUint32(entry[0:4], uint32(len(entry)))
 	stsd.Write(entry)
 
 	var stbl bytes.Buffer
@@ -128,4 +131,60 @@ func buildSttsBox() []byte {
 	binary.BigEndian.PutUint32(buf[8:12], 300)
 	binary.BigEndian.PutUint32(buf[12:16], 3000)
 	return buf
+}
+
+func TestParseMP4CodecAV1FromStsd(t *testing.T) {
+	var buf bytes.Buffer
+	writeMP4Box(&buf, "ftyp", []byte{'i', 's', 'o', 'm'})
+	mvhd := make([]byte, 20)
+	mvhd[0] = 0
+	binary.BigEndian.PutUint32(mvhd[12:16], 1000)
+	binary.BigEndian.PutUint32(mvhd[16:20], 10000)
+
+	var av1CBuf bytes.Buffer
+	writeMP4Box(&av1CBuf, "av1C", []byte{0x81, 0x05, 0x0C, 0x00})
+	trak := buildTrackWithStsd("vide", "av01", av1CBuf.Bytes())
+	var moov bytes.Buffer
+	writeMP4Box(&moov, "mvhd", mvhd)
+	writeMP4Box(&moov, "trak", trak)
+	writeMP4Box(&buf, "moov", moov.Bytes())
+
+	file, err := os.CreateTemp(t.TempDir(), "sample-av1-*.mp4")
+	if err != nil {
+		t.Fatalf("temp: %v", err)
+	}
+	if _, err := file.Write(buf.Bytes()); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	stat, err := os.Stat(file.Name())
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+
+	f, err := os.Open(file.Name())
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer f.Close()
+
+	info, ok := ParseMP4(f, stat.Size())
+	if !ok {
+		t.Fatalf("expected mp4 info")
+	}
+	if len(info.Tracks) != 1 {
+		t.Fatalf("expected 1 track, got %d", len(info.Tracks))
+	}
+	if info.Tracks[0].Format != "AV1" {
+		t.Fatalf("format=%q, want AV1", info.Tracks[0].Format)
+	}
+	if v := findField(info.Tracks[0].Fields, "Format/Info"); v != "AOMedia Video 1" {
+		t.Fatalf("Format/Info=%q, want AOMedia Video 1", v)
+	}
+	if v := findField(info.Tracks[0].Fields, "Codec ID/Info"); v != "" {
+		t.Fatalf("Codec ID/Info=%q, want absent", v)
+	}
 }
