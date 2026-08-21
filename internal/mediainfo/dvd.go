@@ -243,6 +243,7 @@ func parseDVDVideo(path string, file *os.File, size int64, opts AnalyzeOptions) 
 			if parsedInfo, parsedStreams, ok := ParseMPEGPSFiles(vobPaths, aggregateSize, mpegPSOptions{dvdExtras: true, dvdParsing: true, parseSpeed: opts.ParseSpeed}); ok {
 				info.FileSize = aggregateSize
 				streams = mergeDVDTitleSetStreams(parsedStreams, dvdTitleSetSource(base))
+				overlayDVDDeclaredLanguages(streams, audioAttrs, subpicAttrs)
 				streams = mergeDVDDeclaredStreams(streams, audioAttrs, subpicAttrs, ifoDurationSeconds, dvdTitleSetSource(base))
 				payloadDurationSeconds = dvdPayloadCanonicalDuration(streams)
 				if normalizeDVDConstantVideoClock(streams, ifoDurationSeconds) {

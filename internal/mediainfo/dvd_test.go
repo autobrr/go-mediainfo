@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -146,6 +147,51 @@ func TestAnalyzeVTSIFOFallsBackToProgramMetadataForInvalidVOB(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestAnalyzeVTSIFOAppliesLanguageToParsedAudio(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "VIDEO_TS")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	ifoPath := filepath.Join(root, "VTS_01_0.IFO")
+	ifoData := make([]byte, 0x0300)
+	copy(ifoData[:12], []byte("DVDVIDEO-VTS"))
+	ifoData[dvdVideoAttrVTSOffset] = 0x4C
+	binary.BigEndian.PutUint16(ifoData[dvdAudioCountVTSOffset:], 1)
+	ifoData[dvdAudioAttrVTSOffset+1] = 1
+	ifoData[dvdAudioAttrVTSOffset+2] = 'e'
+	ifoData[dvdAudioAttrVTSOffset+3] = 'n'
+	if err := os.WriteFile(ifoPath, ifoData, 0o644); err != nil { //nolint:gosec // test fixture
+		t.Fatalf("write IFO: %v", err)
+	}
+
+	vobData, err := os.ReadFile(filepath.Join("samples", "sample_ac3.vob"))
+	if err != nil {
+		t.Fatalf("read VOB fixture: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "VTS_01_1.VOB"), vobData, 0o644); err != nil { //nolint:gosec // test fixture
+		t.Fatalf("write VOB: %v", err)
+	}
+
+	report, err := AnalyzeFile(ifoPath)
+	if err != nil {
+		t.Fatalf("AnalyzeFile: %v", err)
+	}
+	if text := RenderText([]Report{report}); !strings.Contains(text, padRight("Language", textLabelWidth)+": English") {
+		t.Fatal("text output lacks the IFO-declared audio language")
+	}
+	for _, stream := range report.Streams {
+		if stream.Kind != StreamAudio || findField(stream.Fields, "ID") != "189 (0xBD)-128 (0x80)" {
+			continue
+		}
+		if got := findField(stream.Fields, "Bit rate"); got == "" {
+			t.Fatal("matched audio stream lacks VOB-derived details")
+		}
+		return
+	}
+	t.Fatal("missing parsed AC-3 audio stream")
 }
 
 func TestAnalyzeVTSIFOUsesBUPOnlyForMissingLanguage(t *testing.T) {
