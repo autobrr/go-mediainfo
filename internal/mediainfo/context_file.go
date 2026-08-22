@@ -31,6 +31,10 @@ func (c *contextFile) Seek(offset int64, whence int) (int64, error) {
 	return c.f.Seek(offset, whence)
 }
 
+func (c *contextFile) Stat() (os.FileInfo, error) {
+	return c.f.Stat()
+}
+
 func (c *contextFile) Close() error {
 	return c.f.Close()
 }

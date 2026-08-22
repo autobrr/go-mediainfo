@@ -1713,7 +1713,7 @@ func analyzeFileWithOptions(ctx context.Context, path string, opts AnalyzeOption
 		var parsedStreams []Stream
 		var ok bool
 		if len(psPaths) > 1 || dvdMenu {
-			parsedInfo, parsedStreams, ok = ParseMPEGPSFiles(psPaths, psSize, mpegPSOptions{dvdExtras: dvdExtras, dvdParsing: dvdParsing, dvdMenu: dvdMenu, parseSpeed: parseSpeed})
+			parsedInfo, parsedStreams, ok = ParseMPEGPSFiles(psPaths, psSize, mpegPSOptions{dvdExtras: dvdExtras, dvdParsing: dvdParsing, dvdMenu: dvdMenu, parseSpeed: parseSpeed, inputContext: ctx, inputPath: path})
 		} else {
 			parsedInfo, parsedStreams, ok = ParseMPEGPSWithOptions(file, psSize, mpegPSOptions{dvdExtras: dvdExtras, dvdParsing: dvdParsing, parseSpeed: parseSpeed})
 		}
