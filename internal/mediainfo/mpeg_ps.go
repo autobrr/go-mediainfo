@@ -1787,7 +1787,7 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 				ccVideoDuration = duration
 			}
 		}
-		if ccStream := buildCCTextStream(ccEntry, videoDelay, ccVideoDuration, videoFrameRate); ccStream != nil {
+		if ccStreams := buildCCTextStreams(ccEntry, videoDelay, ccVideoDuration, videoFrameRate); len(ccStreams) > 0 {
 			insertAt := -1
 			for i := len(streamsOut) - 1; i >= 0; i-- {
 				if streamsOut[i].Kind == StreamAudio {
@@ -1804,11 +1804,12 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 				}
 			}
 			if insertAt >= 0 && insertAt < len(streamsOut) {
-				streamsOut = append(streamsOut, Stream{})
-				copy(streamsOut[insertAt+1:], streamsOut[insertAt:])
-				streamsOut[insertAt] = *ccStream
+				oldLen := len(streamsOut)
+				streamsOut = append(streamsOut, make([]Stream, len(ccStreams))...)
+				copy(streamsOut[insertAt+len(ccStreams):], streamsOut[insertAt:oldLen])
+				copy(streamsOut[insertAt:], ccStreams)
 			} else {
-				streamsOut = append(streamsOut, *ccStream)
+				streamsOut = append(streamsOut, ccStreams...)
 			}
 		}
 	}

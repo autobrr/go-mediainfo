@@ -6,13 +6,28 @@ import (
 	"strconv"
 )
 
-// buildCCTextStream projects one detected MPEG-PS caption service into a
+// buildCCTextStreams projects every detected MPEG-PS caption field into a
 // canonical text stream and its public compatibility snapshot.
-func buildCCTextStream(entry *psStream, videoDelay float64, videoDuration float64, frameRate float64) *Stream {
-	track, service := selectCCTrack(entry)
-	if track == nil {
+func buildCCTextStreams(entry *psStream, videoDelay float64, videoDuration float64, frameRate float64) []Stream {
+	if entry == nil || !entry.ccFound {
 		return nil
 	}
+	streams := make([]Stream, 0, 2)
+	for _, candidate := range []struct {
+		track   *ccTrack
+		service string
+	}{
+		{track: &entry.ccOdd, service: "CC1"},
+		{track: &entry.ccEven, service: "CC3"},
+	} {
+		if candidate.track.found {
+			streams = append(streams, buildCCTextStream(entry, candidate.track, candidate.service, videoDelay, videoDuration, frameRate))
+		}
+	}
+	return streams
+}
+
+func buildCCTextStream(entry *psStream, track *ccTrack, service string, videoDelay float64, videoDuration float64, frameRate float64) Stream {
 	service = ccServiceName(service)
 	idLabel := fmt.Sprintf("%s-%s", formatID(uint64(entry.id)), service)
 	fields := []Field{
@@ -150,20 +165,7 @@ func buildCCTextStream(entry *psStream, videoDelay float64, videoDuration float6
 		&extraNode,
 		canonicalStreamPolicy{SkipStreamOrder: true, SkipComputed: true},
 	)
-	return &stream
-}
-
-func selectCCTrack(entry *psStream) (*ccTrack, string) {
-	if entry == nil || !entry.ccFound {
-		return nil, ""
-	}
-	if entry.ccEven.found {
-		return &entry.ccEven, "CC3"
-	}
-	if entry.ccOdd.found {
-		return &entry.ccOdd, "CC1"
-	}
-	return nil, ""
+	return stream
 }
 
 func ccPTSSeconds(value uint64) float64 {

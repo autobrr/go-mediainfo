@@ -2753,7 +2753,8 @@ func dvdPayloadStreamIdentity(id string) (pesID, subID int, hasSubID, ok bool) {
 
 // mergeDVDDeclaredStreams retains payload streams while filling declared DVD
 // identities that a bounded VOB scan did not encounter. Existing VOB facts
-// always win; synthesized streams contain only IFO-owned attributes.
+// always win; disabled PGC subpictures are ignored, and EIA-608 captions do
+// not satisfy RLE declarations.
 func mergeDVDDeclaredStreams(streams []Stream, audio []dvdAudioAttrs, subpics []dvdSubpicAttrs, duration float64, source string) []Stream {
 	used := make([]bool, len(streams))
 	result := make([]Stream, 0, max(len(streams), 1+len(audio)+len(subpics)))
@@ -2763,25 +2764,53 @@ func mergeDVDDeclaredStreams(streams []Stream, audio []dvdAudioAttrs, subpics []
 			used[i] = true
 		}
 	}
-	appendKind := func(kind StreamKind, target int, makeMissing func(int) Stream) {
-		count := 0
-		for i := range streams {
-			if !used[i] && streams[i].Kind == kind {
-				result = append(result, streams[i])
-				used[i] = true
-				count++
-			}
-		}
-		for index := count; index < target; index++ {
-			result = append(result, makeMissing(index))
+	audioCount := 0
+	for i := range streams {
+		if !used[i] && streams[i].Kind == StreamAudio {
+			result = append(result, streams[i])
+			used[i] = true
+			audioCount++
 		}
 	}
-	appendKind(StreamAudio, len(audio), func(index int) Stream {
-		return buildDVDDeclaredAudioStream(audio[index], duration, source)
-	})
-	appendKind(StreamText, len(subpics), func(index int) Stream {
-		return buildDVDDeclaredTextStream(subpics[index], duration, source)
-	})
+	for index := audioCount; index < len(audio); index++ {
+		result = append(result, buildDVDDeclaredAudioStream(audio[index], duration, source))
+	}
+	textStart := len(result)
+	payloadSubpictures := make(map[int]struct{}, len(subpics))
+	for i := range streams {
+		if used[i] || streams[i].Kind != StreamText {
+			continue
+		}
+		result = append(result, streams[i])
+		used[i] = true
+		id, ok := canonicalSeedValue(streams[i], "ID")
+		if !ok {
+			continue
+		}
+		subID, ok := dvdPrivateSubstreamID(id)
+		if ok && subID >= 0x20 && subID <= 0x3F {
+			payloadSubpictures[subID-0x20] = struct{}{}
+		}
+	}
+	for _, subpic := range subpics {
+		if subpic.StreamID < 0 {
+			continue
+		}
+		_, found := payloadSubpictures[subpic.StreamID]
+		if !found {
+			for _, alternate := range subpic.AlternateStreamIDs {
+				if _, found = payloadSubpictures[alternate]; found {
+					break
+				}
+			}
+		}
+		if found {
+			continue
+		}
+		result = append(result, buildDVDDeclaredTextStream(subpic, duration, source))
+		payloadSubpictures[subpic.StreamID] = struct{}{}
+	}
+	sortDVDPayloadStreams(result[textStart:])
 	for i := range streams {
 		if !used[i] {
 			result = append(result, streams[i])

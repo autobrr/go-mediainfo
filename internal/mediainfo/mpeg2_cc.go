@@ -23,7 +23,10 @@ func consumeMPEG2Captions(entry *psStream, payload []byte, pts uint64, hasPTS bo
 			if hasMPEG2CaptionHeader(userData) {
 				entry.ccHeaderFound = true
 			}
-			if hasCC, ccType, hasCommand, hasDisplay := parseMPEG2UserData(userData); hasCC {
+			for ccType, observation := range parseMPEG2UserDataFields(userData) {
+				if !observation.hasCC {
+					continue
+				}
 				framesBefore := entry.videoFrameCount
 				entry.ccFound = true
 				track := &entry.ccOdd
@@ -43,10 +46,10 @@ func consumeMPEG2Captions(entry *psStream, payload []byte, pts uint64, hasPTS bo
 				if hasPTS {
 					track.lastPTS = pts
 				}
-				if hasPTS && hasCommand && track.firstCommandPTS == 0 {
+				if hasPTS && observation.hasCommand && track.firstCommandPTS == 0 {
 					track.firstCommandPTS = pts
 				}
-				if hasDisplay && track.firstType == "" {
+				if observation.hasDisplay && track.firstType == "" {
 					if hasPTS {
 						track.firstDisplayPTS = pts
 					}
@@ -78,11 +81,11 @@ func hasMPEG2CaptionHeader(data []byte) bool {
 	return false
 }
 
-func parseGA94UserData(data []byte) (bool, int, bool, bool) {
+func parseGA94UserDataFields(data []byte) [2]ccParseState {
+	var fields [2]ccParseState
 	if len(data) < 6 {
-		return false, 0, false, false
+		return fields
 	}
-	state := ccParseState{}
 	for i := 0; i+5 < len(data); i++ {
 		if data[i] != 'G' || data[i+1] != 'A' || data[i+2] != '9' || data[i+3] != '4' {
 			continue
@@ -106,26 +109,27 @@ func parseGA94UserData(data []byte) (bool, int, bool, bool) {
 			ccData1 := data[idx+1] & 0x7F
 			ccData2 := data[idx+2] & 0x7F
 			if ccValid && (ccTypeVal == 0 || ccTypeVal == 1) {
-				state.apply(ccData1, ccData2, ccTypeVal == 1)
+				fields[ccTypeVal].apply(ccData1, ccData2)
 			}
 			idx += 3
 		}
 	}
-	return resolveCCResult(state.hasCC, state.seenType0, state.seenType1, state.hasCommand, state.hasDisplay)
+	return fields
 }
 
-func parseDVDUserData(data []byte) (bool, int, bool, bool) {
+func parseDVDUserDataFields(data []byte) [2]ccParseState {
+	var fields [2]ccParseState
 	if len(data) < 6 {
-		return false, 0, false, false
+		return fields
 	}
 	if data[0] != 'C' || data[1] != 'C' {
-		return false, 0, false, false
+		return fields
 	}
 	if data[2] != 0x01 {
-		return false, 0, false, false
+		return fields
 	}
 	if data[3] != 0xF8 {
-		return false, 0, false, false
+		return fields
 	}
 
 	flags := data[4]
@@ -133,10 +137,9 @@ func parseDVDUserData(data []byte) (bool, int, bool, bool) {
 	extra := int(flags & 0x01)
 	totalBlocks := blockCount*2 + extra
 	if totalBlocks <= 0 {
-		return false, 0, false, false
+		return fields
 	}
 
-	state := ccParseState{}
 	idx := 5
 	for j := 0; j < totalBlocks && idx+2 < len(data); j++ {
 		if idx+3 > len(data) {
@@ -147,7 +150,12 @@ func parseDVDUserData(data []byte) (bool, int, bool, bool) {
 			idx += 3
 			continue
 		}
-		odd := (field & 0x01) != 0
+		// DVD caption blocks use 0xFF for field 1 and 0xFE for field 2.
+		// cc_type follows the GA94 convention where 0 is field 1 and 1 is field 2.
+		ccType := 0
+		if field == 0xFE {
+			ccType = 1
+		}
 		raw1 := data[idx+1]
 		raw2 := data[idx+2]
 		if raw1 == 0x80 && raw2 == 0x80 {
@@ -157,38 +165,36 @@ func parseDVDUserData(data []byte) (bool, int, bool, bool) {
 		ccData1 := raw1 & 0x7F
 		ccData2 := raw2 & 0x7F
 		if ccData1 != 0 || ccData2 != 0 {
-			state.apply(ccData1, ccData2, odd)
+			fields[ccType].apply(ccData1, ccData2)
 		}
 		idx += 3
 	}
-	return resolveCCResult(state.hasCC, state.seenType0, state.seenType1, state.hasCommand, state.hasDisplay)
+	return fields
 }
 
-func parseMPEG2UserData(data []byte) (bool, int, bool, bool) {
-	if hasCC, ccType, hasCommand, hasDisplay := parseGA94UserData(data); hasCC {
-		return hasCC, ccType, hasCommand, hasDisplay
+func parseDVDUserData(data []byte) (bool, int, bool, bool) {
+	return resolveCCResult(parseDVDUserDataFields(data))
+}
+
+func parseMPEG2UserDataFields(data []byte) [2]ccParseState {
+	fields := parseGA94UserDataFields(data)
+	if fields[0].hasCC || fields[1].hasCC {
+		return fields
 	}
-	return parseDVDUserData(data)
+	return parseDVDUserDataFields(data)
 }
 
 type ccParseState struct {
 	hasCC      bool
 	hasCommand bool
 	hasDisplay bool
-	seenType0  bool
-	seenType1  bool
 }
 
-func (s *ccParseState) apply(ccData1 byte, ccData2 byte, type1 bool) {
+func (s *ccParseState) apply(ccData1 byte, ccData2 byte) {
 	if ccData1 == 0 && ccData2 == 0 {
 		return
 	}
 	s.hasCC = true
-	if type1 {
-		s.seenType1 = true
-	} else {
-		s.seenType0 = true
-	}
 	if isCCCommand(ccData1, ccData2) {
 		s.hasCommand = true
 		if ccData2 == 0x2F {
@@ -216,17 +222,14 @@ func isCCStartCommand(ccData1 byte, ccData2 byte) bool {
 	}
 }
 
-func resolveCCResult(hasCC bool, seenType0 bool, seenType1 bool, hasCommand bool, hasDisplay bool) (bool, int, bool, bool) {
-	if !hasCC {
-		return false, 0, false, false
+func resolveCCResult(fields [2]ccParseState) (bool, int, bool, bool) {
+	for ccType := len(fields) - 1; ccType >= 0; ccType-- {
+		field := fields[ccType]
+		if field.hasCC {
+			return true, ccType, field.hasCommand, field.hasDisplay
+		}
 	}
-	if seenType1 {
-		return true, 1, hasCommand, hasDisplay
-	}
-	if seenType0 {
-		return true, 0, hasCommand, hasDisplay
-	}
-	return true, 0, hasCommand, hasDisplay
+	return false, 0, false, false
 }
 
 func ccServiceName(name string) string {

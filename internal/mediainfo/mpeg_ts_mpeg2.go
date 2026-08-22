@@ -241,8 +241,10 @@ func parseMPEG2UserDataTS(entry *tsStream, data []byte, pts uint64, hasPTS bool,
 		return
 	}
 	// DVD-style user data fallback (no DTVCC).
-	if hasCC, ccType, _, _ := parseDVDUserData(data); hasCC {
-		updateCCTrackTS(entry, ccType, 0, 0, pts, hasPTS, framesBefore)
+	for ccType, observation := range parseDVDUserDataFields(data) {
+		if observation.hasCC {
+			updateCCTrackTS(entry, ccType, 0, 0, pts, hasPTS, framesBefore)
+		}
 	}
 }
 

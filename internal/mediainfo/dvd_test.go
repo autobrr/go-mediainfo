@@ -247,6 +247,81 @@ func TestAnalyzeVTSIFOAppliesLanguageToRemappedSubpicture(t *testing.T) {
 	t.Fatal("missing parsed RLE subpicture stream")
 }
 
+func TestMergeDVDDeclaredStreamsOmitsDisabledSubpictures(t *testing.T) {
+	caption := Stream{Kind: StreamText}
+	replaceCanonicalSeedFill(&caption, "ID", "224-CC1", "ID", "224 (0xE0)-CC1")
+	replaceCanonicalSeedFill(&caption, "Format", "EIA-608", "Format", "EIA-608")
+
+	subpictures := make([]dvdSubpicAttrs, 32)
+	for i := range subpictures {
+		subpictures[i].StreamID = -1
+	}
+
+	got := mergeDVDDeclaredStreams([]Stream{caption}, nil, subpictures, 0, "VTS_01_1.VOB")
+	if len(got) != 1 {
+		t.Fatalf("stream count = %d, want only the populated caption service", len(got))
+	}
+	if id, _ := canonicalSeedValue(got[0], "ID"); id != "224-CC1" {
+		t.Fatalf("caption ID = %q, want 224-CC1", id)
+	}
+}
+
+func TestMergeDVDDeclaredStreamsKeepsEnabledSubpicturesDistinctFromCaptions(t *testing.T) {
+	caption := Stream{Kind: StreamText}
+	replaceCanonicalSeedFill(&caption, "ID", "224-CC1", "ID", "224 (0xE0)-CC1")
+	replaceCanonicalSeedFill(&caption, "Format", "EIA-608", "Format", "EIA-608")
+
+	got := mergeDVDDeclaredStreams([]Stream{caption}, nil, []dvdSubpicAttrs{{
+		Language:     "English",
+		LanguageCode: "en",
+		StreamID:     1,
+	}}, 0, "VTS_01_1.VOB")
+	if len(got) != 2 {
+		t.Fatalf("stream count = %d, want caption and enabled RLE subpicture", len(got))
+	}
+	if id, _ := canonicalSeedValue(got[1], "ID"); id != "189-33" {
+		t.Fatalf("subpicture ID = %q, want 189-33", id)
+	}
+	if language, _ := canonicalSeedValue(got[1], "Language"); language != "en" {
+		t.Fatalf("subpicture Language = %q, want en", language)
+	}
+}
+
+func TestMergeDVDDeclaredStreamsOrdersSynthesizedSubpicturesByID(t *testing.T) {
+	payload := Stream{Kind: StreamText}
+	replaceCanonicalSeedFill(&payload, "ID", "189-33", "ID", "189 (0xBD)-33 (0x21)")
+	replaceCanonicalSeedFill(&payload, "Format", "RLE", "Format", "RLE")
+
+	got := mergeDVDDeclaredStreams([]Stream{payload}, nil, []dvdSubpicAttrs{
+		{StreamID: 0},
+		{StreamID: 1},
+	}, 0, "VTS_01_1.VOB")
+	if len(got) != 2 {
+		t.Fatalf("stream count = %d, want two RLE subpictures", len(got))
+	}
+	for index, want := range []string{"189-32", "189-33"} {
+		if id, _ := canonicalSeedValue(got[index], "ID"); id != want {
+			t.Fatalf("stream %d ID = %q, want %q", index, id, want)
+		}
+	}
+}
+
+func TestMergeDVDDeclaredStreamsUsesDVDTextOrdering(t *testing.T) {
+	caption := Stream{Kind: StreamText}
+	replaceCanonicalSeedFill(&caption, "ID", "224-CC1", "ID", "224 (0xE0)-CC1")
+	replaceCanonicalSeedFill(&caption, "Format", "EIA-608", "Format", "EIA-608")
+
+	got := mergeDVDDeclaredStreams([]Stream{caption}, nil, []dvdSubpicAttrs{{StreamID: 0}}, 0, "VTS_01_1.VOB")
+	if len(got) != 2 {
+		t.Fatalf("stream count = %d, want RLE subpicture and caption", len(got))
+	}
+	for index, want := range []string{"189-32", "224-CC1"} {
+		if id, _ := canonicalSeedValue(got[index], "ID"); id != want {
+			t.Fatalf("stream %d ID = %q, want %q", index, id, want)
+		}
+	}
+}
+
 func TestAnalyzeVTSIFOUsesBUPOnlyForMissingLanguage(t *testing.T) {
 	tests := []struct {
 		name            string
