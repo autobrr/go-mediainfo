@@ -47,6 +47,16 @@ func FuzzParseMPEGTSPacketizers(f *testing.F) {
 	})
 }
 
+func FuzzParseDVDUserDataFields(f *testing.F) {
+	f.Add([]byte{})
+	f.Add([]byte{'C', 'C', 0x01, 0xF8, 0x82, 0xFF, 0x14, 0x2F, 0xFE, 0x15, 0x2F})
+	f.Add([]byte{'C', 'C', 0x01, 0xF8, 0xFF})
+
+	f.Fuzz(func(_ *testing.T, data []byte) {
+		_ = parseDVDUserDataFields(fuzzLimit(data))
+	})
+}
+
 func FuzzParseMatroskaContainers(f *testing.F) {
 	f.Add([]byte{}, uint8(128))
 	f.Add([]byte{0x1A, 0x45, 0xDF, 0xA3}, uint8(128))

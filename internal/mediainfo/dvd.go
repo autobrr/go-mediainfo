@@ -1121,15 +1121,96 @@ func dvdAudioPrivateID(attrs dvdAudioAttrs, streamID int) int {
 	return streamID
 }
 
-// applyDVDPGCStreamControls applies the referenced PGC's enabled audio and
-// subpicture mappings and returns their menu lists. The boolean reports whether
-// a valid PGC control table was available.
+// applyDVDPGCStreamControls applies enabled audio and subpicture mappings and
+// returns their menu lists. Subtitle mappings cover every retained title PGC.
+// The boolean reports whether a valid PGC control table was available.
 func applyDVDPGCStreamControls(data []byte, pttOffset, pgcOffset int, video dvdVideoAttrs, audio []dvdAudioAttrs, subpics []dvdSubpicAttrs) ([]dvdAudioAttrs, []dvdSubpicAttrs, dvdMenuLists, bool) {
-	base := dvdReferencedPGCBase(data, pttOffset, pgcOffset)
-	return applyDVDPGCStreamControlsAt(data, base, video, audio, subpics, true)
+	bases := dvdReferencedPGCBases(data, pttOffset, pgcOffset)
+	if len(bases) == 0 {
+		return audio, subpics, dvdMenuListsForAspect(video.AspectRatio, len(audio), len(subpics)), false
+	}
+	base := bases[0]
+	audioValues := make([]int, 0, len(audio))
+	for i := range audio {
+		audio[i].StreamID = -1
+		if i >= 8 {
+			continue
+		}
+		control := binary.BigEndian.Uint16(data[base+0x0C+i*2 : base+0x0E+i*2])
+		if control&0x8000 == 0 {
+			continue
+		}
+		streamID := int((control >> 8) & 0x07)
+		audio[i].StreamID = streamID
+		audioValues = append(audioValues, streamID)
+	}
+	if len(audio) <= 4 {
+		for i := range audio {
+			if audio[i].StreamID < 0 && audio[i].Format == "AC-3" {
+				audio[i].StreamID = i
+			}
+		}
+	}
+
+	sub43 := make([]int, 0, len(subpics))
+	subWide := make([]int, 0, len(subpics))
+	subLetter := make([]int, 0, len(subpics))
+	subPan := make([]int, 0, len(subpics))
+	for i := range subpics {
+		subpics[i].StreamID = -1
+		subpics[i].AlternateStreamIDs = nil
+	}
+	listed := make([]bool, len(subpics))
+	addMapping := func(subpic *dvdSubpicAttrs, id int) {
+		if subpic.StreamID < 0 {
+			subpic.StreamID = id
+		} else if subpic.StreamID != id && !slices.Contains(subpic.AlternateStreamIDs, id) {
+			subpic.AlternateStreamIDs = append(subpic.AlternateStreamIDs, id)
+		}
+	}
+	for _, base := range bases {
+		for i := range min(len(subpics), 32) {
+			off := base + 0x1C + i*4
+			control := binary.BigEndian.Uint32(data[off : off+4])
+			if control&0x80000000 == 0 {
+				continue
+			}
+			id43 := int((control >> 24) & 0x7F)
+			idWide := int((control >> 16) & 0x7F)
+			idLetter := int((control >> 8) & 0x7F)
+			idPan := int(control & 0x7F)
+			if !listed[i] {
+				sub43 = append(sub43, id43)
+				subWide = append(subWide, idWide)
+				subLetter = append(subLetter, idLetter)
+				subPan = append(subPan, idPan)
+				listed[i] = true
+			}
+			if video.AspectRatio == "16:9" {
+				addMapping(&subpics[i], idWide)
+				if video.PermittedDisplayFormats == 0 || video.PermittedDisplayFormats == 2 {
+					addMapping(&subpics[i], idLetter)
+				}
+				if video.PermittedDisplayFormats == 0 || video.PermittedDisplayFormats == 1 {
+					addMapping(&subpics[i], idPan)
+				}
+			} else {
+				addMapping(&subpics[i], id43)
+			}
+		}
+	}
+	return audio, subpics, dvdMenuLists{
+		audio:      dvdJoinIndexes(audioValues),
+		sub43:      dvdJoinIndexes(sub43),
+		subWide:    dvdJoinIndexes(subWide),
+		subLetter:  dvdJoinIndexes(subLetter),
+		subPanScan: dvdJoinIndexes(subPan),
+	}, true
 }
 
-func applyDVDPGCStreamControlsAt(data []byte, base int, video dvdVideoAttrs, audio []dvdAudioAttrs, subpics []dvdSubpicAttrs, fallbackAudio bool) ([]dvdAudioAttrs, []dvdSubpicAttrs, dvdMenuLists, bool) {
+// applyDVDPGCStreamControlsAt applies mappings from one PGC for language
+// reconciliation across retained title programs.
+func applyDVDPGCStreamControlsAt(data []byte, base int, video dvdVideoAttrs, audio []dvdAudioAttrs, subpics []dvdSubpicAttrs) ([]dvdAudioAttrs, []dvdSubpicAttrs, dvdMenuLists, bool) {
 	if base < 0 || base+0x9C > len(data) {
 		return audio, subpics, dvdMenuListsForAspect(video.AspectRatio, len(audio), len(subpics)), false
 	}
@@ -1147,14 +1228,6 @@ func applyDVDPGCStreamControlsAt(data []byte, base int, video dvdVideoAttrs, aud
 		audio[i].StreamID = streamID
 		audioValues = append(audioValues, streamID)
 	}
-	if fallbackAudio && len(audio) <= 4 {
-		for i := range audio {
-			if audio[i].StreamID < 0 && audio[i].Format == "AC-3" {
-				audio[i].StreamID = i
-			}
-		}
-	}
-
 	sub43 := make([]int, 0, len(subpics))
 	subWide := make([]int, 0, len(subpics))
 	subLetter := make([]int, 0, len(subpics))
@@ -1210,7 +1283,7 @@ func dvdProgramLanguageMappings(data []byte, programs []dvdProgram, video dvdVid
 	for _, program := range programs {
 		programAudio := slices.Clone(audio)
 		programSubpics := slices.Clone(subpics)
-		programAudio, programSubpics, _, ok := applyDVDPGCStreamControlsAt(data, program.pgcBase, video, programAudio, programSubpics, false)
+		programAudio, programSubpics, _, ok := applyDVDPGCStreamControlsAt(data, program.pgcBase, video, programAudio, programSubpics)
 		if !ok {
 			continue
 		}
@@ -1265,6 +1338,25 @@ func dvdReferencedPGCBase(data []byte, pttOffset, pgcOffset int) int {
 		return -1
 	}
 	return base
+}
+
+// dvdReferencedPGCBases returns the PGCs for every retained title program,
+// falling back to the first title reference when program parsing is incomplete.
+func dvdReferencedPGCBases(data []byte, pttOffset, pgcOffset int) []int {
+	_, programs := parseDVDPrograms(data, pttOffset, pgcOffset)
+	bases := make([]int, 0, len(programs))
+	for _, program := range programs {
+		if program.pgcBase < 0 || program.pgcBase+0x9C > len(data) || slices.Contains(bases, program.pgcBase) {
+			continue
+		}
+		bases = append(bases, program.pgcBase)
+	}
+	if len(bases) == 0 {
+		if base := dvdReferencedPGCBase(data, pttOffset, pgcOffset); base >= 0 && base+0x9C <= len(data) {
+			bases = append(bases, base)
+		}
+	}
+	return bases
 }
 
 // parseDVDPrograms decodes VTS titles from the PTT and PGC tables, retains
@@ -2803,7 +2895,8 @@ func dvdPayloadStreamIdentity(id string) (pesID, subID int, hasSubID, ok bool) {
 
 // mergeDVDDeclaredStreams retains payload streams while filling declared DVD
 // identities that a bounded VOB scan did not encounter. Existing VOB facts
-// always win; synthesized streams contain only IFO-owned attributes.
+// always win; disabled PGC subpictures are ignored, and EIA-608 captions do
+// not satisfy RLE declarations.
 func mergeDVDDeclaredStreams(streams []Stream, audio []dvdAudioAttrs, subpics []dvdSubpicAttrs, duration float64, source string) []Stream {
 	used := make([]bool, len(streams))
 	result := make([]Stream, 0, max(len(streams), 1+len(audio)+len(subpics)))
@@ -2813,25 +2906,61 @@ func mergeDVDDeclaredStreams(streams []Stream, audio []dvdAudioAttrs, subpics []
 			used[i] = true
 		}
 	}
-	appendKind := func(kind StreamKind, target int, makeMissing func(int) Stream) {
-		count := 0
-		for i := range streams {
-			if !used[i] && streams[i].Kind == kind {
-				result = append(result, streams[i])
-				used[i] = true
-				count++
+	audioStart := len(result)
+	matchedAudio := make([]bool, len(audio))
+	for i := range streams {
+		if !used[i] && streams[i].Kind == StreamAudio {
+			result = append(result, streams[i])
+			used[i] = true
+			if id, ok := canonicalSeedValue(streams[i], "ID"); ok {
+				if index := dvdDeclaredAudioIndex(id, audio); index >= 0 {
+					matchedAudio[index] = true
+				}
 			}
 		}
-		for index := count; index < target; index++ {
-			result = append(result, makeMissing(index))
+	}
+	for index := range audio {
+		if !matchedAudio[index] {
+			result = append(result, buildDVDDeclaredAudioStream(audio[index], duration, source))
 		}
 	}
-	appendKind(StreamAudio, len(audio), func(index int) Stream {
-		return buildDVDDeclaredAudioStream(audio[index], duration, source)
-	})
-	appendKind(StreamText, len(subpics), func(index int) Stream {
-		return buildDVDDeclaredTextStream(subpics[index], duration, source)
-	})
+	sortDVDPayloadStreams(result[audioStart:])
+	textStart := len(result)
+	payloadSubpictures := make(map[int]struct{}, len(subpics))
+	for i := range streams {
+		if used[i] || streams[i].Kind != StreamText {
+			continue
+		}
+		result = append(result, streams[i])
+		used[i] = true
+		id, ok := canonicalSeedValue(streams[i], "ID")
+		if !ok {
+			continue
+		}
+		subID, ok := dvdPrivateSubstreamID(id)
+		if ok && subID >= 0x20 && subID <= 0x3F {
+			payloadSubpictures[subID-0x20] = struct{}{}
+		}
+	}
+	for _, subpic := range subpics {
+		if subpic.StreamID < 0 {
+			continue
+		}
+		_, found := payloadSubpictures[subpic.StreamID]
+		if !found {
+			for _, alternate := range subpic.AlternateStreamIDs {
+				if _, found = payloadSubpictures[alternate]; found {
+					break
+				}
+			}
+		}
+		if found {
+			continue
+		}
+		result = append(result, buildDVDDeclaredTextStream(subpic, duration, source))
+		payloadSubpictures[subpic.StreamID] = struct{}{}
+	}
+	sortDVDPayloadStreams(result[textStart:])
 	for i := range streams {
 		if !used[i] {
 			result = append(result, streams[i])
@@ -2843,10 +2972,17 @@ func mergeDVDDeclaredStreams(streams []Stream, audio []dvdAudioAttrs, subpics []
 // buildDVDDeclaredAudioStream constructs the minimal canonical audio stream
 // available from IFO-owned attributes when no VOB payload stream was observed.
 func buildDVDDeclaredAudioStream(audio dvdAudioAttrs, duration float64, source string) Stream {
-	id := dvdAudioPrivateID(audio, audio.StreamID)
 	fields := []Field{}
-	if audio.StreamID >= 0 {
-		fields = append(fields, Field{Name: "ID", Value: fmt.Sprintf("189 (0xBD)-%d (0x%X)", id, id)})
+	pesID, subID, hasSubID := dvdAudioPayloadIdentity(audio)
+	canonicalID := ""
+	if audio.StreamID >= 0 && pesID >= 0 {
+		canonicalID = strconv.Itoa(pesID)
+		displayID := formatID(uint64(pesID))
+		if hasSubID {
+			canonicalID += "-" + strconv.Itoa(subID)
+			displayID = formatIDPair(uint64(pesID), uint64(subID))
+		}
+		fields = append(fields, Field{Name: "ID", Value: displayID})
 	}
 	if audio.Format != "" {
 		fields = append(fields, Field{Name: "Format", Value: audio.Format})
@@ -2876,8 +3012,8 @@ func buildDVDDeclaredAudioStream(audio dvdAudioAttrs, duration float64, source s
 		fields = append(fields, Field{Name: "Language, more info", Value: audio.LanguageMore})
 	}
 	facts := &dvdStructuredFacts{}
-	if audio.StreamID >= 0 {
-		facts.SetSame("ID", fmt.Sprintf("189-%d", id))
+	if canonicalID != "" {
+		facts.SetSame("ID", canonicalID)
 	}
 	if duration > 0 {
 		facts.Set("Duration", strconv.FormatFloat(duration*1000, 'f', -1, 64), formatJSONSeconds(duration))
