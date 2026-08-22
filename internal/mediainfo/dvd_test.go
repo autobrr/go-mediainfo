@@ -253,6 +253,86 @@ func TestAnalyzeVTSIFOAppliesLanguageToRemappedSubpicture(t *testing.T) {
 	t.Fatal("missing parsed RLE subpicture stream")
 }
 
+func TestAnalyzeVTSIFORejectsConflictingPGCLanguages(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "VIDEO_TS")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	ifoData := make([]byte, 3*dvdSectorSize)
+	copy(ifoData[:12], "DVDVIDEO-VTS")
+	ifoData[dvdVideoAttrVTSOffset] = 0x4C
+	binary.BigEndian.PutUint16(ifoData[dvdAudioCountVTSOffset:], 2)
+	ifoData[dvdAudioAttrVTSOffset+1] = 1
+	copy(ifoData[dvdAudioAttrVTSOffset+2:], "en")
+	ifoData[dvdAudioAttrVTSOffset+8+1] = 1
+	copy(ifoData[dvdAudioAttrVTSOffset+8+2:], "fr")
+	binary.BigEndian.PutUint16(ifoData[dvdSubpicCountVTSOff:], 2)
+	copy(ifoData[dvdSubpicCountVTSOff+2+2:], "en")
+	copy(ifoData[dvdSubpicCountVTSOff+2+6+2:], "fr")
+
+	binary.BigEndian.PutUint32(ifoData[dvdPTTSRPTPointerOff:], 1)
+	binary.BigEndian.PutUint32(ifoData[dvdPGCIPointerOff:], 2)
+	pttOffset := dvdSectorSize
+	binary.BigEndian.PutUint16(ifoData[pttOffset:], 2)
+	binary.BigEndian.PutUint32(ifoData[pttOffset+4:], 23)
+	binary.BigEndian.PutUint32(ifoData[pttOffset+8:], 16)
+	binary.BigEndian.PutUint32(ifoData[pttOffset+12:], 20)
+	binary.BigEndian.PutUint16(ifoData[pttOffset+16:], 1)
+	binary.BigEndian.PutUint16(ifoData[pttOffset+18:], 1)
+	binary.BigEndian.PutUint16(ifoData[pttOffset+20:], 2)
+	binary.BigEndian.PutUint16(ifoData[pttOffset+22:], 1)
+
+	pgcOffset := 2 * dvdSectorSize
+	binary.BigEndian.PutUint16(ifoData[pgcOffset:], 2)
+	pgcBases := []int{pgcOffset + 0x20, pgcOffset + 0x120}
+	for i, base := range pgcBases {
+		entry := pgcOffset + 8 + i*8
+		ifoData[entry] = 0x80
+		binary.BigEndian.PutUint32(ifoData[entry+4:], uint32(base-pgcOffset))
+		copy(ifoData[base+4:], []byte{0x00, 0x01, 0x00, 0x40})
+	}
+	binary.BigEndian.PutUint16(ifoData[pgcBases[0]+0x0C:], 0x8000)
+	binary.BigEndian.PutUint32(ifoData[pgcBases[0]+0x1C:], 0x80000000)
+	binary.BigEndian.PutUint16(ifoData[pgcBases[1]+0x0C+2:], 0x8000)
+	binary.BigEndian.PutUint32(ifoData[pgcBases[1]+0x1C+4:], 0x80000000)
+
+	ifoPath := filepath.Join(root, "VTS_01_0.IFO")
+	if err := os.WriteFile(ifoPath, ifoData, 0o644); err != nil { //nolint:gosec // test fixture
+		t.Fatalf("write IFO: %v", err)
+	}
+	vobData, err := os.ReadFile(filepath.Join("samples", "sample_ac3.vob"))
+	if err != nil {
+		t.Fatalf("read VOB fixture: %v", err)
+	}
+	vobData = append(vobData, 0x00, 0x00, 0x01, 0xBD, 0x00, 0x05, 0x80, 0x00, 0x00, 0x20, 0x00)
+	if err := os.WriteFile(filepath.Join(root, "VTS_01_1.VOB"), vobData, 0o644); err != nil { //nolint:gosec // test fixture
+		t.Fatalf("write VOB: %v", err)
+	}
+
+	report, err := AnalyzeFile(ifoPath)
+	if err != nil {
+		t.Fatalf("AnalyzeFile: %v", err)
+	}
+	wantIDs := map[StreamKind]string{StreamAudio: "189-128", StreamText: "189-32"}
+	for kind, wantID := range wantIDs {
+		found := false
+		for _, stream := range report.Streams {
+			id, _ := canonicalSeedValue(stream, "ID")
+			if stream.Kind != kind || id != wantID {
+				continue
+			}
+			found = true
+			if got, ok := canonicalSeedValue(stream, "Language"); ok {
+				t.Errorf("%s payload received conflicting PGC language %q", kind, got)
+			}
+		}
+		if !found {
+			t.Errorf("missing parsed %s payload %s", kind, wantID)
+		}
+	}
+}
+
 func FuzzAnalyzeVTSIFO(f *testing.F) {
 	ifoData, vobData := remappedSubpictureDVDFixture()
 	f.Add(ifoData, vobData)
@@ -496,6 +576,19 @@ func TestOverlayDVDDeclaredLanguagesRejectsPositionalMatch(t *testing.T) {
 	}}, nil)
 	if got, found := canonicalSeedValue(streams[0], "Language"); found {
 		t.Fatalf("mismatched payload received positional language %q", got)
+	}
+}
+
+func TestOverlayDVDDeclaredLanguagesRejectsConflictingAudioIdentity(t *testing.T) {
+	stream := Stream{Kind: StreamAudio}
+	replaceCanonicalSeedFill(&stream, "ID", "189-128", "ID", "189-128")
+	streams := []Stream{stream}
+	overlayDVDDeclaredLanguages(streams, []dvdAudioAttrs{
+		{Format: "AC-3", Language: "English", LanguageCode: "en", StreamID: 0},
+		{Format: "AC-3", Language: "French", LanguageCode: "fr", StreamID: 0},
+	}, nil)
+	if got, found := canonicalSeedValue(streams[0], "Language"); found {
+		t.Fatalf("ambiguous payload received language %q", got)
 	}
 }
 
