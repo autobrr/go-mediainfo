@@ -1,6 +1,7 @@
 package mediainfo
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"math"
@@ -144,6 +145,28 @@ func shouldApplyBDAVSizing(primaryVideoFormat string, audioCount, audioSizedCoun
 // filesystem or open errors. A numbered title VOB inside VIDEO_TS is analyzed
 // with its matching title-set members as one logical input.
 func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
+	return AnalyzeFileWithOptionsContext(context.Background(), path, opts)
+}
+
+// AnalyzeFileWithOptionsContext behaves like AnalyzeFileWithOptions but
+// observes ctx between reads of the input file and returns ctx's error when
+// the context ends before the analysis completes; ctx must be non-nil. Reads
+// of any file other than the input (DVD title-set members, continuous TS
+// recordings, Blu-ray index files) are not cancellation-checked.
+func AnalyzeFileWithOptionsContext(ctx context.Context, path string, opts AnalyzeOptions) (Report, error) {
+	// Checked up front so a dead context skips os.Stat/os.Open, which are
+	// the calls that block first on a stalled mount.
+	if err := ctx.Err(); err != nil {
+		return Report{}, err
+	}
+	report, err := analyzeFileWithOptions(ctx, path, opts)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return Report{}, ctxErr
+	}
+	return report, err
+}
+
+func analyzeFileWithOptions(ctx context.Context, path string, opts AnalyzeOptions) (Report, error) {
 	opts = normalizeAnalyzeOptions(opts)
 	stat, err := os.Stat(path)
 	if err != nil {
@@ -153,10 +176,11 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 	var completeNameLast string
 
 	header := make([]byte, maxSniffBytes)
-	file, err := os.Open(path)
+	rawFile, err := os.Open(path)
 	if err != nil {
 		return Report{}, err
 	}
+	file := &contextFile{ctx: ctx, f: rawFile}
 	defer file.Close()
 
 	n, _ := io.ReadFull(file, header)
@@ -1689,7 +1713,7 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 		var parsedStreams []Stream
 		var ok bool
 		if len(psPaths) > 1 || dvdMenu {
-			parsedInfo, parsedStreams, ok = ParseMPEGPSFiles(psPaths, psSize, mpegPSOptions{dvdExtras: dvdExtras, dvdParsing: dvdParsing, dvdMenu: dvdMenu, parseSpeed: parseSpeed})
+			parsedInfo, parsedStreams, ok = ParseMPEGPSFiles(psPaths, psSize, mpegPSOptions{dvdExtras: dvdExtras, dvdParsing: dvdParsing, dvdMenu: dvdMenu, parseSpeed: parseSpeed, inputContext: ctx, inputPath: path})
 		} else {
 			parsedInfo, parsedStreams, ok = ParseMPEGPSWithOptions(file, psSize, mpegPSOptions{dvdExtras: dvdExtras, dvdParsing: dvdParsing, parseSpeed: parseSpeed})
 		}

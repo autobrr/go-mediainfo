@@ -6,7 +6,16 @@ import (
 	"encoding/binary"
 	"io"
 	"os"
+	"path/filepath"
+	"strings"
 )
+
+type mpegPSFile interface {
+	io.Reader
+	io.ReaderAt
+	io.Closer
+	Stat() (os.FileInfo, error)
+}
 
 type psStreamParser struct {
 	streams         map[uint16]*psStream
@@ -649,7 +658,7 @@ func ParseMPEGPSFiles(paths []string, size int64, opts mpegPSOptions) (Container
 	}
 	if parseSpeed < 1 {
 		captionHeaderOnlyMode := false
-		first, err := os.Open(paths[0]) //nolint:gosec // callers supply validated analysis paths or root-bounded DVD members
+		first, err := openMPEGPSFile(paths[0], opts)
 		if err != nil {
 			return ContainerInfo{}, nil, false
 		}
@@ -729,7 +738,7 @@ func ParseMPEGPSFiles(paths []string, size int64, opts mpegPSOptions) (Container
 	parsedAny := false
 	var sampledBytes int64
 	for _, path := range paths {
-		file, err := os.Open(path)
+		file, err := openMPEGPSFile(path, opts)
 		if err != nil {
 			return ContainerInfo{}, nil, false
 		}
@@ -756,7 +765,7 @@ func parseMPEGPSFileHead(path string, window int64, opts mpegPSOptions) (*psStre
 	if window <= 0 {
 		return parser, 0, false
 	}
-	file, err := os.Open(path) //nolint:gosec // caller supplies a validated DVD member path
+	file, err := openMPEGPSFile(path, opts)
 	if err != nil {
 		return parser, 0, false
 	}
@@ -777,7 +786,7 @@ func parseMPEGPSFileEdges(paths []string, window int64, opts mpegPSOptions) (*ps
 	if len(paths) == 0 || window <= 0 {
 		return parser, 0, false
 	}
-	first, err := os.Open(paths[0]) //nolint:gosec // callers supply validated analysis paths or root-bounded DVD members
+	first, err := openMPEGPSFile(paths[0], opts)
 	if err != nil {
 		return parser, 0, false
 	}
@@ -791,7 +800,7 @@ func parseMPEGPSFileEdges(paths []string, window int64, opts mpegPSOptions) (*ps
 	parsedAny := parser.parseReader(bufio.NewReaderSize(io.NewSectionReader(first, 0, headWindow), 1<<20))
 	_ = first.Close()
 
-	last, err := os.Open(paths[len(paths)-1]) //nolint:gosec // callers supply validated analysis paths or root-bounded DVD members
+	last, err := openMPEGPSFile(paths[len(paths)-1], opts)
 	if err != nil {
 		return parser, 0, false
 	}
@@ -874,7 +883,7 @@ func copyMPEGPSMissingStreams(dst, src *psStreamParser) {
 
 // parseMPEGPSFileSample parses either the whole file or bounded sections chosen
 // from parse speed and DVD options, returning whether data parsed and bytes read.
-func parseMPEGPSFileSample(parser *psStreamParser, file *os.File, opts mpegPSOptions) (bool, int64) {
+func parseMPEGPSFileSample(parser *psStreamParser, file mpegPSFile, opts mpegPSOptions) (bool, int64) {
 	info, err := file.Stat()
 	if err != nil {
 		return false, 0
@@ -930,6 +939,25 @@ func parseMPEGPSFileSample(parser *psStreamParser, file *os.File, opts mpegPSOpt
 		consumed += min(sampleSize, int64(8<<20))
 	}
 	return parsedAny, consumed
+}
+
+func openMPEGPSFile(path string, opts mpegPSOptions) (mpegPSFile, error) {
+	file, err := os.Open(path) //nolint:gosec // callers supply validated analysis paths or root-bounded DVD members
+	if err != nil {
+		return nil, err
+	}
+	cleanPath := filepath.Clean(path)
+	cleanInputPath := filepath.Clean(opts.inputPath)
+	selected := cleanPath == cleanInputPath
+	if opts.inputContext != nil && !selected && strings.EqualFold(cleanPath, cleanInputPath) {
+		inputInfo, inputErr := os.Stat(opts.inputPath) //nolint:gosec // caller-selected analysis path
+		fileInfo, fileErr := file.Stat()
+		selected = inputErr == nil && fileErr == nil && os.SameFile(inputInfo, fileInfo)
+	}
+	if opts.inputContext != nil && selected {
+		return &contextFile{ctx: opts.inputContext, f: file}, nil
+	}
+	return file, nil
 }
 
 // appendTerminalBytes retains only the bounded tail needed to detect a final
