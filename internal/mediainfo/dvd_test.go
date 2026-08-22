@@ -247,6 +247,26 @@ func TestAnalyzeVTSIFOAppliesLanguageToRemappedSubpicture(t *testing.T) {
 	t.Fatal("missing parsed RLE subpicture stream")
 }
 
+func TestMergeDVDDeclaredStreamsMatchesAudioByPayloadIdentity(t *testing.T) {
+	payload := Stream{Kind: StreamAudio}
+	replaceCanonicalSeedFill(&payload, "ID", "189-129", "ID", "189 (0xBD)-129 (0x81)")
+	replaceCanonicalSeedFill(&payload, "Format", "AC-3", "Format", "AC-3")
+
+	got := mergeDVDDeclaredStreams([]Stream{payload}, []dvdAudioAttrs{
+		{Format: "AC-3", StreamID: 0},
+		{Format: "AC-3", StreamID: 1},
+	}, nil, 0, "VTS_01_1.VOB")
+	var gotIDs []string
+	for _, stream := range got {
+		id, _ := canonicalSeedValue(stream, "ID")
+		gotIDs = append(gotIDs, id)
+	}
+	wantIDs := []string{"189-128", "189-129"}
+	if strings.Join(gotIDs, ",") != strings.Join(wantIDs, ",") {
+		t.Fatalf("audio IDs = %v, want %v", gotIDs, wantIDs)
+	}
+}
+
 func TestMergeDVDDeclaredStreamsOmitsDisabledSubpictures(t *testing.T) {
 	caption := Stream{Kind: StreamText}
 	replaceCanonicalSeedFill(&caption, "ID", "224-CC1", "ID", "224 (0xE0)-CC1")

@@ -2764,17 +2764,25 @@ func mergeDVDDeclaredStreams(streams []Stream, audio []dvdAudioAttrs, subpics []
 			used[i] = true
 		}
 	}
-	audioCount := 0
+	audioStart := len(result)
+	matchedAudio := make([]bool, len(audio))
 	for i := range streams {
 		if !used[i] && streams[i].Kind == StreamAudio {
 			result = append(result, streams[i])
 			used[i] = true
-			audioCount++
+			if id, ok := canonicalSeedValue(streams[i], "ID"); ok {
+				if index := dvdDeclaredAudioIndex(id, audio); index >= 0 {
+					matchedAudio[index] = true
+				}
+			}
 		}
 	}
-	for index := audioCount; index < len(audio); index++ {
-		result = append(result, buildDVDDeclaredAudioStream(audio[index], duration, source))
+	for index := range audio {
+		if !matchedAudio[index] {
+			result = append(result, buildDVDDeclaredAudioStream(audio[index], duration, source))
+		}
 	}
+	sortDVDPayloadStreams(result[audioStart:])
 	textStart := len(result)
 	payloadSubpictures := make(map[int]struct{}, len(subpics))
 	for i := range streams {
