@@ -2,6 +2,7 @@ package mediainfo
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"math"
@@ -115,6 +116,8 @@ type mpegPSOptions struct {
 	parseSpeed           float64
 	sampled              bool
 	sampledBytes         int64
+	inputContext         context.Context //nolint:containedctx // carried only through one multi-file parse
+	inputPath            string
 }
 
 // mpegPSBoundedWindow derives MediaInfo's program-stream analysis window from

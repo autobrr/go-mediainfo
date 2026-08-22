@@ -121,7 +121,7 @@ func dvdBUPGeneralExtraNode() structuredNode {
 
 // parseDVDVideo parses one IFO or BUP and, for title sets, aggregates matching
 // VOB streams according to the supplied analysis options.
-func parseDVDVideo(path string, file *os.File, size int64, opts AnalyzeOptions) (dvdInfo, bool) {
+func parseDVDVideo(path string, file io.ReadSeeker, size int64, opts AnalyzeOptions) (dvdInfo, bool) {
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		return dvdInfo{}, false
 	}
@@ -181,6 +181,8 @@ func parseDVDVideo(path string, file *os.File, size int64, opts AnalyzeOptions) 
 	var pgcTableOffset int
 	var audioAttrs []dvdAudioAttrs
 	var subpicAttrs []dvdSubpicAttrs
+	var languageAudioAttrs []dvdAudioAttrs
+	var languageSubpicAttrs []dvdSubpicAttrs
 	menuLists := dvdMenuLists{}
 	menuListsKnown := false
 	if isVTS {
@@ -219,7 +221,13 @@ func parseDVDVideo(path string, file *os.File, size int64, opts AnalyzeOptions) 
 			audioAttrs = mergeDVDAudioAttrs(audioAttrs, parseDVDAudioAttrs(backupData, dvdAudioCountVTSOffset, dvdAudioAttrVTSOffset))
 			subpicAttrs = mergeDVDSubpicAttrs(subpicAttrs, parseDVDSubpicAttrs(backupData, dvdSubpicCountVTSOff, dvdSubpicCountVTSOff+2))
 		}
+		baseAudioAttrs := slices.Clone(audioAttrs)
+		baseSubpicAttrs := slices.Clone(subpicAttrs)
 		audioAttrs, subpicAttrs, menuLists, menuListsKnown = applyDVDPGCStreamControls(data, pttOffset, pgcOffset, videoAttrs, audioAttrs, subpicAttrs)
+		languageAudioAttrs, languageSubpicAttrs = audioAttrs, subpicAttrs
+		if mappedAudio, mappedSubpics, ok := dvdProgramLanguageMappings(data, programs, videoAttrs, baseAudioAttrs, baseSubpicAttrs); ok {
+			languageAudioAttrs, languageSubpicAttrs = mappedAudio, mappedSubpics
+		}
 	} else if isVMG {
 		audioAttrs = parseDVDAudioAttrs(data, dvdAudioCountMenuOffset, dvdAudioAttrMenuOffset)
 		subpicAttrs = parseDVDSubpicAttrs(data, dvdSubpicCountMenuOff, dvdSubpicCountMenuOff+2)
@@ -246,7 +254,7 @@ func parseDVDVideo(path string, file *os.File, size int64, opts AnalyzeOptions) 
 			if parsedInfo, parsedStreams, ok := ParseMPEGPSFiles(vobPaths, aggregateSize, mpegPSOptions{dvdExtras: true, dvdParsing: true, parseSpeed: opts.ParseSpeed}); ok {
 				info.FileSize = aggregateSize
 				streams = mergeDVDTitleSetStreams(parsedStreams, dvdTitleSetSource(base))
-				overlayDVDDeclaredLanguages(streams, audioAttrs, subpicAttrs)
+				overlayDVDDeclaredLanguages(streams, languageAudioAttrs, languageSubpicAttrs)
 				streams = mergeDVDDeclaredStreams(streams, audioAttrs, subpicAttrs, ifoDurationSeconds, dvdTitleSetSource(base))
 				payloadDurationSeconds = dvdPayloadCanonicalDuration(streams)
 				if normalizeDVDConstantVideoClock(streams, ifoDurationSeconds) {
@@ -776,7 +784,7 @@ func buildCanonicalDVDMenuStream(fields []Field, facts *dvdStructuredFacts, extr
 
 // readSizedFile reads exactly size bytes from the start of file after
 // validating the requested allocation.
-func readSizedFile(file *os.File, size int64) ([]byte, error) {
+func readSizedFile(file io.Reader, size int64) ([]byte, error) {
 	if size <= 0 {
 		return io.ReadAll(file)
 	}
@@ -1200,6 +1208,100 @@ func applyDVDPGCStreamControls(data []byte, pttOffset, pgcOffset int, video dvdV
 	}, true
 }
 
+// applyDVDPGCStreamControlsAt applies mappings from one PGC for language
+// reconciliation across retained title programs.
+func applyDVDPGCStreamControlsAt(data []byte, base int, video dvdVideoAttrs, audio []dvdAudioAttrs, subpics []dvdSubpicAttrs) ([]dvdAudioAttrs, []dvdSubpicAttrs, dvdMenuLists, bool) {
+	if base < 0 || base+0x9C > len(data) {
+		return audio, subpics, dvdMenuListsForAspect(video.AspectRatio, len(audio), len(subpics)), false
+	}
+	audioValues := make([]int, 0, len(audio))
+	for i := range audio {
+		audio[i].StreamID = -1
+		if i >= 8 {
+			continue
+		}
+		control := binary.BigEndian.Uint16(data[base+0x0C+i*2 : base+0x0E+i*2])
+		if control&0x8000 == 0 {
+			continue
+		}
+		streamID := int((control >> 8) & 0x07)
+		audio[i].StreamID = streamID
+		audioValues = append(audioValues, streamID)
+	}
+	sub43 := make([]int, 0, len(subpics))
+	subWide := make([]int, 0, len(subpics))
+	subLetter := make([]int, 0, len(subpics))
+	subPan := make([]int, 0, len(subpics))
+	for i := range subpics {
+		subpics[i].StreamID = -1
+		subpics[i].AlternateStreamIDs = nil
+		if i >= 32 {
+			continue
+		}
+		off := base + 0x1C + i*4
+		control := binary.BigEndian.Uint32(data[off : off+4])
+		if control&0x80000000 == 0 {
+			continue
+		}
+		id43 := int((control >> 24) & 0x7F)
+		idWide := int((control >> 16) & 0x7F)
+		idLetter := int((control >> 8) & 0x7F)
+		idPan := int(control & 0x7F)
+		sub43 = append(sub43, id43)
+		subWide = append(subWide, idWide)
+		subLetter = append(subLetter, idLetter)
+		subPan = append(subPan, idPan)
+		if video.AspectRatio == "16:9" {
+			subpics[i].StreamID = idWide
+			if (video.PermittedDisplayFormats == 0 || video.PermittedDisplayFormats == 2) && idLetter != idWide {
+				subpics[i].AlternateStreamIDs = append(subpics[i].AlternateStreamIDs, idLetter)
+			}
+			if (video.PermittedDisplayFormats == 0 || video.PermittedDisplayFormats == 1) && idPan != idWide && !slices.Contains(subpics[i].AlternateStreamIDs, idPan) {
+				subpics[i].AlternateStreamIDs = append(subpics[i].AlternateStreamIDs, idPan)
+			}
+		} else {
+			subpics[i].StreamID = id43
+		}
+	}
+	return audio, subpics, dvdMenuLists{
+		audio:      dvdJoinIndexes(audioValues),
+		sub43:      dvdJoinIndexes(sub43),
+		subWide:    dvdJoinIndexes(subWide),
+		subLetter:  dvdJoinIndexes(subLetter),
+		subPanScan: dvdJoinIndexes(subPan),
+	}, true
+}
+
+// dvdProgramLanguageMappings collects enabled stream mappings from every
+// retained title PGC. Callers reconcile duplicate payload identities.
+func dvdProgramLanguageMappings(data []byte, programs []dvdProgram, video dvdVideoAttrs, audio []dvdAudioAttrs, subpics []dvdSubpicAttrs) ([]dvdAudioAttrs, []dvdSubpicAttrs, bool) {
+	audio = audio[:min(len(audio), 8)]
+	subpics = subpics[:min(len(subpics), 32)]
+	mappedAudio := make([]dvdAudioAttrs, 0, len(audio)*len(programs))
+	mappedSubpics := make([]dvdSubpicAttrs, 0, len(subpics)*len(programs))
+	found := false
+	for _, program := range programs {
+		programAudio := slices.Clone(audio)
+		programSubpics := slices.Clone(subpics)
+		programAudio, programSubpics, _, ok := applyDVDPGCStreamControlsAt(data, program.pgcBase, video, programAudio, programSubpics)
+		if !ok {
+			continue
+		}
+		found = true
+		for _, attrs := range programAudio {
+			if attrs.StreamID >= 0 {
+				mappedAudio = append(mappedAudio, attrs)
+			}
+		}
+		for _, attrs := range programSubpics {
+			if attrs.StreamID >= 0 {
+				mappedSubpics = append(mappedSubpics, attrs)
+			}
+		}
+	}
+	return mappedAudio, mappedSubpics, found
+}
+
 // dvdJoinIndexes formats explicit stream indexes in DVD menu-list form.
 func dvdJoinIndexes(values []int) string {
 	if len(values) == 0 {
@@ -1335,15 +1437,16 @@ func parseDVDProgramEntries(data []byte, pgcOffset int, entries [][2]uint16) (dv
 		return dvdProgram{}, false
 	}
 	duration := float64(dvdTicksToMillisecondsFloor(dvdTimeToTicks(data[base+4:base+8]))) / 1000
+	program := dvdProgram{duration: duration, pgcBase: base}
 	programCount := int(data[base+2])
 	cellCount := int(data[base+3])
 	if programCount <= 0 || cellCount <= 0 {
-		return dvdProgram{duration: duration, pgcBase: base}, duration > 0
+		return program, duration > 0
 	}
 	programMapStart := base + int(binary.BigEndian.Uint16(data[base+0xE6:base+0xE8]))
 	cellPlayStart := base + int(binary.BigEndian.Uint16(data[base+0xE8:base+0xEA]))
 	if programMapStart+programCount > len(data) || cellPlayStart >= len(data) {
-		return dvdProgram{duration: duration, pgcBase: base}, duration > 0
+		return program, duration > 0
 	}
 	programMap := data[programMapStart : programMapStart+programCount]
 	firstSector := uint32(0)
@@ -1378,7 +1481,9 @@ func parseDVDProgramEntries(data []byte, pgcOffset int, entries [][2]uint16) (dv
 		}
 		chapters = append(chapters, dvdTicksToMilliseconds(ticks))
 	}
-	return dvdProgram{duration: duration, chapters: chapters, firstSector: firstSector, pgcBase: base}, duration > 0
+	program.chapters = chapters
+	program.firstSector = firstSector
+	return program, duration > 0
 }
 
 // dvdPGCTimeline returns valid PGCs in playback-sector order. A later PGC with
@@ -2711,7 +2816,7 @@ func overlayDVDDeclaredLanguages(streams []Stream, audio []dvdAudioAttrs, subpic
 				if subpics[candidate].StreamID != streamID && !slices.Contains(subpics[candidate].AlternateStreamIDs, streamID) {
 					continue
 				}
-				if index >= 0 {
+				if index >= 0 && (subpics[index].LanguageCode != subpics[candidate].LanguageCode || subpics[index].LanguageMore != subpics[candidate].LanguageMore) {
 					index = -1
 					break
 				}
@@ -2728,23 +2833,27 @@ func overlayDVDDeclaredLanguages(streams []Stream, audio []dvdAudioAttrs, subpic
 	}
 }
 
-// dvdDeclaredAudioIndex returns the declared audio entry matching a payload
-// stream ID, or -1 when no exact PES/substream identity matches.
+// dvdDeclaredAudioIndex returns a declared audio entry matching a payload
+// stream ID, or -1 when no exact or consistent identity matches.
 func dvdDeclaredAudioIndex(id string, audio []dvdAudioAttrs) int {
 	pesID, subID, hasSubID, ok := dvdPayloadStreamIdentity(id)
 	if !ok {
 		return -1
 	}
+	match := -1
 	for index, attrs := range audio {
 		if attrs.StreamID < 0 {
 			continue
 		}
 		wantPESID, wantSubID, wantSubIDPresent := dvdAudioPayloadIdentity(attrs)
 		if pesID == wantPESID && hasSubID == wantSubIDPresent && (!hasSubID || subID == wantSubID) {
-			return index
+			if match >= 0 && (audio[match].LanguageCode != attrs.LanguageCode || audio[match].LanguageMore != attrs.LanguageMore) {
+				return -1
+			}
+			match = index
 		}
 	}
-	return -1
+	return match
 }
 
 // dvdAudioPayloadIdentity maps declared DVD audio attributes to their PES and,

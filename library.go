@@ -1,6 +1,7 @@
 package mediainfo
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -56,6 +57,16 @@ func WithTestContinuousFileNames(enabled bool) AnalyzeOption {
 // AnalyzeFile analyzes one file or directory path.
 func AnalyzeFile(path string, options ...AnalyzeOption) (Report, error) {
 	return core.AnalyzeFileWithOptions(path, buildAnalyzeOptions(options))
+}
+
+// AnalyzeFileContext behaves like AnalyzeFile but observes ctx between reads
+// of the input file, so a caller can bound an analysis that would otherwise
+// block on slow storage. It returns ctx's error when the context ends before
+// the analysis completes; ctx must be non-nil. A read already blocked in the
+// OS still returns only when the OS completes it, and reads of any file other
+// than the input are not cancellation-checked.
+func AnalyzeFileContext(ctx context.Context, path string, options ...AnalyzeOption) (Report, error) {
+	return core.AnalyzeFileWithOptionsContext(ctx, path, buildAnalyzeOptions(options))
 }
 
 // AnalyzeFiles analyzes multiple paths.
