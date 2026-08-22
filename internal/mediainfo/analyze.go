@@ -150,9 +150,9 @@ func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 
 // AnalyzeFileWithOptionsContext behaves like AnalyzeFileWithOptions but
 // observes ctx between reads of the input file and returns ctx's error when
-// the context ends before the analysis completes. Sibling files opened by
-// multi-file formats (DVD title sets, continuous TS recordings) are read
-// without cancellation checks.
+// the context ends before the analysis completes; ctx must be non-nil. Reads
+// of any file other than the input (DVD title-set members, continuous TS
+// recordings, Blu-ray index files) are not cancellation-checked.
 func AnalyzeFileWithOptionsContext(ctx context.Context, path string, opts AnalyzeOptions) (Report, error) {
 	// Checked up front so a dead context skips os.Stat/os.Open, which are
 	// the calls that block first on a stalled mount.

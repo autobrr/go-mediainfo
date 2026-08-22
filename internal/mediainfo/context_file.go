@@ -9,7 +9,7 @@ import (
 // It stops the analysis from issuing further reads after cancellation; a read
 // already blocked in the OS still returns only when the OS completes it.
 type contextFile struct {
-	ctx context.Context
+	ctx context.Context //nolint:containedctx // io.ReaderAt has no ctx param; adapter lives one analysis
 	f   *os.File
 }
 
