@@ -194,13 +194,7 @@ func TestAnalyzeVTSIFOAppliesLanguageToParsedAudio(t *testing.T) {
 	t.Fatal("missing parsed AC-3 audio stream")
 }
 
-func TestAnalyzeVTSIFOAppliesLanguageToRemappedSubpicture(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "VIDEO_TS")
-	if err := os.MkdirAll(root, 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-
-	ifoPath := filepath.Join(root, "VTS_01_0.IFO")
+func remappedSubpictureDVDFixture() ([]byte, []byte) {
 	ifoData := make([]byte, 3*dvdSectorSize)
 	copy(ifoData[:12], []byte("DVDVIDEO-VTS"))
 	ifoData[dvdVideoAttrVTSOffset] = 0x4C
@@ -219,11 +213,23 @@ func TestAnalyzeVTSIFOAppliesLanguageToRemappedSubpicture(t *testing.T) {
 	binary.BigEndian.PutUint32(ifoData[pgcOffset+12:], 16)
 	pgcBase := pgcOffset + 16
 	binary.BigEndian.PutUint32(ifoData[pgcBase+0x1C:], 0x80000102)
+
+	vobData := []byte{0x00, 0x00, 0x01, 0xBD, 0x00, 0x05, 0x80, 0x00, 0x00, 0x21, 0x00}
+	return ifoData, vobData
+}
+
+func TestAnalyzeVTSIFOAppliesLanguageToRemappedSubpicture(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "VIDEO_TS")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	ifoData, vobData := remappedSubpictureDVDFixture()
+	ifoPath := filepath.Join(root, "VTS_01_0.IFO")
 	if err := os.WriteFile(ifoPath, ifoData, 0o644); err != nil { //nolint:gosec // test fixture
 		t.Fatalf("write IFO: %v", err)
 	}
 
-	vobData := []byte{0x00, 0x00, 0x01, 0xBD, 0x00, 0x05, 0x80, 0x00, 0x00, 0x21, 0x00}
 	if err := os.WriteFile(filepath.Join(root, "VTS_01_1.VOB"), vobData, 0o644); err != nil { //nolint:gosec // test fixture
 		t.Fatalf("write VOB: %v", err)
 	}
@@ -245,6 +251,32 @@ func TestAnalyzeVTSIFOAppliesLanguageToRemappedSubpicture(t *testing.T) {
 		return
 	}
 	t.Fatal("missing parsed RLE subpicture stream")
+}
+
+func FuzzAnalyzeVTSIFO(f *testing.F) {
+	ifoData, vobData := remappedSubpictureDVDFixture()
+	f.Add(ifoData, vobData)
+	f.Add(ifoData[:len(ifoData)/2], vobData)
+	f.Add(ifoData, vobData[:len(vobData)/2])
+
+	root := filepath.Join(f.TempDir(), "VIDEO_TS")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		f.Fatalf("mkdir: %v", err)
+	}
+	ifoPath := filepath.Join(root, "VTS_01_0.IFO")
+	vobPath := filepath.Join(root, "VTS_01_1.VOB")
+
+	f.Fuzz(func(t *testing.T, ifoData, vobData []byte) {
+		ifoData = fuzzLimit(ifoData)
+		vobData = fuzzLimit(vobData)
+		if err := os.WriteFile(ifoPath, ifoData, 0o600); err != nil { //nolint:gosec // bounded fuzz fixture
+			t.Fatalf("write IFO: %v", err)
+		}
+		if err := os.WriteFile(vobPath, vobData, 0o600); err != nil { //nolint:gosec // bounded fuzz fixture
+			t.Fatalf("write VOB: %v", err)
+		}
+		_, _ = AnalyzeFile(ifoPath)
+	})
 }
 
 func TestAnalyzeVTSIFOUsesBUPOnlyForMissingLanguage(t *testing.T) {
@@ -479,18 +511,30 @@ func TestOverlayDVDDeclaredLanguagesMatchesRemappedSubpictureIdentity(t *testing
 		textStream("189-33", "", ""),
 		textStream("189-34", "it", "Italian"),
 		textStream("189-35", "nl", "Dutch"),
+		textStream("189-36", "", ""),
 	}
 	overlayDVDDeclaredLanguages(streams, nil, []dvdSubpicAttrs{
-		{Language: "English", LanguageCode: "en", StreamID: 1},
-		{Language: "French", LanguageCode: "fr", StreamID: 0},
+		{Language: "English", LanguageCode: "en", StreamID: 1, AlternateStreamIDs: []int{4}},
+		{Language: "French", LanguageCode: "fr", StreamID: 0, AlternateStreamIDs: []int{2}},
 		{Language: "German", LanguageCode: "de", StreamID: 3},
 		{Language: "Spanish", LanguageCode: "es", StreamID: 3},
+		{Language: "Italian", LanguageCode: "it", StreamID: 2},
 	})
 
-	for index, want := range []string{"fr", "en", "it", "nl"} {
+	wants := []struct {
+		name     string
+		language string
+	}{
+		{name: "reordered primary zero", language: "fr"},
+		{name: "reordered primary one", language: "en"},
+		{name: "primary alternate collision preserves payload", language: "it"},
+		{name: "duplicate primary collision preserves payload", language: "nl"},
+		{name: "unique alternate", language: "en"},
+	}
+	for index, want := range wants {
 		got, _ := canonicalSeedValue(streams[index], "Language")
-		if got != want {
-			t.Errorf("stream %d Language = %q, want %q", index, got, want)
+		if got != want.language {
+			t.Errorf("%s stream Language = %q, want %q", want.name, got, want.language)
 		}
 	}
 }
