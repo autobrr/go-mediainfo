@@ -2662,8 +2662,19 @@ func overlayDVDDeclaredLanguages(streams []Stream, audio []dvdAudioAttrs, subpic
 			if !ok {
 				continue
 			}
-			index := subID - 0x20
-			if index >= 0 && index < len(subpics) && subpics[index].LanguageCode != "" {
+			streamID := subID - 0x20
+			index := -1
+			for candidate := range subpics {
+				if subpics[candidate].StreamID != streamID {
+					continue
+				}
+				if index >= 0 {
+					index = -1
+					break
+				}
+				index = candidate
+			}
+			if index >= 0 && subpics[index].LanguageCode != "" {
 				replaceCanonicalSeedFill(&streams[i], "Language", subpics[index].LanguageCode, "Language", subpics[index].Language)
 				if subpics[index].LanguageMore != "" {
 					replaceCanonicalSeedFill(&streams[i], "Language_More", subpics[index].LanguageMore, "Language, more info", subpics[index].LanguageMore)

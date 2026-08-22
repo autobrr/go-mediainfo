@@ -414,6 +414,34 @@ func TestOverlayDVDDeclaredLanguagesRejectsPositionalMatch(t *testing.T) {
 	}
 }
 
+func TestOverlayDVDDeclaredLanguagesMatchesRemappedSubpictureIdentity(t *testing.T) {
+	textStream := func(id, languageCode, language string) Stream {
+		stream := Stream{Kind: StreamText}
+		replaceCanonicalSeedFill(&stream, "ID", id, "ID", id)
+		replaceCanonicalSeedFill(&stream, "Language", languageCode, "Language", language)
+		return stream
+	}
+	streams := []Stream{
+		textStream("189-32", "", ""),
+		textStream("189-33", "", ""),
+		textStream("189-34", "it", "Italian"),
+		textStream("189-35", "nl", "Dutch"),
+	}
+	overlayDVDDeclaredLanguages(streams, nil, []dvdSubpicAttrs{
+		{Language: "English", LanguageCode: "en", StreamID: 1},
+		{Language: "French", LanguageCode: "fr", StreamID: 0},
+		{Language: "German", LanguageCode: "de", StreamID: 3},
+		{Language: "Spanish", LanguageCode: "es", StreamID: 3},
+	})
+
+	for index, want := range []string{"fr", "en", "it", "nl"} {
+		got, _ := canonicalSeedValue(streams[index], "Language")
+		if got != want {
+			t.Errorf("stream %d Language = %q, want %q", index, got, want)
+		}
+	}
+}
+
 func TestDVDTitleSetBitRateDurationRetainsBoundedPayloadClock(t *testing.T) {
 	if got, mismatch := dvdTitleSetBitRateDuration(7_272_744_960, 8855, 8771.8, 83.3); got != 83.3 || !mismatch {
 		t.Fatalf("duration = %v, mismatch = %v; want mismatched bounded payload timing", got, mismatch)
