@@ -118,7 +118,7 @@ func dvdBUPGeneralExtraNode() structuredNode {
 
 // parseDVDVideo parses one IFO or BUP and, for title sets, aggregates matching
 // VOB streams according to the supplied analysis options.
-func parseDVDVideo(path string, file *os.File, size int64, opts AnalyzeOptions) (dvdInfo, bool) {
+func parseDVDVideo(path string, file io.ReadSeeker, size int64, opts AnalyzeOptions) (dvdInfo, bool) {
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		return dvdInfo{}, false
 	}
@@ -772,7 +772,7 @@ func buildCanonicalDVDMenuStream(fields []Field, facts *dvdStructuredFacts, extr
 
 // readSizedFile reads exactly size bytes from the start of file after
 // validating the requested allocation.
-func readSizedFile(file *os.File, size int64) ([]byte, error) {
+func readSizedFile(file io.Reader, size int64) ([]byte, error) {
 	if size <= 0 {
 		return io.ReadAll(file)
 	}
