@@ -95,6 +95,7 @@ type dvdProgram struct {
 	duration    float64
 	chapters    []int64
 	firstSector uint32
+	pgcBase     int
 }
 
 type dvdPGCTimelineEntry struct {
@@ -1112,14 +1113,15 @@ func dvdAudioPrivateID(attrs dvdAudioAttrs, streamID int) int {
 	return streamID
 }
 
-// applyDVDPGCStreamControls applies the referenced PGC's enabled audio and
-// subpicture mappings and returns their menu lists. The boolean reports whether
-// a valid PGC control table was available.
+// applyDVDPGCStreamControls applies enabled audio and subpicture mappings and
+// returns their menu lists. Subtitle mappings cover every retained title PGC.
+// The boolean reports whether a valid PGC control table was available.
 func applyDVDPGCStreamControls(data []byte, pttOffset, pgcOffset int, video dvdVideoAttrs, audio []dvdAudioAttrs, subpics []dvdSubpicAttrs) ([]dvdAudioAttrs, []dvdSubpicAttrs, dvdMenuLists, bool) {
-	base := dvdReferencedPGCBase(data, pttOffset, pgcOffset)
-	if base < 0 || base+0x9C > len(data) {
+	bases := dvdReferencedPGCBases(data, pttOffset, pgcOffset)
+	if len(bases) == 0 {
 		return audio, subpics, dvdMenuListsForAspect(video.AspectRatio, len(audio), len(subpics)), false
 	}
+	base := bases[0]
 	audioValues := make([]int, 0, len(audio))
 	for i := range audio {
 		audio[i].StreamID = -1
@@ -1149,32 +1151,44 @@ func applyDVDPGCStreamControls(data []byte, pttOffset, pgcOffset int, video dvdV
 	for i := range subpics {
 		subpics[i].StreamID = -1
 		subpics[i].AlternateStreamIDs = nil
-		if i >= 32 {
-			continue
+	}
+	listed := make([]bool, len(subpics))
+	addMapping := func(subpic *dvdSubpicAttrs, id int) {
+		if subpic.StreamID < 0 {
+			subpic.StreamID = id
+		} else if subpic.StreamID != id && !slices.Contains(subpic.AlternateStreamIDs, id) {
+			subpic.AlternateStreamIDs = append(subpic.AlternateStreamIDs, id)
 		}
-		off := base + 0x1C + i*4
-		control := binary.BigEndian.Uint32(data[off : off+4])
-		if control&0x80000000 == 0 {
-			continue
-		}
-		id43 := int((control >> 24) & 0x7F)
-		idWide := int((control >> 16) & 0x7F)
-		idLetter := int((control >> 8) & 0x7F)
-		idPan := int(control & 0x7F)
-		sub43 = append(sub43, id43)
-		subWide = append(subWide, idWide)
-		subLetter = append(subLetter, idLetter)
-		subPan = append(subPan, idPan)
-		if video.AspectRatio == "16:9" {
-			subpics[i].StreamID = idWide
-			if (video.PermittedDisplayFormats == 0 || video.PermittedDisplayFormats == 2) && idLetter != idWide {
-				subpics[i].AlternateStreamIDs = append(subpics[i].AlternateStreamIDs, idLetter)
+	}
+	for _, base := range bases {
+		for i := range min(len(subpics), 32) {
+			off := base + 0x1C + i*4
+			control := binary.BigEndian.Uint32(data[off : off+4])
+			if control&0x80000000 == 0 {
+				continue
 			}
-			if (video.PermittedDisplayFormats == 0 || video.PermittedDisplayFormats == 1) && idPan != idWide && !slices.Contains(subpics[i].AlternateStreamIDs, idPan) {
-				subpics[i].AlternateStreamIDs = append(subpics[i].AlternateStreamIDs, idPan)
+			id43 := int((control >> 24) & 0x7F)
+			idWide := int((control >> 16) & 0x7F)
+			idLetter := int((control >> 8) & 0x7F)
+			idPan := int(control & 0x7F)
+			if !listed[i] {
+				sub43 = append(sub43, id43)
+				subWide = append(subWide, idWide)
+				subLetter = append(subLetter, idLetter)
+				subPan = append(subPan, idPan)
+				listed[i] = true
 			}
-		} else {
-			subpics[i].StreamID = id43
+			if video.AspectRatio == "16:9" {
+				addMapping(&subpics[i], idWide)
+				if video.PermittedDisplayFormats == 0 || video.PermittedDisplayFormats == 2 {
+					addMapping(&subpics[i], idLetter)
+				}
+				if video.PermittedDisplayFormats == 0 || video.PermittedDisplayFormats == 1 {
+					addMapping(&subpics[i], idPan)
+				}
+			} else {
+				addMapping(&subpics[i], id43)
+			}
 		}
 	}
 	return audio, subpics, dvdMenuLists{
@@ -1222,6 +1236,25 @@ func dvdReferencedPGCBase(data []byte, pttOffset, pgcOffset int) int {
 		return -1
 	}
 	return base
+}
+
+// dvdReferencedPGCBases returns the PGCs for every retained title program,
+// falling back to the first title reference when program parsing is incomplete.
+func dvdReferencedPGCBases(data []byte, pttOffset, pgcOffset int) []int {
+	_, programs := parseDVDPrograms(data, pttOffset, pgcOffset)
+	bases := make([]int, 0, len(programs))
+	for _, program := range programs {
+		if program.pgcBase < 0 || program.pgcBase+0x9C > len(data) || slices.Contains(bases, program.pgcBase) {
+			continue
+		}
+		bases = append(bases, program.pgcBase)
+	}
+	if len(bases) == 0 {
+		if base := dvdReferencedPGCBase(data, pttOffset, pgcOffset); base >= 0 && base+0x9C <= len(data) {
+			bases = append(bases, base)
+		}
+	}
+	return bases
 }
 
 // parseDVDPrograms decodes VTS titles from the PTT and PGC tables, retains
@@ -1305,12 +1338,12 @@ func parseDVDProgramEntries(data []byte, pgcOffset int, entries [][2]uint16) (dv
 	programCount := int(data[base+2])
 	cellCount := int(data[base+3])
 	if programCount <= 0 || cellCount <= 0 {
-		return dvdProgram{duration: duration}, duration > 0
+		return dvdProgram{duration: duration, pgcBase: base}, duration > 0
 	}
 	programMapStart := base + int(binary.BigEndian.Uint16(data[base+0xE6:base+0xE8]))
 	cellPlayStart := base + int(binary.BigEndian.Uint16(data[base+0xE8:base+0xEA]))
 	if programMapStart+programCount > len(data) || cellPlayStart >= len(data) {
-		return dvdProgram{duration: duration}, duration > 0
+		return dvdProgram{duration: duration, pgcBase: base}, duration > 0
 	}
 	programMap := data[programMapStart : programMapStart+programCount]
 	firstSector := uint32(0)
@@ -1345,7 +1378,7 @@ func parseDVDProgramEntries(data []byte, pgcOffset int, entries [][2]uint16) (dv
 		}
 		chapters = append(chapters, dvdTicksToMilliseconds(ticks))
 	}
-	return dvdProgram{duration: duration, chapters: chapters, firstSector: firstSector}, duration > 0
+	return dvdProgram{duration: duration, chapters: chapters, firstSector: firstSector, pgcBase: base}, duration > 0
 }
 
 // dvdPGCTimeline returns valid PGCs in playback-sector order. A later PGC with
@@ -2830,10 +2863,17 @@ func mergeDVDDeclaredStreams(streams []Stream, audio []dvdAudioAttrs, subpics []
 // buildDVDDeclaredAudioStream constructs the minimal canonical audio stream
 // available from IFO-owned attributes when no VOB payload stream was observed.
 func buildDVDDeclaredAudioStream(audio dvdAudioAttrs, duration float64, source string) Stream {
-	id := dvdAudioPrivateID(audio, audio.StreamID)
 	fields := []Field{}
-	if audio.StreamID >= 0 {
-		fields = append(fields, Field{Name: "ID", Value: fmt.Sprintf("189 (0xBD)-%d (0x%X)", id, id)})
+	pesID, subID, hasSubID := dvdAudioPayloadIdentity(audio)
+	canonicalID := ""
+	if audio.StreamID >= 0 && pesID >= 0 {
+		canonicalID = strconv.Itoa(pesID)
+		displayID := formatID(uint64(pesID))
+		if hasSubID {
+			canonicalID += "-" + strconv.Itoa(subID)
+			displayID = formatIDPair(uint64(pesID), uint64(subID))
+		}
+		fields = append(fields, Field{Name: "ID", Value: displayID})
 	}
 	if audio.Format != "" {
 		fields = append(fields, Field{Name: "Format", Value: audio.Format})
@@ -2863,8 +2903,8 @@ func buildDVDDeclaredAudioStream(audio dvdAudioAttrs, duration float64, source s
 		fields = append(fields, Field{Name: "Language, more info", Value: audio.LanguageMore})
 	}
 	facts := &dvdStructuredFacts{}
-	if audio.StreamID >= 0 {
-		facts.SetSame("ID", fmt.Sprintf("189-%d", id))
+	if canonicalID != "" {
+		facts.SetSame("ID", canonicalID)
 	}
 	if duration > 0 {
 		facts.Set("Duration", strconv.FormatFloat(duration*1000, 'f', -1, 64), formatJSONSeconds(duration))
