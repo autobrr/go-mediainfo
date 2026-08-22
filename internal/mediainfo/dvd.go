@@ -46,12 +46,13 @@ type dvdInfo struct {
 // dvdVideoAttrs stores decoded DVD video format, geometry, aspect, standard,
 // and frame-rate facts.
 type dvdVideoAttrs struct {
-	Version     string
-	Standard    string
-	AspectRatio string
-	Width       int
-	Height      int
-	FrameRate   float64
+	Version                 string
+	Standard                string
+	AspectRatio             string
+	PermittedDisplayFormats byte
+	Width                   int
+	Height                  int
+	FrameRate               float64
 }
 
 // dvdAudioAttrs stores decoded format, channel, sampling, and language facts
@@ -68,13 +69,14 @@ type dvdAudioAttrs struct {
 	StreamID      int
 }
 
-// dvdSubpicAttrs stores decoded language metadata for one DVD subpicture
-// stream.
+// dvdSubpicAttrs stores decoded language metadata and PGC payload mappings for
+// one logical DVD subpicture stream.
 type dvdSubpicAttrs struct {
-	Language     string
-	LanguageCode string
-	LanguageMore string
-	StreamID     int
+	Language           string
+	LanguageCode       string
+	LanguageMore       string
+	StreamID           int
+	AlternateStreamIDs []int
 }
 
 // dvdMenuLists stores the audio and subtitle index lists emitted in a DVD
@@ -804,6 +806,7 @@ func parseDVDVideoAttrs(data []byte, offset int) dvdVideoAttrs {
 	resCode := (b1 >> 3) & 0x03
 
 	attrs := dvdVideoAttrs{}
+	attrs.PermittedDisplayFormats = b0 & 0x03
 	switch coding {
 	case 1:
 		attrs.Version = "Version 2"
@@ -1145,6 +1148,7 @@ func applyDVDPGCStreamControls(data []byte, pttOffset, pgcOffset int, video dvdV
 	subPan := make([]int, 0, len(subpics))
 	for i := range subpics {
 		subpics[i].StreamID = -1
+		subpics[i].AlternateStreamIDs = nil
 		if i >= 32 {
 			continue
 		}
@@ -1163,8 +1167,14 @@ func applyDVDPGCStreamControls(data []byte, pttOffset, pgcOffset int, video dvdV
 		subPan = append(subPan, idPan)
 		if video.AspectRatio == "16:9" {
 			subpics[i].StreamID = idWide
+			if (video.PermittedDisplayFormats == 0 || video.PermittedDisplayFormats == 2) && idLetter != idWide {
+				subpics[i].AlternateStreamIDs = append(subpics[i].AlternateStreamIDs, idLetter)
+			}
+			if (video.PermittedDisplayFormats == 0 || video.PermittedDisplayFormats == 1) && idPan != idWide && !slices.Contains(subpics[i].AlternateStreamIDs, idPan) {
+				subpics[i].AlternateStreamIDs = append(subpics[i].AlternateStreamIDs, idPan)
+			}
 		} else {
-			subpics[i].StreamID = 0
+			subpics[i].StreamID = id43
 		}
 	}
 	return audio, subpics, dvdMenuLists{
@@ -2665,7 +2675,7 @@ func overlayDVDDeclaredLanguages(streams []Stream, audio []dvdAudioAttrs, subpic
 			streamID := subID - 0x20
 			index := -1
 			for candidate := range subpics {
-				if subpics[candidate].StreamID != streamID {
+				if subpics[candidate].StreamID != streamID && !slices.Contains(subpics[candidate].AlternateStreamIDs, streamID) {
 					continue
 				}
 				if index >= 0 {

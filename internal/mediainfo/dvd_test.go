@@ -194,6 +194,59 @@ func TestAnalyzeVTSIFOAppliesLanguageToParsedAudio(t *testing.T) {
 	t.Fatal("missing parsed AC-3 audio stream")
 }
 
+func TestAnalyzeVTSIFOAppliesLanguageToRemappedSubpicture(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "VIDEO_TS")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	ifoPath := filepath.Join(root, "VTS_01_0.IFO")
+	ifoData := make([]byte, 3*dvdSectorSize)
+	copy(ifoData[:12], []byte("DVDVIDEO-VTS"))
+	ifoData[dvdVideoAttrVTSOffset] = 0x4C
+	binary.BigEndian.PutUint16(ifoData[dvdSubpicCountVTSOff:], 1)
+	subpicture := dvdSubpicCountVTSOff + 2
+	ifoData[subpicture+2] = 'e'
+	ifoData[subpicture+3] = 'n'
+
+	binary.BigEndian.PutUint32(ifoData[dvdPTTSRPTPointerOff:], 1)
+	binary.BigEndian.PutUint32(ifoData[dvdPGCIPointerOff:], 2)
+	pttOffset := dvdSectorSize
+	binary.BigEndian.PutUint32(ifoData[pttOffset+8:], 12)
+	binary.BigEndian.PutUint16(ifoData[pttOffset+12:], 1)
+	pgcOffset := 2 * dvdSectorSize
+	binary.BigEndian.PutUint16(ifoData[pgcOffset:], 1)
+	binary.BigEndian.PutUint32(ifoData[pgcOffset+12:], 16)
+	pgcBase := pgcOffset + 16
+	binary.BigEndian.PutUint32(ifoData[pgcBase+0x1C:], 0x80000102)
+	if err := os.WriteFile(ifoPath, ifoData, 0o644); err != nil { //nolint:gosec // test fixture
+		t.Fatalf("write IFO: %v", err)
+	}
+
+	vobData := []byte{0x00, 0x00, 0x01, 0xBD, 0x00, 0x05, 0x80, 0x00, 0x00, 0x21, 0x00}
+	if err := os.WriteFile(filepath.Join(root, "VTS_01_1.VOB"), vobData, 0o644); err != nil { //nolint:gosec // test fixture
+		t.Fatalf("write VOB: %v", err)
+	}
+
+	report, err := AnalyzeFile(ifoPath)
+	if err != nil {
+		t.Fatalf("AnalyzeFile: %v", err)
+	}
+	if text := RenderText([]Report{report}); !strings.Contains(text, padRight("Language", textLabelWidth)+": English") {
+		t.Fatalf("text output lacks the IFO-declared subpicture language:\n%s", text)
+	}
+	for _, stream := range report.Streams {
+		if stream.Kind != StreamText || findField(stream.Fields, "ID") != "189 (0xBD)-33 (0x21)" {
+			continue
+		}
+		if got, _ := canonicalSeedValue(stream, "Language"); got != "en" {
+			t.Fatalf("canonical Language = %q, want en", got)
+		}
+		return
+	}
+	t.Fatal("missing parsed RLE subpicture stream")
+}
+
 func TestAnalyzeVTSIFOUsesBUPOnlyForMissingLanguage(t *testing.T) {
 	tests := []struct {
 		name            string
