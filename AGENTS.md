@@ -14,7 +14,7 @@ go-mediainfo must be accurate. Official MediaInfo is the reference we diff again
 
 - Loop to done: fix, verify, commit. Do not ask "continue?".
 - Write the test first in `internal/mediainfo/*_test.go`. Run `gofmt -w` on touched `.go` files before you commit.
-- A new parser gets a fuzz target in `internal/mediainfo/fuzz_parsers_test.go`, wired into the CI fuzz smoke in `.github/workflows/ci.yml` and the scheduled run in `.github/workflows/fuzz.yml`.
+- A new parser gets a fuzz target in `internal/mediainfo/fuzz_parsers_test.go`. `scripts/fuzz.sh` discovers every `Fuzz*` function, so CI needs no other change.
 - Verify a parser or formatter change against real files on the media host before you push.
 
 ## Privacy
