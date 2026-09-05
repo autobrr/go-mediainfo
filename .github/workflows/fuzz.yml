@@ -3,7 +3,7 @@ name: fuzz
 on:
   workflow_dispatch:
   schedule:
-    # Daily long-ish fuzz run; CI keeps short smokes.
+    # Daily 2m-per-target fuzz run; CI keeps the 3s smoke.
     - cron: "17 05 * * *"
 
 permissions:
@@ -16,7 +16,7 @@ concurrency:
 jobs:
   fuzz:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 45
     env:
       CGO_ENABLED: 0
     steps:
@@ -29,16 +29,10 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: go fuzz (12m)
-        run: |
-          set -euo pipefail
-          go test ./internal/mediainfo -run=^$ -fuzz=FuzzParseAC3FrameParsers -fuzztime=2m
-          go test ./internal/mediainfo -run=^$ -fuzz=FuzzParseMPEGTSPacketizers -fuzztime=2m
-          go test ./internal/mediainfo -run=^$ -fuzz=FuzzParseMatroskaContainers -fuzztime=2m
-          go test ./internal/mediainfo -run=^$ -fuzz=FuzzMatroskaAttachmentSecurity -fuzztime=2m
-          go test ./internal/mediainfo -run=^$ -fuzz=FuzzReadMatroskaBlockHeader -fuzztime=2m
-          go test ./internal/mediainfo -run=^$ -fuzz=FuzzScanMatroskaClusters -fuzztime=2m
-          go test ./internal/mediainfo -run=^$ -fuzz=FuzzAACRawDataBlock -fuzztime=2m
+      - name: go fuzz
+        run: bash scripts/fuzz.sh
+        env:
+          FUZZTIME: 2m
 
       - name: Upload fuzz crashers/corpus
         if: failure()
