@@ -1345,8 +1345,13 @@ func TestVideoProbeNeedsSample(t *testing.T) {
 		t.Fatalf("expected HDR-complete HEVC probe without x265 SEI to keep sampling")
 	}
 	probe.hdrInfo.x265Seen = true
+	if !videoProbeNeedsSample(probe) {
+		t.Fatalf("expected HDR-complete HEVC probe without SPS to keep sampling")
+	}
+	probe.hevcSPS.Width = 1
+	probe.hevcSPS.Height = 1
 	if videoProbeNeedsSample(probe) {
-		t.Fatalf("expected HDR-complete HEVC probe with x265 SEI to stop sampling")
+		t.Fatalf("expected HDR-complete HEVC probe with x265 SEI and SPS to stop sampling")
 	}
 }
 
@@ -1373,6 +1378,30 @@ func TestProbeMatroskaVideo_HEVCContinuesAfterHDRForX265SEI(t *testing.T) {
 	}
 	if probe.hdrInfo.x265Settings != "wpp / me=0" {
 		t.Fatalf("x265Settings = %q, want %q", probe.hdrInfo.x265Settings, "wpp / me=0")
+	}
+}
+
+func TestProbeMatroskaVideo_HEVCContinuesAfterHDRAndX265ForSPS(t *testing.T) {
+	sps := buildHEVCSPS(hevcSPSOpts{picWidth: 320, picHeight: 240, chromaLoc: -1})
+	sample := make([]byte, 4+len(sps))
+	binary.BigEndian.PutUint32(sample, uint32(len(sps)))
+	copy(sample[4:], sps)
+	probe := &matroskaVideoProbe{
+		codec:         "HEVC",
+		nalLengthSize: 4,
+		hdrInfo: hevcHDRInfo{
+			hasMastering: true,
+			maxCLL:       1000,
+			maxFALL:      400,
+			hdr10Plus:    true,
+			x265Seen:     true,
+		},
+	}
+
+	probeMatroskaVideo(map[uint64]*matroskaVideoProbe{1: probe}, 1, sample)
+
+	if probe.hevcSPS.Width != 320 || probe.hevcSPS.Height != 240 {
+		t.Fatalf("late SPS dimensions = %dx%d, want 320x240", probe.hevcSPS.Width, probe.hevcSPS.Height)
 	}
 }
 
@@ -1654,6 +1683,28 @@ func TestApplyMatroskaVideoProbes_DolbyVisionWithStaticHDR10(t *testing.T) {
 	}
 	if got, _ := canonicalSeedValue(info.Tracks[0], "MaxFALL"); got != "144" {
 		t.Fatalf("MaxFALL = %q", got)
+	}
+}
+
+func TestApplyMatroskaVideoProbes_StaticHDR10PreservesExistingDisplay(t *testing.T) {
+	stream := Stream{Kind: StreamVideo}
+	replaceCanonicalSeedFill(&stream, "ID", "1", "ID", "1")
+	const existing = "Dolby Vision / SMPTE ST 2086, HDR10 compatible"
+	insertCanonicalSeedTextBefore(&stream, "HDR format", existing, "Format tier", "Codec ID")
+	info := MatroskaInfo{Tracks: []Stream{stream}}
+	probes := map[uint64]*matroskaVideoProbe{1: {
+		codec: "HEVC",
+		hdrInfo: hevcHDRInfo{
+			hasMastering:          true,
+			masteringLuminanceMin: 0.005,
+			masteringLuminanceMax: 1000,
+		},
+	}}
+
+	applyMatroskaVideoProbes(&info, probes)
+
+	if got := matroskaStreamDisplay(info.Tracks[0], "HDR format"); got != existing {
+		t.Fatalf("HDR format = %q; want %q", got, existing)
 	}
 }
 

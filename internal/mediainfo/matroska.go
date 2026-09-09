@@ -533,6 +533,7 @@ func parseMatroskaWithOptions(r io.ReaderAt, size int64, opts AnalyzeOptions, pu
 						probe := &matroskaVideoProbe{
 							codec:         format,
 							nalLengthSize: stream.nalLengthSize,
+							hevcSPS:       stream.mkvH264SPS,
 							headerStrip:   stream.mkvHeaderStripBytes,
 						}
 						if stream.mkvHEVCX265Library != "" {

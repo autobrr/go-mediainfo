@@ -46,18 +46,20 @@ func (info *hevcHDRInfo) sampleScanDone() bool {
 	return info.complete() && info.x265Seen
 }
 
-func parseHEVCSampleHDR(sample []byte, nalLengthSize int, info *hevcHDRInfo) {
+func parseHEVCSampleHDR(sample []byte, nalLengthSize int, info *hevcHDRInfo) (h264SPSInfo, bool) {
 	if len(sample) == 0 || info == nil {
-		return
+		return h264SPSInfo{}, false
 	}
 	if nalLengthSize > 0 && nalLengthSize <= 4 {
-		parseHEVCNALUnitsLengthPrefixed(sample, nalLengthSize, info)
-		return
+		return parseHEVCNALUnitsLengthPrefixed(sample, nalLengthSize, info)
 	}
 	parseHEVCNALUnitsAnnexB(sample, info)
+	return h264SPSInfo{}, false
 }
 
-func parseHEVCNALUnitsLengthPrefixed(sample []byte, nalLengthSize int, info *hevcHDRInfo) {
+func parseHEVCNALUnitsLengthPrefixed(sample []byte, nalLengthSize int, info *hevcHDRInfo) (h264SPSInfo, bool) {
+	var sps h264SPSInfo
+	spsFound := false
 	for offset := 0; offset+nalLengthSize <= len(sample); {
 		nalSize := readNALSize(sample[offset:], nalLengthSize)
 		if nalSize <= 0 {
@@ -67,12 +69,21 @@ func parseHEVCNALUnitsLengthPrefixed(sample []byte, nalLengthSize int, info *hev
 		if offset+nalSize > len(sample) {
 			break
 		}
-		parseHEVCNAL(sample[offset:offset+nalSize], info)
-		if info.sampleScanDone() {
-			return
+		nal := sample[offset : offset+nalSize]
+		if !spsFound && len(nal) >= 2 && (nal[0]>>1)&0x3F == 33 {
+			parsed := parseHEVCSPS(nal)
+			if parsed.Width > 0 && parsed.Height > 0 {
+				sps = parsed
+				spsFound = true
+			}
+		}
+		parseHEVCNAL(nal, info)
+		if info.sampleScanDone() && spsFound {
+			return sps, true
 		}
 		offset += nalSize
 	}
+	return sps, spsFound
 }
 
 func parseHEVCNALUnitsAnnexB(sample []byte, info *hevcHDRInfo) {
