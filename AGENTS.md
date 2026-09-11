@@ -15,7 +15,7 @@ go-mediainfo must be accurate. Official MediaInfo is the reference we diff again
 - Loop to done: fix, verify, commit. Do not ask "continue?".
 - Write the test first in `internal/mediainfo/*_test.go`. Run `gofmt -w` on touched `.go` files before you commit.
 - A new parser gets a fuzz target in `internal/mediainfo/fuzz_parsers_test.go`. `scripts/fuzz.sh` discovers every `Fuzz*` function, so CI needs no other change.
-- Verify a parser or formatter change against real files on the media host before you push.
+- Verify a parser or formatter change against real files before you push, using either a verified local reference binary or the media host described below.
 
 ## Privacy
 
@@ -23,11 +23,13 @@ Never put release names or media-library paths in anything that lands on GitHub:
 
 ## Parity harness
 
-- Reference: `mediainfo` (MediaInfoLib v23.04) on the media host. Connect with `ssh -o RemoteCommand=none -T root@media`. The `-o RemoteCommand=none -T` part is required.
-- Deploy: `GOOS=linux GOARCH=amd64 go build -o /tmp/go-mediainfo-linux-amd64 ./cmd/mediainfo`, then copy the binary to `/tmp/go-mediainfo` on the host.
+- Reference: official MediaInfo CLI with MediaInfoLib v23.04. Run the selected binary with `--Version` and verify that it reports `MediaInfoLib - v23.04` before comparing. A matching local binary on Windows, Linux, or macOS satisfies the reference requirement; it need not be on `PATH`. Do not substitute another version without explicitly recording and resolving the baseline difference.
+- Local validation: invoke the verified reference binary by its full path and build go-mediainfo for the local platform. Compare both binaries against the same real files with the JSON and text options below. Record the reference version, sample IDs, commands, and results. Successful local validation satisfies the pre-push requirement; SSH access is not additionally required.
+- Media host alternative: `root@media` is an environment-specific SSH destination, not a universal hostname or a prerequisite for local validation. When configured, connect with `ssh -o RemoteCommand=none -T root@media`. The `-o RemoteCommand=none -T` part is required for this route.
+- Remote deployment only: `GOOS=linux GOARCH=amd64 go build -o /tmp/go-mediainfo-linux-amd64 ./cmd/mediainfo`, then copy the binary to `/tmp/go-mediainfo` on the host.
 - Compare JSON: official `mediainfo --Output=JSON --Language=raw --ParseSpeed=0.5` against `go-mediainfo --output=JSON --language=raw`. Normalize both with `jq -S 'del(.creatingLibrary)|del(.media.track[]?.File_Created_Date)|del(.media.track[]?.File_Created_Date_Local)'`, then `diff -u`.
 - Compare text: official `mediainfo --ParseSpeed=0.5` against `go-mediainfo`, with the `ReportBy` line removed from ours.
-- Scripts and sample lists live outside the repo in `~/.local/share/go-mediainfo-parity/scripts/`.
+- Media-host scripts and sample lists live outside the repo in `~/.local/share/go-mediainfo-parity/scripts/`. Local validation may use equivalent commands without this directory.
 - The per-sample text-diff baseline and the known gaps per sample are in `docs/agents/parity-samples.md`. Update it when a commit moves a number. Do not copy it here.
 - Disk politeness on the media host: `ionice -c3 nice -n10`, `timeout 300`, sample a few files per type, no full-tree scans. UHD and BDAV probes have stalled the host in kernel D state before.
 - MediaInfoLib source is checked out at `~/github/oss/MediaInfoLib`. It is newer than the v23.04 binary. Read it to settle what official does. It is faster than running the binary and works offline.
