@@ -2587,6 +2587,49 @@ func applyMatroskaInBandHEVCSPS(stream *Stream, sps h264SPSInfo) {
 	if stream == nil {
 		return
 	}
+	// hvcC profile data is authoritative when present. A valid SPS fills only
+	// missing hvcC components, except a placeholder Main tier without either
+	// profile or level.
+	profile := matroskaStreamScalar(*stream, "Format_Profile")
+	level := matroskaStreamScalar(*stream, "Format_Level")
+	tier := matroskaStreamScalar(*stream, "Format_Tier")
+	profileMissing := profile == ""
+	levelMissing := level == ""
+	updatedTuple := false
+	if profileMissing {
+		if spsProfile := hevcProfileName(sps.ProfileID); spsProfile != "" {
+			profile = spsProfile
+			replaceCanonicalSeedFill(stream, "Format_Profile", profile, "Format profile", profile)
+			updatedTuple = true
+		}
+	}
+	if levelMissing {
+		if spsLevel := hevcLevelName(sps.LevelID); spsLevel != "" {
+			level = spsLevel
+			replaceCanonicalSeedFill(stream, "Format_Level", level, "", "")
+			updatedTuple = true
+		}
+	}
+	if tier == "" || (profileMissing && levelMissing && tier == "Main") {
+		if sps.HEVCTier != "" {
+			tier = sps.HEVCTier
+			replaceCanonicalSeedFill(stream, "Format_Tier", tier, "", "")
+			updatedTuple = true
+		}
+	}
+	if updatedTuple && profile != "" {
+		display := profile
+		if level != "" {
+			display += "@L" + level
+		}
+		if tier != "" {
+			display += "@" + tier
+		}
+		replaceCanonicalSeedText(stream, "Format profile", display)
+		clearCanonicalSeedText(stream, "Format tier")
+	} else if updatedTuple && tier != "" {
+		replaceCanonicalSeedText(stream, "Format tier", tier)
+	}
 	if sps.HasChromaLoc {
 		position := fmt.Sprintf("Type %d", sps.ChromaSampleLoc)
 		replaceCanonicalSeedFill(stream, "ChromaSubsampling_Position", position, "", "")
@@ -2602,6 +2645,22 @@ func applyMatroskaInBandHEVCSPS(stream *Stream, sps h264SPSInfo) {
 		sps.TransferCharacteristics,
 		sps.MatrixCoefficients,
 	)
+	// Matroska renders SPS color values while retaining conflicting Colour
+	// elements in the structured projection. applyMatroskaProbedColor keeps
+	// the per-field container provenance; update only the text projection.
+	for _, fact := range []struct {
+		label string
+		value string
+	}{
+		{label: "Color range", value: sps.ColorRange},
+		{label: "Color primaries", value: sps.ColorPrimaries},
+		{label: "Transfer characteristics", value: sps.TransferCharacteristics},
+		{label: "Matrix coefficients", value: sps.MatrixCoefficients},
+	} {
+		if fact.value != "" {
+			replaceCanonicalSeedText(stream, fact.label, fact.value)
+		}
+	}
 }
 
 // applyMatroskaInBandH264HRD projects HRD parameters from an SPS carried in
