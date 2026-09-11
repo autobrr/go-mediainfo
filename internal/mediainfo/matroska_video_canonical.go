@@ -250,21 +250,30 @@ func applyMatroskaHEVCCanonicalCodec(builder *canonicalStreamBuilder, facts matr
 		if level != "" {
 			display += "@L" + level
 		}
+		if facts.hevc.tierName != "" {
+			display += "@" + facts.hevc.tierName
+		}
 		builder.Fill("Format_Profile", profile, "Format profile", display)
 	}
 	if level != "" {
 		builder.Structured("Format_Level", level)
 	}
 	if facts.hevc.tierName != "" {
-		builder.Fill("Format_Tier", facts.hevc.tierName, "Format tier", facts.hevc.tierName)
+		if profile == "" {
+			builder.Fill("Format_Tier", facts.hevc.tierName, "Format tier", facts.hevc.tierName)
+		} else {
+			builder.Structured("Format_Tier", facts.hevc.tierName)
+		}
 	}
 	builder.Fill("ColorSpace", "YUV", "Color space", "YUV")
 	if facts.hevc.chromaFormat != "" {
-		builder.Fill("ChromaSubsampling", facts.hevc.chromaFormat, "Chroma subsampling", facts.hevc.chromaFormat)
+		display := facts.hevc.chromaFormat
 		if facts.sps.HasChromaLoc {
 			position := fmt.Sprintf("Type %d", facts.sps.ChromaSampleLoc)
-			builder.Fill("ChromaSubsampling_Position", position, "Chroma subsampling position", position)
+			display += " (" + position + ")"
+			builder.Structured("ChromaSubsampling_Position", position)
 		}
+		builder.Fill("ChromaSubsampling", facts.hevc.chromaFormat, "Chroma subsampling", display)
 	}
 	if facts.hevc.bitDepth > 0 {
 		value := strconv.Itoa(int(facts.hevc.bitDepth))

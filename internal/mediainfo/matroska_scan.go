@@ -228,6 +228,7 @@ type matroskaVideoProbe struct {
 	avcAnnexB     []byte
 	sliceCount    int
 	h264SPS       h264SPSInfo
+	hevcSPS       h264SPSInfo
 	timeCode      string
 	activeFormat  int
 	packetCount   int
@@ -1104,9 +1105,9 @@ func readMatroskaBlockHeader(er *ebmlReader, size int64, audioProbes map[uint64]
 }
 
 // videoProbeNeedsSample reports whether another Matroska video block can still
-// contribute bitstream-derived metadata. HEVC keeps looking for optional x265
-// SEI after required HDR metadata is complete, but only until the packet cap is
-// exhausted.
+// contribute bitstream-derived metadata. HEVC keeps looking for its SPS and
+// optional x265 SEI after required HDR metadata is complete, but only until the
+// packet cap is exhausted.
 func videoProbeNeedsSample(probe *matroskaVideoProbe) bool {
 	if probe == nil {
 		return false
@@ -1121,7 +1122,7 @@ func videoProbeNeedsSample(probe *matroskaVideoProbe) bool {
 	}
 	switch probe.codec {
 	case "HEVC":
-		return !probe.hdrInfo.scanDone() || !probe.hdrInfo.x265Seen
+		return !probe.hdrInfo.scanDone() || !probe.hdrInfo.x265Seen || probe.hevcSPS.Width == 0 || probe.hevcSPS.Height == 0
 	case "AVC":
 		return true
 	case "MPEG Video":
@@ -2335,6 +2336,9 @@ func applyMatroskaVideoProbes(info *MatroskaInfo, probes map[uint64]*matroskaVid
 				replaceCanonicalSeedFill(stream, "Encoded_Library_Settings", probe.hdrInfo.x265Settings, "Encoding settings", probe.hdrInfo.x265Settings)
 			}
 		}
+		if probe.codec == "HEVC" && probe.hevcSPS.Width > 0 && probe.hevcSPS.Height > 0 {
+			applyMatroskaInBandHEVCSPS(stream, probe.hevcSPS)
+		}
 		if probe.codec == "HEVC" && probe.hdrInfo.x265Library == "" && probe.hdrInfo.encoderLibrary != "" {
 			replaceCanonicalSeedFill(stream, "Encoded_Library", probe.hdrInfo.encoderLibrary, "Writing library", probe.hdrInfo.encoderLibrary)
 			replaceCanonicalSeedFill(stream, "Encoded_Library_Name", probe.hdrInfo.encoderName, "", "")
@@ -2371,6 +2375,7 @@ func applyMatroskaVideoProbes(info *MatroskaInfo, probes map[uint64]*matroskaVid
 			replaceCanonicalSeedFill(stream, "MaxFALL", strconv.FormatUint(hdr.maxFALL, 10), "Maximum Frame-Average Light Level", maxFALL)
 			replaceCanonicalSeedFill(stream, "MaxFALL_Source", "Stream", "", "")
 		}
+		hasStaticHDR10 := hdr.hasMastering && hdr.masteringLuminanceMin >= 0 && hdr.masteringLuminanceMax > 0
 		if hdr.hdr10Plus {
 			hdrText := formatHDR10Plus(hdr)
 			if existing := matroskaStreamDisplay(*stream, "HDR format"); existing != "" {
@@ -2381,8 +2386,17 @@ func applyMatroskaVideoProbes(info *MatroskaInfo, probes map[uint64]*matroskaVid
 				}
 			}
 			insertCanonicalSeedTextBefore(stream, "HDR format", hdrText, "Format tier", "Codec ID")
+		} else if hasStaticHDR10 {
+			hdrText := "SMPTE ST 2086, HDR10 compatible"
+			if existing := matroskaStreamDisplay(*stream, "HDR format"); existing != "" {
+				if strings.Contains(existing, "SMPTE ST 2086") {
+					hdrText = existing
+				} else {
+					hdrText = existing + " / " + hdrText
+				}
+			}
+			insertCanonicalSeedTextBefore(stream, "HDR format", hdrText, "Format tier", "Codec ID")
 		}
-		hasStaticHDR10 := hdr.hasMastering && hdr.masteringLuminanceMin >= 0 && hdr.masteringLuminanceMax > 0
 		hasSecondaryHDR := hdr.hdr10Plus || hasStaticHDR10
 		if stream.mkvHasDolbyVision && !hasSecondaryHDR {
 			insertCanonicalSeedTextBefore(stream, "HDR format", formatDolbyVisionHDRWithoutCompatibility(stream.mkvDolbyVision), "Format tier", "Codec ID")
@@ -2567,6 +2581,86 @@ func applyMatroskaInBandH264SPS(stream *Stream, sps h264SPSInfo, scanConflict bo
 	clearCanonicalSeedField(stream, "FrameRate_Mode_Original", "")
 	replaceCanonicalSeedFill(stream, "FrameRate_Mode", "VFR", "Frame rate mode", "Variable")
 	replaceCanonicalSeedFill(stream, "FrameRate_Original", fmt.Sprintf("%.3f", sps.FrameRate), "", "")
+}
+
+func applyMatroskaInBandHEVCSPS(stream *Stream, sps h264SPSInfo) {
+	if stream == nil {
+		return
+	}
+	// hvcC profile data is authoritative when present. A valid SPS fills only
+	// missing hvcC components, except a placeholder Main tier without either
+	// profile or level.
+	profile := matroskaStreamScalar(*stream, "Format_Profile")
+	level := matroskaStreamScalar(*stream, "Format_Level")
+	tier := matroskaStreamScalar(*stream, "Format_Tier")
+	profileMissing := profile == ""
+	levelMissing := level == ""
+	updatedTuple := false
+	if profileMissing {
+		if spsProfile := hevcProfileName(sps.ProfileID); spsProfile != "" {
+			profile = spsProfile
+			replaceCanonicalSeedFill(stream, "Format_Profile", profile, "Format profile", profile)
+			updatedTuple = true
+		}
+	}
+	if levelMissing {
+		if spsLevel := hevcLevelName(sps.LevelID); spsLevel != "" {
+			level = spsLevel
+			replaceCanonicalSeedFill(stream, "Format_Level", level, "", "")
+			updatedTuple = true
+		}
+	}
+	if tier == "" || (profileMissing && levelMissing && tier == "Main") {
+		if sps.HEVCTier != "" {
+			tier = sps.HEVCTier
+			replaceCanonicalSeedFill(stream, "Format_Tier", tier, "", "")
+			updatedTuple = true
+		}
+	}
+	if updatedTuple && profile != "" {
+		display := profile
+		if level != "" {
+			display += "@L" + level
+		}
+		if tier != "" {
+			display += "@" + tier
+		}
+		replaceCanonicalSeedText(stream, "Format profile", display)
+		clearCanonicalSeedText(stream, "Format tier")
+	} else if updatedTuple && tier != "" {
+		replaceCanonicalSeedText(stream, "Format tier", tier)
+	}
+	if sps.HasChromaLoc {
+		position := fmt.Sprintf("Type %d", sps.ChromaSampleLoc)
+		replaceCanonicalSeedFill(stream, "ChromaSubsampling_Position", position, "", "")
+		if chroma := firstNonEmpty(sps.ChromaFormat, matroskaStreamScalar(*stream, "ChromaSubsampling")); chroma != "" {
+			replaceCanonicalSeedFill(stream, "ChromaSubsampling", chroma, "Chroma subsampling", chroma+" ("+position+")")
+		}
+	}
+	applyMatroskaProbedColor(
+		stream,
+		sps.HasColorDescription,
+		sps.ColorRange,
+		sps.ColorPrimaries,
+		sps.TransferCharacteristics,
+		sps.MatrixCoefficients,
+	)
+	// Matroska renders SPS color values while retaining conflicting Colour
+	// elements in the structured projection. applyMatroskaProbedColor keeps
+	// the per-field container provenance; update only the text projection.
+	for _, fact := range []struct {
+		label string
+		value string
+	}{
+		{label: "Color range", value: sps.ColorRange},
+		{label: "Color primaries", value: sps.ColorPrimaries},
+		{label: "Transfer characteristics", value: sps.TransferCharacteristics},
+		{label: "Matrix coefficients", value: sps.MatrixCoefficients},
+	} {
+		if fact.value != "" {
+			replaceCanonicalSeedText(stream, fact.label, fact.value)
+		}
+	}
 }
 
 // applyMatroskaInBandH264HRD projects HRD parameters from an SPS carried in
@@ -3186,7 +3280,9 @@ func probeMatroskaVideo(probes map[uint64]*matroskaVideoProbe, track uint64, pay
 		return
 	}
 	if probe.codec == "HEVC" {
-		parseHEVCSampleHDR(payload, probe.nalLengthSize, &probe.hdrInfo)
+		if sps, ok := parseHEVCSampleHDR(payload, probe.nalLengthSize, &probe.hdrInfo); ok {
+			probe.hevcSPS = sps
+		}
 		return
 	}
 	if probe.codec == "AVC" {
@@ -3275,13 +3371,17 @@ func applyMatroskaProbedColor(stream *Stream, descriptionPresent bool, colorRang
 			break
 		}
 	}
-	streamSource := "Stream"
+	descriptionSource := "Stream"
 	if hasContainer {
-		streamSource = "Container / Stream"
+		descriptionSource = "Container / Stream"
 	}
 	if descriptionPresent {
 		replaceCanonicalSeedFill(stream, "colour_description_present", "Yes", "", "")
-		replaceCanonicalSeedFill(stream, "colour_description_present_Source", streamSource, "", "")
+		replaceCanonicalSeedFill(stream, "colour_description_present_Source", descriptionSource, "", "")
+		if primaries != "" && transfer != "" && matrix != "" {
+			setCanonicalSeedXMLVisibility(stream, "colour_description_present", true)
+			setCanonicalSeedXMLVisibility(stream, "colour_description_present_Source", true)
+		}
 	}
 	for _, fact := range []struct {
 		key     fieldName
@@ -3298,12 +3398,20 @@ func applyMatroskaProbedColor(stream *Stream, descriptionPresent bool, colorRang
 			continue
 		}
 		existing := matroskaStreamScalar(*stream, fact.key)
+		sourceValue := "Stream"
 		if existing == "" {
 			replaceCanonicalSeedFill(stream, fact.key, fact.value, fact.display, fact.value)
 		} else if existing != fact.value {
 			continue
+		} else if strings.Contains(matroskaStreamScalar(*stream, fact.source), "Container") {
+			sourceValue = "Container / Stream"
 		}
-		replaceCanonicalSeedFill(stream, fact.source, streamSource, "", "")
+		if fact.key == "matrix_coefficients" && existing == "" && hasContainer {
+			// Matroska uses combined provenance when a stream matrix supplements
+			// any container color metadata.
+			sourceValue = "Container / Stream"
+		}
+		replaceCanonicalSeedFill(stream, fact.source, sourceValue, "", "")
 	}
 }
 

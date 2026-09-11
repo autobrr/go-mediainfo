@@ -2,6 +2,7 @@ package mediainfo
 
 import (
 	"encoding/binary"
+	"encoding/hex"
 	"maps"
 	"math"
 	"reflect"
@@ -1489,6 +1490,77 @@ func TestMatroskaStaticVideoColorDescriptionRequiresContainerRange(t *testing.T)
 	}
 }
 
+func TestMatroskaProbedColorRestoresXMLDescriptionForFullVUI(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		primaries   string
+		transfer    string
+		matrix      string
+		wantVisible bool
+	}{
+		{name: "full VUI", primaries: "BT.2020", transfer: "PQ", matrix: "BT.2020 non-constant", wantVisible: true},
+		{name: "partial VUI", primaries: "BT.2020", wantVisible: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			builder := newCanonicalStreamBuilder(StreamVideo)
+			applyMatroskaStaticVideoColor(builder, matroskaVideoCanonicalFacts{
+				format: "HEVC",
+				video: matroskaVideoInfo{
+					colorRange:       "Limited",
+					colorRangeSource: "Container",
+				},
+			})
+			stream := builder.Snapshot(canonicalStreamPolicy{})
+			applyMatroskaProbedColor(&stream, true, "Limited", test.primaries, test.transfer, test.matrix)
+			if test.wantVisible {
+				for key, want := range map[fieldName]string{
+					"colour_description_present_Source": "Container / Stream",
+					"colour_range_Source":               "Container / Stream",
+					"colour_primaries_Source":           "Stream",
+					"transfer_characteristics_Source":   "Stream",
+					"matrix_coefficients_Source":        "Container / Stream",
+				} {
+					got, found := canonicalSeedValue(stream, key)
+					if !found || got != want {
+						t.Errorf("%s = %q, %v; want %q", key, got, found, want)
+					}
+				}
+			}
+
+			for _, key := range []fieldName{"colour_description_present", "colour_description_present_Source"} {
+				found := false
+				for _, entry := range stream.canonicalSeed {
+					entryKey := fieldName(firstNonEmpty(entry.StructuredKey, string(entry.Name)))
+					if !entry.Options.ShowStructured || entryKey != key {
+						continue
+					}
+					found = true
+					if entry.Options.ShowXML != test.wantVisible {
+						t.Errorf("%s XML visibility = %v; want %v", key, entry.Options.ShowXML, test.wantVisible)
+					}
+					break
+				}
+				if !found {
+					t.Errorf("canonical %s not found", key)
+				}
+			}
+		})
+	}
+}
+
+func TestMatroskaHEVCCanonicalCodecUnknownProfileKeepsTierText(t *testing.T) {
+	stream := Stream{Kind: StreamVideo, canonicalSeed: matroskaHEVCCanonicalSeed(matroskaVideoCanonicalFacts{
+		format: "HEVC",
+		hevc:   hevcConfigInfo{tierName: "High", chromaFormat: "4:2:0", bitDepth: 8},
+	})}
+	if got, found := canonicalSeedValue(stream, "Format_Tier"); !found || got != "High" {
+		t.Fatalf("Format_Tier = %q, %v; want High", got, found)
+	}
+	if got := matroskaCanonicalSeedText(stream, "Format tier"); got != "High" {
+		t.Fatalf("Format tier = %q; want High", got)
+	}
+}
+
 func TestMatroskaAACCanonicalSeedTracksStatisticsTags(t *testing.T) {
 	audioPayload := buildMatroskaElement(mkvIDChannels, encodeMatroskaUint(2))
 	samplingRate := make([]byte, 8)
@@ -2065,6 +2137,304 @@ func TestMatroskaHEVCCanonicalSeedTracksConfigurationAndProbeFacts(t *testing.T)
 		}
 	}
 	assertMatroskaDirectStreamMatchesLegacy(t, stream, "canonical-hevc.mkv")
+}
+
+func TestMatroskaHEVCProbeAppliesInBandSPSMetadata(t *testing.T) {
+	codecPrivate, err := hex.DecodeString("01022000000090000000000096f000fefdfafa00000f00")
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := buildMatroskaElement(mkvIDTrackNumber, encodeMatroskaUint(1))
+	payload = append(payload, buildMatroskaElement(mkvIDTrackType, encodeMatroskaUint(1))...)
+	payload = append(payload, buildMatroskaElement(mkvIDCodecID, []byte("V_MPEGH/ISO/HEVC"))...)
+	payload = append(payload, buildMatroskaElement(mkvIDCodecPrivate, codecPrivate)...)
+	payload = append(payload, buildMatroskaVideoSettings(3840, 2160)...)
+
+	stream, ok := parseMatroskaTrackEntry(payload, 1, 9)
+	if !ok {
+		t.Fatal("HEVC TrackEntry did not parse")
+	}
+
+	// This real SPS carries limited-range BT.2020/PQ VUI, BT.2020 non-constant
+	// matrix coefficients, and chroma location type 2. Its hvcC has no NAL arrays.
+	sample := matroskaHEVCInBandSPSSample(t, false)
+	probe := &matroskaVideoProbe{
+		codec:         "HEVC",
+		nalLengthSize: 4,
+		hdrInfo: hevcHDRInfo{
+			masteringPrimaries:    "Display P3",
+			masteringLuminanceMin: 0.0001,
+			masteringLuminanceMax: 1000,
+			hasMastering:          true,
+			maxCLL:                1006,
+			maxFALL:               342,
+		},
+	}
+	probeMatroskaVideo(map[uint64]*matroskaVideoProbe{1: probe}, 1, sample)
+	info := MatroskaInfo{Tracks: []Stream{stream}}
+	applyMatroskaVideoProbes(&info, map[uint64]*matroskaVideoProbe{1: probe})
+	stream = info.Tracks[0]
+
+	for _, test := range []struct {
+		name fieldName
+		want string
+	}{
+		{name: "Format_Profile", want: "Main 10"},
+		{name: "Format_Level", want: "5"},
+		{name: "Format_Tier", want: "Main"},
+		{name: "HDR_Format", want: "SMPTE ST 2086"},
+		{name: "HDR_Format_Compatibility", want: "HDR10"},
+		{name: "ChromaSubsampling_Position", want: "Type 2"},
+		{name: "colour_range", want: "Limited"},
+		{name: "colour_primaries", want: "BT.2020"},
+		{name: "transfer_characteristics", want: "PQ"},
+		{name: "matrix_coefficients", want: "BT.2020 non-constant"},
+		{name: "MasteringDisplay_ColorPrimaries", want: "Display P3"},
+	} {
+		got, found := canonicalSeedValue(stream, test.name)
+		if !found || got != test.want {
+			t.Errorf("canonical %s = %q, %v; want %q", test.name, got, found, test.want)
+		}
+	}
+
+	for _, test := range []struct {
+		label string
+		want  string
+	}{
+		{label: "Format profile", want: "Main 10@L5@Main"},
+		{label: "HDR format", want: "SMPTE ST 2086, HDR10 compatible"},
+		{label: "Chroma subsampling", want: "4:2:0 (Type 2)"},
+		{label: "Color range", want: "Limited"},
+		{label: "Color primaries", want: "BT.2020"},
+		{label: "Transfer characteristics", want: "PQ"},
+		{label: "Matrix coefficients", want: "BT.2020 non-constant"},
+		{label: "Mastering display color primaries", want: "Display P3"},
+	} {
+		if got := matroskaCanonicalSeedText(stream, test.label); got != test.want {
+			t.Errorf("%s = %q; want %q", test.label, got, test.want)
+		}
+	}
+	if got := matroskaCanonicalSeedText(stream, "Format tier"); got != "" {
+		t.Errorf("Format tier = %q; want structured-only tier", got)
+	}
+	if got := matroskaCanonicalSeedText(stream, "Chroma subsampling position"); got != "" {
+		t.Errorf("Chroma subsampling position = %q; want structured-only position", got)
+	}
+}
+
+func matroskaHEVCInBandSPSSample(t *testing.T, highTier bool) []byte {
+	t.Helper()
+	sps, err := hex.DecodeString("420101022000000300900000030000030096a001e020021c4d9e5792429185164aaacb9b9ebce40977eb9978f016a1220136c2000007d20000bb81f455ef7e00e5001ca801ca003951")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if highTier {
+		sps[3] |= 0x20
+	}
+	sample := make([]byte, 4+len(sps))
+	binary.BigEndian.PutUint32(sample, uint32(len(sps)))
+	copy(sample[4:], sps)
+	return sample
+}
+
+func matroskaHEVCInBandSPSUnmappedProfileSample(t *testing.T) []byte {
+	t.Helper()
+	sample := matroskaHEVCInBandSPSSample(t, true)
+	// The profile_tier_level starts at NAL byte 3 after the four-byte sample
+	// length. Keep High tier and use the unmapped profile_idc 31.
+	sample[7] = 0x3F
+	return sample
+}
+
+func TestMatroskaHEVCProbeInBandSPSKeepsContainerColorStructured(t *testing.T) {
+	colour := buildMatroskaElement(mkvIDRange, encodeMatroskaUint(2))
+	colour = append(colour, buildMatroskaElement(mkvIDColourPrimaries, encodeMatroskaUint(1))...)
+	colour = append(colour, buildMatroskaElement(mkvIDTransferChar, encodeMatroskaUint(1))...)
+	colour = append(colour, buildMatroskaElement(mkvIDMatrixCoeffs, encodeMatroskaUint(1))...)
+	video := buildMatroskaElement(mkvIDPixelWidth, encodeMatroskaUint(3840))
+	video = append(video, buildMatroskaElement(mkvIDPixelHeight, encodeMatroskaUint(2160))...)
+	video = append(video, buildMatroskaElement(mkvIDColour, colour)...)
+	payload := buildMatroskaElement(mkvIDTrackNumber, encodeMatroskaUint(1))
+	payload = append(payload, buildMatroskaElement(mkvIDTrackType, encodeMatroskaUint(1))...)
+	payload = append(payload, buildMatroskaElement(mkvIDCodecID, []byte("V_MPEGH/ISO/HEVC"))...)
+	payload = append(payload, buildMatroskaElement(mkvIDCodecPrivate, buildHVCCRecord(nil, nil))...)
+	payload = append(payload, buildMatroskaElement(mkvIDTrackVideo, video)...)
+
+	stream, ok := parseMatroskaTrackEntry(payload, 1, 9)
+	if !ok {
+		t.Fatal("HEVC TrackEntry did not parse")
+	}
+	probe := &matroskaVideoProbe{codec: "HEVC", nalLengthSize: 4}
+	probeMatroskaVideo(map[uint64]*matroskaVideoProbe{1: probe}, 1, matroskaHEVCInBandSPSSample(t, false))
+	info := MatroskaInfo{Tracks: []Stream{stream}}
+	applyMatroskaVideoProbes(&info, map[uint64]*matroskaVideoProbe{1: probe})
+	stream = info.Tracks[0]
+
+	for _, test := range []struct {
+		name fieldName
+		want string
+	}{
+		{name: "colour_range", want: "Full"},
+		{name: "colour_primaries", want: "BT.709"},
+		{name: "transfer_characteristics", want: "BT.709"},
+		{name: "matrix_coefficients", want: "BT.709"},
+		{name: "colour_description_present_Source", want: "Container / Stream"},
+		{name: "colour_range_Source", want: "Container"},
+		{name: "colour_primaries_Source", want: "Container"},
+		{name: "transfer_characteristics_Source", want: "Container"},
+		{name: "matrix_coefficients_Source", want: "Container"},
+	} {
+		if got, found := canonicalSeedValue(stream, test.name); !found || got != test.want {
+			t.Errorf("canonical %s = %q, %v; want %q", test.name, got, found, test.want)
+		}
+	}
+	for _, test := range []struct {
+		label string
+		want  string
+	}{
+		{label: "Color range", want: "Limited"},
+		{label: "Color primaries", want: "BT.2020"},
+		{label: "Transfer characteristics", want: "PQ"},
+		{label: "Matrix coefficients", want: "BT.2020 non-constant"},
+	} {
+		if got := matroskaCanonicalSeedText(stream, test.label); got != test.want {
+			t.Errorf("%s = %q; want %q", test.label, got, test.want)
+		}
+	}
+}
+
+func TestMatroskaHEVCProbeInBandSPSProfileFallback(t *testing.T) {
+	for _, test := range []struct {
+		name         string
+		codecPrivate []byte
+		profile      string
+		level        string
+		tier         string
+		text         string
+		tierText     string
+		spsHighTier  bool
+		unmappedSPS  bool
+	}{
+		{
+			name: "unspecified hvcC uses SPS",
+			codecPrivate: func() []byte {
+				config := make([]byte, 23)
+				config[0] = 1
+				config[21] = 3
+				return config
+			}(),
+			profile: "Main 10", level: "5", tier: "High", text: "Main 10@L5@High",
+			spsHighTier: true,
+		},
+		{
+			name: "unmapped SPS profile refreshes standalone tier",
+			codecPrivate: func() []byte {
+				config := make([]byte, 23)
+				config[0] = 1
+				config[21] = 3
+				return config
+			}(),
+			level: "5", tier: "High", tierText: "High", unmappedSPS: true,
+		},
+		{
+			name: "unmapped SPS profile preserves explicit High tier",
+			codecPrivate: func() []byte {
+				config := make([]byte, 23)
+				config[0] = 1
+				config[1] = 0x20
+				config[21] = 3
+				return config
+			}(),
+			level: "5", tier: "High", tierText: "High", unmappedSPS: true,
+		},
+		{
+			name: "unspecified hvcC preserves explicit High tier",
+			codecPrivate: func() []byte {
+				config := make([]byte, 23)
+				config[0] = 1
+				config[1] = 0x20
+				config[21] = 3
+				return config
+			}(),
+			profile: "Main 10", level: "5", tier: "High", text: "Main 10@L5@High",
+		},
+		{
+			name:         "known hvcC wins",
+			codecPrivate: buildHVCCRecord(nil, nil),
+			profile:      "Main", level: "2", tier: "Main", text: "Main@L2@Main",
+		},
+		{
+			name: "known hvcC profile and tier keep SPS level",
+			codecPrivate: func() []byte {
+				config := buildHVCCRecord(nil, nil)
+				config[12] = 0
+				return config
+			}(),
+			profile: "Main", level: "5", tier: "Main", text: "Main@L5@Main",
+			spsHighTier: true,
+		},
+		{
+			name: "known hvcC level and tier keep SPS profile",
+			codecPrivate: func() []byte {
+				config := buildHVCCRecord(nil, nil)
+				config[1] = 0
+				return config
+			}(),
+			profile: "Main 10", level: "2", tier: "Main", text: "Main 10@L2@Main",
+			spsHighTier: true,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			payload := buildMatroskaElement(mkvIDTrackNumber, encodeMatroskaUint(1))
+			payload = append(payload, buildMatroskaElement(mkvIDTrackType, encodeMatroskaUint(1))...)
+			payload = append(payload, buildMatroskaElement(mkvIDCodecID, []byte("V_MPEGH/ISO/HEVC"))...)
+			payload = append(payload, buildMatroskaElement(mkvIDCodecPrivate, test.codecPrivate)...)
+			payload = append(payload, buildMatroskaVideoSettings(3840, 2160)...)
+			stream, ok := parseMatroskaTrackEntry(payload, 1, 9)
+			if !ok {
+				t.Fatal("HEVC TrackEntry did not parse")
+			}
+			probe := &matroskaVideoProbe{codec: "HEVC", nalLengthSize: 4}
+			sample := matroskaHEVCInBandSPSSample(t, test.spsHighTier)
+			if test.unmappedSPS {
+				sample = matroskaHEVCInBandSPSUnmappedProfileSample(t)
+			}
+			probeMatroskaVideo(map[uint64]*matroskaVideoProbe{1: probe}, 1, sample)
+			info := MatroskaInfo{Tracks: []Stream{stream}}
+			applyMatroskaVideoProbes(&info, map[uint64]*matroskaVideoProbe{1: probe})
+			stream = info.Tracks[0]
+
+			for _, want := range []struct {
+				name  fieldName
+				value string
+			}{
+				{name: "Format_Profile", value: test.profile},
+				{name: "Format_Level", value: test.level},
+				{name: "Format_Tier", value: test.tier},
+			} {
+				got, found := canonicalSeedValue(stream, want.name)
+				if want.value == "" {
+					if found {
+						t.Errorf("canonical %s = %q, %v; want omitted", want.name, got, found)
+					}
+					continue
+				}
+				if !found || got != want.value {
+					t.Errorf("canonical %s = %q, %v; want %q", want.name, got, found, want.value)
+				}
+			}
+			if got := matroskaCanonicalSeedText(stream, "Format profile"); got != test.text {
+				t.Errorf("Format profile = %q; want %q", got, test.text)
+			}
+			refreshCanonicalCompatibilitySnapshot(&stream)
+			if got := findField(stream.Fields, "Format profile"); got != test.text {
+				t.Errorf("rendered Format profile = %q; want %q", got, test.text)
+			}
+			if got := findField(stream.Fields, "Format tier"); got != test.tierText {
+				t.Errorf("rendered Format tier = %q; want %q", got, test.tierText)
+			}
+		})
+	}
 }
 
 // buildMatroskaFLACPrivateForTest creates complete codec-private metadata with

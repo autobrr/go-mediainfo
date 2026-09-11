@@ -72,6 +72,16 @@ func FuzzParseMatroskaContainers(f *testing.F) {
 	})
 }
 
+func FuzzParseHEVCLengthPrefixedNALUnits(f *testing.F) {
+	f.Add([]byte{}, uint8(0))
+	f.Add([]byte{0x00, 0x00, 0x00, 0x02, 0x42, 0x01}, uint8(4))
+
+	f.Fuzz(func(_ *testing.T, data []byte, lengthSize uint8) {
+		var info hevcHDRInfo
+		_, _ = parseHEVCNALUnitsLengthPrefixed(fuzzLimit(data), int(lengthSize%5), &info)
+	})
+}
+
 // FuzzMatroskaAttachmentSecurity exercises checked size arithmetic, budget
 // transitions, and the lazy attachment scanner with a logical file size that is
 // independent of the bounded in-memory fuzz payload.
