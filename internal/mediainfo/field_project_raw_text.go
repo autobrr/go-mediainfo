@@ -107,6 +107,7 @@ var rawTextLabelAliases = map[string]string{
 	"Service kind":                       "ServiceKind/String",
 	"Writing application":                "Encoded_Application/String",
 	"Writing library":                    "Encoded_Library/String",
+	"MD5 of the unencoded content":       "MD5_Unencoded",
 	"Encoding settings":                  "Encoded_Library_Settings",
 	"Encoded date":                       "Encoded_Date",
 	"Tagged date":                        "Tagged_Date",

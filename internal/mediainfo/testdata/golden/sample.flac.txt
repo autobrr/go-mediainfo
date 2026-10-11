@@ -15,6 +15,7 @@ Channel(s)                               : 1 channel
 Channel layout                           : M
 Sampling rate                            : 48.0 kHz
 Bit depth                                : 16 bits
+MD5 of the unencoded content             : 97EED3BC2F094D9221F0E9772AC7B3E7
 
 ReportBy                                 : go-mediainfo - dev
 

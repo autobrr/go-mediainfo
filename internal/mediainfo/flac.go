@@ -257,8 +257,8 @@ type flacAudioStreamParams struct {
 // canonicalFLACAudioStream records FLAC audio facts in canonical units before
 // publishing the public compatibility snapshot.
 func canonicalFLACAudioStream(params flacAudioStreamParams) Stream {
-	store := &fieldStore{}
-	ref := store.Prepare(StreamAudio)
+	builder := newCanonicalStreamBuilder(StreamAudio)
+	store, ref := builder.store, builder.ref
 	store.streams[ref].SkipStreamOrder = true
 	store.Fill(ref, "Format", "FLAC", fillReplace)
 	if params.duration > 0 {
@@ -340,6 +340,7 @@ func canonicalFLACAudioStream(params flacAudioStreamParams) Stream {
 		}
 	}
 	if params.md5Hex != "" {
+		builder.Text("MD5 of the unencoded content", params.md5Hex)
 		node := structuredObjectFromKVs([]jsonKV{{Key: "MD5_Unencoded", Val: params.md5Hex}})
 		raw := structuredNodeText(node)
 		_, known := structuredFieldSpec(StreamAudio, "extra")

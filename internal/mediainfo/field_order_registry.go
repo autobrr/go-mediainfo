@@ -140,6 +140,8 @@ var textStreamFieldOrder = map[string]int{
 	"Service name":                      61,
 	"Service provider":                  62,
 	"Service type":                      63,
+	// The checksum follows unregistered metadata tags (order 1 << 20).
+	"MD5 of the unencoded content": 1<<20 + 1,
 }
 
 // textFieldOrderPolicy returns the registered display order for kind.

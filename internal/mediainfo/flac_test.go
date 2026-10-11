@@ -1,10 +1,87 @@
 package mediainfo
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/hex"
+	"strings"
 	"testing"
 )
+
+func TestFLACUnencodedMD5Output(t *testing.T) {
+	const digest = "864D55F003143D8BAD47D3B997FAE64C"
+	const label = "MD5 of the unencoded content"
+	for _, container := range []string{"FLAC", "Matroska"} {
+		for _, hasMD5 := range []bool{true, false} {
+			name := container + "/present"
+			if !hasMD5 {
+				name = container + "/unspecified"
+			}
+			t.Run(name, func(t *testing.T) {
+				streamInfo, err := hex.DecodeString("1000100000001000210c0bb802f00e5b6540864d55f003143d8bad47d3b997fae64c")
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !hasMD5 {
+					clear(streamInfo[18:])
+				}
+				private := append([]byte("fLaC\x80\x00\x00\x22"), streamInfo...)
+				var stream Stream
+				if container == "Matroska" {
+					payload := buildMatroskaElement(mkvIDTrackNumber, []byte{1})
+					payload = append(payload, buildMatroskaElement(mkvIDTrackUID, []byte{42})...)
+					payload = append(payload, buildMatroskaElement(mkvIDTrackType, []byte{2})...)
+					payload = append(payload, buildMatroskaElement(mkvIDCodecID, []byte("A_FLAC"))...)
+					payload = append(payload, buildMatroskaElement(mkvIDCodecPrivate, private)...)
+					var ok bool
+					stream, ok = parseMatroskaTrackEntry(payload, 2, 3)
+					if !ok {
+						t.Fatal("FLAC TrackEntry did not parse")
+					}
+					tags := buildMatroskaElement(mkvIDTagTargets, buildMatroskaElement(mkvIDTagTrackUID, []byte{42}))
+					tags = append(tags, buildMatroskaSimpleTag("SOURCE", "Blu-ray")...)
+					_, _, _, _, _, scoped := parseMatroskaTags(buildMatroskaElement(mkvIDTag, tags), "", "")
+					info := MatroskaInfo{Tracks: []Stream{stream}, scopedTags: scoped}
+					applyMatroskaTrackTags(&info)
+					stream = info.Tracks[0]
+					refreshCanonicalCompatibilitySnapshot(&stream)
+				} else {
+					_, streams, _, _, ok := parseFLAC(bytes.NewReader(private), int64(len(private)))
+					if !ok || len(streams) != 1 {
+						t.Fatal("FLAC metadata did not parse")
+					}
+					stream = streams[0]
+				}
+				reports := []Report{{
+					General: Stream{Kind: StreamGeneral, Fields: []Field{{Name: "Format", Value: container}}},
+					Streams: []Stream{stream},
+				}}
+				wantCount := 0
+				if hasMD5 {
+					wantCount = 1
+					if got := stream.Fields[len(stream.Fields)-1]; got != (Field{Name: label, Value: digest}) {
+						t.Fatalf("last audio field = %#v, want unencoded MD5", got)
+					}
+				}
+				for format, output := range map[string]string{
+					"text": RenderText(reports),
+					"raw":  RenderTextWithOptions(reports, TextRenderOptions{Language: "raw"}),
+					"JSON": RenderJSON(reports),
+				} {
+					if got := strings.Count(output, digest); got != wantCount {
+						t.Errorf("%s digest count = %d, want %d:\n%s", format, got, wantCount, output)
+					}
+				}
+				if got := strings.Contains(RenderText(reports), label); got != hasMD5 {
+					t.Errorf("text MD5 label present = %v, want %v", got, hasMD5)
+				}
+				if got := strings.Contains(RenderJSON(reports), "MD5_Unencoded"); got != hasMD5 {
+					t.Errorf("JSON MD5 key present = %v, want %v", got, hasMD5)
+				}
+			})
+		}
+	}
+}
 
 func TestParseFLACStreamInfoDetails(t *testing.T) {
 	data, err := hex.DecodeString("1000100000001000210c0bb802f00e5b6540864d55f003143d8bad47d3b997fae64c")
