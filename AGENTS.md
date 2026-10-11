@@ -50,8 +50,8 @@ Issues live as GitHub issues in `autobrr/go-mediainfo`, managed with the `gh` CL
 
 ### Triage labels
 
-The five canonical triage roles, using the default label strings. See `docs/agents/triage-labels.md`.
+The six canonical triage roles, using the default label strings. See `docs/agents/triage-labels.md`.
 
 ### Domain docs
 
-Single-context: `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+Single-context: `GLOSSARY.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
