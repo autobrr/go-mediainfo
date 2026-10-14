@@ -602,3 +602,26 @@ func TestOggTheoraFLACVideoBitRateIsMeasured(t *testing.T) {
 		t.Fatalf("video BitRate = %q, want 40168", got)
 	}
 }
+
+// TestOggFLACSplitsLibFLACVendor checks that Ogg FLAC splits a libFLAC
+// vendor into name, version, and date, as standalone and MP4 FLAC do.
+func TestOggFLACSplitsLibFLACVendor(t *testing.T) {
+	streamInfo, err := hex.DecodeString("1000100000001000210c0bb802f00e5b6540864d55f003143d8bad47d3b997fae64c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := buildOggFLACForTest(append([]byte("fLaC\x80\x00\x00\x22"), streamInfo...), "reference libFLAC 1.4.3 20230623")
+	_, streams, _, _, _, ok := parseOgg(bytes.NewReader(data), int64(len(data)))
+	if !ok || len(streams) != 1 {
+		t.Fatal("Ogg FLAC did not parse")
+	}
+	for key, want := range map[fieldName]string{
+		"Encoded_Library_Name":    "libFLAC",
+		"Encoded_Library_Version": "1.4.3",
+		"Encoded_Library_Date":    "2023-06-23",
+	} {
+		if got, _ := canonicalSeedValue(streams[0], key); got != want {
+			t.Errorf("%s = %q, want %q", key, got, want)
+		}
+	}
+}

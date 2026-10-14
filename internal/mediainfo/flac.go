@@ -190,18 +190,6 @@ func parseFLAC(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, *canoni
 			}
 		}
 	}
-	encodedLibraryName := ""
-	encodedLibraryVersion := ""
-	encodedLibraryDate := ""
-	if encoder != "" {
-		// Match MediaInfo naming: ENCODER becomes Encoded_Application (General) and Encoded_Library (Audio).
-		if name, version, date := splitFLACEncodedLibrary(encoder); name != "" {
-			encodedLibraryName = name
-			encodedLibraryVersion = version
-			encodedLibraryDate = date
-		}
-	}
-
 	generalFacts, generalExtra := flacTagsToGeneralFacts(tags, encoder)
 	if coverMIME != "" && len(generalFacts.values) > 0 {
 		generalFacts.SetSame("Cover", "Yes")
@@ -212,22 +200,19 @@ func parseFLAC(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, *canoni
 	}
 
 	audioStream := canonicalFLACAudioStream(flacAudioStreamParams{
-		channels:              channels,
-		sampleRate:            sampleRate,
-		bitsPerSample:         bitsPerSample,
-		detectedBits:          detectedBits,
-		totalSamples:          totalSamples,
-		duration:              duration,
-		displayBitrate:        bitrate,
-		rawBitrate:            rawBitrate,
-		streamSize:            streamSize,
-		encoder:               encoder,
-		encodedLibraryName:    encodedLibraryName,
-		encodedLibraryVersion: encodedLibraryVersion,
-		encodedLibraryDate:    encodedLibraryDate,
-		md5Hex:                md5Hex,
-		channelMask:           channelMask,
-		hasChannelMask:        hasChannelMask,
+		channels:       channels,
+		sampleRate:     sampleRate,
+		bitsPerSample:  bitsPerSample,
+		detectedBits:   detectedBits,
+		totalSamples:   totalSamples,
+		duration:       duration,
+		displayBitrate: bitrate,
+		rawBitrate:     rawBitrate,
+		streamSize:     streamSize,
+		encoder:        encoder,
+		md5Hex:         md5Hex,
+		channelMask:    channelMask,
+		hasChannelMask: hasChannelMask,
 		omitDerivedLayout: flacDerivedLayoutIsOmitted(flacStreamInfo{
 			hasChannelMask: hasChannelMask,
 			channelMask:    channelMask,
@@ -237,24 +222,21 @@ func parseFLAC(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, *canoni
 }
 
 type flacAudioStreamParams struct {
-	id                    string
-	channels              uint8
-	sampleRate            uint32
-	bitsPerSample         uint8
-	detectedBits          uint8
-	totalSamples          uint64
-	duration              float64
-	displayBitrate        float64
-	rawBitrate            string
-	streamSize            int64
-	encoder               string
-	encodedLibraryName    string
-	encodedLibraryVersion string
-	encodedLibraryDate    string
-	md5Hex                string
-	channelMask           uint32
-	hasChannelMask        bool
-	omitDerivedLayout     bool
+	id                string
+	channels          uint8
+	sampleRate        uint32
+	bitsPerSample     uint8
+	detectedBits      uint8
+	totalSamples      uint64
+	duration          float64
+	displayBitrate    float64
+	rawBitrate        string
+	streamSize        int64
+	encoder           string
+	md5Hex            string
+	channelMask       uint32
+	hasChannelMask    bool
+	omitDerivedLayout bool
 }
 
 // canonicalFLACAudioStream records FLAC audio facts in canonical units before
@@ -338,14 +320,15 @@ func canonicalFLACAudioStream(params flacAudioStreamParams) Stream {
 	if params.encoder != "" {
 		overrides = append(overrides, jsonKV{Key: "Encoded_Library", Val: params.encoder})
 	}
-	if params.encodedLibraryName != "" {
-		overrides = append(overrides, jsonKV{Key: "Encoded_Library_Name", Val: params.encodedLibraryName})
+	name, version, date := splitFLACEncodedLibrary(params.encoder)
+	if name != "" {
+		overrides = append(overrides, jsonKV{Key: "Encoded_Library_Name", Val: name})
 	}
-	if params.encodedLibraryVersion != "" {
-		overrides = append(overrides, jsonKV{Key: "Encoded_Library_Version", Val: params.encodedLibraryVersion})
+	if version != "" {
+		overrides = append(overrides, jsonKV{Key: "Encoded_Library_Version", Val: version})
 	}
-	if params.encodedLibraryDate != "" {
-		overrides = append(overrides, jsonKV{Key: "Encoded_Library_Date", Val: params.encodedLibraryDate})
+	if date != "" {
+		overrides = append(overrides, jsonKV{Key: "Encoded_Library_Date", Val: date})
 	}
 	sort.Slice(overrides, func(left, right int) bool { return overrides[left].Key < overrides[right].Key })
 	for _, override := range overrides {
