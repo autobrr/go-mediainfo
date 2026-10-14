@@ -860,10 +860,11 @@ func analyzeFileWithOptions(ctx context.Context, path string, opts AnalyzeOption
 							trackFacts.Set("SamplingCount", strconv.FormatInt(int64(math.Round(displayDuration*48000)), 10))
 						}
 					}
-					if strings.EqualFold(audioFormat, "AAC") {
-						if trackFacts.Get("SamplesPerFrame") == "" {
-							trackFacts.Set("SamplesPerFrame", "1024")
-						}
+					isAAC := strings.EqualFold(audioFormat, "AAC")
+					if isAAC && trackFacts.Get("SamplesPerFrame") == "" {
+						trackFacts.Set("SamplesPerFrame", "1024")
+					}
+					if isAAC || audioFormat == "FLAC" {
 						if displayDuration > 0 {
 							if sampleRate, ok := parseInt(trackFacts.Canonical("SamplingRate")); ok && sampleRate > 0 {
 								durationMS := math.Round(displayDuration * 1000)
@@ -920,6 +921,7 @@ func analyzeFileWithOptions(ctx context.Context, path string, opts AnalyzeOption
 			for _, stream := range streams {
 				if mode, ok := canonicalSeedValue(stream, "BitRate_Mode"); ok && (mode == "VBR" || mode == "Variable") {
 					generalFacts.SetSame("OverallBitRate_Mode", "VBR")
+					general.Fields = appendFieldUnique(general.Fields, Field{Name: "Overall bit rate mode", Value: "Variable"})
 					break
 				}
 			}
@@ -1986,6 +1988,9 @@ func analyzeFileWithOptions(ctx context.Context, path string, opts AnalyzeOption
 		if parsedInfo, parsedStreams, generalFields, generalFacts, generalExtra, ok := parseOgg(file, stat.Size()); ok {
 			info = parsedInfo
 			streams = parsedStreams
+			if info.BitrateMode != "" {
+				general.Fields = appendFieldUnique(general.Fields, Field{Name: "Overall bit rate mode", Value: info.BitrateMode})
+			}
 			if len(generalFields) > 0 {
 				for _, field := range generalFields {
 					general.Fields = appendFieldUnique(general.Fields, field)

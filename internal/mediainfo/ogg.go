@@ -41,6 +41,7 @@ type oggLogicalStream struct {
 	lastPage       int
 	hasPage        bool
 	duration       float64
+	flac           flacStreamInfo
 }
 
 // parseOgg scans Ogg page headers and logical-stream headers, retaining exact
@@ -142,6 +143,10 @@ func parseOgg(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, []Field,
 			if frameCount > 0 && stream.frameRateNum > 0 && stream.frameRateDen > 0 {
 				stream.duration = float64(frameCount) * float64(stream.frameRateDen) / float64(stream.frameRateNum)
 			}
+		case "FLAC":
+			if stream.lastGranule > 0 && stream.sampleRate > 0 {
+				stream.duration = float64(stream.lastGranule) / float64(stream.sampleRate)
+			}
 		case "Vorbis", "Opus":
 			if stream.lastGranule > 0 && stream.sampleRate > 0 {
 				stream.duration = float64(stream.lastGranule) / float64(stream.sampleRate)
@@ -170,6 +175,7 @@ func parseOgg(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, []Field,
 	}
 
 	streams := make([]Stream, 0, len(order))
+	hasFLAC := false
 	for _, serial := range order {
 		stream := logical[serial]
 		if stream == nil || stream.format == "" {
@@ -189,6 +195,23 @@ func parseOgg(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, []Field,
 				duration = float64(stream.lastGranule) / float64(stream.sampleRate)
 			}
 			streams = append(streams, canonicalOggAudioStream(stream, duration, videoCount > 0))
+		case "FLAC":
+			hasFLAC = true
+			mask, hasMask := parseFLACChannelMask(stream.tags["WAVEFORMATEXTENSIBLE_CHANNEL_MASK"])
+			streams = append(streams, canonicalFLACAudioStream(flacAudioStreamParams{
+				id:                strconv.FormatUint(uint64(stream.serial), 10),
+				channels:          stream.channels,
+				sampleRate:        stream.sampleRate,
+				bitsPerSample:     stream.flac.bitsPerSample,
+				totalSamples:      stream.lastGranule,
+				duration:          math.Round(stream.duration*1000) / 1000,
+				encoder:           strings.TrimSpace(stream.vendor),
+				md5Hex:            stream.flac.md5,
+				detectedBits:      parseFLACDetectedBits(stream.tags["VALID_BITS"]),
+				channelMask:       mask,
+				hasChannelMask:    hasMask,
+				omitDerivedLayout: hasMask && mask == 0,
+			}))
 		}
 	}
 	if len(streams) == 0 {
@@ -204,7 +227,7 @@ func parseOgg(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, []Field,
 		streamOverhead = size - onlyVideo.payloadBytes - derivedAudioBytes
 	}
 	info := ContainerInfo{DurationSeconds: maxDuration, StreamOverheadBytes: streamOverhead}
-	if videoCount > 0 {
+	if videoCount > 0 || hasFLAC {
 		info.BitrateMode = "Variable"
 		generalFacts.SetSame("OverallBitRate_Mode", "VBR")
 	}
@@ -280,6 +303,19 @@ func consumeOggHeaderSegments(stream *oggLogicalStream, segments, body []byte, c
 
 func parseOggHeaderPacket(stream *oggLogicalStream, packet []byte) {
 	switch {
+	case stream.format == "FLAC" && len(packet) >= 4 && packet[0]&0x7F == 4:
+		stream.vendor, stream.tags = parseOggComments(packet[4:])
+	case len(packet) >= 51 && packet[0] == 0x7F && bytes.Equal(packet[1:5], []byte("FLAC")) && bytes.Equal(packet[9:13], []byte("fLaC")) && packet[13]&0x7F == 0:
+		// https://xiph.org/flac/ogg_mapping.html: the first packet holds a
+		// 9-byte mapping header, the fLaC marker, and the STREAMINFO block.
+		info, ok := parseFLACStreamInfoDetails(packet[17:51])
+		if !ok {
+			return
+		}
+		stream.format = "FLAC"
+		stream.flac = info
+		stream.channels = info.channels
+		stream.sampleRate = info.sampleRate
 	case len(packet) >= 30 && packet[0] == 0x01 && bytes.Equal(packet[1:7], []byte("vorbis")):
 		stream.format = "Vorbis"
 		stream.channels = packet[11]

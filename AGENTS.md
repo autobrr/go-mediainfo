@@ -41,6 +41,8 @@ Do not change these back to official.
 - AAC `Errors: Missing ID_END` on sample `mkv-07`: official reports it, but its SBR parser overruns the fill element. Our walk consumes each frame bit-exactly and finds `ID_END`. Issue #34, PR #35.
 - `Encoded_Application_Name` and `Encoded_Application_Version` are split. This is newer MediaInfo behavior, kept on purpose.
 - A Matroska cover attachment produces an Image track. Official v23.04 has none.
+- Ogg FLAC General keeps `Writing application` and `Title` from the FLAC Vorbis comments. Official v23.04 drops them for Ogg FLAC only, and keeps them for standalone FLAC and Ogg Vorbis. Issue #55.
+- Ogg FLAC General has no `Format/Info`. Official v23.04 shows the FLAC description there, but the General format is Ogg. Issue #55.
 
 ## Agent skills
 

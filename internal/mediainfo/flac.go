@@ -237,6 +237,7 @@ func parseFLAC(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, *canoni
 }
 
 type flacAudioStreamParams struct {
+	id                    string
 	channels              uint8
 	sampleRate            uint32
 	bitsPerSample         uint8
@@ -262,7 +263,11 @@ func canonicalFLACAudioStream(params flacAudioStreamParams) Stream {
 	builder := newCanonicalStreamBuilder(StreamAudio)
 	store, ref := builder.store, builder.ref
 	store.streams[ref].SkipStreamOrder = true
+	if params.id != "" {
+		store.Fill(ref, "ID", params.id, fillReplace)
+	}
 	store.Fill(ref, "Format", "FLAC", fillReplace)
+	builder.Text("Format/Info", "Free Lossless Audio Codec")
 	if params.duration > 0 {
 		store.Fill(ref, "Duration", strconv.FormatInt(int64(math.Round(params.duration*1000)), 10), fillReplace)
 	}
@@ -281,9 +286,13 @@ func canonicalFLACAudioStream(params flacAudioStreamParams) Stream {
 		if !params.omitDerivedLayout {
 			positions := ""
 			layout := ""
-			if params.hasChannelMask {
-				positions = flacChannelPositionsFromMask(params.channelMask)
-				layout = flacChannelLayoutFromMask(params.channelMask)
+			mask, hasMask := params.channelMask, params.hasChannelMask
+			if !hasMask {
+				mask, hasMask = flacDefaultChannelMask(params.channels)
+			}
+			if hasMask {
+				positions = flacChannelPositionsFromMask(mask)
+				layout = flacChannelLayoutFromMask(mask)
 			}
 			if positions == "" {
 				positions = channelPositionsFromCount(channelText)
@@ -309,7 +318,11 @@ func canonicalFLACAudioStream(params flacAudioStreamParams) Stream {
 		fillGeneratedStructured(store, ref, "BitDepth_Detected", strconv.Itoa(int(params.detectedBits)))
 	}
 
-	overrides := []jsonKV{{Key: "Compression_Mode", Val: "Lossless"}}
+	store.Fill(ref, "Compression_Mode", "Lossless", fillReplace)
+	if params.encoder != "" {
+		store.Fill(ref, "Encoded_Library", params.encoder, fillReplace)
+	}
+	overrides := []jsonKV{}
 	if params.duration > 0 {
 		overrides = append(overrides, jsonKV{Key: "Duration", Val: formatJSONSeconds(params.duration)})
 	}
@@ -613,6 +626,28 @@ func splitFLACEncodedLibrary(value string) (name, version, date string) {
 // channel count.
 func flacDerivedLayoutIsOmitted(info flacStreamInfo) bool {
 	return info.hasChannelMask && info.channelMask == 0
+}
+
+// flacDefaultChannelMask returns the WAVEFORMATEXTENSIBLE mask that
+// MediaInfoLib's File_Flac assumes for 3 to 8 channels without a stored mask.
+// Mono and stereo keep the count-derived "M" and "L R" layouts.
+func flacDefaultChannelMask(channels uint8) (uint32, bool) {
+	switch channels {
+	case 3:
+		return 0x007, true
+	case 4:
+		return 0x603, true
+	case 5:
+		return 0x607, true
+	case 6:
+		return 0x60F, true
+	case 7:
+		return 0x70F, true
+	case 8:
+		return 0x63F, true
+	default:
+		return 0, false
+	}
 }
 
 type flacSpeaker struct {

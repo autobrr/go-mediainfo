@@ -8,6 +8,7 @@ Overall bit rate,122 kb/s
 
 Audio
 Format,FLAC
+Format/Info,Free Lossless Audio Codec
 Duration,4 s 0 ms
 Bit rate mode,Variable
 Bit rate,122 kb/s
@@ -15,5 +16,7 @@ Channel(s),1 channel
 Channel layout,M
 Sampling rate,48.0 kHz
 Bit depth,16 bits
+Compression mode,Lossless
+Writing library,Lavf62.3.100
 MD5 of the unencoded content,97EED3BC2F094D9221F0E9772AC7B3E7
 

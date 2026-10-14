@@ -174,7 +174,7 @@ func mapMP4SampleEntry(sample string) string {
 		return "E-AC-3"
 	case "alac":
 		return "ALAC"
-	case "flac":
+	case "fLaC", "flac":
 		return "FLAC"
 	case "Opus", "opus":
 		return "Opus"
@@ -202,7 +202,7 @@ func isVideoSampleEntry(sample string) bool {
 // isAudioSampleEntry reports whether sample is a supported MP4 audio entry.
 func isAudioSampleEntry(sample string) bool {
 	switch sample {
-	case "mp4a", "ac-3", "ec-3", "alac", "flac", "Opus", "opus":
+	case "mp4a", "ac-3", "ec-3", "alac", "fLaC", "flac", "Opus", "opus":
 		return true
 	default:
 		return false
@@ -720,7 +720,8 @@ func parseAudioSampleEntry(entry []byte, sampleType string) sampleEntryResult {
 		return sampleEntryResult{}
 	}
 	channels := binary.BigEndian.Uint16(entry[24:26])
-	sampleRate := binary.BigEndian.Uint32(entry[32:36])
+	// sampleRate is 16.16 fixed point. FLAC rates above 65535 Hz overflow 32 bits.
+	sampleRate := uint64(binary.BigEndian.Uint32(entry[32:36]))
 	codecID := sampleType
 	fields := []Field{}
 	structuredFacts := &mp4StructuredFacts{}
@@ -764,6 +765,20 @@ func parseAudioSampleEntry(entry []byte, sampleType string) sampleEntryResult {
 			}
 			sampleRate = 48000 << 16
 			fields = setFieldValue(fields, "Sampling rate", formatSampleRate(48000))
+		}
+	}
+	var flac *flacStreamInfo
+	if sampleType == "fLaC" || sampleType == "flac" {
+		// ISO FLAC mapping: dfLa is a FullBox that holds the STREAMINFO block first.
+		if payload, ok := findMP4BoxByName(entry, "dfLa"); ok && len(payload) >= 42 && payload[4]&0x7F == 0 {
+			if info, ok := parseFLACStreamInfoDetails(payload[8:42]); ok {
+				flac = &info
+				channels = uint16(info.channels)
+				sampleRate = uint64(info.sampleRate) << 16
+				fields = setFieldValue(appendChannelFields(fields, uint64(channels)), "Channel(s)", formatChannels(uint64(channels)))
+				fields = setFieldValue(appendSampleRateField(fields, float64(info.sampleRate)), "Sampling rate", formatSampleRate(float64(info.sampleRate)))
+				fields = append(fields, Field{Name: "Bit rate mode", Value: "Variable"}, Field{Name: "Compression mode", Value: "Lossless"})
+			}
 		}
 	}
 	if sampleType == "mp4a" {
@@ -820,7 +835,7 @@ func parseAudioSampleEntry(entry []byte, sampleType string) sampleEntryResult {
 	return sampleEntryResult{
 		Fields:        fields,
 		Format:        format,
-		canonicalSeed: canonicalMP4AudioSampleSeed(fields, structuredFacts, sampleType, codecID, canonicalBitRate, channels, sampleRate),
+		canonicalSeed: canonicalMP4AudioSampleSeed(fields, structuredFacts, sampleType, codecID, canonicalBitRate, channels, sampleRate, flac),
 	}
 }
 
@@ -954,13 +969,20 @@ func canonicalMP4VisualSampleSeed(fields []Field, structuredFacts *mp4Structured
 
 // canonicalMP4AudioSampleSeed converts audio sample-entry header facts to
 // direct canonical entries while retaining text-only codec descriptions.
-func canonicalMP4AudioSampleSeed(fields []Field, structuredFacts *mp4StructuredFacts, sampleType, codecID, canonicalBitRate string, channels uint16, sampleRate uint32) []fieldEntry {
+func canonicalMP4AudioSampleSeed(fields []Field, structuredFacts *mp4StructuredFacts, sampleType, codecID, canonicalBitRate string, channels uint16, sampleRate uint64, flac *flacStreamInfo) []fieldEntry {
 	builder := newCanonicalStreamBuilder(StreamAudio)
 	appendMP4TextOnlyFields(builder, StreamAudio, fields)
 	if channels > 0 {
 		raw := strconv.FormatUint(uint64(channels), 10)
 		builder.Fill("Channels", raw, "Channel(s)", formatChannels(uint64(channels)))
-		if layout := channelLayout(uint64(channels)); layout != "" {
+		layout := channelLayout(uint64(channels))
+		if flac != nil {
+			if mask, ok := flacDefaultChannelMask(flac.channels); ok {
+				layout = flacChannelLayoutFromMask(mask)
+				builder.Structured("ChannelPositions", flacChannelPositionsFromMask(mask))
+			}
+		}
+		if layout != "" {
 			builder.Fill("ChannelLayout", layout, "Channel layout", layout)
 		}
 	}
@@ -985,6 +1007,11 @@ func canonicalMP4AudioSampleSeed(fields []Field, structuredFacts *mp4StructuredF
 		builder.Fill("Compression_Mode", compression, "Compression mode", compression)
 	}
 	builder.Fill("CodecID", codecID, "Codec ID", codecID)
+	if flac != nil {
+		builder.Fill("BitDepth", strconv.Itoa(int(flac.bitsPerSample)), "Bit depth", formatBitDepth(flac.bitsPerSample))
+		builder.Text(flacUnencodedMD5Label, flac.md5)
+		builder.StructuredNode("extra", structuredObjectFromKVs([]jsonKV{{Key: "MD5_Unencoded", Val: flac.md5}}))
+	}
 	structuredFacts.Apply(builder)
 	return builder.Snapshot(canonicalStreamPolicy{}).canonicalSeed
 }
@@ -1237,6 +1264,8 @@ func mapAudioFormatInfo(sampleType string) string {
 		return "Audio Coding 3"
 	case "ec-3":
 		return "Enhanced AC-3"
+	case "fLaC", "flac":
+		return "Free Lossless Audio Codec"
 	default:
 		return ""
 	}

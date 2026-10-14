@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/hex"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -16,6 +18,8 @@ func TestFLACUnencodedMD5Output(t *testing.T) {
 	}{
 		{"FLAC", parseStandaloneFLACMD5TestStream},
 		{"Matroska", parseMatroskaFLACMD5TestStream},
+		{"Ogg", parseOggFLACMD5TestStream},
+		{"MPEG-4", parseMP4FLACMD5TestStream},
 	} {
 		for _, checksum := range []struct{ name, digest string }{
 			{"stored", "864D55F003143D8BAD47D3B997FAE64C"},
@@ -52,6 +56,11 @@ func TestFLACUnencodedMD5Output(t *testing.T) {
 				for format, output := range outputs {
 					if got := strings.Count(output, checksum.digest); got != 1 {
 						t.Errorf("%s digest count = %d, want 1:\n%s", format, got, output)
+					}
+				}
+				for _, row := range []string{"Format : FLAC", "Bit depth : 16 bits"} {
+					if !strings.Contains(strings.Join(strings.Fields(outputs["text"]), " "), row) {
+						t.Errorf("text lacks %q:\n%s", row, outputs["text"])
 					}
 				}
 				if got := strings.Count(outputs["text"], label); got != 1 {
@@ -93,6 +102,93 @@ func parseMatroskaFLACMD5TestStream(t *testing.T, private []byte) Stream {
 	stream = info.Tracks[0]
 	refreshCanonicalCompatibilitySnapshot(&stream)
 	return stream
+}
+
+// parseOggFLACMD5TestStream wraps private in the Ogg FLAC mapping: a 0x7F
+// "FLAC" first packet, a VORBIS_COMMENT packet, and one audio page.
+func parseOggFLACMD5TestStream(t *testing.T, private []byte) Stream {
+	t.Helper()
+	data := buildOggFLACForTest(private, "Lavf63.1")
+	_, streams, _, _, _, ok := parseOgg(bytes.NewReader(data), int64(len(data)))
+	if !ok || len(streams) != 1 {
+		t.Fatal("Ogg FLAC did not parse")
+	}
+	if got := findField(streams[0].Fields, "Writing library"); got != "Lavf63.1" {
+		t.Errorf("Writing library = %q, want Lavf63.1", got)
+	}
+	return streams[0]
+}
+
+// buildOggFLACForTest wraps private (an fLaC metadata sequence) in the Ogg
+// FLAC mapping: a 0x7F "FLAC" first packet, a VORBIS_COMMENT packet with
+// vendor and tags, and one audio page that ends at granule 4096.
+func buildOggFLACForTest(private []byte, vendor string, tags ...string) []byte {
+	first := append([]byte("\x7fFLAC\x01\x00\x00\x01"), private...)
+	first[13] &^= 0x80 // a VORBIS_COMMENT block follows
+	comment := binary.LittleEndian.AppendUint32(nil, uint32(len(vendor)))
+	comment = append(comment, vendor...)
+	comment = binary.LittleEndian.AppendUint32(comment, uint32(len(tags)))
+	for _, tag := range tags {
+		comment = binary.LittleEndian.AppendUint32(comment, uint32(len(tag)))
+		comment = append(comment, tag...)
+	}
+	comment = append([]byte{0x84, 0, 0, byte(len(comment))}, comment...)
+	data := buildOggPageForTest(7, 0x02, 0, first)
+	data = append(data, buildOggPageForTest(7, 0x00, 0, comment)...)
+	return append(data, buildOggPageForTest(7, 0x04, 4096, make([]byte, 64))...)
+}
+
+// parseMP4FLACMD5TestStream analyzes private wrapped by buildMP4FLACForTest.
+func parseMP4FLACMD5TestStream(t *testing.T, private []byte) Stream {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "flac.mp4")
+	if err := os.WriteFile(path, buildMP4FLACForTest(private), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	report, err := AnalyzeFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, stream := range report.Streams {
+		if stream.Kind == StreamAudio {
+			return stream
+		}
+	}
+	t.Fatal("MP4 FLAC has no audio stream")
+	return Stream{}
+}
+
+// buildMP4FLACForTest wraps the STREAMINFO block of private (an fLaC
+// metadata sequence) in the ISO FLAC mapping: an fLaC sample entry with a dfLa box.
+func buildMP4FLACForTest(private []byte) []byte {
+	var dfLa bytes.Buffer
+	writeMP4Box(&dfLa, "dfLa", append(make([]byte, 4), private[4:]...))
+	entry := make([]byte, 36)
+	copy(entry[4:8], "fLaC")
+	binary.BigEndian.PutUint16(entry[24:26], 2)
+	binary.BigEndian.PutUint32(entry[32:36], 44100<<16)
+	entry = append(entry, dfLa.Bytes()...)
+	binary.BigEndian.PutUint32(entry[0:4], uint32(len(entry)))
+	stsd := append([]byte{0, 0, 0, 0, 0, 0, 0, 1}, entry...)
+
+	var stbl, minf, mdia, trak, moov, file bytes.Buffer
+	writeMP4Box(&stbl, "stsd", stsd)
+	writeMP4Box(&stbl, "stts", buildSttsBox())
+	writeMP4Box(&minf, "stbl", stbl.Bytes())
+	writeMP4Box(&mdia, "mdhd", buildMdhdBox())
+	handler := make([]byte, 20)
+	copy(handler[8:12], "soun")
+	writeMP4Box(&mdia, "hdlr", handler)
+	writeMP4Box(&mdia, "minf", minf.Bytes())
+	writeMP4Box(&trak, "mdia", mdia.Bytes())
+	mvhd := make([]byte, 20)
+	binary.BigEndian.PutUint32(mvhd[12:16], 1000)
+	binary.BigEndian.PutUint32(mvhd[16:20], 10000)
+	writeMP4Box(&moov, "mvhd", mvhd)
+	writeMP4Box(&moov, "trak", trak.Bytes())
+	writeMP4Box(&file, "ftyp", []byte("isom"))
+	writeMP4Box(&file, "moov", moov.Bytes())
+	return file.Bytes()
 }
 
 func TestParseFLACStreamInfoDetailsRejectsTruncatedMD5(t *testing.T) {
@@ -261,6 +357,93 @@ func TestFLACChannelMaskOverridesCountDerivedLayout(t *testing.T) {
 	}
 	if got, _ := canonicalSeedValue(stream, "ChannelPositions"); got != "Front: L R, Back: L R" {
 		t.Fatalf("canonical ChannelPositions = %q", got)
+	}
+}
+
+// TestContainerFLACSamplingCountFollowsContainer checks that SamplingCount
+// comes from container timing, not from STREAMINFO. A cut remux keeps the
+// total sample count of its full-length source in STREAMINFO.
+func TestContainerFLACSamplingCountFollowsContainer(t *testing.T) {
+	streamInfo, err := hex.DecodeString("1000100000001000210c0bb802f00e5b6540864d55f003143d8bad47d3b997fae64c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	private := append([]byte("fLaC\x80\x00\x00\x22"), streamInfo...)
+	for name, test := range map[string]struct {
+		parse func(*testing.T, []byte) Stream
+		want  string
+	}{
+		"Ogg":    {parseOggFLACMD5TestStream, "4096"},   // last granule position
+		"MPEG-4": {parseMP4FLACMD5TestStream, "480000"}, // 10 s at 48 kHz
+	} {
+		if got, _ := canonicalSeedValue(test.parse(t, private), "SamplingCount"); got != test.want {
+			t.Errorf("%s SamplingCount = %q, want %q", name, got, test.want)
+		}
+	}
+}
+
+// TestOggFLACReadsChannelMaskTag checks that Ogg FLAC applies the
+// WAVEFORMATEXTENSIBLE_CHANNEL_MASK comment as standalone FLAC does. A zero
+// mask omits the derived layout.
+func TestOggFLACReadsChannelMaskTag(t *testing.T) {
+	streamInfo, err := hex.DecodeString("1000100000001000210c0bb802f00e5b6540864d55f003143d8bad47d3b997fae64c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	private := append([]byte("fLaC\x80\x00\x00\x22"), streamInfo...)
+	data := buildOggFLACForTest(private, "", "WAVEFORMATEXTENSIBLE_CHANNEL_MASK=0x0")
+	_, streams, _, _, _, ok := parseOgg(bytes.NewReader(data), int64(len(data)))
+	if !ok || len(streams) != 1 {
+		t.Fatal("Ogg FLAC did not parse")
+	}
+	if got, found := canonicalSeedValue(streams[0], "ChannelLayout"); found {
+		t.Fatalf("ChannelLayout = %q, want omitted for a zero mask", got)
+	}
+}
+
+// TestOggFLACGeneralDeliberateDifferences pins two deliberate differences
+// from official v23.04 for Ogg FLAC (see AGENTS.md). General keeps the
+// ENCODER and TITLE comments, as for standalone FLAC and Ogg Vorbis. General
+// has no codec Format/Info, because the General format is Ogg, not FLAC.
+func TestOggFLACGeneralDeliberateDifferences(t *testing.T) {
+	streamInfo, err := hex.DecodeString("1000100000001000210c0bb802f00e5b6540864d55f003143d8bad47d3b997fae64c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	private := append([]byte("fLaC\x80\x00\x00\x22"), streamInfo...)
+	path := filepath.Join(t.TempDir(), "flac.oga")
+	if err := os.WriteFile(path, buildOggFLACForTest(private, "Lavf63.1", "ENCODER=Lavf63.1", "TITLE=Mix"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	report, err := AnalyzeFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]string{"Writing application": "Lavf63.1", "Title": "Mix", "Format/Info": ""} {
+		if got := findField(report.General.Fields, name); got != want {
+			t.Errorf("General %s = %q, want %q", name, got, want)
+		}
+	}
+}
+
+// TestFLACDefaultChannelLayout pins the default masks that MediaInfoLib's
+// File_Flac applies when no WAVEFORMATEXTENSIBLE_CHANNEL_MASK is present.
+func TestFLACDefaultChannelLayout(t *testing.T) {
+	for channels, want := range map[uint8][2]string{
+		3: {"L R C", "Front: L C R"},
+		4: {"L R Ls Rs", "Front: L R, Side: L R"},
+		5: {"L R C Ls Rs", "Front: L C R, Side: L R"},
+		6: {"L R C LFE Ls Rs", "Front: L C R, Side: L R, LFE"},
+		7: {"L R C LFE Cb Ls Rs", "Front: L C R, Side: L R, Back: C, LFE"},
+		8: {"L R C LFE Lb Rb Ls Rs", "Front: L C R, Side: L R, Back: L R, LFE"},
+	} {
+		stream := canonicalFLACAudioStream(flacAudioStreamParams{channels: channels})
+		if got, _ := canonicalSeedValue(stream, "ChannelLayout"); got != want[0] {
+			t.Errorf("%d channels: ChannelLayout = %q, want %q", channels, got, want[0])
+		}
+		if got, _ := canonicalSeedValue(stream, "ChannelPositions"); got != want[1] {
+			t.Errorf("%d channels: ChannelPositions = %q, want %q", channels, got, want[1])
+		}
 	}
 }
 
