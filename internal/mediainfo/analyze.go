@@ -842,7 +842,7 @@ func analyzeFileWithOptions(ctx context.Context, path string, opts AnalyzeOption
 				}
 				if track.Kind == StreamAudio {
 					channels := trackFacts.Canonical("Channels")
-					if channels != "" && trackFacts.Get("ChannelPositions") == "" && trackFacts.Get("Channels_Original") == "" {
+					if channels != "" && trackFacts.Get("ChannelPositions") == "" && trackFacts.Get("Channels_Original") == "" && mapMP4SampleEntry(track.sampleEntryType) != "FLAC" {
 						if positions := channelPositionsFromCount(channels); positions != "" {
 							trackFacts.Set("ChannelPositions", positions)
 						}

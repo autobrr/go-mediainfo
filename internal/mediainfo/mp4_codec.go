@@ -984,11 +984,18 @@ func canonicalMP4AudioSampleSeed(fields []Field, structuredFacts *mp4StructuredF
 			if !ok {
 				mask, ok = flacDefaultChannelMask(flac.channels)
 			}
-			if ok && mask != 0 {
+			// FLAC owns its positions. An explicit zero mask omits the layout
+			// and the positions, as for standalone and Ogg FLAC.
+			switch {
+			case ok && mask == 0:
+				layout = ""
+			case ok:
 				layout = flacChannelLayoutFromMask(mask)
 				builder.Structured("ChannelPositions", flacChannelPositionsFromMask(mask))
-			} else if ok {
-				layout = ""
+			default:
+				if positions := channelPositionsFromCount(raw); positions != "" {
+					builder.Structured("ChannelPositions", positions)
+				}
 			}
 		}
 		if layout != "" {

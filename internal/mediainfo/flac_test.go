@@ -625,3 +625,26 @@ func TestOggFLACSplitsLibFLACVendor(t *testing.T) {
 		}
 	}
 }
+
+// TestMP4FLACZeroChannelMaskOmitsLayout checks that a dfLa VORBIS_COMMENT
+// with WAVEFORMATEXTENSIBLE_CHANNEL_MASK=0x0 omits the derived layout and
+// positions, as standalone and Ogg FLAC do.
+func TestMP4FLACZeroChannelMaskOmitsLayout(t *testing.T) {
+	streamInfo, err := hex.DecodeString("1000100000001000210c0bb802f00e5b6540864d55f003143d8bad47d3b997fae64c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tag := "WAVEFORMATEXTENSIBLE_CHANNEL_MASK=0x0"
+	comment := binary.LittleEndian.AppendUint32(nil, 0)
+	comment = binary.LittleEndian.AppendUint32(comment, 1)
+	comment = binary.LittleEndian.AppendUint32(comment, uint32(len(tag)))
+	comment = append(comment, tag...)
+	private := append([]byte("fLaC\x00\x00\x00\x22"), streamInfo...)
+	private = append(private, 0x84, 0, 0, byte(len(comment)))
+	stream := parseMP4FLACMD5TestStream(t, append(private, comment...))
+	for _, key := range []fieldName{"ChannelLayout", "ChannelPositions"} {
+		if got, found := canonicalSeedValue(stream, key); found {
+			t.Errorf("%s = %q, want omitted for a zero mask", key, got)
+		}
+	}
+}
