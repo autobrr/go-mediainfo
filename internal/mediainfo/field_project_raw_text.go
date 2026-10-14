@@ -107,6 +107,7 @@ var rawTextLabelAliases = map[string]string{
 	"Service kind":                       "ServiceKind/String",
 	"Writing application":                "Encoded_Application/String",
 	"Writing library":                    "Encoded_Library/String",
+	flacUnencodedMD5Label:                "MD5_Unencoded",
 	"Encoding settings":                  "Encoded_Library_Settings",
 	"Encoded date":                       "Encoded_Date",
 	"Tagged date":                        "Tagged_Date",
@@ -642,7 +643,7 @@ func rawTextDVDFieldOrder(kind StreamKind, label string) int {
 	if order, ok := rawTextDVDFieldOrderPolicy(kind)[label]; ok {
 		return order
 	}
-	return 1 << 20
+	return unregisteredFieldOrder
 }
 
 // DVD raw-text field-order registries mirror MediaInfo's per-kind projection.
@@ -1964,7 +1965,7 @@ func rawTextFieldOrder(kind StreamKind, label string) int {
 	if order, ok := rawTextFieldOrderPolicy(kind)[label]; ok {
 		return order
 	}
-	return 1 << 20
+	return unregisteredFieldOrder
 }
 
 // Raw text field order registries are immutable after package initialization.

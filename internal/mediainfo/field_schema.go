@@ -198,7 +198,7 @@ func textFieldOrder(kind StreamKind, label string) int {
 	if value, ok := order[label]; ok {
 		return value
 	}
-	return 1 << 20
+	return unregisteredFieldOrder
 }
 
 // structuredFieldOrder returns the established structured order, after known
@@ -207,5 +207,5 @@ func structuredFieldOrder(kind StreamKind, key string) int {
 	if value, ok := structuredFieldOrderPolicy(kind)[key]; ok {
 		return value
 	}
-	return 1 << 20
+	return unregisteredFieldOrder
 }

@@ -949,6 +949,10 @@ func TestMatroskaFLACCanonicalSeedTracksStatsAndEncoderTags(t *testing.T) {
 	if extra == nil || len(extra.Object) != 2 || extra.Object[0].Key != "Source" || extra.Object[1].Key != "MD5_Unencoded" {
 		t.Fatalf("canonical extra order = %#v", extra)
 	}
+	refreshCanonicalCompatibilitySnapshot(&stream)
+	if fields := stream.Fields; fields[len(fields)-2].Name != "Source" || fields[len(fields)-1].Name != "MD5 of the unencoded content" {
+		t.Fatalf("FLAC source and MD5 text order = %#v", fields)
+	}
 	for _, entry := range stream.canonicalSeed {
 		if entry.Projected {
 			t.Fatalf("field %q came from the legacy projection", entry.Name)

@@ -148,6 +148,7 @@ func matroskaFLACCanonicalSeed(facts matroskaFLACCanonicalFacts) []fieldEntry {
 	}
 	builder.Fill("Forced", forcedText, "Forced", forcedText)
 	if facts.codec.md5 != "" {
+		builder.Text(flacUnencodedMD5Label, facts.codec.md5)
 		builder.StructuredNode("extra", structuredNode{Kind: structuredObject, Object: []structuredMember{{
 			Key: "MD5_Unencoded", Value: structuredNode{Kind: structuredString, Text: facts.codec.md5},
 		}}})

@@ -12,6 +12,8 @@ import (
 	"strings"
 )
 
+const flacUnencodedMD5Label = "MD5 of the unencoded content"
+
 type flacTagKV struct {
 	Key string
 	Val string
@@ -257,8 +259,8 @@ type flacAudioStreamParams struct {
 // canonicalFLACAudioStream records FLAC audio facts in canonical units before
 // publishing the public compatibility snapshot.
 func canonicalFLACAudioStream(params flacAudioStreamParams) Stream {
-	store := &fieldStore{}
-	ref := store.Prepare(StreamAudio)
+	builder := newCanonicalStreamBuilder(StreamAudio)
+	store, ref := builder.store, builder.ref
 	store.streams[ref].SkipStreamOrder = true
 	store.Fill(ref, "Format", "FLAC", fillReplace)
 	if params.duration > 0 {
@@ -340,17 +342,9 @@ func canonicalFLACAudioStream(params flacAudioStreamParams) Stream {
 		}
 	}
 	if params.md5Hex != "" {
+		builder.Text(flacUnencodedMD5Label, params.md5Hex)
 		node := structuredObjectFromKVs([]jsonKV{{Key: "MD5_Unencoded", Val: params.md5Hex}})
-		raw := structuredNodeText(node)
-		_, known := structuredFieldSpec(StreamAudio, "extra")
-		store.appendEntry(store.stream(ref), fieldEntry{
-			Name:          "extra",
-			Value:         fieldValue{Text: raw},
-			Dynamic:       !known,
-			Options:       fieldOptions{ShowStructured: true, ShowXML: true, ValueType: fieldValueNode},
-			StructuredKey: "extra",
-			Node:          &node,
-		})
+		builder.StructuredNode("extra", node)
 	}
 	return canonicalStreamSnapshot(store, ref, canonicalStreamPolicy{SkipStreamOrder: true})
 }
@@ -451,6 +445,7 @@ func parseFLACStreamInfo(data []byte) (uint32, uint8, uint8, uint64, string) {
 
 // parseFLACStreamInfoDetails decodes a 34-byte STREAMINFO payload and reports
 // false when the payload is truncated or lacks usable audio properties.
+// It retains the stored MD5 as 32 uppercase hex digits, including all zeros.
 func parseFLACStreamInfoDetails(data []byte) (flacStreamInfo, bool) {
 	if len(data) < 34 {
 		return flacStreamInfo{}, false
@@ -461,18 +456,6 @@ func parseFLACStreamInfoDetails(data []byte) (flacStreamInfo, bool) {
 	bitsPerSample++
 
 	totalSamples := uint64(data[13]&0x0F)<<32 | uint64(binary.BigEndian.Uint32(data[14:18]))
-	md5 := data[18:34]
-	allZero := true
-	for _, b := range md5 {
-		if b != 0 {
-			allZero = false
-			break
-		}
-	}
-	md5Hex := ""
-	if !allZero {
-		md5Hex = strings.ToUpper(hex.EncodeToString(md5))
-	}
 	return flacStreamInfo{
 		minBlockSize:  binary.BigEndian.Uint16(data[0:2]),
 		maxBlockSize:  binary.BigEndian.Uint16(data[2:4]),
@@ -480,7 +463,7 @@ func parseFLACStreamInfoDetails(data []byte) (flacStreamInfo, bool) {
 		channels:      channels,
 		bitsPerSample: bitsPerSample,
 		totalSamples:  totalSamples,
-		md5:           md5Hex,
+		md5:           strings.ToUpper(hex.EncodeToString(data[18:34])),
 	}, sampleRate > 0 && channels > 0
 }
 
