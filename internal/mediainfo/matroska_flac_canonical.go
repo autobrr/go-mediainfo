@@ -121,13 +121,7 @@ func matroskaFLACCanonicalSeed(facts matroskaFLACCanonicalFacts) []fieldEntry {
 			builder.Text("Writing library", facts.codecName)
 		}
 	}
-	if facts.encoder != "" {
-		builder.Fill("Encoded_Library", facts.encoder, "Writing library", facts.encoder)
-		name, version, date := splitFLACEncodedLibrary(facts.encoder)
-		builder.Structured("Encoded_Library_Name", name)
-		builder.Structured("Encoded_Library_Version", version)
-		builder.Structured("Encoded_Library_Date", date)
-	}
+	fillFLACEncodedLibrary(builder, facts.encoder)
 	if facts.trackName != "" {
 		builder.Fill("Title", facts.trackName, "Title", facts.trackName)
 	}

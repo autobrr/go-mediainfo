@@ -539,14 +539,16 @@ func TestMP4FLACSamplingCountIsExact(t *testing.T) {
 }
 
 // TestMP4FLACReadsVorbisCommentBlock checks that a dfLa box with a
-// VORBIS_COMMENT block after STREAMINFO applies its channel mask and
+// VORBIS_COMMENT block after STREAMINFO applies its vendor, channel mask, and
 // VALID_BITS, as standalone and Ogg FLAC do.
 func TestMP4FLACReadsVorbisCommentBlock(t *testing.T) {
 	streamInfo, err := hex.DecodeString("1000100000001000210c0bb802f00e5b6540864d55f003143d8bad47d3b997fae64c")
 	if err != nil {
 		t.Fatal(err)
 	}
-	comment := binary.LittleEndian.AppendUint32(nil, 0)
+	vendor := "reference libFLAC 1.4.3 20230623"
+	comment := binary.LittleEndian.AppendUint32(nil, uint32(len(vendor)))
+	comment = append(comment, vendor...)
 	comment = binary.LittleEndian.AppendUint32(comment, 2)
 	for _, tag := range []string{"WAVEFORMATEXTENSIBLE_CHANNEL_MASK=0x600", "VALID_BITS=12"} {
 		comment = binary.LittleEndian.AppendUint32(comment, uint32(len(tag)))
@@ -555,7 +557,15 @@ func TestMP4FLACReadsVorbisCommentBlock(t *testing.T) {
 	private := append([]byte("fLaC\x00\x00\x00\x22"), streamInfo...)
 	private = append(private, 0x84, 0, 0, byte(len(comment)))
 	stream := parseMP4FLACMD5TestStream(t, append(private, comment...))
-	for key, want := range map[fieldName]string{"ChannelLayout": "Ls Rs", "ChannelPositions": "Side: L R", "BitDepth_Detected": "12"} {
+	for key, want := range map[fieldName]string{
+		"ChannelLayout":           "Ls Rs",
+		"ChannelPositions":        "Side: L R",
+		"BitDepth_Detected":       "12",
+		"Encoded_Library":         vendor,
+		"Encoded_Library_Name":    "libFLAC",
+		"Encoded_Library_Version": "1.4.3",
+		"Encoded_Library_Date":    "2023-06-23",
+	} {
 		if got, _ := canonicalSeedValue(stream, key); got != want {
 			t.Errorf("%s = %q, want %q", key, got, want)
 		}

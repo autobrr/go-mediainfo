@@ -768,12 +768,14 @@ func parseAudioSampleEntry(entry []byte, sampleType string) sampleEntryResult {
 		}
 	}
 	var flac *flacStreamInfo
+	flacEncoder := ""
 	if sampleType == "fLaC" || sampleType == "flac" {
 		// ISO FLAC mapping: dfLa is a FullBox that holds native FLAC metadata
 		// blocks, STREAMINFO first.
 		if payload, ok := findMP4BoxByName(entry, "dfLa"); ok && len(payload) > 4 {
-			if info, _, ok := parseFLACMetadataBlocks(append([]byte("fLaC"), payload[4:]...)); ok {
+			if info, vendor, ok := parseFLACMetadataBlocks(append([]byte("fLaC"), payload[4:]...)); ok {
 				flac = &info
+				flacEncoder = vendor
 				channels = uint16(info.channels)
 				sampleRate = uint64(info.sampleRate) << 16
 				fields = setFieldValue(appendChannelFields(fields, uint64(channels)), "Channel(s)", formatChannels(uint64(channels)))
@@ -836,7 +838,7 @@ func parseAudioSampleEntry(entry []byte, sampleType string) sampleEntryResult {
 	return sampleEntryResult{
 		Fields:        fields,
 		Format:        format,
-		canonicalSeed: canonicalMP4AudioSampleSeed(fields, structuredFacts, sampleType, codecID, canonicalBitRate, channels, sampleRate, flac),
+		canonicalSeed: canonicalMP4AudioSampleSeed(fields, structuredFacts, sampleType, codecID, canonicalBitRate, channels, sampleRate, flac, flacEncoder),
 	}
 }
 
@@ -970,7 +972,7 @@ func canonicalMP4VisualSampleSeed(fields []Field, structuredFacts *mp4Structured
 
 // canonicalMP4AudioSampleSeed converts audio sample-entry header facts to
 // direct canonical entries while retaining text-only codec descriptions.
-func canonicalMP4AudioSampleSeed(fields []Field, structuredFacts *mp4StructuredFacts, sampleType, codecID, canonicalBitRate string, channels uint16, sampleRate uint64, flac *flacStreamInfo) []fieldEntry {
+func canonicalMP4AudioSampleSeed(fields []Field, structuredFacts *mp4StructuredFacts, sampleType, codecID, canonicalBitRate string, channels uint16, sampleRate uint64, flac *flacStreamInfo, flacEncoder string) []fieldEntry {
 	builder := newCanonicalStreamBuilder(StreamAudio)
 	appendMP4TextOnlyFields(builder, StreamAudio, fields)
 	if channels > 0 {
@@ -1019,6 +1021,7 @@ func canonicalMP4AudioSampleSeed(fields []Field, structuredFacts *mp4StructuredF
 		if flac.detectedBits > 0 {
 			builder.Structured("BitDepth_Detected", strconv.Itoa(int(flac.detectedBits)))
 		}
+		fillFLACEncodedLibrary(builder, flacEncoder)
 		builder.Text(flacUnencodedMD5Label, flac.md5)
 		builder.StructuredNode("extra", structuredObjectFromKVs([]jsonKV{{Key: "MD5_Unencoded", Val: flac.md5}}))
 	}

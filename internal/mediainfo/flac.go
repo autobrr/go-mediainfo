@@ -594,6 +594,19 @@ func parseFLACVorbisComment(buf []byte) (string, []flacTagKV) {
 	return vendor, out
 }
 
+// fillFLACEncodedLibrary records the Vorbis vendor of a FLAC stream and its
+// libFLAC name, version, and date parts.
+func fillFLACEncodedLibrary(builder *canonicalStreamBuilder, encoder string) {
+	if encoder == "" {
+		return
+	}
+	builder.Fill("Encoded_Library", encoder, "Writing library", encoder)
+	name, version, date := splitFLACEncodedLibrary(encoder)
+	builder.Structured("Encoded_Library_Name", name)
+	builder.Structured("Encoded_Library_Version", version)
+	builder.Structured("Encoded_Library_Date", date)
+}
+
 func splitFLACEncodedLibrary(value string) (name, version, date string) {
 	// Example: "reference libFLAC 1.5.0 20250211"
 	// MediaInfo emits: Encoded_Library_Name=libFLAC, Encoded_Library_Version=1.5.0, Encoded_Library_Date=2025-02-11
