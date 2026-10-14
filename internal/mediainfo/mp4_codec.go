@@ -769,9 +769,10 @@ func parseAudioSampleEntry(entry []byte, sampleType string) sampleEntryResult {
 	}
 	var flac *flacStreamInfo
 	if sampleType == "fLaC" || sampleType == "flac" {
-		// ISO FLAC mapping: dfLa is a FullBox that holds the STREAMINFO block first.
-		if payload, ok := findMP4BoxByName(entry, "dfLa"); ok && len(payload) >= 42 && payload[4]&0x7F == 0 {
-			if info, ok := parseFLACStreamInfoDetails(payload[8:42]); ok {
+		// ISO FLAC mapping: dfLa is a FullBox that holds native FLAC metadata
+		// blocks, STREAMINFO first.
+		if payload, ok := findMP4BoxByName(entry, "dfLa"); ok && len(payload) > 4 {
+			if info, _, ok := parseFLACMetadataBlocks(append([]byte("fLaC"), payload[4:]...)); ok {
 				flac = &info
 				channels = uint16(info.channels)
 				sampleRate = uint64(info.sampleRate) << 16
@@ -977,9 +978,15 @@ func canonicalMP4AudioSampleSeed(fields []Field, structuredFacts *mp4StructuredF
 		builder.Fill("Channels", raw, "Channel(s)", formatChannels(uint64(channels)))
 		layout := channelLayout(uint64(channels))
 		if flac != nil {
-			if mask, ok := flacDefaultChannelMask(flac.channels); ok {
+			mask, ok := flac.channelMask, flac.hasChannelMask
+			if !ok {
+				mask, ok = flacDefaultChannelMask(flac.channels)
+			}
+			if ok && mask != 0 {
 				layout = flacChannelLayoutFromMask(mask)
 				builder.Structured("ChannelPositions", flacChannelPositionsFromMask(mask))
+			} else if ok {
+				layout = ""
 			}
 		}
 		if layout != "" {
@@ -1009,6 +1016,9 @@ func canonicalMP4AudioSampleSeed(fields []Field, structuredFacts *mp4StructuredF
 	builder.Fill("CodecID", codecID, "Codec ID", codecID)
 	if flac != nil {
 		builder.Fill("BitDepth", strconv.Itoa(int(flac.bitsPerSample)), "Bit depth", formatBitDepth(flac.bitsPerSample))
+		if flac.detectedBits > 0 {
+			builder.Structured("BitDepth_Detected", strconv.Itoa(int(flac.detectedBits)))
+		}
 		builder.Text(flacUnencodedMD5Label, flac.md5)
 		builder.StructuredNode("extra", structuredObjectFromKVs([]jsonKV{{Key: "MD5_Unencoded", Val: flac.md5}}))
 	}

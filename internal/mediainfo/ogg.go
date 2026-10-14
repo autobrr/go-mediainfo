@@ -147,6 +147,10 @@ func parseOgg(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, []Field,
 			if stream.lastGranule > 0 && stream.sampleRate > 0 {
 				stream.duration = float64(stream.lastGranule) / float64(stream.sampleRate)
 			}
+			// FLAC has no nominal bit rate. A zero rate stops the video
+			// estimate, so video uses its measured payload instead.
+			audioBitRates = append(audioBitRates, 0)
+			derivedAudioBytes += stream.payloadBytes
 		case "Vorbis", "Opus":
 			if stream.lastGranule > 0 && stream.sampleRate > 0 {
 				stream.duration = float64(stream.lastGranule) / float64(stream.sampleRate)

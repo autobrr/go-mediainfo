@@ -43,6 +43,8 @@ Do not change these back to official.
 - A Matroska cover attachment produces an Image track. Official v23.04 has none.
 - Ogg FLAC General keeps `Writing application` and `Title` from the FLAC Vorbis comments. Official v23.04 drops them for Ogg FLAC only, and keeps them for standalone FLAC and Ogg Vorbis. Issue #55.
 - Ogg FLAC General has no `Format/Info`. Official v23.04 shows the FLAC description there, but the General format is Ogg. Issue #55.
+- MP4 audio `SamplingCount` (AAC, AC-3, FLAC) comes from the exact track duration. Official v23.04 rounds the duration to milliseconds first, so a 44.1 kHz track of 132304 samples shows 132300. PR #59.
+- Ogg with Theora and FLAC shows the measured video bit rate and stream size. FLAC has no nominal bit rate, and official v23.04 shows no video bit rate. PR #59.
 
 ## Agent skills
 

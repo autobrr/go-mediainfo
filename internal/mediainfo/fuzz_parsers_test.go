@@ -139,7 +139,7 @@ func FuzzParseMP4Containers(f *testing.F) {
 		0x00, 0x00, 0x00, 0x08, 'm', 'v', 'h', 'd',
 	})
 	// fLaC sample entry with a dfLa STREAMINFO block.
-	f.Add(buildMP4FLACForTest(append([]byte("fLaC\x80\x00\x00\x22"), make([]byte, 34)...)))
+	f.Add(buildMP4FLACForTest(append([]byte("fLaC\x80\x00\x00\x22"), make([]byte, 34)...), 0))
 
 	f.Fuzz(func(t *testing.T, data []byte) {
 		data = fuzzLimit(data)

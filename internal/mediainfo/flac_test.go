@@ -142,7 +142,7 @@ func buildOggFLACForTest(private []byte, vendor string, tags ...string) []byte {
 func parseMP4FLACMD5TestStream(t *testing.T, private []byte) Stream {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "flac.mp4")
-	if err := os.WriteFile(path, buildMP4FLACForTest(private), 0o600); err != nil {
+	if err := os.WriteFile(path, buildMP4FLACForTest(private, 0), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	report, err := AnalyzeFile(path)
@@ -160,7 +160,8 @@ func parseMP4FLACMD5TestStream(t *testing.T, private []byte) Stream {
 
 // buildMP4FLACForTest wraps the STREAMINFO block of private (an fLaC
 // metadata sequence) in the ISO FLAC mapping: an fLaC sample entry with a dfLa box.
-func buildMP4FLACForTest(private []byte) []byte {
+// A positive mediaTime adds an edit list that starts at that media time.
+func buildMP4FLACForTest(private []byte, mediaTime uint32) []byte {
 	var dfLa bytes.Buffer
 	writeMP4Box(&dfLa, "dfLa", append(make([]byte, 4), private[4:]...))
 	entry := make([]byte, 36)
@@ -180,6 +181,16 @@ func buildMP4FLACForTest(private []byte) []byte {
 	copy(handler[8:12], "soun")
 	writeMP4Box(&mdia, "hdlr", handler)
 	writeMP4Box(&mdia, "minf", minf.Bytes())
+	if mediaTime > 0 {
+		var edts bytes.Buffer
+		elst := make([]byte, 20)
+		binary.BigEndian.PutUint32(elst[4:8], 1)
+		binary.BigEndian.PutUint32(elst[8:12], 9000)
+		binary.BigEndian.PutUint32(elst[12:16], mediaTime)
+		binary.BigEndian.PutUint32(elst[16:20], 0x00010000)
+		writeMP4Box(&edts, "elst", elst)
+		writeMP4Box(&trak, "edts", edts.Bytes())
+	}
 	writeMP4Box(&trak, "mdia", mdia.Bytes())
 	mvhd := make([]byte, 20)
 	binary.BigEndian.PutUint32(mvhd[12:16], 1000)
@@ -256,7 +267,7 @@ func TestParseFLACStreamInfoDetails(t *testing.T) {
 	}
 }
 
-func TestParseMatroskaFLACPrivateReadsVorbisMetadata(t *testing.T) {
+func TestParseFLACMetadataBlocksReadsVorbisMetadata(t *testing.T) {
 	streamInfo, err := hex.DecodeString("1000100000001000210c0bb802f00e5b6540864d55f003143d8bad47d3b997fae64c")
 	if err != nil {
 		t.Fatal(err)
@@ -276,7 +287,7 @@ func TestParseMatroskaFLACPrivateReadsVorbisMetadata(t *testing.T) {
 	private = append(private, 0x84, byte(len(comment)>>16), byte(len(comment)>>8), byte(len(comment)))
 	private = append(private, comment...)
 
-	info, gotVendor, ok := parseMatroskaFLACPrivate(private)
+	info, gotVendor, ok := parseFLACMetadataBlocks(private)
 	if !ok {
 		t.Fatal("expected valid Matroska FLAC private data")
 	}
@@ -382,6 +393,35 @@ func TestContainerFLACSamplingCountFollowsContainer(t *testing.T) {
 	}
 }
 
+// TestMP4FLACKeepsMD5WithSourceDelay checks that an edit list does not drop
+// MD5_Unencoded from extra. Official v23.04 puts it after Source_Delay.
+func TestMP4FLACKeepsMD5WithSourceDelay(t *testing.T) {
+	streamInfo, err := hex.DecodeString("1000100000001000210c0bb802f00e5b6540864d55f003143d8bad47d3b997fae64c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	private := append([]byte("fLaC\x80\x00\x00\x22"), streamInfo...)
+	path := filepath.Join(t.TempDir(), "flac.mp4")
+	if err := os.WriteFile(path, buildMP4FLACForTest(private, 4500), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	report, err := AnalyzeFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, stream := range report.Streams {
+		if stream.Kind != StreamAudio {
+			continue
+		}
+		want := `{"Source_Delay":"-50","Source_Delay_Source":"Container","MD5_Unencoded":"864D55F003143D8BAD47D3B997FAE64C"}`
+		if node := canonicalSeedStructuredNode(&stream, "extra"); node == nil || structuredNodeText(*node) != want {
+			t.Fatalf("extra = %v, want %s", node, want)
+		}
+		return
+	}
+	t.Fatal("MP4 FLAC has no audio stream")
+}
+
 // TestOggFLACReadsChannelMaskTag checks that Ogg FLAC applies the
 // WAVEFORMATEXTENSIBLE_CHANNEL_MASK comment as standalone FLAC does. A zero
 // mask omits the derived layout.
@@ -447,9 +487,9 @@ func TestFLACDefaultChannelLayout(t *testing.T) {
 	}
 }
 
-// FuzzParseMatroskaFLACPrivate verifies that bare STREAMINFO, complete fLaC
+// FuzzParseFLACMetadataBlocks verifies that bare STREAMINFO, complete fLaC
 // metadata, and truncated metadata blocks remain bounded for arbitrary input.
-func FuzzParseMatroskaFLACPrivate(f *testing.F) {
+func FuzzParseFLACMetadataBlocks(f *testing.F) {
 	streamInfo, err := hex.DecodeString("1000100000001000210c0bb802f00e5b6540864d55f003143d8bad47d3b997fae64c")
 	if err != nil {
 		f.Fatal(err)
@@ -460,6 +500,95 @@ func FuzzParseMatroskaFLACPrivate(f *testing.F) {
 	f.Add([]byte("fLaC\x00\x00\x00\x22\x10"))
 
 	f.Fuzz(func(_ *testing.T, data []byte) {
-		parseMatroskaFLACPrivate(data)
+		parseFLACMetadataBlocks(data)
 	})
+}
+
+// TestMP4FLACSamplingCountIsExact checks that SamplingCount comes from the
+// exact track duration. Official v23.04 rounds the duration to milliseconds
+// first and reports 4080 for these 4096 samples (see AGENTS.md).
+func TestMP4FLACSamplingCountIsExact(t *testing.T) {
+	streamInfo, err := hex.DecodeString("1000100000001000210c0bb802f00e5b6540864d55f003143d8bad47d3b997fae64c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := buildMP4FLACForTest(append([]byte("fLaC\x80\x00\x00\x22"), streamInfo...), 0)
+	mdhd := bytes.Index(data, []byte("mdhd")) + 4
+	binary.BigEndian.PutUint32(data[mdhd+12:], 48000)
+	binary.BigEndian.PutUint32(data[mdhd+16:], 4096)
+	stts := bytes.Index(data, []byte("stts")) + 4
+	binary.BigEndian.PutUint32(data[stts+8:], 1)
+	binary.BigEndian.PutUint32(data[stts+12:], 4096)
+	path := filepath.Join(t.TempDir(), "flac.mp4")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	report, err := AnalyzeFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, stream := range report.Streams {
+		if stream.Kind == StreamAudio {
+			if got, _ := canonicalSeedValue(stream, "SamplingCount"); got != "4096" {
+				t.Fatalf("SamplingCount = %q, want 4096", got)
+			}
+			return
+		}
+	}
+	t.Fatal("MP4 FLAC has no audio stream")
+}
+
+// TestMP4FLACReadsVorbisCommentBlock checks that a dfLa box with a
+// VORBIS_COMMENT block after STREAMINFO applies its channel mask and
+// VALID_BITS, as standalone and Ogg FLAC do.
+func TestMP4FLACReadsVorbisCommentBlock(t *testing.T) {
+	streamInfo, err := hex.DecodeString("1000100000001000210c0bb802f00e5b6540864d55f003143d8bad47d3b997fae64c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	comment := binary.LittleEndian.AppendUint32(nil, 0)
+	comment = binary.LittleEndian.AppendUint32(comment, 2)
+	for _, tag := range []string{"WAVEFORMATEXTENSIBLE_CHANNEL_MASK=0x600", "VALID_BITS=12"} {
+		comment = binary.LittleEndian.AppendUint32(comment, uint32(len(tag)))
+		comment = append(comment, tag...)
+	}
+	private := append([]byte("fLaC\x00\x00\x00\x22"), streamInfo...)
+	private = append(private, 0x84, 0, 0, byte(len(comment)))
+	stream := parseMP4FLACMD5TestStream(t, append(private, comment...))
+	for key, want := range map[fieldName]string{"ChannelLayout": "Ls Rs", "ChannelPositions": "Side: L R", "BitDepth_Detected": "12"} {
+		if got, _ := canonicalSeedValue(stream, key); got != want {
+			t.Errorf("%s = %q, want %q", key, got, want)
+		}
+	}
+}
+
+// TestOggTheoraFLACVideoBitRateIsMeasured checks that FLAC bytes are not
+// counted as video. FLAC has no nominal bit rate, so the video bit rate comes
+// from the measured Theora payload. Official v23.04 shows no video bit rate
+// here (see AGENTS.md).
+func TestOggTheoraFLACVideoBitRateIsMeasured(t *testing.T) {
+	streamInfo, err := hex.DecodeString("1000100000001000210c0bb802f00e5b6540864d55f003143d8bad47d3b997fae64c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	theora := make([]byte, 42)
+	copy(theora, "\x80theora\x03\x02\x01")
+	theora[16], theora[19] = 16, 16 // 16x16 picture
+	theora[25], theora[29] = 25, 1  // 25 fps
+	theora[32], theora[35] = 1, 1   // square pixels
+	theora[41] = 0xC0               // granule shift 6
+	data := buildOggPageForTest(1, 0x02, 0, theora)
+	data = append(data, buildOggPageForTest(2, 0x02, 0, append([]byte("\x7fFLAC\x01\x00\x00\x00fLaC\x80\x00\x00\x22"), streamInfo...))...)
+	for page := range 40 {
+		data = append(data, buildOggPageForTest(1, 0, uint64(page+1)*5/4<<6, make([]byte, 250))...)
+		data = append(data, buildOggPageForTest(2, 0, uint64(page+1)*2400, make([]byte, 250))...)
+	}
+	_, streams, _, _, _, ok := parseOgg(bytes.NewReader(data), int64(len(data)))
+	if !ok || len(streams) != 2 || streams[0].Kind != StreamVideo {
+		t.Fatal("Ogg Theora and FLAC did not parse")
+	}
+	// (42 + 40*250 bytes) * 8 / 2 s
+	if got, _ := canonicalSeedValue(streams[0], "BitRate"); got != "40168" {
+		t.Fatalf("video BitRate = %q, want 40168", got)
+	}
 }

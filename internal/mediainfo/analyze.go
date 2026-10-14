@@ -728,8 +728,7 @@ func analyzeFileWithOptions(ctx context.Context, path string, opts AnalyzeOption
 						node := applyMP4AC3Probe(builder, trackFacts, ac3, track.Format)
 						extraNode = &node
 						if displayDuration > 0 && ac3.sampleRate > 0 {
-							durationMS := math.Round(displayDuration * 1000)
-							samplingCount := strconv.FormatInt(int64(math.Round(durationMS*ac3.sampleRate/1000)), 10)
+							samplingCount := strconv.FormatInt(int64(math.Round(displayDuration*ac3.sampleRate)), 10)
 							trackFacts.Set("SamplingCount", samplingCount)
 							builder.OverrideStructured("SamplingCount", samplingCount)
 						}
@@ -867,9 +866,9 @@ func analyzeFileWithOptions(ctx context.Context, path string, opts AnalyzeOption
 					if isAAC || audioFormat == "FLAC" {
 						if displayDuration > 0 {
 							if sampleRate, ok := parseInt(trackFacts.Canonical("SamplingRate")); ok && sampleRate > 0 {
-								durationMS := math.Round(displayDuration * 1000)
-								samplingCount := math.Round(durationMS * float64(sampleRate) / 1000)
-								value := strconv.FormatInt(int64(samplingCount), 10)
+								// Official MediaInfo rounds the duration to milliseconds
+								// first. The exact duration gives the exact sample count.
+								value := strconv.FormatInt(int64(math.Round(displayDuration*float64(sampleRate))), 10)
 								trackFacts.Set("SamplingCount", value)
 								builder.OverrideStructured("SamplingCount", value)
 							}
@@ -901,6 +900,13 @@ func analyzeFileWithOptions(ctx context.Context, path string, opts AnalyzeOption
 				}
 				trackFacts.Apply(builder)
 				if extraNode != nil {
+					// The override replaces the sample-entry extra, such as FLAC
+					// MD5_Unencoded. Official MediaInfo puts those members last.
+					if track.Kind == StreamAudio {
+						if seed := canonicalSeedStructuredNode(&Stream{canonicalSeed: track.canonicalSeed}, "extra"); seed != nil {
+							mergeStructuredExtraNode(&extraNode, *seed)
+						}
+					}
 					builder.OverrideStructuredNode("extra", *extraNode)
 				}
 				streams = append(streams, builder.Snapshot(canonicalStreamPolicy{}))

@@ -480,9 +480,9 @@ func parseFLACStreamInfoDetails(data []byte) (flacStreamInfo, bool) {
 	}, sampleRate > 0 && channels > 0
 }
 
-// parseMatroskaFLACPrivate accepts either a bare STREAMINFO payload or a full
+// parseFLACMetadataBlocks accepts either a bare STREAMINFO payload or a full
 // fLaC metadata sequence and returns its STREAMINFO plus Vorbis vendor string.
-func parseMatroskaFLACPrivate(data []byte) (flacStreamInfo, string, bool) {
+func parseFLACMetadataBlocks(data []byte) (flacStreamInfo, string, bool) {
 	if len(data) == 34 {
 		info, ok := parseFLACStreamInfoDetails(data)
 		return info, "", ok
