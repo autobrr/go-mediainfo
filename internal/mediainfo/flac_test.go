@@ -648,3 +648,49 @@ func TestMP4FLACZeroChannelMaskOmitsLayout(t *testing.T) {
 		}
 	}
 }
+
+// TestMP4FLACReadsDfLaAtChildBoxBoundaries checks that the fLaC sample entry
+// finds dfLa by its child-box walk. A "dfLa" byte sequence inside a preceding
+// free box must not win, and a dfLa with a 64-bit largesize must be read.
+func TestMP4FLACReadsDfLaAtChildBoxBoundaries(t *testing.T) {
+	block := func(streamInfo string) []byte {
+		raw, err := hex.DecodeString(streamInfo)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// FullBox version and flags, then a last STREAMINFO block.
+		return append([]byte{0, 0, 0, 0, 0x80, 0, 0, 0x22}, raw...)
+	}
+	stored := block("1000100000001000210c0bb802f00e5b6540864d55f003143d8bad47d3b997fae64c")
+	decoy := block("1000100000001000210c01f400f00e5b6540864d55f003143d8bad47d3b997fae64c")
+	header := make([]byte, 36)
+	copy(header[4:8], "fLaC")
+	binary.BigEndian.PutUint16(header[24:26], 2)
+	binary.BigEndian.PutUint32(header[32:36], 44100<<16)
+
+	var decoyBox, free, extended bytes.Buffer
+	writeMP4Box(&decoyBox, "dfLa", decoy)
+	writeMP4Box(&free, "free", decoyBox.Bytes())
+	writeMP4Box(&free, "dfLa", stored)
+	extended.Write([]byte{0, 0, 0, 1})
+	extended.WriteString("dfLa")
+	extended.Write(binary.BigEndian.AppendUint64(nil, uint64(16+len(stored))))
+	extended.Write(stored)
+
+	for name, children := range map[string][]byte{
+		"decoy in free box": free.Bytes(),
+		"largesize dfLa":    extended.Bytes(),
+	} {
+		t.Run(name, func(t *testing.T) {
+			entry := append(bytes.Clone(header), children...)
+			binary.BigEndian.PutUint32(entry[0:4], uint32(len(entry)))
+			fields := parseAudioSampleEntry(entry, "fLaC").Fields
+			if got := findField(fields, "Sampling rate"); got != "48.0 kHz" {
+				t.Errorf("Sampling rate = %q, want 48.0 kHz", got)
+			}
+			if got := findField(fields, "Compression mode"); got != "Lossless" {
+				t.Errorf("Compression mode = %q, want Lossless", got)
+			}
+		})
+	}
+}

@@ -772,7 +772,7 @@ func parseAudioSampleEntry(entry []byte, sampleType string) sampleEntryResult {
 	if sampleType == "fLaC" || sampleType == "flac" {
 		// ISO FLAC mapping: dfLa is a FullBox that holds native FLAC metadata
 		// blocks, STREAMINFO first.
-		if payload, ok := findMP4BoxByName(entry, "dfLa"); ok && len(payload) > 4 {
+		if payload, ok := findMP4ChildBox(entry, mp4AudioSampleEntryHeaderSize, "dfLa"); ok && len(payload) > 4 {
 			if info, vendor, ok := parseFLACMetadataBlocks(append([]byte("fLaC"), payload[4:]...)); ok {
 				flac = &info
 				flacEncoder = vendor
@@ -1220,15 +1220,25 @@ func findMP4ChildBox(entry []byte, start int, name string) ([]byte, bool) {
 	}
 	pos := start
 	for pos+8 <= len(entry) {
-		size := int(binary.BigEndian.Uint32(entry[pos : pos+4]))
-		if size < 8 || pos+size > len(entry) {
+		size := uint64(binary.BigEndian.Uint32(entry[pos : pos+4]))
+		header := uint64(8)
+		switch size {
+		case 0: // the box extends to the end of the entry
+			size = uint64(len(entry) - pos)
+		case 1: // a 64-bit largesize follows the type
+			if pos+16 > len(entry) {
+				return nil, false
+			}
+			size = binary.BigEndian.Uint64(entry[pos+8 : pos+16])
+			header = 16
+		}
+		if size < header || size > uint64(len(entry)-pos) {
 			return nil, false
 		}
-		typ := string(entry[pos+4 : pos+8])
-		if typ == name {
-			return entry[pos+8 : pos+size], true
+		if string(entry[pos+4:pos+8]) == name {
+			return entry[pos+int(header) : pos+int(size)], true
 		}
-		pos += size
+		pos += int(size)
 	}
 	return nil, false
 }
