@@ -138,6 +138,8 @@ func FuzzParseMP4Containers(f *testing.F) {
 		0x00, 0x00, 0x00, 0x10, 'm', 'o', 'o', 'v',
 		0x00, 0x00, 0x00, 0x08, 'm', 'v', 'h', 'd',
 	})
+	// fLaC sample entry with a dfLa STREAMINFO block.
+	f.Add(buildMP4FLACForTest(append([]byte("fLaC\x80\x00\x00\x22"), make([]byte, 34)...), 0))
 
 	f.Fuzz(func(t *testing.T, data []byte) {
 		data = fuzzLimit(data)
@@ -199,6 +201,8 @@ func FuzzParseOggContainers(f *testing.F) {
 	seed[27] = 19
 	seed = append(seed, []byte("OpusHead\x01\x01\x00\x00\x80\xBB\x00\x00\x00\x00\x00")...)
 	f.Add(seed)
+	// Ogg FLAC mapping header with a STREAMINFO block.
+	f.Add(buildOggPageForTest(1, 0x02, 0, append([]byte("\x7fFLAC\x01\x00\x00\x01fLaC\x00\x00\x00\x22"), make([]byte, 34)...)))
 
 	manySerials := make([]byte, 0, 27*(maxOggLogicalStreams+1))
 	for serial := uint32(1); serial <= uint32(maxOggLogicalStreams+1); serial++ {

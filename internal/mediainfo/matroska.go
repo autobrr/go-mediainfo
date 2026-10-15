@@ -1958,7 +1958,7 @@ func parseCanonicalMatroskaTrackEntry(buf []byte, segmentDuration float64, durat
 	flacEncoder := ""
 	flacChannelsFromPrivate := false
 	if kind == StreamAudio && format == "FLAC" && len(codecPrivate) > 0 {
-		if parsed, vendor, ok := parseMatroskaFLACPrivate(codecPrivate); ok {
+		if parsed, vendor, ok := parseFLACMetadataBlocks(codecPrivate); ok {
 			flacInfo = parsed
 			flacEncoder = vendor
 			flacChannelsFromPrivate = flacDerivedLayoutIsOmitted(parsed)

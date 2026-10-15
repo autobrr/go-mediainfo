@@ -728,8 +728,7 @@ func analyzeFileWithOptions(ctx context.Context, path string, opts AnalyzeOption
 						node := applyMP4AC3Probe(builder, trackFacts, ac3, track.Format)
 						extraNode = &node
 						if displayDuration > 0 && ac3.sampleRate > 0 {
-							durationMS := math.Round(displayDuration * 1000)
-							samplingCount := strconv.FormatInt(int64(math.Round(durationMS*ac3.sampleRate/1000)), 10)
+							samplingCount := strconv.FormatInt(int64(math.Round(displayDuration*ac3.sampleRate)), 10)
 							trackFacts.Set("SamplingCount", samplingCount)
 							builder.OverrideStructured("SamplingCount", samplingCount)
 						}
@@ -843,7 +842,7 @@ func analyzeFileWithOptions(ctx context.Context, path string, opts AnalyzeOption
 				}
 				if track.Kind == StreamAudio {
 					channels := trackFacts.Canonical("Channels")
-					if channels != "" && trackFacts.Get("ChannelPositions") == "" && trackFacts.Get("Channels_Original") == "" {
+					if channels != "" && trackFacts.Get("ChannelPositions") == "" && trackFacts.Get("Channels_Original") == "" && mapMP4SampleEntry(track.sampleEntryType) != "FLAC" {
 						if positions := channelPositionsFromCount(channels); positions != "" {
 							trackFacts.Set("ChannelPositions", positions)
 						}
@@ -860,15 +859,16 @@ func analyzeFileWithOptions(ctx context.Context, path string, opts AnalyzeOption
 							trackFacts.Set("SamplingCount", strconv.FormatInt(int64(math.Round(displayDuration*48000)), 10))
 						}
 					}
-					if strings.EqualFold(audioFormat, "AAC") {
-						if trackFacts.Get("SamplesPerFrame") == "" {
-							trackFacts.Set("SamplesPerFrame", "1024")
-						}
+					isAAC := strings.EqualFold(audioFormat, "AAC")
+					if isAAC && trackFacts.Get("SamplesPerFrame") == "" {
+						trackFacts.Set("SamplesPerFrame", "1024")
+					}
+					if isAAC || audioFormat == "FLAC" {
 						if displayDuration > 0 {
 							if sampleRate, ok := parseInt(trackFacts.Canonical("SamplingRate")); ok && sampleRate > 0 {
-								durationMS := math.Round(displayDuration * 1000)
-								samplingCount := math.Round(durationMS * float64(sampleRate) / 1000)
-								value := strconv.FormatInt(int64(samplingCount), 10)
+								// Official MediaInfo rounds the duration to milliseconds
+								// first. The exact duration gives the exact sample count.
+								value := strconv.FormatInt(int64(math.Round(displayDuration*float64(sampleRate))), 10)
 								trackFacts.Set("SamplingCount", value)
 								builder.OverrideStructured("SamplingCount", value)
 							}
@@ -900,6 +900,13 @@ func analyzeFileWithOptions(ctx context.Context, path string, opts AnalyzeOption
 				}
 				trackFacts.Apply(builder)
 				if extraNode != nil {
+					// The override replaces the sample-entry extra, such as FLAC
+					// MD5_Unencoded. Official MediaInfo puts those members last.
+					if track.Kind == StreamAudio {
+						if seed := canonicalSeedStructuredNode(&Stream{canonicalSeed: track.canonicalSeed}, "extra"); seed != nil {
+							mergeStructuredExtraNode(&extraNode, *seed)
+						}
+					}
 					builder.OverrideStructuredNode("extra", *extraNode)
 				}
 				streams = append(streams, builder.Snapshot(canonicalStreamPolicy{}))
@@ -920,6 +927,7 @@ func analyzeFileWithOptions(ctx context.Context, path string, opts AnalyzeOption
 			for _, stream := range streams {
 				if mode, ok := canonicalSeedValue(stream, "BitRate_Mode"); ok && (mode == "VBR" || mode == "Variable") {
 					generalFacts.SetSame("OverallBitRate_Mode", "VBR")
+					general.Fields = appendFieldUnique(general.Fields, Field{Name: "Overall bit rate mode", Value: "Variable"})
 					break
 				}
 			}
@@ -1986,6 +1994,9 @@ func analyzeFileWithOptions(ctx context.Context, path string, opts AnalyzeOption
 		if parsedInfo, parsedStreams, generalFields, generalFacts, generalExtra, ok := parseOgg(file, stat.Size()); ok {
 			info = parsedInfo
 			streams = parsedStreams
+			if info.BitrateMode != "" {
+				general.Fields = appendFieldUnique(general.Fields, Field{Name: "Overall bit rate mode", Value: info.BitrateMode})
+			}
 			if len(generalFields) > 0 {
 				for _, field := range generalFields {
 					general.Fields = appendFieldUnique(general.Fields, field)
