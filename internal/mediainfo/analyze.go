@@ -2156,6 +2156,7 @@ func analyzeFileWithOptions(ctx context.Context, path string, opts AnalyzeOption
 		}
 	}
 
+	normalizeVideoFrameRates(&general, streams)
 	for _, stream := range streams {
 		if stream.Kind != StreamVideo {
 			continue
