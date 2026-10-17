@@ -4,7 +4,8 @@
 
 go-mediainfo must be accurate. Official MediaInfo is the reference we diff against because it is usually right.
 
-- When official MediaInfo is wrong, fix the value in go-mediainfo. Do not port the bug. "MediaInfoLib does it this way" does not close a correctness issue.
+- A measured fact (a size, count, duration, bit rate, stream presence, metadata value, or error) must be correct. When official MediaInfo reports a wrong fact, fix the value in go-mediainfo. Do not port the bug. "MediaInfoLib does it this way" does not close a correctness issue.
+- A reporting convention (rounding, frame-rate snapping, num/den display, units, the stream that General takes a value from) follows official v23.04. The reason and the rejected options are in `docs/adr/0001-measured-facts-vs-reporting-conventions.md`.
 - Prove each deliberate difference with a real file before you ship it. Say why in the commit and pin it with a test.
 - Keep the output shape compatible. Field names, JSON schema, text labels, and field order stay MediaInfo-compatible, because tools such as upbrr parse this output. Change values, not the schema.
 - Pure Go, no CGO, cross-platform.
@@ -36,15 +37,15 @@ Never put release names or media-library paths in anything that lands on GitHub:
 
 ## Deliberate differences from official v23.04
 
-Do not change these back to official.
+Do not change these back to official. Each one is a measured fact or a newer upstream convention.
 
-- AAC `Errors: Missing ID_END` on sample `mkv-07`: official reports it, but its SBR parser overruns the fill element. Our walk consumes each frame bit-exactly and finds `ID_END`. Issue #34, PR #35.
-- `Encoded_Application_Name` and `Encoded_Application_Version` are split. This is newer MediaInfo behavior, kept on purpose.
-- A Matroska cover attachment produces an Image track. Official v23.04 has none.
-- Ogg FLAC General keeps `Writing application` and `Title` from the FLAC Vorbis comments. Official v23.04 drops them for Ogg FLAC only, and keeps them for standalone FLAC and Ogg Vorbis. Issue #55.
-- Ogg FLAC General has no `Format/Info`. Official v23.04 shows the FLAC description there, but the General format is Ogg. Issue #55.
-- MP4 audio `SamplingCount` (AAC, AC-3, FLAC) comes from the exact track duration. Official v23.04 rounds the duration to milliseconds first, so a 44.1 kHz track of 132304 samples shows 132300. PR #59.
-- Ogg with Theora and FLAC shows the measured video bit rate and stream size. FLAC has no nominal bit rate, and official v23.04 shows no video bit rate. PR #59.
+- Measured fact: AAC `Errors: Missing ID_END` on sample `mkv-07`: official reports it, but its SBR parser overruns the fill element. Our walk consumes each frame bit-exactly and finds `ID_END`. Issue #34, PR #35.
+- Newer upstream convention: `Encoded_Application_Name` and `Encoded_Application_Version` are split, as in newer MediaInfo.
+- Measured fact: a Matroska cover attachment produces an Image track. Official v23.04 has none.
+- Measured fact: Ogg FLAC General keeps `Writing application` and `Title` from the FLAC Vorbis comments. Official v23.04 drops them for Ogg FLAC only, and keeps them for standalone FLAC and Ogg Vorbis. Issue #55.
+- Measured fact: Ogg FLAC General has no `Format/Info`. Official v23.04 shows the FLAC description there, but `Format/Info` describes the General format, which is Ogg, so the FLAC description is a wrong value. Issue #55.
+- Measured fact: MP4 audio `SamplingCount` (AAC, AC-3, FLAC) comes from the exact track duration. Official v23.04 rounds the duration to milliseconds first, so a 44.1 kHz track of 132304 samples shows 132300. PR #59.
+- Measured fact: Ogg with Theora and FLAC shows the measured video bit rate and stream size. FLAC has no nominal bit rate, and official v23.04 shows no video bit rate. PR #59.
 
 ## Agent skills
 
