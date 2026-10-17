@@ -4,7 +4,7 @@
 
 go-mediainfo must be accurate. Official MediaInfo is the reference we diff against because it is usually right.
 
-- A measured fact (a size, count, duration, bit rate, stream, metadata value, or error) must be correct. When official MediaInfo reports a wrong fact, fix the value in go-mediainfo. Do not port the bug. "MediaInfoLib does it this way" does not close a correctness issue.
+- A measured fact (a size, count, duration, bit rate, stream presence, metadata value, or error) must be correct. When official MediaInfo reports a wrong fact, fix the value in go-mediainfo. Do not port the bug. "MediaInfoLib does it this way" does not close a correctness issue.
 - A reporting convention (rounding, frame-rate snapping, num/den display, units, the stream that General takes a value from) follows official v23.04. The reason and the rejected options are in `docs/adr/0001-measured-facts-vs-reporting-conventions.md`.
 - Prove each deliberate difference with a real file before you ship it. Say why in the commit and pin it with a test.
 - Keep the output shape compatible. Field names, JSON schema, text labels, and field order stay MediaInfo-compatible, because tools such as upbrr parse this output. Change values, not the schema.
