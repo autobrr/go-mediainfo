@@ -43,7 +43,7 @@ Do not change these back to official. Each one is a measured fact or a newer ups
 - Newer upstream convention: `Encoded_Application_Name` and `Encoded_Application_Version` are split, as in newer MediaInfo.
 - Measured fact: a Matroska cover attachment produces an Image track. Official v23.04 has none.
 - Measured fact: Ogg FLAC General keeps `Writing application` and `Title` from the FLAC Vorbis comments. Official v23.04 drops them for Ogg FLAC only, and keeps them for standalone FLAC and Ogg Vorbis. Issue #55.
-- Measured fact: Ogg FLAC General has no `Format/Info`. Official v23.04 shows the FLAC description there, but the General format is Ogg. Issue #55.
+- Measured fact: Ogg FLAC General has no `Format/Info`. Official v23.04 shows the FLAC description there, but `Format/Info` describes the General format, which is Ogg, so the FLAC description is a wrong value. Issue #55.
 - Measured fact: MP4 audio `SamplingCount` (AAC, AC-3, FLAC) comes from the exact track duration. Official v23.04 rounds the duration to milliseconds first, so a 44.1 kHz track of 132304 samples shows 132300. PR #59.
 - Measured fact: Ogg with Theora and FLAC shows the measured video bit rate and stream size. FLAC has no nominal bit rate, and official v23.04 shows no video bit rate. PR #59.
 
