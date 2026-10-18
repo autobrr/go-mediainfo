@@ -57,7 +57,6 @@ Do not change these back to official. Each line is a measured fact, a newer upst
 - Measured fact: the Matroska tag `ENCODER_OPTIONS` shows as `Encoded_Library_Settings`, and `DATE`, `ARTIST`, `GENRE` and `SYNOPSIS` map to `Recorded_Date`, `Performer`, `Genre` and `Synopsis`. v23.04 shows the raw tag names, and v26 maps them. Issue #83.
 - Newer upstream convention: DVD IFO stream IDs use the "189-128" form, which names the private stream and the sub-stream, as v26.05 does. Issue #77.
 - Measured fact: DVD menus. go-mediainfo makes one Menu per title and drops a menu shorter than half of the longest one (v26.05 rule). It reads all program chains where v23.04 has a parse error, and it adds NTSC cell times in exact 90 kHz ticks before it rounds. Raw text subtitle labels follow the newer upstream convention, the v26 short form. Issue #79.
-- Measured fact: AAC `GainControl_Present` shows only when the packet parses cleanly, as in v26. Issue #83.
 - Measured fact: TS captions show `Duration_End` and `Duration_Start2End` from the caption timestamps, as in v26. Issue #83.
 
 ## Agent skills
