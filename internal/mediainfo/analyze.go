@@ -2157,26 +2157,6 @@ func analyzeFileWithOptions(ctx context.Context, path string, opts AnalyzeOption
 	}
 
 	normalizeVideoFrameRates(&general, streams)
-	for _, stream := range streams {
-		if stream.Kind != StreamVideo {
-			continue
-		}
-		rate := findField(stream.Fields, "Frame rate")
-		if format == "Matroska" {
-			rate, _ = canonicalSeedTextValue(stream, "Frame rate")
-		}
-		if rate != "" {
-			if (format == "MPEG-PS" || format == "MPEG Video" || format == "MPEG-TS" || format == "BDAV" || format == "Matroska" || format == "MPEG-4" || format == "QuickTime") && strings.Contains(rate, "(") {
-				parts := strings.Fields(rate)
-				if len(parts) > 0 {
-					general.Fields = appendFieldUnique(general.Fields, Field{Name: "Frame rate", Value: parts[0] + " FPS"})
-					break
-				}
-			}
-			general.Fields = appendFieldUnique(general.Fields, Field{Name: "Frame rate", Value: rate})
-			break
-		}
-	}
 
 	if info.HasDuration() && format != "DVD Video" {
 		general.Fields = append(general.Fields, Field{Name: "Duration", Value: formatDuration(info.DurationSeconds)})

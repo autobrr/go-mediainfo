@@ -4,33 +4,35 @@ import (
 	"fmt"
 	"math"
 	"strconv"
-	"strings"
 )
 
 // normalizeVideoFrameRates applies the CLI's standard-rate rounding after
-// container measurements and updates General facts copied from the old rate.
+// container measurements, refreshes derived facts, and copies the first video's
+// rate to General, even when a later video has a different or nonempty rate.
 func normalizeVideoFrameRates(general *Stream, streams []Stream) {
 	primaryVideo := -1
-	previousRate := ""
 	for i := range streams {
 		stream := &streams[i]
 		if stream.Kind != StreamVideo {
 			continue
 		}
 		if primaryVideo < 0 {
+			primaryVideo = i
+		}
+		previousRate, _ := canonicalSeedValue(*stream, "FrameRate")
+		nominal, _ := canonicalSeedValue(*stream, "FrameRate_Nominal")
+		rate32, _ := strconv.ParseFloat(previousRate, 32)
+		nominal32, _ := strconv.ParseFloat(nominal, 32)
+		changed := nominal32 > rate32*0.9995 && nominal32 < rate32*1.0005
+		if changed {
+			clearCanonicalSeedField(stream, "FrameRate_Nominal", "Nominal frame rate")
 			display, _ := canonicalSeedTextValue(*stream, "Frame rate")
-			if display == "" {
-				display = findField(stream.Fields, "Frame rate")
-			}
 			if display != "" {
-				primaryVideo = i
-				previousRate = extractLeadingNumber(display)
+				display = nominal + " FPS"
 			}
+			replaceCanonicalSeedFill(stream, "FrameRate", nominal, "Frame rate", display)
 		}
-		if originalNum, _ := canonicalSeedValue(*stream, "FrameRate_Original_Num"); originalNum != "" {
-			continue
-		}
-		changed := false
+		originalNum, _ := canonicalSeedValue(*stream, "FrameRate_Original_Num")
 		for _, field := range []struct {
 			name  fieldName
 			label string
@@ -39,52 +41,85 @@ func normalizeVideoFrameRates(general *Stream, streams []Stream) {
 			{"FrameRate_Nominal", "Nominal frame rate"},
 			{"FrameRate_Original", "Original frame rate"},
 		} {
+			if originalNum != "" {
+				break
+			}
 			value, _ := canonicalSeedValue(*stream, field.name)
 			rate, err := strconv.ParseFloat(value, 64)
 			if err != nil {
 				continue
 			}
 			rounded := roundVideoFrameRate(rate)
-			if !(math.Abs(rounded-rate) >= 0.000999999) {
-				continue
+			if math.Abs(rounded-rate) >= 0.000999999 {
+				value = fmt.Sprintf("%.3f", rounded)
+				display, _ := canonicalSeedTextValue(*stream, field.label)
+				if display != "" {
+					display = value + " FPS"
+				}
+				replaceCanonicalSeedFill(stream, field.name, value, field.label, display)
+				changed = true
 			}
-			raw := fmt.Sprintf("%.3f", rounded)
-			display, _ := canonicalSeedTextValue(*stream, field.label)
-			if display != "" {
-				// Retain any explicit rational suffix and its existing visibility.
-				_, suffix, found := strings.Cut(display, " ")
-				display = raw
-				if found {
-					display += " " + suffix
+			if actual, _ := canonicalSeedValue(*stream, "FrameRate"); field.name != "FrameRate" && value != "" && value == actual {
+				clearCanonicalSeedField(stream, field.name, field.label)
+				changed = true
+			}
+		}
+		rate, _ := canonicalSeedValue(*stream, "FrameRate")
+		if rate != previousRate {
+			fps, _ := strconv.ParseFloat(rate, 64)
+			num, den := matroskaFrameRateRatio(fps)
+			if num > 0 && den > 0 {
+				replaceCanonicalSeedFill(stream, "FrameRate_Num", strconv.Itoa(num), "", "")
+				replaceCanonicalSeedFill(stream, "FrameRate_Den", strconv.Itoa(den), "", "")
+			} else {
+				clearCanonicalSeedField(stream, "FrameRate_Num", "")
+				clearCanonicalSeedField(stream, "FrameRate_Den", "")
+			}
+			if display, _ := canonicalSeedTextValue(*stream, "Frame rate"); display != "" {
+				display = formatFrameRate(fps)
+				if den > 1 {
+					display = fmt.Sprintf("%s (%d/%d) FPS", rate, num, den)
+				}
+				replaceCanonicalSeedText(stream, "Frame rate", display)
+			}
+			bitRate, _ := canonicalSeedValue(*stream, "BitRate")
+			bps, _ := strconv.ParseFloat(bitRate, 64)
+			if bps == 0 {
+				bitRate, _ = canonicalSeedValue(*stream, "BitRate_Nominal")
+				bps, _ = strconv.ParseFloat(bitRate, 64)
+			}
+			width, _ := canonicalSeedValue(*stream, "Width")
+			height, _ := canonicalSeedValue(*stream, "Height")
+			w, _ := strconv.ParseUint(width, 10, 64)
+			h, _ := strconv.ParseUint(height, 10, 64)
+			if density := formatBitsPerPixelFrame(bps, w, h, fps); density != "" {
+				if value, _ := canonicalSeedValue(*stream, "Bits-(Pixel*Frame)"); value != "" {
+					replaceCanonicalSeedFill(stream, "Bits-(Pixel*Frame)", density, "Bits/(Pixel*Frame)", density)
+				} else {
+					replaceCanonicalSeedText(stream, "Bits/(Pixel*Frame)", density)
 				}
 			}
-			replaceCanonicalSeedFill(stream, field.name, raw, field.label, display)
-			changed = true
 		}
 		if changed {
 			refreshCanonicalCompatibilitySnapshot(stream)
 		}
 	}
-	if general == nil || primaryVideo < 0 || previousRate == "" {
+	if general == nil || primaryVideo < 0 {
 		return
 	}
 	rate, _ := canonicalSeedValue(streams[primaryVideo], "FrameRate")
-	if rate == "" || rate == previousRate {
-		return
-	}
-	// Containers can copy General facts before this normalization. Update
-	// matching copies independently; retain other values and missing fields.
-	if value, _ := canonicalSeedValue(*general, "FrameRate"); value == previousRate {
-		replaceCanonicalSeedFill(general, "FrameRate", rate, "", "")
-	}
-	if display, _ := canonicalSeedTextValue(*general, "Frame rate"); extractLeadingNumber(display) == previousRate {
-		replaceCanonicalSeedText(general, "Frame rate", strings.Replace(display, previousRate, rate, 1))
-	}
-	for i := range general.Fields {
-		field := &general.Fields[i]
-		if field.Name == "Frame rate" && extractLeadingNumber(field.Value) == previousRate {
-			field.Value = strings.Replace(field.Value, previousRate, rate, 1)
+	clearCanonicalSeedField(general, "FrameRate", "Frame rate")
+	fields := general.Fields[:0]
+	for _, field := range general.Fields {
+		if field.Name != "Frame rate" {
+			fields = append(fields, field)
 		}
+	}
+	general.Fields = fields
+	if rate != "" {
+		display := rate + " FPS"
+		replaceCanonicalSeedFill(general, "FrameRate", rate, "Frame rate", display)
+		general.Fields = append(general.Fields, Field{Name: "Frame rate", Value: display})
 	}
 }
 

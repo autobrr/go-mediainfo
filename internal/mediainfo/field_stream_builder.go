@@ -542,7 +542,8 @@ func insertCanonicalSeedObjectMembersBefore(stream *Stream, key fieldName, befor
 	appendCanonicalSeedObjectMembers(stream, key, members)
 }
 
-// replaceCanonicalSeedFill mirrors a post-parse media fact into both projections.
+// replaceCanonicalSeedFill mirrors a post-parse media fact into both projections,
+// keeping a formatted display separate from the structured value.
 func replaceCanonicalSeedFill(stream *Stream, name fieldName, raw, label, display string) {
 	if stream == nil || raw == "" {
 		return
@@ -560,6 +561,10 @@ func replaceCanonicalSeedFill(stream *Stream, name fieldName, raw, label, displa
 			entry.Projected = false
 			if display != "" {
 				entry.Options.ShowXML = true
+				if entry.Options.ShowText && entry.TextLabel == label {
+					entry.Options.ShowText = false
+					entry.DeriveString = false
+				}
 			}
 			foundStructured = true
 		}
