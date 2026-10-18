@@ -7,7 +7,7 @@ go-mediainfo must be accurate. Official MediaInfo is the reference we diff again
 - A measured fact (a size, count, duration, bit rate, stream presence, metadata value, or error) must be correct. When official MediaInfo reports a wrong fact, fix the value in go-mediainfo. Do not port the bug. "MediaInfoLib does it this way" does not close a correctness issue.
 - A reporting convention (rounding, frame-rate snapping, num/den display, units, names, the stream that General takes a value from) follows official v23.04. The rules and the rejected options are in `docs/adr/0001-parity-baseline-and-output-scope.md`.
 - Prove each deliberate difference with a real file before you ship it. Say why in the commit and pin it with a test.
-- Keep the output shape compatible. Field names, JSON schema, text labels, and field order stay MediaInfo-compatible, because tools such as upbrr parse this output. Change values, not the schema.
+- Keep the output shape compatible. Field names, JSON schema, text labels, and field order come from official MediaInfo, because tools such as upbrr parse this output. A field comes from v23.04, or from v26.10 where ADR 0001 allows it. Never invent a field or a label.
 - Pure Go, no CGO, cross-platform.
 - Not implemented yet: ARIB/ISDB metadata and captions in TS, `.mpls` playlists, HDR10 and Dolby Vision metadata for HEVC in MP4, raw `.hevc` elementary streams.
 
