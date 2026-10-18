@@ -41,12 +41,23 @@ Do not change these back to official. Each line is a measured fact, a newer upst
 
 - Safety: hostile input gets the limits, omissions and escaping in the "Embedded metadata safety" section of `README.md`. These protect against denial of service and output injection, and `output_safety_test.go` pins them.
 - Measured fact: AAC `Errors: Missing ID_END` on sample `mkv-07`: official reports it, but its SBR parser overruns the fill element. Our walk consumes each frame bit-exactly and finds `ID_END`. Issue #34, PR #35.
-- Newer upstream convention: `Encoded_Application_Name` and `Encoded_Application_Version` are split, as in newer MediaInfo.
-- Measured fact: a Matroska cover attachment produces an Image track. Official v23.04 has none.
+- Newer upstream convention: `Encoded_Application_Name` and `Encoded_Application_Version` are split, as in newer MediaInfo. The Matroska General `Encoded_Library` (MuxingApp) is split into name and version the same way. Issue #83.
+- Measured fact: a Matroska cover attachment produces an Image track, and General shows `Cover_Description`, `Cover_Mime`, `Cover_Type` and `ImageCount`. Official v23.04 has none.
 - Measured fact: Ogg FLAC General keeps `Writing application` and `Title` from the FLAC Vorbis comments. Official v23.04 drops them for Ogg FLAC only, and keeps them for standalone FLAC and Ogg Vorbis. Issue #55.
 - Measured fact: Ogg FLAC General has no `Format/Info`. Official v23.04 shows the FLAC description there, but `Format/Info` describes the General format, which is Ogg, so the FLAC description is a wrong value. Issue #55.
 - Measured fact: MP4 audio `SamplingCount` (AAC, AC-3, FLAC) comes from the exact track duration. Official v23.04 rounds the duration to milliseconds first, so a 44.1 kHz track of 132304 samples shows 132300. PR #59.
 - Measured fact: Ogg with Theora and FLAC shows the measured video bit rate and stream size. FLAC has no nominal bit rate, and official v23.04 shows no video bit rate. PR #59.
+- Newer upstream convention: HDR fields have the v26 form. JSON `MaxCLL` and `MaxFALL` are numbers with no unit, raw text uses `MaxCLL/String` and `MaxFALL/String`, and Dolby Vision text shows the profile as "8.1". A number is the better JSON value, and "8.1" is the real profile name. Issue #67.
+- Measured fact: HDR fields that v23.04 does not fill: `MasteringDisplay_Luminance_Min`, `MasteringDisplay_Luminance_Max`, `HDR_Format_Compression`, and `HDR_Format_Compatibility` on MP4. Issue #67.
+- Measured fact: AC-3 metadata (dialnorm, compr, dynrng and the others) shows in text, and JSON has `cmixlev`, `surmixlev`, `mixlevel`, `roomtyp`, `dmixmod`, the `loro` and `ltrt` mix levels, `dialnorm_Count` and `adconvtyp`. v23.04 hides these values, and v26 shows them. Issue #78.
+- Newer upstream convention: aspect ratio names `2.39:1` (v23.04 shows `2.40:1` for 2.37 to 2.45) and `9:16`. These are the standard names. Issue #68.
+- Newer upstream convention: titles are not joined as "X / X" when the two values are equal, and spaces at the start and the end are trimmed. Issue #73.
+- Measured fact: `vp09` in MP4 shows as VP9, and Matroska text shows AV1 film grain. v23.04 shows the raw code and skips the film grain line. Issue #71.
+- Measured fact: `ServiceKind` comes from the Matroska hearing impaired, original and commentary flags. v23.04 does not read the flags, and v26.05 does. Issue #75.
+- Measured fact: the Matroska tag `ENCODER_OPTIONS` shows as `Encoded_Library_Settings`, and `DATE`, `ARTIST`, `GENRE` and `SYNOPSIS` map to `Recorded_Date`, `Performer`, `Genre` and `Synopsis`. v23.04 shows the raw tag names, and v26 maps them. Issue #83.
+- Newer upstream convention: DVD IFO stream IDs use the "189-128" form, which names the private stream and the sub-stream, as v26.05 does. Issue #77.
+- Measured fact: DVD menus. go-mediainfo makes one Menu per title and drops a menu shorter than half of the longest one (v26.05 rule). It reads all program chains where v23.04 has a parse error, and it adds NTSC cell times in exact 90 kHz ticks before it rounds. Raw text subtitle labels follow the newer upstream convention, the v26 short form. Issue #79.
+- Measured fact: TS captions show `Duration_End` and `Duration_Start2End` from the caption timestamps, as in v26. Issue #83.
 
 ## Agent skills
 
