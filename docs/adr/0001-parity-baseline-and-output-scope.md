@@ -13,7 +13,7 @@ The six formats also have different users. upbrr uses go-mediainfo as a library.
 ## Decision
 
 1. MediaInfo v23.04 stays the reference that the parity harness compares against.
-2. If v26.10 differs from v23.04 and the v26.10 behavior is more correct, go-mediainfo can follow v26.10. Each such field gets one line with the reason in the "Deliberate differences" list in `AGENTS.md`. Fields of one family can share a line. Without a recorded reason, the v23.04 behavior applies.
+2. If v26.10 differs from v23.04 and the v26.10 behavior is more correct, go-mediainfo can follow v26.10. A v26.10 field or value is more correct when it fixes a wrong v23.04 value, or when it shows real data from the file that v23.04 does not read. A guessed value, or a value fitted to sample files, is not more correct. Each such field gets one line with the reason in the "Deliberate differences" list in `AGENTS.md`. Fields of one family can share a line. Without a recorded reason, the v23.04 behavior applies.
 3. Parity work fixes differences in the JSON and text outputs. A difference that shows only in XML, HTML, or CSV counts only if it has the same root cause as a JSON or text difference.
 
 ## Consequences
