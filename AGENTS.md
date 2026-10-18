@@ -36,7 +36,7 @@ Never put release names or media-library paths in anything that lands on GitHub:
 
 ## Deliberate differences from official v23.04
 
-Do not change these back to official.
+Do not change these back to official. Before you add a line, read `docs/adr/0001-parity-baseline-and-output-scope.md`: it sets when v26.10 behavior wins and which outputs count.
 
 - AAC `Errors: Missing ID_END` on sample `mkv-07`: official reports it, but its SBR parser overruns the fill element. Our walk consumes each frame bit-exactly and finds `ID_END`. Issue #34, PR #35.
 - `Encoded_Application_Name` and `Encoded_Application_Version` are split. This is newer MediaInfo behavior, kept on purpose.
