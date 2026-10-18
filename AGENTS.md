@@ -37,8 +37,9 @@ Never put release names or media-library paths in anything that lands on GitHub:
 
 ## Deliberate differences from official v23.04
 
-Do not change these back to official. Each line is a measured fact or a newer upstream convention. Before you add a line, read `docs/adr/0001-parity-baseline-and-output-scope.md`: it sets when v26.10 behavior wins and which outputs count.
+Do not change these back to official. Each line is a measured fact, a newer upstream convention, or a safety rule. Before you add a line, read `docs/adr/0001-parity-baseline-and-output-scope.md`: it sets when v26.10 behavior wins and which outputs count.
 
+- Safety: hostile input gets the limits, omissions and escaping in the "Embedded metadata safety" section of `README.md`. These protect against denial of service and output injection, and `output_safety_test.go` pins them.
 - Measured fact: AAC `Errors: Missing ID_END` on sample `mkv-07`: official reports it, but its SBR parser overruns the fill element. Our walk consumes each frame bit-exactly and finds `ID_END`. Issue #34, PR #35.
 - Newer upstream convention: `Encoded_Application_Name` and `Encoded_Application_Version` are split, as in newer MediaInfo.
 - Measured fact: a Matroska cover attachment produces an Image track. Official v23.04 has none.
