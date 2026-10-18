@@ -89,3 +89,5 @@ homebrew_casks:
     repository:
       owner: autobrr
       name: "go-mediainfo"
+      pull_request:
+        enabled: true
