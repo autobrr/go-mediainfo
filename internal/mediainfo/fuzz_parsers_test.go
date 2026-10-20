@@ -435,10 +435,10 @@ func mkvProbeMaps(mode uint8) (map[uint64]*matroskaAudioProbe, map[uint64]*matro
 		}, nil
 	default:
 		return map[uint64]*matroskaAudioProbe{
-			track: {format: "E-AC-3", collect: true, targetPackets: 8},
-		}, map[uint64]*matroskaVideoProbe{
-			track: {codec: "HEVC"},
-		}
+				track: {format: "E-AC-3", collect: true, targetPackets: 8},
+			}, map[uint64]*matroskaVideoProbe{
+				track: {codec: "HEVC"},
+			}
 	}
 }
 
