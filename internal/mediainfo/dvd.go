@@ -14,10 +14,7 @@ import (
 	"strings"
 )
 
-const (
-	dvdSectorSize    = 2048
-	dvdMaxMuxBitRate = 10_080_000
-)
+const dvdSectorSize = 2048
 
 const (
 	dvdVideoAttrMenuOffset  = 0x0100
@@ -46,13 +43,12 @@ type dvdInfo struct {
 // dvdVideoAttrs stores decoded DVD video format, geometry, aspect, standard,
 // and frame-rate facts.
 type dvdVideoAttrs struct {
-	Version                 string
-	Standard                string
-	AspectRatio             string
-	PermittedDisplayFormats byte
-	Width                   int
-	Height                  int
-	FrameRate               float64
+	Version     string
+	Standard    string
+	AspectRatio string
+	Width       int
+	Height      int
+	FrameRate   float64
 }
 
 // dvdAudioAttrs stores decoded format, channel, sampling, and language facts
@@ -72,11 +68,10 @@ type dvdAudioAttrs struct {
 // dvdSubpicAttrs stores decoded language metadata and PGC payload mappings for
 // one logical DVD subpicture stream.
 type dvdSubpicAttrs struct {
-	Language           string
-	LanguageCode       string
-	LanguageMore       string
-	StreamID           int
-	AlternateStreamIDs []int
+	Language     string
+	LanguageCode string
+	LanguageMore string
+	StreamID     int
 }
 
 // dvdMenuLists stores the audio and subtitle index lists emitted in a DVD
@@ -119,9 +114,9 @@ func dvdBUPGeneralExtraNode() structuredNode {
 	}}
 }
 
-// parseDVDVideo parses one IFO or BUP and, for title sets, aggregates matching
-// VOB streams according to the supplied analysis options.
-func parseDVDVideo(path string, file io.ReadSeeker, size int64, opts AnalyzeOptions) (dvdInfo, bool) {
+// parseDVDVideo parses one IFO or BUP. The report holds only what the file
+// declares, as in MediaInfo v23.04, which opens no VOB for an IFO.
+func parseDVDVideo(path string, file io.ReadSeeker, size int64) (dvdInfo, bool) {
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		return dvdInfo{}, false
 	}
@@ -146,12 +141,6 @@ func parseDVDVideo(path string, file io.ReadSeeker, size int64, opts AnalyzeOpti
 	if isVTS && !isBUP {
 		backupData = dvdMatchingBackupData(path)
 	}
-	// Title-set IFOs inside VIDEO_TS describe the logical program formed by the
-	// sibling VTS_nn_1.VOB...VTS_nn_9.VOB files. BUP and VMG files remain
-	// metadata-only: BUP is a navigation backup, while VMG describes menus.
-	aggregateMode := isVTS && !isBUP && isDVDVideoTSPath(path)
-	programMode := !aggregateMode
-
 	var videoAttrs dvdVideoAttrs
 	if isVMG {
 		videoAttrs = parseDVDVideoAttrs(data, dvdVideoAttrMenuOffset)
@@ -165,7 +154,7 @@ func parseDVDVideo(path string, file io.ReadSeeker, size int64, opts AnalyzeOpti
 	generalFields := []Field{}
 	if isVMG {
 		generalFields = append(generalFields, Field{Name: "Format profile", Value: "Menu"})
-	} else if programMode {
+	} else {
 		generalFields = append(generalFields, Field{Name: "Format profile", Value: "Program"})
 	}
 	if ext != "" {
@@ -173,16 +162,12 @@ func parseDVDVideo(path string, file io.ReadSeeker, size int64, opts AnalyzeOpti
 	}
 
 	var durationSeconds float64
-	var ifoDurationSeconds float64
-	var ifoBitRateDurationSeconds float64
 	var chapterStarts []int64
 	var menuStreams []Stream
 	var programs []dvdProgram
 	var pgcTableOffset int
 	var audioAttrs []dvdAudioAttrs
 	var subpicAttrs []dvdSubpicAttrs
-	var languageAudioAttrs []dvdAudioAttrs
-	var languageSubpicAttrs []dvdSubpicAttrs
 	menuLists := dvdMenuLists{}
 	menuListsKnown := false
 	if isVTS {
@@ -209,10 +194,8 @@ func parseDVDVideo(path string, file io.ReadSeeker, size int64, opts AnalyzeOpti
 				}
 			}
 		}
-		ifoBitRateDurationSeconds = dvdPGCTimelineDuration(data, pgcOffset)
 		if durationSeconds > 0 {
 			info.Container.DurationSeconds = durationSeconds
-			ifoDurationSeconds = durationSeconds
 			generalFields = append(generalFields, Field{Name: "Duration", Value: formatDVDDuration(durationSeconds)})
 		}
 		audioAttrs = parseDVDAudioAttrs(data, dvdAudioCountVTSOffset, dvdAudioAttrVTSOffset)
@@ -221,139 +204,20 @@ func parseDVDVideo(path string, file io.ReadSeeker, size int64, opts AnalyzeOpti
 			audioAttrs = mergeDVDAudioAttrs(audioAttrs, parseDVDAudioAttrs(backupData, dvdAudioCountVTSOffset, dvdAudioAttrVTSOffset))
 			subpicAttrs = mergeDVDSubpicAttrs(subpicAttrs, parseDVDSubpicAttrs(backupData, dvdSubpicCountVTSOff, dvdSubpicCountVTSOff+2))
 		}
-		baseAudioAttrs := slices.Clone(audioAttrs)
-		baseSubpicAttrs := slices.Clone(subpicAttrs)
 		audioAttrs, subpicAttrs, menuLists, menuListsKnown = applyDVDPGCStreamControls(data, pttOffset, pgcOffset, videoAttrs, audioAttrs, subpicAttrs)
-		languageAudioAttrs, languageSubpicAttrs = audioAttrs, subpicAttrs
-		if mappedAudio, mappedSubpics, ok := dvdProgramLanguageMappings(data, programs, videoAttrs, baseAudioAttrs, baseSubpicAttrs); ok {
-			languageAudioAttrs, languageSubpicAttrs = mappedAudio, mappedSubpics
-		}
 	} else if isVMG {
 		audioAttrs = parseDVDAudioAttrs(data, dvdAudioCountMenuOffset, dvdAudioAttrMenuOffset)
 		subpicAttrs = parseDVDSubpicAttrs(data, dvdSubpicCountMenuOff, dvdSubpicCountMenuOff+2)
 	}
 
 	streams := []Stream{}
-	titleSetParsed := false
-	payloadDurationSeconds := 0.0
-	payloadBitRateDurationSeconds := 0.0
-	payloadBitRateCorrected := false
-	payloadFileSize := int64(0)
-	if aggregateMode {
-		if vobPaths, vobSize := dvdTitleSetVOBs(path); len(vobPaths) > 0 && vobSize > 0 {
-			if len(backupData) == 0 && len(vobPaths) > 1 {
-				vobPaths = vobPaths[:1]
-				if firstInfo, err := os.Stat(vobPaths[0]); err == nil { //nolint:gosec // path came from root-bounded DVD grammar discovery
-					vobSize = firstInfo.Size()
-				}
-			}
-			aggregateSize := vobSize
-			if ifoInfo, err := os.Stat(path); err == nil { //nolint:gosec // path is the caller-selected DVD analysis input; Stat only accounts its size
-				aggregateSize += ifoInfo.Size()
-			}
-			if parsedInfo, parsedStreams, ok := ParseMPEGPSFiles(vobPaths, aggregateSize, mpegPSOptions{dvdExtras: true, dvdParsing: true, parseSpeed: opts.ParseSpeed}); ok {
-				info.FileSize = aggregateSize
-				streams = mergeDVDTitleSetStreams(parsedStreams, dvdTitleSetSource(base))
-				overlayDVDDeclaredLanguages(streams, languageAudioAttrs, languageSubpicAttrs)
-				streams = mergeDVDDeclaredStreams(streams, audioAttrs, subpicAttrs, ifoDurationSeconds, dvdTitleSetSource(base))
-				payloadDurationSeconds = dvdPayloadCanonicalDuration(streams)
-				if normalizeDVDConstantVideoClock(streams, ifoDurationSeconds) {
-					payloadDurationSeconds = ifoDurationSeconds
-				}
-				payloadFileSize = vobSize
-				payloadBitRateDurationSeconds, payloadBitRateCorrected = dvdTitleSetBitRateDuration(
-					payloadFileSize, ifoBitRateDurationSeconds, ifoDurationSeconds, payloadDurationSeconds,
-				)
-				payloadBitRateCorrected = payloadBitRateCorrected && dvdHasConstantVideoBitRate(streams)
-				deriveDVDPSVideoBitRateAndSize(streams, payloadFileSize, payloadBitRateDurationSeconds, payloadBitRateCorrected)
-				titleSetParsed = len(streams) > 0
-				if parsedInfo.DurationSeconds > 0 {
-					info.Container.DurationSeconds = parsedInfo.DurationSeconds
-					durationSeconds = parsedInfo.DurationSeconds
-					generalFields = setFieldValue(generalFields, "Duration", formatDuration(durationSeconds))
-				}
-				if fps, ok := parseFPS(findStreamField(streams, StreamVideo, "Frame rate")); ok {
-					generalFields = setFieldValue(generalFields, "Frame rate", formatFrameRate(fps))
-					info.GeneralFacts.SetSame("FrameRate", formatJSONFloat(fps))
-				}
-				frameCount, streamSizeSum := dvdJSONStreamStats(streams)
-				if frameCount != "" {
-					info.GeneralFacts.SetSame("FrameCount", frameCount)
-				}
-				if streamSizeSum > 0 {
-					remaining := payloadFileSize - streamSizeSum
-					if remaining >= 0 {
-						info.GeneralFacts.SetSame("StreamSize", strconv.FormatInt(remaining, 10))
-					}
-				}
-			}
-		}
-	}
-	if aggregateMode && !titleSetParsed {
-		aggregateMode = false
-		generalFields = append([]Field{{Name: "Format profile", Value: "Program"}}, generalFields...)
-	}
-	if aggregateMode && titleSetParsed && ifoDurationSeconds > 0 {
-		info.Container.DurationSeconds = ifoDurationSeconds
-		durationSeconds = ifoDurationSeconds
-		generalFields = setFieldValue(generalFields, "Duration", formatDVDDuration(ifoDurationSeconds))
-		for i := range streams {
-			streams[i].Fields = setFieldValue(streams[i].Fields, "Duration", formatDVDDuration(ifoDurationSeconds))
-			replaceCanonicalSeedProjection(
-				&streams[i], "Duration",
-				strconv.FormatFloat(ifoDurationSeconds*1000, 'f', -1, 64),
-				formatJSONSeconds(ifoDurationSeconds),
-				"Duration", formatDVDDuration(ifoDurationSeconds))
-		}
-	}
-	if titleSetParsed && len(programs) > 1 {
-		for i := range streams {
-			if streams[i].Kind == StreamVideo {
-				replaceCanonicalSeedFill(&streams[i], "Format_Settings_GOP", "Variable", "Format settings, GOP", "Variable")
-				if scan, _ := canonicalSeedValue(streams[i], "ScanType"); scan == "Interlaced" {
-					replaceCanonicalSeedFill(&streams[i], "Gop_OpenClosed", "Closed", "GOP, Open/Closed", "Closed")
-					for _, name := range []fieldName{
-						"colour_description_present", "colour_description_present_Source",
-						"colour_primaries", "colour_primaries_Source",
-						"transfer_characteristics", "transfer_characteristics_Source",
-						"matrix_coefficients", "matrix_coefficients_Source",
-					} {
-						clearCanonicalSeedField(&streams[i], name, "")
-					}
-				} else {
-					clearCanonicalSeedField(&streams[i], "Gop_OpenClosed", "")
-				}
-				clearCanonicalSeedField(&streams[i], "Gop_OpenClosed_FirstFrame", "")
-				break
-			}
-		}
-	}
-
-	overallMode := "Variable"
-	if titleSetParsed {
-		for i := range streams {
-			if streams[i].Kind != StreamVideo {
-				continue
-			}
-			if mode, ok := canonicalSeedValue(streams[i], "BitRate_Mode"); ok && (mode == "CBR" || mode == "Constant") {
-				overallMode = "Constant"
-			}
-			break
-		}
-	}
-	generalFields = append(generalFields, Field{Name: "Overall bit rate mode", Value: overallMode})
+	generalFields = append(generalFields, Field{Name: "Overall bit rate mode", Value: "Variable"})
 	if info.Container.DurationSeconds > 0 && info.FileSize > 0 {
-		bitRateDuration := info.Container.DurationSeconds
-		bitRateSize := info.FileSize
-		if titleSetParsed && payloadBitRateDurationSeconds > 0 {
-			bitRateDuration = payloadBitRateDurationSeconds
-			bitRateSize = payloadFileSize
-		}
-		overall := (float64(bitRateSize) * 8) / bitRateDuration
+		overall := (float64(info.FileSize) * 8) / info.Container.DurationSeconds
 		generalFields = append(generalFields, Field{Name: "Overall bit rate", Value: formatBitrate(overall)})
 		info.GeneralFacts.SetSame("OverallBitRate", strconv.FormatInt(int64(overall+0.5), 10))
 	}
-	if videoAttrs.FrameRate > 0 && !titleSetParsed {
+	if videoAttrs.FrameRate > 0 {
 		generalFields = append(generalFields, Field{Name: "Frame rate", Value: formatFrameRate(videoAttrs.FrameRate)})
 		if info.Container.DurationSeconds > 0 {
 			frameCount := int64(info.Container.DurationSeconds*videoAttrs.FrameRate + 0.5)
@@ -372,182 +236,161 @@ func parseDVDVideo(path string, file io.ReadSeeker, size int64, opts AnalyzeOpti
 	}
 
 	info.General = generalFields
-	if !titleSetParsed {
-		videoDurationSeconds := durationSeconds
-		videoFrameCount := int64(0)
-		if videoAttrs.FrameRate > 0 && durationSeconds > 0 {
-			videoFrameCount = int64(durationSeconds*videoAttrs.FrameRate + 0.5)
-		}
-
-		videoFields := []Field{}
-		if videoAttrs.Version != "" {
-			videoFields = append(videoFields, Field{Name: "Format", Value: "MPEG Video"})
-			videoFields = append(videoFields, Field{Name: "Format version", Value: videoAttrs.Version})
-		} else {
-			videoFields = append(videoFields, Field{Name: "Format", Value: "MPEG Video"})
-		}
-		videoFields = append(videoFields, Field{Name: "ID", Value: "224 (0xE0)"})
-		videoFields = append(videoFields, Field{Name: "Bit rate mode", Value: "Variable"})
-		if videoDurationSeconds > 0 {
-			videoFields = append(videoFields, Field{Name: "Duration", Value: formatDVDDuration(videoDurationSeconds)})
-		}
-		if videoAttrs.Width > 0 {
-			videoFields = append(videoFields, Field{Name: "Width", Value: formatPixels(uint64(videoAttrs.Width))})
-		}
-		if videoAttrs.Height > 0 {
-			videoFields = append(videoFields, Field{Name: "Height", Value: formatPixels(uint64(videoAttrs.Height))})
-		}
-		if videoAttrs.AspectRatio != "" {
-			videoFields = append(videoFields, Field{Name: "Display aspect ratio", Value: videoAttrs.AspectRatio})
-		}
-		if videoAttrs.FrameRate > 0 {
-			videoFields = append(videoFields, Field{Name: "Frame rate", Value: formatDVDFrameRate(videoAttrs.FrameRate)})
-		}
-		if videoAttrs.Standard != "" {
-			videoFields = append(videoFields, Field{Name: "Standard", Value: videoAttrs.Standard})
-		}
-		videoFields = append(videoFields, Field{Name: "Compression mode", Value: "Lossy"})
-		if aggregateMode && isVTS && !isBUP {
-			if source := dvdTitleSetSource(base); source != "" {
-				videoFields = append(videoFields, Field{Name: "Source", Value: source})
-			}
-		}
-		videoFacts := &dvdStructuredFacts{}
-		if videoDurationSeconds > 0 {
-			videoFacts.Set(
-				"Duration",
-				strconv.FormatFloat(videoDurationSeconds*1000, 'f', -1, 64),
-				formatJSONSeconds(videoDurationSeconds),
-			)
-		}
-		if videoAttrs.Standard == "NTSC" {
-			videoFacts.SetSame("FrameRate_Num", "29970")
-			videoFacts.SetSame("FrameRate_Den", "1000")
-		} else if videoAttrs.Standard == "PAL" {
-			videoFacts.SetSame("FrameRate_Num", "25")
-			videoFacts.SetSame("FrameRate_Den", "1")
-		}
-		if videoAttrs.AspectRatio != "" && videoAttrs.Width > 0 && videoAttrs.Height > 0 {
-			if displayAspect, ok := parseRatioFloat(videoAttrs.AspectRatio); ok {
-				pixelAspect := displayAspect / (float64(videoAttrs.Width) / float64(videoAttrs.Height))
-				videoFacts.SetSame("PixelAspectRatio", formatJSONFloat(pixelAspect))
-			}
-		}
-		if videoFrameCount > 0 {
-			videoFacts.SetSame("FrameCount", strconv.FormatInt(videoFrameCount, 10))
-		}
-		videoFacts.SetSame("ID", "224")
-		videoStream := buildCanonicalDVDVideoStream(videoFields, videoFacts, videoAttrs, videoDurationSeconds)
-		streams = append(streams, videoStream)
-
-		if len(audioAttrs) > 0 {
-			for _, audio := range audioAttrs {
-				audioFields := []Field{}
-				if isVTS && audio.StreamID >= 0 {
-					id := dvdAudioPrivateID(audio, audio.StreamID)
-					audioFields = append(audioFields, Field{Name: "ID", Value: fmt.Sprintf("189 (0xBD)-%d (0x%X)", id, id)})
-				}
-				if audio.Format != "" {
-					audioFields = append(audioFields, Field{Name: "Format", Value: audio.Format})
-				}
-				if audio.FormatInfo != "" {
-					audioFields = append(audioFields, Field{Name: "Format/Info", Value: audio.FormatInfo})
-				}
-				if audio.FormatProfile != "" {
-					audioFields = append(audioFields, Field{Name: "Format profile", Value: audio.FormatProfile})
-				}
-				if durationSeconds > 0 {
-					audioFields = append(audioFields, Field{Name: "Duration", Value: formatDVDDuration(durationSeconds)})
-				}
-				if audio.Channels > 0 {
-					audioFields = append(audioFields, Field{Name: "Channel(s)", Value: formatChannels(uint64(audio.Channels))})
-				}
-				if audio.SampleRate > 0 {
-					audioFields = append(audioFields, Field{Name: "Sampling rate", Value: formatSampleRate(audio.SampleRate)})
-				} else if audio.Format == "PCM" {
-					audioFields = append(audioFields, Field{Name: "Sampling rate", Value: "0 Hz"})
-				}
-				if audio.Format != "PCM" {
-					audioFields = append(audioFields, Field{Name: "Compression mode", Value: "Lossy"})
-				}
-				suppressLanguage := aggregateMode
-				if audio.Language != "" && !suppressLanguage {
-					audioFields = append(audioFields, Field{Name: "Language", Value: audio.Language})
-				}
-				if audio.LanguageMore != "" && !suppressLanguage {
-					audioFields = append(audioFields, Field{Name: "Language, more info", Value: audio.LanguageMore})
-				}
-				if aggregateMode && isVTS && !isBUP {
-					if source := dvdTitleSetSource(base); source != "" {
-						audioFields = append(audioFields, Field{Name: "Source", Value: source})
-					}
-				}
-				audioFacts := &dvdStructuredFacts{}
-				if durationSeconds > 0 {
-					audioFacts.Set(
-						"Duration",
-						strconv.FormatFloat(durationSeconds*1000, 'f', -1, 64),
-						formatJSONSeconds(durationSeconds),
-					)
-				}
-				if durationSeconds > 0 && audio.SampleRate > 0 {
-					durationMs := int64(durationSeconds*1000 + 0.0005)
-					sr := int64(audio.SampleRate + 0.5)
-					samplingCount := (durationMs * sr) / 1000
-					audioFacts.SetSame("SamplingCount", strconv.FormatInt(samplingCount, 10))
-				}
-				if audio.LanguageCode != "" && !suppressLanguage {
-					audioFacts.SetSame("Language", audio.LanguageCode)
-				}
-				if audio.LanguageMore != "" && !suppressLanguage {
-					audioFacts.SetSame("Language_More", audio.LanguageMore)
-				}
-				if isVTS && audio.StreamID >= 0 {
-					audioFacts.SetSame("ID", fmt.Sprintf("189-%d", dvdAudioPrivateID(audio, audio.StreamID)))
-				}
-				audioStream := buildCanonicalDVDAudioStream(audioFields, audioFacts, audio, durationSeconds)
-				streams = append(streams, audioStream)
-			}
-		}
-
-		if len(subpicAttrs) > 0 {
-			for _, subpic := range subpicAttrs {
-				textFields := []Field{}
-				if isVTS && subpic.StreamID >= 0 {
-					id := 0x20 + subpic.StreamID
-					textFields = append(textFields, Field{Name: "ID", Value: fmt.Sprintf("189 (0xBD)-%d (0x%X)", id, id)})
-				}
-				textFields = append(textFields, Field{Name: "Format", Value: "RLE"})
-				textFields = append(textFields, Field{Name: "Format/Info", Value: "Run-length encoding"})
-				textFields = append(textFields, Field{Name: "Bit depth", Value: "2 bits"})
-				if subpic.Language != "" && !aggregateMode {
-					textFields = append(textFields, Field{Name: "Language", Value: subpic.Language})
-				}
-				if subpic.LanguageMore != "" && !aggregateMode {
-					textFields = append(textFields, Field{Name: "Language, more info", Value: subpic.LanguageMore})
-				}
-				textFacts := &dvdStructuredFacts{}
-				if durationSeconds > 0 {
-					textFacts.Set("Duration", strconv.FormatFloat(durationSeconds*1000, 'f', -1, 64), formatJSONSeconds(durationSeconds))
-					textFields = append(textFields, Field{Name: "Duration", Value: formatDVDDuration(durationSeconds)})
-				}
-				if subpic.LanguageCode != "" && !aggregateMode {
-					textFacts.SetSame("Language", subpic.LanguageCode)
-				}
-				if subpic.LanguageMore != "" && !aggregateMode {
-					textFacts.SetSame("Language_More", subpic.LanguageMore)
-				}
-				if isVTS && subpic.StreamID >= 0 {
-					textFacts.SetSame("ID", fmt.Sprintf("189-%d", 0x20+subpic.StreamID))
-				}
-				textStream := buildCanonicalDVDTextStream(textFields, textFacts, subpic)
-				streams = append(streams, textStream)
-			}
-		}
+	videoFrameCount := int64(0)
+	if videoAttrs.FrameRate > 0 && durationSeconds > 0 {
+		videoFrameCount = int64(durationSeconds*videoAttrs.FrameRate + 0.5)
 	}
 
-	if len(programs) == 0 && len(chapterStarts) > 0 && ifoDurationSeconds > 0 {
-		programs = []dvdProgram{{duration: ifoDurationSeconds, chapters: chapterStarts}}
+	videoFields := []Field{{Name: "Format", Value: "MPEG Video"}}
+	if videoAttrs.Version != "" {
+		videoFields = append(videoFields, Field{Name: "Format version", Value: videoAttrs.Version})
+	}
+	videoFields = append(videoFields, Field{Name: "ID", Value: "224 (0xE0)"})
+	videoFields = append(videoFields, Field{Name: "Bit rate mode", Value: "Variable"})
+	if durationSeconds > 0 {
+		videoFields = append(videoFields, Field{Name: "Duration", Value: formatDVDDuration(durationSeconds)})
+	}
+	if videoAttrs.Width > 0 {
+		videoFields = append(videoFields, Field{Name: "Width", Value: formatPixels(uint64(videoAttrs.Width))})
+	}
+	if videoAttrs.Height > 0 {
+		videoFields = append(videoFields, Field{Name: "Height", Value: formatPixels(uint64(videoAttrs.Height))})
+	}
+	if videoAttrs.AspectRatio != "" {
+		videoFields = append(videoFields, Field{Name: "Display aspect ratio", Value: videoAttrs.AspectRatio})
+	}
+	if videoAttrs.FrameRate > 0 {
+		videoFields = append(videoFields, Field{Name: "Frame rate", Value: formatDVDFrameRate(videoAttrs.FrameRate)})
+	}
+	if videoAttrs.Standard != "" {
+		videoFields = append(videoFields, Field{Name: "Standard", Value: videoAttrs.Standard})
+	}
+	videoFields = append(videoFields, Field{Name: "Compression mode", Value: "Lossy"})
+	videoFacts := &dvdStructuredFacts{}
+	if durationSeconds > 0 {
+		videoFacts.Set(
+			"Duration",
+			strconv.FormatFloat(durationSeconds*1000, 'f', -1, 64),
+			formatJSONSeconds(durationSeconds),
+		)
+	}
+	if videoAttrs.Standard == "NTSC" {
+		videoFacts.SetSame("FrameRate_Num", "29970")
+		videoFacts.SetSame("FrameRate_Den", "1000")
+	} else if videoAttrs.Standard == "PAL" {
+		videoFacts.SetSame("FrameRate_Num", "25")
+		videoFacts.SetSame("FrameRate_Den", "1")
+	}
+	if videoAttrs.AspectRatio != "" && videoAttrs.Width > 0 && videoAttrs.Height > 0 {
+		if displayAspect, ok := parseRatioFloat(videoAttrs.AspectRatio); ok {
+			pixelAspect := displayAspect / (float64(videoAttrs.Width) / float64(videoAttrs.Height))
+			videoFacts.SetSame("PixelAspectRatio", formatJSONFloat(pixelAspect))
+		}
+	}
+	if videoFrameCount > 0 {
+		videoFacts.SetSame("FrameCount", strconv.FormatInt(videoFrameCount, 10))
+	}
+	videoFacts.SetSame("ID", "224")
+	videoStream := buildCanonicalDVDVideoStream(videoFields, videoFacts, videoAttrs, durationSeconds)
+	streams = append(streams, videoStream)
+
+	for _, audio := range audioAttrs {
+		audioFields := []Field{}
+		if isVTS && audio.StreamID >= 0 {
+			id := dvdAudioPrivateID(audio, audio.StreamID)
+			audioFields = append(audioFields, Field{Name: "ID", Value: fmt.Sprintf("189 (0xBD)-%d (0x%X)", id, id)})
+		}
+		if audio.Format != "" {
+			audioFields = append(audioFields, Field{Name: "Format", Value: audio.Format})
+		}
+		if audio.FormatInfo != "" {
+			audioFields = append(audioFields, Field{Name: "Format/Info", Value: audio.FormatInfo})
+		}
+		if audio.FormatProfile != "" {
+			audioFields = append(audioFields, Field{Name: "Format profile", Value: audio.FormatProfile})
+		}
+		if durationSeconds > 0 {
+			audioFields = append(audioFields, Field{Name: "Duration", Value: formatDVDDuration(durationSeconds)})
+		}
+		if audio.Channels > 0 {
+			audioFields = append(audioFields, Field{Name: "Channel(s)", Value: formatChannels(uint64(audio.Channels))})
+		}
+		if audio.SampleRate > 0 {
+			audioFields = append(audioFields, Field{Name: "Sampling rate", Value: formatSampleRate(audio.SampleRate)})
+		} else if audio.Format == "PCM" {
+			audioFields = append(audioFields, Field{Name: "Sampling rate", Value: "0 Hz"})
+		}
+		if audio.Format != "PCM" {
+			audioFields = append(audioFields, Field{Name: "Compression mode", Value: "Lossy"})
+		}
+		if audio.Language != "" {
+			audioFields = append(audioFields, Field{Name: "Language", Value: audio.Language})
+		}
+		if audio.LanguageMore != "" {
+			audioFields = append(audioFields, Field{Name: "Language, more info", Value: audio.LanguageMore})
+		}
+		audioFacts := &dvdStructuredFacts{}
+		if durationSeconds > 0 {
+			audioFacts.Set(
+				"Duration",
+				strconv.FormatFloat(durationSeconds*1000, 'f', -1, 64),
+				formatJSONSeconds(durationSeconds),
+			)
+		}
+		if durationSeconds > 0 && audio.SampleRate > 0 {
+			durationMs := int64(durationSeconds*1000 + 0.0005)
+			sr := int64(audio.SampleRate + 0.5)
+			samplingCount := (durationMs * sr) / 1000
+			audioFacts.SetSame("SamplingCount", strconv.FormatInt(samplingCount, 10))
+		}
+		if audio.LanguageCode != "" {
+			audioFacts.SetSame("Language", audio.LanguageCode)
+		}
+		if audio.LanguageMore != "" {
+			audioFacts.SetSame("Language_More", audio.LanguageMore)
+		}
+		if isVTS && audio.StreamID >= 0 {
+			audioFacts.SetSame("ID", fmt.Sprintf("189-%d", dvdAudioPrivateID(audio, audio.StreamID)))
+		}
+		audioStream := buildCanonicalDVDAudioStream(audioFields, audioFacts, audio, durationSeconds)
+		streams = append(streams, audioStream)
+	}
+
+	for _, subpic := range subpicAttrs {
+		textFields := []Field{}
+		if isVTS && subpic.StreamID >= 0 {
+			id := 0x20 + subpic.StreamID
+			textFields = append(textFields, Field{Name: "ID", Value: fmt.Sprintf("189 (0xBD)-%d (0x%X)", id, id)})
+		}
+		textFields = append(textFields, Field{Name: "Format", Value: "RLE"})
+		textFields = append(textFields, Field{Name: "Format/Info", Value: "Run-length encoding"})
+		textFields = append(textFields, Field{Name: "Bit depth", Value: "2 bits"})
+		if subpic.Language != "" {
+			textFields = append(textFields, Field{Name: "Language", Value: subpic.Language})
+		}
+		if subpic.LanguageMore != "" {
+			textFields = append(textFields, Field{Name: "Language, more info", Value: subpic.LanguageMore})
+		}
+		textFacts := &dvdStructuredFacts{}
+		if durationSeconds > 0 {
+			textFacts.Set("Duration", strconv.FormatFloat(durationSeconds*1000, 'f', -1, 64), formatJSONSeconds(durationSeconds))
+			textFields = append(textFields, Field{Name: "Duration", Value: formatDVDDuration(durationSeconds)})
+		}
+		if subpic.LanguageCode != "" {
+			textFacts.SetSame("Language", subpic.LanguageCode)
+		}
+		if subpic.LanguageMore != "" {
+			textFacts.SetSame("Language_More", subpic.LanguageMore)
+		}
+		if isVTS && subpic.StreamID >= 0 {
+			textFacts.SetSame("ID", fmt.Sprintf("189-%d", 0x20+subpic.StreamID))
+		}
+		textStream := buildCanonicalDVDTextStream(textFields, textFacts, subpic)
+		streams = append(streams, textStream)
+	}
+
+	if len(programs) == 0 && len(chapterStarts) > 0 && durationSeconds > 0 {
+		programs = []dvdProgram{{duration: durationSeconds, chapters: chapterStarts}}
 	}
 	programDelays := dvdProgramStartDelays(data, pgcTableOffset, programs)
 	for programIndex, program := range programs {
@@ -580,11 +423,6 @@ func parseDVDVideo(path string, file io.ReadSeeker, size int64, opts AnalyzeOpti
 			menuFields = append(menuFields, Field{Name: "List (Subtitles Letterbox)", Value: dvdZeroList(len(subpicAttrs))})
 			menuFields = append(menuFields, Field{Name: "List (Subtitles Pan&Scan)", Value: dvdZeroList(len(subpicAttrs))})
 		}
-		if aggregateMode && isVTS && !isBUP {
-			if source := dvdTitleSetSource(base); source != "" {
-				menuFields = append(menuFields, Field{Name: "Source", Value: source})
-			}
-		}
 		menuFacts := &dvdStructuredFacts{}
 		menuFacts.Set(
 			"Duration",
@@ -604,49 +442,13 @@ func parseDVDVideo(path string, file io.ReadSeeker, size int64, opts AnalyzeOpti
 		menuStreams = append(menuStreams, menu)
 	}
 
-	for i := range menuStreams {
-		if aggregateMode {
-			if source := dvdTitleSetSource(base); source != "" {
-				appendCanonicalSeedObjectMembers(&menuStreams[i], "extra", []structuredMember{{
-					Key:   "Source",
-					Value: structuredNode{Kind: structuredString, Text: source},
-				}})
-			}
-		}
-		streams = append(streams, menuStreams[i])
-	}
+	streams = append(streams, menuStreams...)
 
 	for index := range streams {
 		publishCanonicalProjectionPolicy(&streams[index])
 	}
 	info.Streams = streams
 	return info, true
-}
-
-// dvdTitleSetBitRateDuration retains the bounded VOB timing used by
-// MediaInfoLib's payload bitrate derivation. The independently parsed IFO
-// duration remains the reported program duration; it does not replace the
-// sampled payload clock used for bitrate and stream-size math.
-func dvdTitleSetBitRateDuration(fileSize int64, ifoTimelineDuration, ifoDuration, payloadDuration float64) (float64, bool) {
-	if payloadDuration > 0 {
-		clockMismatch := fileSize > 0 && float64(fileSize)*8/payloadDuration > dvdMaxMuxBitRate
-		return payloadDuration, clockMismatch
-	}
-	if ifoTimelineDuration > 0 {
-		return ifoTimelineDuration, false
-	}
-	return ifoDuration, false
-}
-
-func dvdHasConstantVideoBitRate(streams []Stream) bool {
-	for i := range streams {
-		if streams[i].Kind != StreamVideo {
-			continue
-		}
-		mode, _ := canonicalSeedValue(streams[i], "BitRate_Mode")
-		return mode == "CBR" || mode == "Constant"
-	}
-	return false
 }
 
 // dvdStructuredFacts stages IFO facts without exposing JSON-shaped state to
@@ -686,9 +488,6 @@ func buildCanonicalDVDVideoStream(fields []Field, facts *dvdStructuredFacts, att
 		builder.Fill("Standard", attrs.Standard, "Standard", attrs.Standard)
 	}
 	builder.Fill("Compression_Mode", "Lossy", "Compression mode", "Lossy")
-	if source := findField(fields, "Source"); source != "" {
-		builder.Text("Source", source)
-	}
 	facts.Apply(builder)
 	return builder.Snapshot(canonicalStreamPolicy{SkipStreamOrder: true, SkipComputed: true, DVDOrder: true})
 }
@@ -728,9 +527,6 @@ func buildCanonicalDVDAudioStream(fields []Field, facts *dvdStructuredFacts, att
 	}
 	if attrs.LanguageMore != "" {
 		builder.Fill("Language_More", attrs.LanguageMore, "Language, more info", attrs.LanguageMore)
-	}
-	if source := findField(fields, "Source"); source != "" {
-		builder.Text("Source", source)
 	}
 	facts.Apply(builder)
 	return builder.Snapshot(canonicalStreamPolicy{SkipStreamOrder: true, SkipComputed: true, DVDOrder: true})
@@ -815,7 +611,6 @@ func parseDVDVideoAttrs(data []byte, offset int) dvdVideoAttrs {
 	resCode := (b1 >> 3) & 0x03
 
 	attrs := dvdVideoAttrs{}
-	attrs.PermittedDisplayFormats = b0 & 0x03
 	switch coding {
 	case 1:
 		attrs.Version = "Version 2"
@@ -1158,16 +953,8 @@ func applyDVDPGCStreamControls(data []byte, pttOffset, pgcOffset int, video dvdV
 	subPan := make([]int, 0, len(subpics))
 	for i := range subpics {
 		subpics[i].StreamID = -1
-		subpics[i].AlternateStreamIDs = nil
 	}
 	listed := make([]bool, len(subpics))
-	addMapping := func(subpic *dvdSubpicAttrs, id int) {
-		if subpic.StreamID < 0 {
-			subpic.StreamID = id
-		} else if subpic.StreamID != id && !slices.Contains(subpic.AlternateStreamIDs, id) {
-			subpic.AlternateStreamIDs = append(subpic.AlternateStreamIDs, id)
-		}
-	}
 	for _, base := range bases {
 		for i := range min(len(subpics), 32) {
 			off := base + 0x1C + i*4
@@ -1186,16 +973,11 @@ func applyDVDPGCStreamControls(data []byte, pttOffset, pgcOffset int, video dvdV
 				subPan = append(subPan, idPan)
 				listed[i] = true
 			}
-			if video.AspectRatio == "16:9" {
-				addMapping(&subpics[i], idWide)
-				if video.PermittedDisplayFormats == 0 || video.PermittedDisplayFormats == 2 {
-					addMapping(&subpics[i], idLetter)
+			if subpics[i].StreamID < 0 {
+				subpics[i].StreamID = id43
+				if video.AspectRatio == "16:9" {
+					subpics[i].StreamID = idWide
 				}
-				if video.PermittedDisplayFormats == 0 || video.PermittedDisplayFormats == 1 {
-					addMapping(&subpics[i], idPan)
-				}
-			} else {
-				addMapping(&subpics[i], id43)
 			}
 		}
 	}
@@ -1206,100 +988,6 @@ func applyDVDPGCStreamControls(data []byte, pttOffset, pgcOffset int, video dvdV
 		subLetter:  dvdJoinIndexes(subLetter),
 		subPanScan: dvdJoinIndexes(subPan),
 	}, true
-}
-
-// applyDVDPGCStreamControlsAt applies mappings from one PGC for language
-// reconciliation across retained title programs.
-func applyDVDPGCStreamControlsAt(data []byte, base int, video dvdVideoAttrs, audio []dvdAudioAttrs, subpics []dvdSubpicAttrs) ([]dvdAudioAttrs, []dvdSubpicAttrs, dvdMenuLists, bool) {
-	if base < 0 || base+0x9C > len(data) {
-		return audio, subpics, dvdMenuListsForAspect(video.AspectRatio, len(audio), len(subpics)), false
-	}
-	audioValues := make([]int, 0, len(audio))
-	for i := range audio {
-		audio[i].StreamID = -1
-		if i >= 8 {
-			continue
-		}
-		control := binary.BigEndian.Uint16(data[base+0x0C+i*2 : base+0x0E+i*2])
-		if control&0x8000 == 0 {
-			continue
-		}
-		streamID := int((control >> 8) & 0x07)
-		audio[i].StreamID = streamID
-		audioValues = append(audioValues, streamID)
-	}
-	sub43 := make([]int, 0, len(subpics))
-	subWide := make([]int, 0, len(subpics))
-	subLetter := make([]int, 0, len(subpics))
-	subPan := make([]int, 0, len(subpics))
-	for i := range subpics {
-		subpics[i].StreamID = -1
-		subpics[i].AlternateStreamIDs = nil
-		if i >= 32 {
-			continue
-		}
-		off := base + 0x1C + i*4
-		control := binary.BigEndian.Uint32(data[off : off+4])
-		if control&0x80000000 == 0 {
-			continue
-		}
-		id43 := int((control >> 24) & 0x7F)
-		idWide := int((control >> 16) & 0x7F)
-		idLetter := int((control >> 8) & 0x7F)
-		idPan := int(control & 0x7F)
-		sub43 = append(sub43, id43)
-		subWide = append(subWide, idWide)
-		subLetter = append(subLetter, idLetter)
-		subPan = append(subPan, idPan)
-		if video.AspectRatio == "16:9" {
-			subpics[i].StreamID = idWide
-			if (video.PermittedDisplayFormats == 0 || video.PermittedDisplayFormats == 2) && idLetter != idWide {
-				subpics[i].AlternateStreamIDs = append(subpics[i].AlternateStreamIDs, idLetter)
-			}
-			if (video.PermittedDisplayFormats == 0 || video.PermittedDisplayFormats == 1) && idPan != idWide && !slices.Contains(subpics[i].AlternateStreamIDs, idPan) {
-				subpics[i].AlternateStreamIDs = append(subpics[i].AlternateStreamIDs, idPan)
-			}
-		} else {
-			subpics[i].StreamID = id43
-		}
-	}
-	return audio, subpics, dvdMenuLists{
-		audio:      dvdJoinIndexes(audioValues),
-		sub43:      dvdJoinIndexes(sub43),
-		subWide:    dvdJoinIndexes(subWide),
-		subLetter:  dvdJoinIndexes(subLetter),
-		subPanScan: dvdJoinIndexes(subPan),
-	}, true
-}
-
-// dvdProgramLanguageMappings collects enabled stream mappings from every
-// retained title PGC. Callers reconcile duplicate payload identities.
-func dvdProgramLanguageMappings(data []byte, programs []dvdProgram, video dvdVideoAttrs, audio []dvdAudioAttrs, subpics []dvdSubpicAttrs) ([]dvdAudioAttrs, []dvdSubpicAttrs, bool) {
-	audio = audio[:min(len(audio), 8)]
-	subpics = subpics[:min(len(subpics), 32)]
-	mappedAudio := make([]dvdAudioAttrs, 0, len(audio)*len(programs))
-	mappedSubpics := make([]dvdSubpicAttrs, 0, len(subpics)*len(programs))
-	found := false
-	for _, program := range programs {
-		programAudio := slices.Clone(audio)
-		programSubpics := slices.Clone(subpics)
-		programAudio, programSubpics, _, ok := applyDVDPGCStreamControlsAt(data, program.pgcBase, video, programAudio, programSubpics)
-		if !ok {
-			continue
-		}
-		found = true
-		for _, attrs := range programAudio {
-			if attrs.StreamID >= 0 {
-				mappedAudio = append(mappedAudio, attrs)
-			}
-		}
-		for _, attrs := range programSubpics {
-			if attrs.StreamID >= 0 {
-				mappedSubpics = append(mappedSubpics, attrs)
-			}
-		}
-	}
-	return mappedAudio, mappedSubpics, found
 }
 
 // dvdJoinIndexes formats explicit stream indexes in DVD menu-list form.
@@ -1533,16 +1221,6 @@ func dvdPGCTimeline(data []byte, pgcOffset int) []dvdPGCTimelineEntry {
 		timeline = append(timeline, titles[sector])
 	}
 	return timeline
-}
-
-// dvdPGCTimelineDuration returns the complete unique PGC timeline in seconds.
-// It is the duration counterpart to aggregate title-VOB size accounting.
-func dvdPGCTimelineDuration(data []byte, pgcOffset int) float64 {
-	var total int64
-	for _, title := range dvdPGCTimeline(data, pgcOffset) {
-		total += title.duration
-	}
-	return float64(total) / 90000
 }
 
 // dvdProgramStartDelays derives program delays in seconds from the complete
@@ -1780,19 +1458,6 @@ func dvdMenuExtraNode(chapterStarts []int64, lists dvdMenuLists) structuredNode 
 	return structuredObjectFromKVs(fields)
 }
 
-// dvdTitleSetSource derives the first title VOB name from a title-set IFO
-// basename.
-func dvdTitleSetSource(base string) string {
-	upper := strings.ToUpper(base)
-	if strings.HasPrefix(upper, "VTS_") && strings.HasSuffix(upper, ".IFO") {
-		parts := strings.SplitN(upper, "_", 3)
-		if len(parts) >= 2 {
-			return fmt.Sprintf("VTS_%s_1.VOB", parts[1])
-		}
-	}
-	return ""
-}
-
 // isDVDVideoTSPath reports whether path is directly inside a VIDEO_TS directory.
 func isDVDVideoTSPath(path string) bool {
 	return strings.EqualFold(filepath.Base(filepath.Dir(filepath.Clean(path))), "VIDEO_TS")
@@ -1825,56 +1490,6 @@ func isDVDMenuVOBPath(path string) bool {
 	return len(name) == len("VTS_00_0.VOB") && strings.HasPrefix(name, "VTS_") &&
 		name[4] >= '0' && name[4] <= '9' && name[5] >= '0' && name[5] <= '9' &&
 		name[6:] == "_0.VOB"
-}
-
-// dvdTitleSetVOBs returns the sorted title VOB paths associated with an IFO and
-// their combined size, excluding the title-set menu VOB.
-func dvdTitleSetVOBs(path string) ([]string, int64) {
-	dir := filepath.Dir(path)
-	base := strings.ToUpper(filepath.Base(path))
-	if !strings.HasPrefix(base, "VTS_") {
-		return nil, 0
-	}
-	parts := strings.SplitN(base, "_", 3)
-	if len(parts) < 2 {
-		return nil, 0
-	}
-	prefix := fmt.Sprintf("VTS_%s_", parts[1])
-	root, err := os.OpenRoot(dir)
-	if err != nil {
-		return nil, 0
-	}
-	defer root.Close()
-	entries, err := fs.ReadDir(root.FS(), ".")
-	if err != nil {
-		return nil, 0
-	}
-	var total int64
-	paths := []string{}
-	for _, entry := range entries {
-		name := entry.Name()
-		upper := strings.ToUpper(name)
-		if !isDVDTitleMemberName(upper, prefix) {
-			continue
-		}
-		info, err := root.Stat(name)
-		if err != nil {
-			continue
-		}
-		paths = append(paths, filepath.Join(dir, name))
-		total += info.Size()
-	}
-	sort.Slice(paths, func(i, j int) bool {
-		return dvdVOBIndex(paths[i]) < dvdVOBIndex(paths[j])
-	})
-	return paths, total
-}
-
-// isDVDTitleMemberName reports whether name is an exact numbered title VOB for
-// prefix. The menu member with index zero is excluded.
-func isDVDTitleMemberName(name, prefix string) bool {
-	return len(name) == len(prefix)+len("1.VOB") && strings.HasPrefix(name, prefix) &&
-		name[len(prefix)] >= '1' && name[len(prefix)] <= '9' && strings.HasSuffix(name, ".VOB")
 }
 
 // dvdMatchingBackupData reads only the exact sibling backup selected by DVD
@@ -1988,215 +1603,11 @@ func mergeDVDSubpicAttrs(primary, backup []dvdSubpicAttrs) []dvdSubpicAttrs {
 	return primary
 }
 
-// mergeDVDTitleSetStreams deduplicates title-set streams while appending their
-// common VOB source to each retained canonical extra object.
-func mergeDVDTitleSetStreams(streams []Stream, source string) []Stream {
-	if len(streams) == 0 {
-		return streams
-	}
-	hasAudio := false
-	hasCaption := false
-	for _, stream := range streams {
-		if stream.Kind == StreamAudio {
-			hasAudio = true
-		}
-		if stream.Kind == StreamText {
-			format, _ := canonicalSeedValue(stream, "Format")
-			if format == "EIA-608" {
-				hasCaption = true
-			}
-		}
-	}
-	out := []Stream{}
-	for i := range streams {
-		stream := streams[i]
-		if stream.Kind == StreamMenu {
-			continue
-		}
-		if stream.Kind == StreamAudio {
-			format, _ := canonicalSeedValue(stream, "Format")
-			if format == "MPEG Audio" {
-				omitCanonicalStreamOrder(&stream)
-			} else {
-				stream.canonicalPolicy.SkipStreamOrder = false
-				replaceCanonicalSeedFill(&stream, "StreamOrder", "0", "", "")
-			}
-		}
-		if stream.Kind == StreamVideo && hasAudio {
-			omitCanonicalStreamOrder(&stream)
-		}
-		if stream.Kind == StreamText {
-			format, _ := canonicalSeedValue(stream, "Format")
-			if format == "RLE" {
-				stream.canonicalPolicy.SkipStreamOrder = false
-				replaceCanonicalSeedFill(&stream, "StreamOrder", "0", "", "")
-			} else {
-				omitCanonicalStreamOrder(&stream)
-			}
-		}
-		if source != "" {
-			replaceCanonicalSeedText(&stream, "Source", source)
-			appendCanonicalSeedObjectMembers(&stream, "extra", []structuredMember{{
-				Key:   "Source",
-				Value: structuredNode{Kind: structuredString, Text: source},
-			}})
-
-		}
-		out = append(out, stream)
-	}
-	sortDVDPayloadStreams(out)
-	cleanupDVDTextStreams(out, false, hasCaption)
-	normalizeDVDVideoFields(out)
-	normalizeDVDPayloadDelay(out)
-	suppressDVDShortVideoScan(out)
-	expandDVDPrimaryAudioDuration(out, true)
-	clearDVDShortAudioTiming(out)
-	extendDVDShortAC3Frame(out)
-	alignDVDHeaderAudioStreams(out)
-	normalizeDVDPCMVideoClock(out)
-	markDVDProjectionOrder(out)
-	return out
-}
-
-// markDVDProjectionOrder selects DVD-specific renderer ordering and moves the
-// Source extra member to the end of each stream's ordered extra object.
+// markDVDProjectionOrder selects the DVD field order for each stream.
 func markDVDProjectionOrder(streams []Stream) {
 	for i := range streams {
 		streams[i].canonicalPolicy.DVDOrder = true
-		node := canonicalSeedStructuredNode(&streams[i], "extra")
-		if node == nil || node.Kind != structuredObject {
-			continue
-		}
-		var source *structuredMember
-		for _, member := range node.Object {
-			if member.Key == "Source" {
-				memberCopy := member
-				source = &memberCopy
-				break
-			}
-		}
-		if source != nil {
-			removeCanonicalSeedObjectMember(&streams[i], "extra", "Source")
-			appendCanonicalSeedObjectMembers(&streams[i], "extra", []structuredMember{*source})
-		}
 	}
-}
-
-// deriveDVDPSVideoBitRateAndSize derives the sole video stream's bitrate and
-// size from aggregate file size, authoritative logical duration, and known
-// audio bitrates.
-func deriveDVDPSVideoBitRateAndSize(streams []Stream, fileSize int64, duration float64, correctedDuration bool) {
-	if fileSize <= 0 || duration <= 0 {
-		return
-	}
-	videoIndex := -1
-	audioBitRate := 0.0
-	for i := range streams {
-		switch streams[i].Kind {
-		case StreamVideo:
-			if videoIndex >= 0 {
-				return
-			}
-			videoIndex = i
-		case StreamAudio:
-			value, ok := canonicalSeedValue(streams[i], "BitRate")
-			if !ok {
-				if _, discovered := canonicalSeedValue(streams[i], "FirstPacketOrder"); discovered {
-					return
-				}
-				continue
-			}
-			parsed, err := strconv.ParseFloat(value, 64)
-			if err != nil || parsed <= 0 {
-				return
-			}
-			audioBitRate += parsed
-		case StreamText:
-		case StreamGeneral, StreamImage, StreamMenu:
-		}
-	}
-	if videoIndex < 0 {
-		return
-	}
-	overall := math.Round(float64(fileSize) * 8 / duration)
-	bitRate := overall*0.99 - audioBitRate/0.99
-	bitRate *= 0.99
-	if bitRate < 10000 {
-		return
-	}
-	videoDuration := dvdCanonicalNumber(streams[videoIndex], "Duration") / 1000
-	if frameCount := dvdCanonicalNumber(streams[videoIndex], "FrameCount"); frameCount > 0 {
-		if frameRate := dvdCanonicalNumber(streams[videoIndex], "FrameRate"); frameRate > 0 {
-			videoDuration = frameCount / frameRate
-		}
-	}
-	if videoDuration <= 0 {
-		return
-	}
-	streamSize := int64(math.Round(bitRate / 8 * videoDuration))
-	mode, _ := canonicalSeedValue(streams[videoIndex], "BitRate_Mode")
-	headerRate := dvdCanonicalNumber(streams[videoIndex], "BitRate")
-	correctedConstantClock := correctedDuration && (mode == "CBR" || mode == "Constant") && headerRate > 0
-	if correctedConstantClock {
-		if headerRateValue, ok := canonicalSeedValue(streams[videoIndex], "BitRate"); ok {
-			replaceCanonicalSeedFill(&streams[videoIndex], "BitRate_Maximum", headerRateValue, "Maximum bit rate", formatBitrate(headerRate))
-		}
-		if value, _ := canonicalSeedValue(streams[videoIndex], "colour_primaries"); value == "BT.470 BG" {
-			replaceCanonicalSeedFill(&streams[videoIndex], "colour_primaries", "BT.601 PAL", "", "")
-		}
-		if value, _ := canonicalSeedValue(streams[videoIndex], "transfer_characteristics"); value == "Gamma 2.8" {
-			replaceCanonicalSeedFill(&streams[videoIndex], "transfer_characteristics", "BT.470 System B/G", "", "")
-		}
-		if value, _ := canonicalSeedValue(streams[videoIndex], "matrix_coefficients"); value == "BT.470 BG" {
-			replaceCanonicalSeedFill(&streams[videoIndex], "matrix_coefficients", "BT.470 System B/G", "", "")
-		}
-		if streams[videoIndex].dvdMPEG2IntraDCFirst > 0 {
-			replaceCanonicalSeedObjectValues(&streams[videoIndex], "extra", map[string]string{
-				"intra_dc_precision": strconv.Itoa(streams[videoIndex].dvdMPEG2IntraDCFirst),
-			})
-		}
-	}
-	if mode != "CBR" && mode != "Constant" || correctedConstantClock {
-		replaceCanonicalSeedFill(&streams[videoIndex], "BitRate", strconv.FormatInt(int64(math.Round(bitRate)), 10), "Bit rate", formatBitrate(bitRate))
-	}
-	replaceCanonicalSeedFill(&streams[videoIndex], "StreamSize", strconv.FormatInt(streamSize, 10), "Stream size", formatStreamSize(streamSize, fileSize))
-}
-
-// normalizeDVDConstantVideoClock aligns a constant-bitrate video's frame count
-// to a compatible IFO duration. It reports whether the duration was accepted.
-func normalizeDVDConstantVideoClock(streams []Stream, duration float64) bool {
-	if duration <= 0 {
-		return false
-	}
-	for i := range streams {
-		if streams[i].Kind != StreamVideo {
-			continue
-		}
-		mode, _ := canonicalSeedValue(streams[i], "BitRate_Mode")
-		if mode != "CBR" && mode != "Constant" {
-			return false
-		}
-		payloadDuration := dvdCanonicalNumber(streams[i], "Duration") / 1000
-		if payloadDuration <= 0 || math.Abs(payloadDuration-duration) > max(1, duration*0.01) {
-			return false
-		}
-		frameRate := dvdCanonicalNumber(streams[i], "FrameRate")
-		if frameRate > 0 {
-			frameCount := int64(math.Round(duration * frameRate))
-			if existing := int64(dvdCanonicalNumber(streams[i], "FrameCount")); existing > 0 && existing != frameCount {
-				difference := existing - frameCount
-				if difference < 0 {
-					difference = -difference
-				}
-				if difference <= 1 {
-					return false
-				}
-			}
-			replaceCanonicalSeedFill(&streams[i], "FrameCount", strconv.FormatInt(frameCount, 10), "", "")
-		}
-		return true
-	}
-	return false
 }
 
 // sortDVDPayloadStreams orders DVD payload streams by kind, then by the
@@ -2265,11 +1676,11 @@ func normalizeDVDVOBStreams(streams []Stream) {
 		}
 	}
 	sortDVDPayloadStreams(streams)
-	cleanupDVDTextStreams(streams, true, hasCaption)
+	cleanupDVDTextStreams(streams, hasCaption)
 	normalizeDVDVideoFields(streams)
 	normalizeDVDPayloadDelay(streams)
 	suppressDVDShortVideoScan(streams)
-	expandDVDPrimaryAudioDuration(streams, false)
+	expandDVDPrimaryAudioDuration(streams)
 	clearDVDShortAudioTiming(streams)
 	extendDVDShortAC3Frame(streams)
 	normalizeDVDPCMVideoClock(streams)
@@ -2315,8 +1726,8 @@ func normalizeDVDMenuVOBStreams(streams []Stream) {
 }
 
 // cleanupDVDTextStreams removes DVD subtitle and caption timing fields that
-// MediaInfo omits for standalone, duplicate, or mixed-caption projections.
-func cleanupDVDTextStreams(streams []Stream, standalone, hasCaption bool) {
+// MediaInfo omits for a VOB, and for duplicate or mixed-caption projections.
+func cleanupDVDTextStreams(streams []Stream, hasCaption bool) {
 	seenRLE := false
 	firstRLEDelay := 0.0
 	firstRLEVideoDelay := 0.0
@@ -2328,9 +1739,7 @@ func cleanupDVDTextStreams(streams []Stream, standalone, hasCaption bool) {
 		format, _ := canonicalSeedValue(streams[i], "Format")
 		switch format {
 		case "RLE":
-			if standalone {
-				clearCanonicalSeedField(&streams[i], "Duration", "Duration")
-			}
+			clearCanonicalSeedField(&streams[i], "Duration", "Duration")
 			delay, hasDelay := canonicalSeedValue(streams[i], "Delay")
 			videoDelay, hasVideoDelay := canonicalSeedValue(streams[i], "Video_Delay")
 			parsedDelay, delayErr := strconv.ParseFloat(delay, 64)
@@ -2403,52 +1812,6 @@ func extendDVDShortAC3Frame(streams []Stream) {
 			}
 			replaceCanonicalSeedFill(&streams[i], name, strconv.FormatInt(parsed, 10), "", "")
 		}
-	}
-}
-
-// alignDVDHeaderAudioStreams normalizes one-frame MPEG-2 headers and extends
-// shorter audio sampling counts to the longest header-level audio stream.
-func alignDVDHeaderAudioStreams(streams []Stream) {
-	headerVideo := false
-	maxSamplingCount := int64(0)
-	for i := range streams {
-		if streams[i].Kind == StreamVideo && dvdCanonicalNumber(streams[i], "FrameCount") == 1 {
-			headerVideo = true
-			replaceCanonicalSeedFill(&streams[i], "ScanType", "Interlaced", "Scan type", "Interlaced")
-			replaceCanonicalSeedFill(&streams[i], "ScanOrder", "TFF", "Scan order", "Top Field First")
-			replaceCanonicalSeedFill(&streams[i], "Gop_OpenClosed", "Closed", "GOP, Open/Closed", "Closed")
-			clearCanonicalSeedField(&streams[i], "Gop_OpenClosed_FirstFrame", "GOP, Open/Closed of first frame")
-			if streams[i].dvdMPEG2MaxBitRate > 0 {
-				replaceCanonicalSeedFill(&streams[i], "BitRate_Maximum", strconv.FormatInt(streams[i].dvdMPEG2MaxBitRate, 10), "Maximum bit rate", formatBitrate(float64(streams[i].dvdMPEG2MaxBitRate)))
-			}
-		}
-		if streams[i].Kind == StreamAudio {
-			maxSamplingCount = max(maxSamplingCount, int64(dvdCanonicalNumber(streams[i], "SamplingCount")))
-		}
-	}
-	if !headerVideo || maxSamplingCount <= 0 {
-		return
-	}
-	for i := range streams {
-		if streams[i].Kind != StreamAudio {
-			continue
-		}
-		count := int64(dvdCanonicalNumber(streams[i], "SamplingCount"))
-		if count <= 0 || count >= maxSamplingCount {
-			continue
-		}
-		replaceCanonicalSeedFill(&streams[i], "SamplingCount", strconv.FormatInt(maxSamplingCount, 10), "", "")
-		clearCanonicalSeedField(&streams[i], "FrameCount", "")
-		samplingRate := dvdCanonicalNumber(streams[i], "SamplingRate")
-		bitRate := dvdCanonicalNumber(streams[i], "BitRate")
-		if samplingRate > 0 && bitRate > 0 {
-			size := int64(math.Round(float64(maxSamplingCount) / samplingRate * bitRate / 8))
-			replaceCanonicalSeedFill(&streams[i], "StreamSize", strconv.FormatInt(size, 10), "Stream size", formatStreamSize(size, 0))
-		}
-		insertCanonicalSeedObjectMembersBefore(&streams[i], "extra", "Source", []structuredMember{
-			{Key: "SamplingCount_Source", Value: structuredNode{Kind: structuredString, Text: "General_Duration"}},
-			{Key: "Duration_Source", Value: structuredNode{Kind: structuredString, Text: "General_Duration"}},
-		})
 	}
 }
 
@@ -2716,7 +2079,7 @@ func clearDVDPayloadTextTiming(stream *Stream) {
 
 // expandDVDPrimaryAudioDuration extends the best-observed audio stream to a
 // much longer video duration and recomputes dependent sampling and size facts.
-func expandDVDPrimaryAudioDuration(streams []Stream, addSources bool) {
+func expandDVDPrimaryAudioDuration(streams []Stream) {
 	videoDuration := 0.0
 	for _, stream := range streams {
 		if stream.Kind != StreamVideo {
@@ -2767,12 +2130,6 @@ func expandDVDPrimaryAudioDuration(streams []Stream, addSources bool) {
 		size := int64(math.Round(float64(bitRate) * videoDurationSeconds / 8))
 		replaceCanonicalSeedFill(&streams[candidate], "StreamSize", strconv.FormatInt(size, 10), "Stream size", formatStreamSize(size, 0))
 	}
-	if addSources {
-		appendCanonicalSeedObjectMembers(&streams[candidate], "extra", []structuredMember{
-			{Key: "SamplingCount_Source", Value: structuredNode{Kind: structuredString, Text: "General_Duration"}},
-			{Key: "Duration_Source", Value: structuredNode{Kind: structuredString, Text: "General_Duration"}},
-		})
-	}
 }
 
 // dvdCanonicalNumber parses a stream's canonical numeric value. Composite DVD
@@ -2786,347 +2143,4 @@ func dvdCanonicalNumber(stream Stream, name fieldName) float64 {
 	}
 	parsed, _ := strconv.ParseFloat(value, 64)
 	return parsed
-}
-
-// overlayDVDDeclaredLanguages fills payload audio and subtitle language facts
-// by exact DVD PES/substream identity, never by positional stream order.
-func overlayDVDDeclaredLanguages(streams []Stream, audio []dvdAudioAttrs, subpics []dvdSubpicAttrs) {
-	for i := range streams {
-		id, ok := canonicalSeedValue(streams[i], "ID")
-		if !ok {
-			continue
-		}
-		switch streams[i].Kind {
-		case StreamAudio:
-			index := dvdDeclaredAudioIndex(id, audio)
-			if index >= 0 && index < len(audio) && audio[index].LanguageCode != "" {
-				replaceCanonicalSeedFill(&streams[i], "Language", audio[index].LanguageCode, "Language", audio[index].Language)
-				if audio[index].LanguageMore != "" {
-					replaceCanonicalSeedFill(&streams[i], "Language_More", audio[index].LanguageMore, "Language, more info", audio[index].LanguageMore)
-				}
-			}
-		case StreamText:
-			subID, ok := dvdPrivateSubstreamID(id)
-			if !ok {
-				continue
-			}
-			streamID := subID - 0x20
-			index := -1
-			for candidate := range subpics {
-				if subpics[candidate].StreamID != streamID && !slices.Contains(subpics[candidate].AlternateStreamIDs, streamID) {
-					continue
-				}
-				if index >= 0 && (subpics[index].LanguageCode != subpics[candidate].LanguageCode || subpics[index].LanguageMore != subpics[candidate].LanguageMore) {
-					index = -1
-					break
-				}
-				index = candidate
-			}
-			if index >= 0 && subpics[index].LanguageCode != "" {
-				replaceCanonicalSeedFill(&streams[i], "Language", subpics[index].LanguageCode, "Language", subpics[index].Language)
-				if subpics[index].LanguageMore != "" {
-					replaceCanonicalSeedFill(&streams[i], "Language_More", subpics[index].LanguageMore, "Language, more info", subpics[index].LanguageMore)
-				}
-			}
-		case StreamGeneral, StreamVideo, StreamImage, StreamMenu:
-		}
-	}
-}
-
-// dvdDeclaredAudioIndex returns a declared audio entry matching a payload
-// stream ID, or -1 when no exact or consistent identity matches.
-func dvdDeclaredAudioIndex(id string, audio []dvdAudioAttrs) int {
-	pesID, subID, hasSubID, ok := dvdPayloadStreamIdentity(id)
-	if !ok {
-		return -1
-	}
-	match := -1
-	for index, attrs := range audio {
-		if attrs.StreamID < 0 {
-			continue
-		}
-		wantPESID, wantSubID, wantSubIDPresent := dvdAudioPayloadIdentity(attrs)
-		if pesID == wantPESID && hasSubID == wantSubIDPresent && (!hasSubID || subID == wantSubID) {
-			if match >= 0 && (audio[match].LanguageCode != attrs.LanguageCode || audio[match].LanguageMore != attrs.LanguageMore) {
-				return -1
-			}
-			match = index
-		}
-	}
-	return match
-}
-
-// dvdAudioPayloadIdentity maps declared DVD audio attributes to their PES and,
-// when applicable, private-stream substream identity.
-func dvdAudioPayloadIdentity(attrs dvdAudioAttrs) (pesID, subID int, hasSubID bool) {
-	switch attrs.Format {
-	case "MPEG Audio":
-		return 0xC0 + attrs.StreamID, 0, false
-	case "AC-3":
-		return 0xBD, 0x80 + attrs.StreamID, true
-	case "DTS":
-		return 0xBD, 0x88 + attrs.StreamID, true
-	case "PCM":
-		return 0xBD, 0xA0 + attrs.StreamID, true
-	default:
-		return -1, -1, false
-	}
-}
-
-// dvdPayloadStreamIdentity parses a canonical DVD stream ID into its PES and
-// optional private-stream substream identity.
-func dvdPayloadStreamIdentity(id string) (pesID, subID int, hasSubID, ok bool) {
-	parts := strings.SplitN(id, "-", 2)
-	parse := func(part string) (int, bool) {
-		fields := strings.Fields(part)
-		if len(fields) == 0 {
-			return 0, false
-		}
-		value, err := strconv.Atoi(fields[0])
-		return value, err == nil
-	}
-	pesID, ok = parse(parts[0])
-	if !ok || len(parts) == 1 {
-		return pesID, 0, false, ok
-	}
-	subID, ok = parse(parts[1])
-	return pesID, subID, true, ok
-}
-
-// mergeDVDDeclaredStreams retains payload streams while filling declared DVD
-// identities that a bounded VOB scan did not encounter. Existing VOB facts
-// always win; disabled PGC subpictures are ignored, and EIA-608 captions do
-// not satisfy RLE declarations.
-func mergeDVDDeclaredStreams(streams []Stream, audio []dvdAudioAttrs, subpics []dvdSubpicAttrs, duration float64, source string) []Stream {
-	used := make([]bool, len(streams))
-	result := make([]Stream, 0, max(len(streams), 1+len(audio)+len(subpics)))
-	for i := range streams {
-		if streams[i].Kind == StreamVideo {
-			result = append(result, streams[i])
-			used[i] = true
-		}
-	}
-	audioStart := len(result)
-	matchedAudio := make([]bool, len(audio))
-	for i := range streams {
-		if !used[i] && streams[i].Kind == StreamAudio {
-			result = append(result, streams[i])
-			used[i] = true
-			if id, ok := canonicalSeedValue(streams[i], "ID"); ok {
-				if index := dvdDeclaredAudioIndex(id, audio); index >= 0 {
-					matchedAudio[index] = true
-				}
-			}
-		}
-	}
-	for index := range audio {
-		if !matchedAudio[index] {
-			result = append(result, buildDVDDeclaredAudioStream(audio[index], duration, source))
-		}
-	}
-	sortDVDPayloadStreams(result[audioStart:])
-	textStart := len(result)
-	payloadSubpictures := make(map[int]struct{}, len(subpics))
-	for i := range streams {
-		if used[i] || streams[i].Kind != StreamText {
-			continue
-		}
-		result = append(result, streams[i])
-		used[i] = true
-		id, ok := canonicalSeedValue(streams[i], "ID")
-		if !ok {
-			continue
-		}
-		subID, ok := dvdPrivateSubstreamID(id)
-		if ok && subID >= 0x20 && subID <= 0x3F {
-			payloadSubpictures[subID-0x20] = struct{}{}
-		}
-	}
-	for _, subpic := range subpics {
-		if subpic.StreamID < 0 {
-			continue
-		}
-		_, found := payloadSubpictures[subpic.StreamID]
-		if !found {
-			for _, alternate := range subpic.AlternateStreamIDs {
-				if _, found = payloadSubpictures[alternate]; found {
-					break
-				}
-			}
-		}
-		if found {
-			continue
-		}
-		result = append(result, buildDVDDeclaredTextStream(subpic, duration, source))
-		payloadSubpictures[subpic.StreamID] = struct{}{}
-	}
-	sortDVDPayloadStreams(result[textStart:])
-	for i := range streams {
-		if !used[i] {
-			result = append(result, streams[i])
-		}
-	}
-	return result
-}
-
-// buildDVDDeclaredAudioStream constructs the minimal canonical audio stream
-// available from IFO-owned attributes when no VOB payload stream was observed.
-func buildDVDDeclaredAudioStream(audio dvdAudioAttrs, duration float64, source string) Stream {
-	fields := []Field{}
-	pesID, subID, hasSubID := dvdAudioPayloadIdentity(audio)
-	canonicalID := ""
-	if audio.StreamID >= 0 && pesID >= 0 {
-		canonicalID = strconv.Itoa(pesID)
-		displayID := formatID(uint64(pesID))
-		if hasSubID {
-			canonicalID += "-" + strconv.Itoa(subID)
-			displayID = formatIDPair(uint64(pesID), uint64(subID))
-		}
-		fields = append(fields, Field{Name: "ID", Value: displayID})
-	}
-	if audio.Format != "" {
-		fields = append(fields, Field{Name: "Format", Value: audio.Format})
-	}
-	if audio.FormatInfo != "" {
-		fields = append(fields, Field{Name: "Format/Info", Value: audio.FormatInfo})
-	}
-	if audio.FormatProfile != "" {
-		fields = append(fields, Field{Name: "Format profile", Value: audio.FormatProfile})
-	}
-	if duration > 0 {
-		fields = append(fields, Field{Name: "Duration", Value: formatDVDDuration(duration)})
-	}
-	if audio.Channels > 0 {
-		fields = append(fields, Field{Name: "Channel(s)", Value: formatChannels(uint64(audio.Channels))})
-	}
-	if audio.SampleRate > 0 {
-		fields = append(fields, Field{Name: "Sampling rate", Value: formatSampleRate(audio.SampleRate)})
-	}
-	if audio.Format != "PCM" {
-		fields = append(fields, Field{Name: "Compression mode", Value: "Lossy"})
-	}
-	if audio.Language != "" {
-		fields = append(fields, Field{Name: "Language", Value: audio.Language})
-	}
-	if audio.LanguageMore != "" {
-		fields = append(fields, Field{Name: "Language, more info", Value: audio.LanguageMore})
-	}
-	facts := &dvdStructuredFacts{}
-	if canonicalID != "" {
-		facts.SetSame("ID", canonicalID)
-	}
-	if duration > 0 {
-		facts.Set("Duration", strconv.FormatFloat(duration*1000, 'f', -1, 64), formatJSONSeconds(duration))
-	}
-	if audio.SampleRate > 0 && duration > 0 {
-		facts.SetSame("SamplingCount", strconv.FormatInt(int64(duration*audio.SampleRate), 10))
-	}
-	if audio.LanguageCode != "" {
-		facts.SetSame("Language", audio.LanguageCode)
-	}
-	if audio.LanguageMore != "" {
-		facts.SetSame("Language_More", audio.LanguageMore)
-	}
-	stream := buildCanonicalDVDAudioStream(fields, facts, audio, duration)
-	appendCanonicalSeedObjectMembers(&stream, "extra", []structuredMember{{Key: "Source", Value: structuredNode{Kind: structuredString, Text: source}}})
-	publishCanonicalProjectionPolicy(&stream)
-	return stream
-}
-
-// buildDVDDeclaredTextStream constructs the minimal canonical subpicture stream
-// available from IFO-owned attributes when no VOB payload stream was observed.
-func buildDVDDeclaredTextStream(subpic dvdSubpicAttrs, duration float64, source string) Stream {
-	id := 0x20 + subpic.StreamID
-	fields := []Field{
-		{Name: "Format", Value: "RLE"},
-		{Name: "Format/Info", Value: "Run-length encoding"},
-		{Name: "Bit depth", Value: "2 bits"},
-	}
-	if subpic.StreamID >= 0 {
-		fields = append([]Field{{Name: "ID", Value: fmt.Sprintf("189 (0xBD)-%d (0x%X)", id, id)}}, fields...)
-	}
-	if duration > 0 {
-		fields = append(fields, Field{Name: "Duration", Value: formatDVDDuration(duration)})
-	}
-	if subpic.Language != "" {
-		fields = append(fields, Field{Name: "Language", Value: subpic.Language})
-	}
-	if subpic.LanguageMore != "" {
-		fields = append(fields, Field{Name: "Language, more info", Value: subpic.LanguageMore})
-	}
-	facts := &dvdStructuredFacts{}
-	if subpic.StreamID >= 0 {
-		facts.SetSame("ID", fmt.Sprintf("189-%d", id))
-	}
-	if duration > 0 {
-		facts.Set("Duration", strconv.FormatFloat(duration*1000, 'f', -1, 64), formatJSONSeconds(duration))
-	}
-	if subpic.LanguageCode != "" {
-		facts.SetSame("Language", subpic.LanguageCode)
-	}
-	if subpic.LanguageMore != "" {
-		facts.SetSame("Language_More", subpic.LanguageMore)
-	}
-	stream := buildCanonicalDVDTextStream(fields, facts, subpic)
-	appendCanonicalSeedObjectMembers(&stream, "extra", []structuredMember{{Key: "Source", Value: structuredNode{Kind: structuredString, Text: source}}})
-	publishCanonicalProjectionPolicy(&stream)
-	return stream
-}
-
-// dvdPrivateSubstreamID parses the private-stream component from a canonical
-// DVD ID. It rejects IDs outside the 189-prefixed private stream.
-func dvdPrivateSubstreamID(id string) (int, bool) {
-	const prefix = "189-"
-	if !strings.HasPrefix(id, prefix) {
-		return 0, false
-	}
-	end := len(id)
-	if index := strings.IndexByte(id[len(prefix):], ' '); index >= 0 {
-		end = len(prefix) + index
-	}
-	value, err := strconv.Atoi(id[len(prefix):end])
-	return value, err == nil
-}
-
-// dvdVOBIndex extracts the trailing numeric title-set index from a VOB path.
-func dvdVOBIndex(path string) int {
-	name := strings.ToUpper(filepath.Base(path))
-	if !strings.HasSuffix(name, ".VOB") {
-		return 0
-	}
-	name = strings.TrimSuffix(name, ".VOB")
-	parts := strings.Split(name, "_")
-	if len(parts) < 3 {
-		return 0
-	}
-	value, err := strconv.Atoi(parts[len(parts)-1])
-	if err != nil {
-		return 0
-	}
-	return value
-}
-
-// dvdJSONStreamStats returns the canonical video frame count and total
-// canonical payload size used by DVD General derivation.
-func dvdJSONStreamStats(streams []Stream) (string, int64) {
-	var frameCount string
-	for _, stream := range streams {
-		if stream.Kind == StreamVideo {
-			frameCount, _ = canonicalSeedValue(stream, "FrameCount")
-		}
-	}
-	streamSizeSum := sumCanonicalStreamSizes(streams)
-	return frameCount, streamSizeSum
-}
-
-func findStreamField(streams []Stream, kind StreamKind, name string) string {
-	for _, stream := range streams {
-		if stream.Kind != kind {
-			continue
-		}
-		if value := findField(stream.Fields, name); value != "" {
-			return value
-		}
-	}
-	return ""
 }

@@ -20,9 +20,6 @@ func consumeMPEG2Captions(entry *psStream, payload []byte, pts uint64, hasPTS bo
 				end = len(buf)
 			}
 			userData := buf[i+4 : end]
-			if hasMPEG2CaptionHeader(userData) {
-				entry.ccHeaderFound = true
-			}
 			for ccType, observation := range parseMPEG2UserDataFields(userData) {
 				if !observation.hasCC {
 					continue
@@ -65,20 +62,6 @@ func consumeMPEG2Captions(entry *psStream, payload []byte, pts uint64, hasPTS bo
 	} else {
 		entry.videoCCCarry = append(entry.videoCCCarry[:0], buf...)
 	}
-}
-
-// hasMPEG2CaptionHeader reports whether user data contains a DVD CC or GA94
-// caption-data header, even when no renderable caption pair is present.
-func hasMPEG2CaptionHeader(data []byte) bool {
-	for i := 0; i+2 < len(data); i++ {
-		if data[i] == 'C' && data[i+1] == 'C' && data[i+2] == 0x01 {
-			return true
-		}
-		if i+4 < len(data) && data[i] == 'G' && data[i+1] == 'A' && data[i+2] == '9' && data[i+3] == '4' && data[i+4] == 0x03 {
-			return true
-		}
-	}
-	return false
 }
 
 func parseGA94UserDataFields(data []byte) [2]ccParseState {

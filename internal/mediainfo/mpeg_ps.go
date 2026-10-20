@@ -2,7 +2,6 @@ package mediainfo
 
 import (
 	"bufio"
-	"context"
 	"fmt"
 	"io"
 	"math"
@@ -108,16 +107,12 @@ func ParseMPEGPSWithOptions(file io.ReadSeeker, size int64, opts mpegPSOptions) 
 // mpegPSOptions controls bounded program-stream parsing and DVD-specific
 // canonical metadata.
 type mpegPSOptions struct {
-	dvdExtras            bool
-	dvdParsing           bool
-	dvdWideWindow        bool
-	dvdCaptionHeaderOnly bool
-	dvdMenu              bool
-	parseSpeed           float64
-	sampled              bool
-	sampledBytes         int64
-	inputContext         context.Context //nolint:containedctx // carried only through one multi-file parse
-	inputPath            string
+	dvdExtras    bool
+	dvdParsing   bool
+	dvdMenu      bool
+	parseSpeed   float64
+	sampled      bool
+	sampledBytes int64
 }
 
 // mpegPSBoundedWindow derives MediaInfo's program-stream analysis window from
@@ -256,7 +251,7 @@ func audioDurationPS(st *psStream, opts mpegPSOptions) float64 {
 	}
 	if st.hasAC3 && st.ac3Info.sampleRate > 0 && st.ac3Info.spf > 0 && st.audioFrames > 0 {
 		frameDur := float64(st.ac3Info.spf) / st.ac3Info.sampleRate
-		if !opts.dvdCaptionHeaderOnly && !opts.dvdWideWindow && duration >= 60 {
+		if duration >= 60 {
 			if sampled, ok := sampledFrameClockDurationPS(st, opts, st.ac3Info.sampleRate, st.ac3Info.spf, false); ok && sampled > frameDur {
 				// The PTS names the first complete frame in the terminal PES.
 				// Extend through subsequent parsed frames, excluding that anchor.
@@ -273,11 +268,6 @@ func audioDurationPS(st *psStream, opts mpegPSOptions) float64 {
 			duration = derived
 		} else if duration == 0 || math.Abs(derived-duration) <= frameDur {
 			duration = derived
-		}
-		if opts.dvdCaptionHeaderOnly && opts.sampled && duration > 0.025 {
-			// MediaInfo retains the partial AC-3 payload at a DVD caption-header
-			// validation boundary instead of rounding up to the next full frame.
-			duration -= 0.025
 		}
 	}
 	if hasTerminalMPEGAudioSyncLoss(st) && st.audioRate > 0 && st.mpegAudioLayer != 0 {
@@ -689,7 +679,7 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 				showGOPDetails := !opts.sampled || info.GOPSamples >= 8
 				resetDVDClock := opts.dvdParsing && (st.pts.hasResets() || anyPTS.hasResets())
 				switch {
-				case showGOPDetails && resetDVDClock && !opts.dvdCaptionHeaderOnly:
+				case showGOPDetails && resetDVDClock:
 					fields = append(fields, Field{Name: "Format settings, GOP", Value: "Variable"})
 					builder.Fill("Format_Settings_GOP", "Variable", "Format settings, GOP", "Variable")
 				case showGOPDetails && info.GOPM > 0 && info.GOPN > 0 && info.BVOP != nil && *info.BVOP:
@@ -1668,13 +1658,7 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 				facts.Set("Video_Delay", fmt.Sprintf("%.3f", videoDelay))
 			}
 		}
-		snapshot := buildMPEGPSCanonicalSnapshot(builder, fields, facts, extraNode, canonicalStreamPolicy{SkipStreamOrder: hasMenuStream})
-		if st.kind == StreamVideo {
-			snapshot.dvdMPEG2IntraDCFirst = info.IntraDCPrecisionFirst
-			snapshot.dvdMPEG2IntraDCLast = info.IntraDCPrecisionLast
-			snapshot.dvdMPEG2MaxBitRate = info.MaxBitRateKbps * 1000
-		}
-		streamsOut = append(streamsOut, snapshot)
+		streamsOut = append(streamsOut, buildMPEGPSCanonicalSnapshot(builder, fields, facts, extraNode, canonicalStreamPolicy{SkipStreamOrder: hasMenuStream}))
 	}
 
 	info := ContainerInfo{}

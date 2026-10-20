@@ -189,6 +189,7 @@ func FuzzParseMPEGPSContainers(f *testing.F) {
 		data = fuzzLimit(data)
 		r := bytes.NewReader(data)
 		_, _, _ = ParseMPEGPS(r, int64(len(data)))
+		_, _, _ = parseMPEGPSMenu(r, int64(len(data)), mpegPSOptions{dvdParsing: true, dvdMenu: true, parseSpeed: 0.5})
 	})
 }
 
@@ -434,10 +435,10 @@ func mkvProbeMaps(mode uint8) (map[uint64]*matroskaAudioProbe, map[uint64]*matro
 		}, nil
 	default:
 		return map[uint64]*matroskaAudioProbe{
-				track: {format: "E-AC-3", collect: true, targetPackets: 8},
-			}, map[uint64]*matroskaVideoProbe{
-				track: {codec: "HEVC"},
-			}
+			track: {format: "E-AC-3", collect: true, targetPackets: 8},
+		}, map[uint64]*matroskaVideoProbe{
+			track: {codec: "HEVC"},
+		}
 	}
 }
 

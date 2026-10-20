@@ -70,9 +70,6 @@ type Stream struct {
 	mkvDefaultDuration       uint64
 	mkvTimecodeScale         uint64
 	mkvOmitDerivedFLACLayout bool
-	dvdMPEG2IntraDCFirst     int
-	dvdMPEG2IntraDCLast      int
-	dvdMPEG2MaxBitRate       int64
 	// matroskaDeferredFacts holds fallback TrackEntry values until all parser
 	// refinements have updated the canonical seed.
 	matroskaDeferredFacts *matroskaDeferredFacts

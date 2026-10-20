@@ -2,7 +2,8 @@ package mediainfo
 
 import (
 	"encoding/binary"
-	"math"
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -10,53 +11,121 @@ import (
 	"testing"
 )
 
-func TestDVDHasConstantVideoBitRateUsesFirstVideoStream(t *testing.T) {
-	streamWithMode := func(kind StreamKind, mode string) Stream {
-		builder := newCanonicalStreamBuilder(kind)
-		if mode != "" {
-			builder.DirectStructured("BitRate_Mode", mode)
+// dvdComparableOutputs renders the JSON and text reports of path with the path
+// and the file dates removed, so that reports of copies at other paths compare.
+func dvdComparableOutputs(t *testing.T, path string) (string, string) {
+	t.Helper()
+	report, err := AnalyzeFile(path)
+	if err != nil {
+		t.Fatalf("AnalyzeFile(%s): %v", path, err)
+	}
+	escaped, err := json.Marshal(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jsonLines := []string{}
+	for line := range strings.SplitSeq(RenderJSON([]Report{report}), "\n") {
+		if !strings.HasPrefix(line, `"File_`) {
+			jsonLines = append(jsonLines, strings.ReplaceAll(line, string(escaped[1:len(escaped)-1]), "INPUT"))
 		}
-		return builder.Snapshot(canonicalStreamPolicy{})
 	}
-	tests := []struct {
-		name    string
-		streams []Stream
-		want    bool
-	}{
-		{name: "no streams"},
-		{name: "audio only", streams: []Stream{streamWithMode(StreamAudio, "CBR")}},
-		{name: "CBR", streams: []Stream{streamWithMode(StreamVideo, "CBR")}, want: true},
-		{name: "Constant", streams: []Stream{streamWithMode(StreamVideo, "Constant")}, want: true},
-		{name: "VBR", streams: []Stream{streamWithMode(StreamVideo, "VBR")}},
-		{
-			name: "skip audio before video",
-			streams: []Stream{
-				streamWithMode(StreamAudio, "CBR"),
-				streamWithMode(StreamVideo, "Constant"),
-			},
-			want: true,
-		},
+	return strings.Join(jsonLines, "\n"), strings.ReplaceAll(RenderText([]Report{report}), path, "INPUT")
+}
+
+func writeDVDFixture(t *testing.T, path string, data []byte) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
 	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			if got := dvdHasConstantVideoBitRate(test.streams); got != test.want {
-				t.Fatalf("dvdHasConstantVideoBitRate() = %v; want %v", got, test.want)
-			}
-		})
+	if err := os.WriteFile(path, data, 0o600); err != nil { //nolint:gosec // test fixture
+		t.Fatalf("write %s: %v", path, err)
 	}
 }
 
-func TestDVDTitleSetBitRateDurationFlagsMuxRateAboveDVDLimit(t *testing.T) {
-	const duration = 10.0
-	atLimitSize := int64(dvdMaxMuxBitRate * duration / 8)
-
-	gotDuration, mismatch := dvdTitleSetBitRateDuration(atLimitSize, 8, 9, duration)
-	if gotDuration != duration || mismatch {
-		t.Fatalf("at-limit result=%.3f/%v; want %.3f/false", gotDuration, mismatch, duration)
+func TestAnalyzeTitleVOBReportsOnlyTheNamedFile(t *testing.T) {
+	vobData, err := os.ReadFile(filepath.Join("samples", "sample_ac3.vob"))
+	if err != nil {
+		t.Fatalf("read VOB fixture: %v", err)
 	}
-	gotDuration, mismatch = dvdTitleSetBitRateDuration(atLimitSize+1, 8, 9, duration)
-	if gotDuration != duration || !mismatch {
-		t.Fatalf("above-limit result=%.3f/%v; want %.3f/true", gotDuration, mismatch, duration)
+	second := vobData[:len(vobData)/2]
+
+	set := filepath.Join(t.TempDir(), "VIDEO_TS")
+	writeDVDFixture(t, filepath.Join(set, "VTS_01_1.VOB"), vobData)
+	writeDVDFixture(t, filepath.Join(set, "VTS_01_2.VOB"), second)
+	writeDVDFixture(t, filepath.Join(set, "VTS_01_3.VOB"), vobData)
+	alone := filepath.Join(t.TempDir(), "VIDEO_TS", "VTS_01_2.VOB")
+	writeDVDFixture(t, alone, second)
+
+	gotJSON, gotText := dvdComparableOutputs(t, filepath.Join(set, "VTS_01_2.VOB"))
+	size := strconv.Itoa(len(second))
+	if !strings.Contains(gotJSON, `"FileSize":"`+size+`"`) {
+		t.Errorf("JSON FileSize is not the size of the named VOB (%s)", size)
+	}
+	if !strings.Contains(gotText, padRight("File size", textLabelWidth)+": "+formatBytes(int64(len(second)))+"\n") {
+		t.Errorf("text File size is not the size of the named VOB (%s)", formatBytes(int64(len(second))))
+	}
+	if strings.Contains(gotJSON, "CompleteName_Last") || strings.Contains(gotText, "VTS_01_3.VOB") {
+		t.Error("report names the last VOB of the title set")
+	}
+
+	wantJSON, wantText := dvdComparableOutputs(t, alone)
+	if gotJSON != wantJSON {
+		t.Errorf("JSON of a title VOB in a set differs from the same VOB alone:\n got: %s\nwant: %s", gotJSON, wantJSON)
+	}
+	if gotText != wantText {
+		t.Errorf("text of a title VOB in a set differs from the same VOB alone:\n got: %s\nwant: %s", gotText, wantText)
+	}
+}
+
+func TestAnalyzeVTSIFOReportsOnlyTheIFO(t *testing.T) {
+	ifoData := make([]byte, 0x0300)
+	copy(ifoData[:12], "DVDVIDEO-VTS")
+	ifoData[dvdVideoAttrVTSOffset] = 0x4C
+	binary.BigEndian.PutUint16(ifoData[dvdAudioCountVTSOffset:], 1)
+	ifoData[dvdAudioAttrVTSOffset+1] = 1
+	ifoData[dvdAudioAttrVTSOffset+2] = 'e'
+	ifoData[dvdAudioAttrVTSOffset+3] = 'n'
+	vobData, err := os.ReadFile(filepath.Join("samples", "sample_ac3.vob"))
+	if err != nil {
+		t.Fatalf("read VOB fixture: %v", err)
+	}
+
+	videoTS := filepath.Join(t.TempDir(), "VIDEO_TS")
+	ifoPath := filepath.Join(videoTS, "VTS_01_0.IFO")
+	writeDVDFixture(t, ifoPath, ifoData)
+	writeDVDFixture(t, filepath.Join(videoTS, "VTS_01_1.VOB"), vobData)
+	writeDVDFixture(t, filepath.Join(videoTS, "VTS_01_2.VOB"), vobData)
+	outside := filepath.Join(t.TempDir(), "VTS_01_0.IFO")
+	writeDVDFixture(t, outside, ifoData)
+	wantJSON, wantText := dvdComparableOutputs(t, outside)
+
+	for _, withBUP := range []bool{false, true} {
+		t.Run(fmt.Sprintf("BUP=%v", withBUP), func(t *testing.T) {
+			if withBUP {
+				writeDVDFixture(t, filepath.Join(videoTS, "VTS_01_0.BUP"), ifoData)
+			}
+			gotJSON, gotText := dvdComparableOutputs(t, ifoPath)
+			if !strings.Contains(gotJSON, `"FileSize":"`+strconv.Itoa(len(ifoData))+`"`) {
+				t.Error("JSON FileSize is not the IFO size")
+			}
+			if !strings.Contains(gotText, padRight("File size", textLabelWidth)+": "+formatBytes(int64(len(ifoData)))+"\n") {
+				t.Error("text File size is not the IFO size")
+			}
+			if !strings.Contains(gotText, padRight("Format profile", textLabelWidth)+": Program\n") {
+				t.Error("Format profile is not Program")
+			}
+			for _, vobOnly := range []string{"ServiceKind", "dialnorm", "StreamSize", "BitRate_Maximum"} {
+				if strings.Contains(gotJSON, vobOnly) {
+					t.Errorf("JSON has the VOB value %s", vobOnly)
+				}
+			}
+			if gotJSON != wantJSON {
+				t.Errorf("JSON differs from the same IFO outside VIDEO_TS:\n got: %s\nwant: %s", gotJSON, wantJSON)
+			}
+			if gotText != wantText {
+				t.Errorf("text differs from the same IFO outside VIDEO_TS:\n got: %s\nwant: %s", gotText, wantText)
+			}
+		})
 	}
 }
 
@@ -149,52 +218,7 @@ func TestAnalyzeVTSIFOFallsBackToProgramMetadataForInvalidVOB(t *testing.T) {
 	}
 }
 
-func TestAnalyzeVTSIFOAppliesLanguageToParsedAudio(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "VIDEO_TS")
-	if err := os.MkdirAll(root, 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-
-	ifoPath := filepath.Join(root, "VTS_01_0.IFO")
-	ifoData := make([]byte, 0x0300)
-	copy(ifoData[:12], []byte("DVDVIDEO-VTS"))
-	ifoData[dvdVideoAttrVTSOffset] = 0x4C
-	binary.BigEndian.PutUint16(ifoData[dvdAudioCountVTSOffset:], 1)
-	ifoData[dvdAudioAttrVTSOffset+1] = 1
-	ifoData[dvdAudioAttrVTSOffset+2] = 'e'
-	ifoData[dvdAudioAttrVTSOffset+3] = 'n'
-	if err := os.WriteFile(ifoPath, ifoData, 0o644); err != nil { //nolint:gosec // test fixture
-		t.Fatalf("write IFO: %v", err)
-	}
-
-	vobData, err := os.ReadFile(filepath.Join("samples", "sample_ac3.vob"))
-	if err != nil {
-		t.Fatalf("read VOB fixture: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(root, "VTS_01_1.VOB"), vobData, 0o644); err != nil { //nolint:gosec // test fixture
-		t.Fatalf("write VOB: %v", err)
-	}
-
-	report, err := AnalyzeFile(ifoPath)
-	if err != nil {
-		t.Fatalf("AnalyzeFile: %v", err)
-	}
-	if text := RenderText([]Report{report}); !strings.Contains(text, padRight("Language", textLabelWidth)+": English") {
-		t.Fatal("text output lacks the IFO-declared audio language")
-	}
-	for _, stream := range report.Streams {
-		if stream.Kind != StreamAudio || findField(stream.Fields, "ID") != "189 (0xBD)-128 (0x80)" {
-			continue
-		}
-		if got := findField(stream.Fields, "Bit rate"); got == "" {
-			t.Fatal("matched audio stream lacks VOB-derived details")
-		}
-		return
-	}
-	t.Fatal("missing parsed AC-3 audio stream")
-}
-
-func remappedSubpictureDVDFixture() ([]byte, []byte) {
+func remappedSubpictureDVDFixture() []byte {
 	ifoData := make([]byte, 3*dvdSectorSize)
 	copy(ifoData[:12], []byte("DVDVIDEO-VTS"))
 	ifoData[dvdVideoAttrVTSOffset] = 0x4C
@@ -213,26 +237,13 @@ func remappedSubpictureDVDFixture() ([]byte, []byte) {
 	binary.BigEndian.PutUint32(ifoData[pgcOffset+12:], 16)
 	pgcBase := pgcOffset + 16
 	binary.BigEndian.PutUint32(ifoData[pgcBase+0x1C:], 0x80000102)
-
-	vobData := []byte{0x00, 0x00, 0x01, 0xBD, 0x00, 0x05, 0x80, 0x00, 0x00, 0x21, 0x00}
-	return ifoData, vobData
+	return ifoData
 }
 
 func TestAnalyzeVTSIFOAppliesLanguageToRemappedSubpicture(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "VIDEO_TS")
-	if err := os.MkdirAll(root, 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-
-	ifoData, vobData := remappedSubpictureDVDFixture()
-	ifoPath := filepath.Join(root, "VTS_01_0.IFO")
-	if err := os.WriteFile(ifoPath, ifoData, 0o644); err != nil { //nolint:gosec // test fixture
-		t.Fatalf("write IFO: %v", err)
-	}
-
-	if err := os.WriteFile(filepath.Join(root, "VTS_01_1.VOB"), vobData, 0o644); err != nil { //nolint:gosec // test fixture
-		t.Fatalf("write VOB: %v", err)
-	}
+	ifoData := remappedSubpictureDVDFixture()
+	ifoPath := filepath.Join(t.TempDir(), "VIDEO_TS", "VTS_01_0.IFO")
+	writeDVDFixture(t, ifoPath, ifoData)
 
 	report, err := AnalyzeFile(ifoPath)
 	if err != nil {
@@ -242,7 +253,7 @@ func TestAnalyzeVTSIFOAppliesLanguageToRemappedSubpicture(t *testing.T) {
 		t.Fatalf("text output lacks the IFO-declared subpicture language:\n%s", text)
 	}
 	for _, stream := range report.Streams {
-		if stream.Kind != StreamText || findField(stream.Fields, "ID") != "189 (0xBD)-33 (0x21)" {
+		if stream.Kind != StreamText {
 			continue
 		}
 		if got, _ := canonicalSeedValue(stream, "Language"); got != "en" {
@@ -250,7 +261,7 @@ func TestAnalyzeVTSIFOAppliesLanguageToRemappedSubpicture(t *testing.T) {
 		}
 		return
 	}
-	t.Fatal("missing parsed RLE subpicture stream")
+	t.Fatal("missing declared RLE subpicture stream")
 }
 
 func TestApplyDVDPGCStreamControlsKeepsSubpictureEnabledByLaterProgram(t *testing.T) {
@@ -286,249 +297,28 @@ func TestApplyDVDPGCStreamControlsKeepsSubpictureEnabledByLaterProgram(t *testin
 	if !known {
 		t.Fatal("PGC controls not detected")
 	}
-	got := mergeDVDDeclaredStreams(nil, nil, subpics, 0, "VTS_01_1.VOB")
-	if len(got) != 1 {
-		t.Fatalf("stream count = %d, want subtitle enabled by the second PGC", len(got))
+	if len(subpics) != 1 || subpics[0].StreamID != 1 {
+		t.Fatalf("subpictures = %+v, want stream 1 enabled by the second PGC", subpics)
 	}
-	if id, _ := canonicalSeedValue(got[0], "ID"); id != "189-33" {
-		t.Fatalf("subtitle ID = %q, want 189-33", id)
-	}
-	if language, _ := canonicalSeedValue(got[0], "Language"); language != "en" {
-		t.Fatalf("subtitle language = %q, want en", language)
-	}
-}
-
-func TestMergeDVDDeclaredStreamsMatchesAudioByPayloadIdentity(t *testing.T) {
-	payload := Stream{Kind: StreamAudio}
-	replaceCanonicalSeedFill(&payload, "ID", "189-129", "ID", "189 (0xBD)-129 (0x81)")
-	replaceCanonicalSeedFill(&payload, "Format", "AC-3", "Format", "AC-3")
-
-	got := mergeDVDDeclaredStreams([]Stream{payload}, []dvdAudioAttrs{
-		{Format: "AC-3", StreamID: 0},
-		{Format: "AC-3", StreamID: 1},
-	}, nil, 0, "VTS_01_1.VOB")
-	var gotIDs []string
-	for _, stream := range got {
-		id, _ := canonicalSeedValue(stream, "ID")
-		gotIDs = append(gotIDs, id)
-	}
-	wantIDs := []string{"189-128", "189-129"}
-	if strings.Join(gotIDs, ",") != strings.Join(wantIDs, ",") {
-		t.Fatalf("audio IDs = %v, want %v", gotIDs, wantIDs)
-	}
-}
-
-func TestMergeDVDDeclaredStreamsSynthesizesNonAC3PayloadIDs(t *testing.T) {
-	tests := []struct {
-		format      string
-		payloadID   string
-		wantIDs     string
-		wantDisplay string
-	}{
-		{format: "DTS", payloadID: "189-137", wantIDs: "189-136,189-137", wantDisplay: "189 (0xBD)-136 (0x88)"},
-		{format: "PCM", payloadID: "189-161", wantIDs: "189-160,189-161", wantDisplay: "189 (0xBD)-160 (0xA0)"},
-		{format: "MPEG Audio", payloadID: "193", wantIDs: "192,193", wantDisplay: "192 (0xC0)"},
-	}
-	for _, test := range tests {
-		t.Run(test.format, func(t *testing.T) {
-			payload := Stream{Kind: StreamAudio}
-			replaceCanonicalSeedFill(&payload, "ID", test.payloadID, "ID", test.payloadID)
-			replaceCanonicalSeedFill(&payload, "Format", test.format, "Format", test.format)
-
-			got := mergeDVDDeclaredStreams([]Stream{payload}, []dvdAudioAttrs{
-				{Format: test.format, StreamID: 0},
-				{Format: test.format, StreamID: 1},
-			}, nil, 0, "VTS_01_1.VOB")
-			gotIDs := make([]string, len(got))
-			for i, stream := range got {
-				gotIDs[i], _ = canonicalSeedValue(stream, "ID")
-			}
-			if joined := strings.Join(gotIDs, ","); joined != test.wantIDs {
-				t.Fatalf("audio IDs = %s, want %s", joined, test.wantIDs)
-			}
-			if display := findField(got[0].Fields, "ID"); display != test.wantDisplay {
-				t.Fatalf("display ID = %q, want %q", display, test.wantDisplay)
-			}
-		})
-	}
-}
-
-func TestMergeDVDDeclaredStreamsOmitsDisabledSubpictures(t *testing.T) {
-	caption := Stream{Kind: StreamText}
-	replaceCanonicalSeedFill(&caption, "ID", "224-CC1", "ID", "224 (0xE0)-CC1")
-	replaceCanonicalSeedFill(&caption, "Format", "EIA-608", "Format", "EIA-608")
-
-	subpictures := make([]dvdSubpicAttrs, 32)
-	for i := range subpictures {
-		subpictures[i].StreamID = -1
-	}
-
-	got := mergeDVDDeclaredStreams([]Stream{caption}, nil, subpictures, 0, "VTS_01_1.VOB")
-	if len(got) != 1 {
-		t.Fatalf("stream count = %d, want only the populated caption service", len(got))
-	}
-	if id, _ := canonicalSeedValue(got[0], "ID"); id != "224-CC1" {
-		t.Fatalf("caption ID = %q, want 224-CC1", id)
-	}
-}
-
-func TestMergeDVDDeclaredStreamsKeepsEnabledSubpicturesDistinctFromCaptions(t *testing.T) {
-	caption := Stream{Kind: StreamText}
-	replaceCanonicalSeedFill(&caption, "ID", "224-CC1", "ID", "224 (0xE0)-CC1")
-	replaceCanonicalSeedFill(&caption, "Format", "EIA-608", "Format", "EIA-608")
-
-	got := mergeDVDDeclaredStreams([]Stream{caption}, nil, []dvdSubpicAttrs{{
-		Language:     "English",
-		LanguageCode: "en",
-		StreamID:     1,
-	}}, 0, "VTS_01_1.VOB")
-	if len(got) != 2 {
-		t.Fatalf("stream count = %d, want caption and enabled RLE subpicture", len(got))
-	}
-	if id, _ := canonicalSeedValue(got[1], "ID"); id != "189-33" {
-		t.Fatalf("subpicture ID = %q, want 189-33", id)
-	}
-	if language, _ := canonicalSeedValue(got[1], "Language"); language != "en" {
-		t.Fatalf("subpicture Language = %q, want en", language)
-	}
-}
-
-func TestMergeDVDDeclaredStreamsOrdersSynthesizedSubpicturesByID(t *testing.T) {
-	payload := Stream{Kind: StreamText}
-	replaceCanonicalSeedFill(&payload, "ID", "189-33", "ID", "189 (0xBD)-33 (0x21)")
-	replaceCanonicalSeedFill(&payload, "Format", "RLE", "Format", "RLE")
-
-	got := mergeDVDDeclaredStreams([]Stream{payload}, nil, []dvdSubpicAttrs{
-		{StreamID: 0},
-		{StreamID: 1},
-	}, 0, "VTS_01_1.VOB")
-	if len(got) != 2 {
-		t.Fatalf("stream count = %d, want two RLE subpictures", len(got))
-	}
-	for index, want := range []string{"189-32", "189-33"} {
-		if id, _ := canonicalSeedValue(got[index], "ID"); id != want {
-			t.Fatalf("stream %d ID = %q, want %q", index, id, want)
-		}
-	}
-}
-
-func TestMergeDVDDeclaredStreamsUsesDVDTextOrdering(t *testing.T) {
-	caption := Stream{Kind: StreamText}
-	replaceCanonicalSeedFill(&caption, "ID", "224-CC1", "ID", "224 (0xE0)-CC1")
-	replaceCanonicalSeedFill(&caption, "Format", "EIA-608", "Format", "EIA-608")
-
-	got := mergeDVDDeclaredStreams([]Stream{caption}, nil, []dvdSubpicAttrs{{StreamID: 0}}, 0, "VTS_01_1.VOB")
-	if len(got) != 2 {
-		t.Fatalf("stream count = %d, want RLE subpicture and caption", len(got))
-	}
-	for index, want := range []string{"189-32", "224-CC1"} {
-		if id, _ := canonicalSeedValue(got[index], "ID"); id != want {
-			t.Fatalf("stream %d ID = %q, want %q", index, id, want)
-		}
-	}
-}
-
-func TestAnalyzeVTSIFORejectsConflictingPGCLanguages(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "VIDEO_TS")
-	if err := os.MkdirAll(root, 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-
-	ifoData := make([]byte, 3*dvdSectorSize)
-	copy(ifoData[:12], "DVDVIDEO-VTS")
-	ifoData[dvdVideoAttrVTSOffset] = 0x4C
-	binary.BigEndian.PutUint16(ifoData[dvdAudioCountVTSOffset:], 2)
-	ifoData[dvdAudioAttrVTSOffset+1] = 1
-	copy(ifoData[dvdAudioAttrVTSOffset+2:], "en")
-	ifoData[dvdAudioAttrVTSOffset+8+1] = 1
-	copy(ifoData[dvdAudioAttrVTSOffset+8+2:], "fr")
-	binary.BigEndian.PutUint16(ifoData[dvdSubpicCountVTSOff:], 2)
-	copy(ifoData[dvdSubpicCountVTSOff+2+2:], "en")
-	copy(ifoData[dvdSubpicCountVTSOff+2+6+2:], "fr")
-
-	binary.BigEndian.PutUint32(ifoData[dvdPTTSRPTPointerOff:], 1)
-	binary.BigEndian.PutUint32(ifoData[dvdPGCIPointerOff:], 2)
-	pttOffset := dvdSectorSize
-	binary.BigEndian.PutUint16(ifoData[pttOffset:], 2)
-	binary.BigEndian.PutUint32(ifoData[pttOffset+4:], 23)
-	binary.BigEndian.PutUint32(ifoData[pttOffset+8:], 16)
-	binary.BigEndian.PutUint32(ifoData[pttOffset+12:], 20)
-	binary.BigEndian.PutUint16(ifoData[pttOffset+16:], 1)
-	binary.BigEndian.PutUint16(ifoData[pttOffset+18:], 1)
-	binary.BigEndian.PutUint16(ifoData[pttOffset+20:], 2)
-	binary.BigEndian.PutUint16(ifoData[pttOffset+22:], 1)
-
-	pgcOffset := 2 * dvdSectorSize
-	binary.BigEndian.PutUint16(ifoData[pgcOffset:], 2)
-	pgcBases := []int{pgcOffset + 0x20, pgcOffset + 0x120}
-	for i, base := range pgcBases {
-		entry := pgcOffset + 8 + i*8
-		ifoData[entry] = 0x80
-		binary.BigEndian.PutUint32(ifoData[entry+4:], uint32(base-pgcOffset))
-		copy(ifoData[base+4:], []byte{0x00, 0x01, 0x00, 0x40})
-	}
-	binary.BigEndian.PutUint16(ifoData[pgcBases[0]+0x0C:], 0x8000)
-	binary.BigEndian.PutUint32(ifoData[pgcBases[0]+0x1C:], 0x80000000)
-	binary.BigEndian.PutUint16(ifoData[pgcBases[1]+0x0C+2:], 0x8000)
-	binary.BigEndian.PutUint32(ifoData[pgcBases[1]+0x1C+4:], 0x80000000)
-
-	ifoPath := filepath.Join(root, "VTS_01_0.IFO")
-	if err := os.WriteFile(ifoPath, ifoData, 0o644); err != nil { //nolint:gosec // test fixture
-		t.Fatalf("write IFO: %v", err)
-	}
-	vobData, err := os.ReadFile(filepath.Join("samples", "sample_ac3.vob"))
-	if err != nil {
-		t.Fatalf("read VOB fixture: %v", err)
-	}
-	vobData = append(vobData, 0x00, 0x00, 0x01, 0xBD, 0x00, 0x05, 0x80, 0x00, 0x00, 0x20, 0x00)
-	if err := os.WriteFile(filepath.Join(root, "VTS_01_1.VOB"), vobData, 0o644); err != nil { //nolint:gosec // test fixture
-		t.Fatalf("write VOB: %v", err)
-	}
-
-	report, err := AnalyzeFile(ifoPath)
-	if err != nil {
-		t.Fatalf("AnalyzeFile: %v", err)
-	}
-	wantIDs := map[StreamKind]string{StreamAudio: "189-128", StreamText: "189-32"}
-	for kind, wantID := range wantIDs {
-		found := false
-		for _, stream := range report.Streams {
-			id, _ := canonicalSeedValue(stream, "ID")
-			if stream.Kind != kind || id != wantID {
-				continue
-			}
-			found = true
-			if got, ok := canonicalSeedValue(stream, "Language"); ok {
-				t.Errorf("%s payload received conflicting PGC language %q", kind, got)
-			}
-		}
-		if !found {
-			t.Errorf("missing parsed %s payload %s", kind, wantID)
-		}
+	if subpics[0].LanguageCode != "en" {
+		t.Fatalf("subtitle language = %q, want en", subpics[0].LanguageCode)
 	}
 }
 
 func FuzzAnalyzeVTSIFO(f *testing.F) {
-	ifoData, vobData := remappedSubpictureDVDFixture()
-	f.Add(ifoData, vobData)
-	f.Add(ifoData[:len(ifoData)/2], vobData)
-	f.Add(ifoData, vobData[:len(vobData)/2])
+	ifoData := remappedSubpictureDVDFixture()
+	f.Add(ifoData)
+	f.Add(ifoData[:len(ifoData)/2])
 
 	root := filepath.Join(f.TempDir(), "VIDEO_TS")
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		f.Fatalf("mkdir: %v", err)
 	}
 	ifoPath := filepath.Join(root, "VTS_01_0.IFO")
-	vobPath := filepath.Join(root, "VTS_01_1.VOB")
 
-	f.Fuzz(func(t *testing.T, ifoData, vobData []byte) {
-		ifoData = fuzzLimit(ifoData)
-		vobData = fuzzLimit(vobData)
-		if err := os.WriteFile(ifoPath, ifoData, 0o600); err != nil { //nolint:gosec // bounded fuzz fixture
+	f.Fuzz(func(t *testing.T, ifoData []byte) {
+		if err := os.WriteFile(ifoPath, fuzzLimit(ifoData), 0o600); err != nil { //nolint:gosec // bounded fuzz fixture
 			t.Fatalf("write IFO: %v", err)
-		}
-		if err := os.WriteFile(vobPath, vobData, 0o600); err != nil { //nolint:gosec // bounded fuzz fixture
-			t.Fatalf("write VOB: %v", err)
 		}
 		_, _ = AnalyzeFile(ifoPath)
 	})
@@ -684,171 +474,7 @@ func TestAnalyzeDVDProjectsDistinctLanguageMoreTables(t *testing.T) {
 	}
 }
 
-func TestDVDTitleSetVOBsUsesExactSparseCaseInsensitiveMembers(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "VIDEO_TS")
-	if err := os.MkdirAll(root, 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	for name, size := range map[string]int{
-		"VTS_07_0.VOB":     11,
-		"vts_07_1.vob":     13,
-		"VTS_07_3.VOB":     17,
-		"VTS_08_1.VOB":     19,
-		"VTS_07_1.VOB.bak": 23,
-	} {
-		if err := os.WriteFile(filepath.Join(root, name), make([]byte, size), 0o644); err != nil { //nolint:gosec // test fixture
-			t.Fatalf("write %s: %v", name, err)
-		}
-	}
-	paths, size := dvdTitleSetVOBs(filepath.Join(root, "VTS_07_0.IFO"))
-	if len(paths) != 2 || filepath.Base(paths[0]) != "vts_07_1.vob" || filepath.Base(paths[1]) != "VTS_07_3.VOB" {
-		t.Fatalf("members = %v, want sparse title members 1 and 3", paths)
-	}
-	if size != 30 {
-		t.Fatalf("size = %d, want 30", size)
-	}
-}
-
-func TestOverlayDVDDeclaredLanguagesMatchesPayloadIdentity(t *testing.T) {
-	tests := []struct {
-		name   string
-		id     string
-		format string
-	}{
-		{name: "MPEG audio PES", id: "192", format: "MPEG Audio"},
-		{name: "AC-3 private stream", id: "189-128", format: "AC-3"},
-		{name: "DTS private stream", id: "189-136", format: "DTS"},
-		{name: "PCM private stream", id: "189-160", format: "PCM"},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			stream := Stream{Kind: StreamAudio}
-			replaceCanonicalSeedFill(&stream, "ID", test.id, "ID", test.id)
-			streams := []Stream{stream}
-			overlayDVDDeclaredLanguages(streams, []dvdAudioAttrs{{
-				Format:       test.format,
-				Language:     "English",
-				LanguageCode: "en",
-				StreamID:     0,
-			}}, nil)
-			got, found := canonicalSeedValue(streams[0], "Language")
-			if !found || got != "en" {
-				t.Fatalf("Language = %q, found %v; want en", got, found)
-			}
-		})
-	}
-}
-
-func TestOverlayDVDDeclaredLanguagesRejectsPositionalMatch(t *testing.T) {
-	stream := Stream{Kind: StreamAudio}
-	replaceCanonicalSeedFill(&stream, "ID", "193", "ID", "193")
-	streams := []Stream{stream}
-	overlayDVDDeclaredLanguages(streams, []dvdAudioAttrs{{
-		Format:       "MPEG Audio",
-		Language:     "English",
-		LanguageCode: "en",
-		StreamID:     0,
-	}}, nil)
-	if got, found := canonicalSeedValue(streams[0], "Language"); found {
-		t.Fatalf("mismatched payload received positional language %q", got)
-	}
-}
-
-func TestOverlayDVDDeclaredLanguagesRejectsConflictingAudioIdentity(t *testing.T) {
-	stream := Stream{Kind: StreamAudio}
-	replaceCanonicalSeedFill(&stream, "ID", "189-128", "ID", "189-128")
-	streams := []Stream{stream}
-	overlayDVDDeclaredLanguages(streams, []dvdAudioAttrs{
-		{Format: "AC-3", Language: "English", LanguageCode: "en", StreamID: 0},
-		{Format: "AC-3", Language: "French", LanguageCode: "fr", StreamID: 0},
-	}, nil)
-	if got, found := canonicalSeedValue(streams[0], "Language"); found {
-		t.Fatalf("ambiguous payload received language %q", got)
-	}
-}
-
-func TestOverlayDVDDeclaredLanguagesMatchesRemappedSubpictureIdentity(t *testing.T) {
-	textStream := func(id, languageCode, language string) Stream {
-		stream := Stream{Kind: StreamText}
-		replaceCanonicalSeedFill(&stream, "ID", id, "ID", id)
-		replaceCanonicalSeedFill(&stream, "Language", languageCode, "Language", language)
-		return stream
-	}
-	streams := []Stream{
-		textStream("189-32", "", ""),
-		textStream("189-33", "", ""),
-		textStream("189-34", "it", "Italian"),
-		textStream("189-35", "nl", "Dutch"),
-		textStream("189-36", "", ""),
-	}
-	overlayDVDDeclaredLanguages(streams, nil, []dvdSubpicAttrs{
-		{Language: "English", LanguageCode: "en", StreamID: 1, AlternateStreamIDs: []int{4}},
-		{Language: "French", LanguageCode: "fr", StreamID: 0, AlternateStreamIDs: []int{2}},
-		{Language: "German", LanguageCode: "de", StreamID: 3},
-		{Language: "Spanish", LanguageCode: "es", StreamID: 3},
-		{Language: "Italian", LanguageCode: "it", StreamID: 2},
-	})
-
-	wants := []struct {
-		name     string
-		language string
-	}{
-		{name: "reordered primary zero", language: "fr"},
-		{name: "reordered primary one", language: "en"},
-		{name: "primary alternate collision preserves payload", language: "it"},
-		{name: "duplicate primary collision preserves payload", language: "nl"},
-		{name: "unique alternate", language: "en"},
-	}
-	for index, want := range wants {
-		got, _ := canonicalSeedValue(streams[index], "Language")
-		if got != want.language {
-			t.Errorf("%s stream Language = %q, want %q", want.name, got, want.language)
-		}
-	}
-}
-
-func TestDVDTitleSetBitRateDurationRetainsBoundedPayloadClock(t *testing.T) {
-	if got, mismatch := dvdTitleSetBitRateDuration(7_272_744_960, 8855, 8771.8, 83.3); got != 83.3 || !mismatch {
-		t.Fatalf("duration = %v, mismatch = %v; want mismatched bounded payload timing", got, mismatch)
-	}
-	if got, mismatch := dvdTitleSetBitRateDuration(1_000_000_000, 8855, 8771.8, 1000); got != 1000 || mismatch {
-		t.Fatalf("plausible duration = %v, mismatch = %v; want bounded timing retained", got, mismatch)
-	}
-	if got, mismatch := dvdTitleSetBitRateDuration(7_272_744_960, 0, 8771.8, 83.3); got != 83.3 || !mismatch {
-		t.Fatalf("IFO fallback duration = %v, mismatch = %v; want mismatched bounded payload timing", got, mismatch)
-	}
-	if got, mismatch := dvdTitleSetBitRateDuration(7_272_744_960, 0, 0, 83.3); got != 83.3 || !mismatch {
-		t.Fatalf("payload fallback duration = %v, mismatch = %v; want mismatched bounded payload timing", got, mismatch)
-	}
-}
-
-func BenchmarkDVDTitleSetParsing(b *testing.B) {
-	root := filepath.Join(b.TempDir(), "VIDEO_TS")
-	if err := os.MkdirAll(root, 0o755); err != nil {
-		b.Fatal(err)
-	}
-	ifoPath := filepath.Join(root, "VTS_01_0.IFO")
-	ifoData := make([]byte, 0x0300)
-	copy(ifoData[:12], []byte("DVDVIDEO-VTS"))
-	ifoData[dvdVideoAttrVTSOffset] = 0x4C
-	if err := os.WriteFile(ifoPath, ifoData, 0o600); err != nil {
-		b.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(root, "VTS_01_1.VOB"), make([]byte, 2<<20), 0o600); err != nil {
-		b.Fatal(err)
-	}
-
-	b.ReportAllocs()
-	b.SetBytes(2 << 20)
-	b.ResetTimer()
-	for range b.N {
-		if _, err := AnalyzeFile(ifoPath); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
-func TestDVDPGCTimelineDurationDeduplicatesFirstSector(t *testing.T) {
+func TestDVDProgramStartDelaysDeduplicateFirstSector(t *testing.T) {
 	const pgcOffset = 0x100
 	data := make([]byte, 0x1000)
 	binary.BigEndian.PutUint16(data[pgcOffset:], 3)
@@ -868,50 +494,9 @@ func TestDVDPGCTimelineDurationDeduplicatesFirstSector(t *testing.T) {
 	setPGC(1, 0x300, [4]byte{0x00, 0x02, 0x00, 0x40}, 100, 199)
 	setPGC(2, 0x500, [4]byte{0x00, 0x00, 0x30, 0x40}, 200, 299)
 
-	if got := dvdPGCTimelineDuration(data, pgcOffset); got != 150 {
-		t.Fatalf("timeline duration = %v, want 150 seconds", got)
-	}
 	delays := dvdProgramStartDelays(data, pgcOffset, make([]dvdProgram, 3))
 	if delays[1] != 0 || delays[2] != 120 {
 		t.Fatalf("timeline delays = %v, want replacement at 0 and next PGC at 120", delays)
-	}
-}
-
-func TestDeriveDVDPSVideoBitRateAndSizeUsesBoundedPayloadClock(t *testing.T) {
-	video := Stream{Kind: StreamVideo}
-	replaceCanonicalSeedFill(&video, "BitRate_Mode", "CBR", "Bit rate mode", "Constant")
-	replaceCanonicalSeedFill(&video, "BitRate", "6000000", "Bit rate", "6000 kb/s")
-	replaceCanonicalSeedFill(&video, "Duration", "83300", "Duration", "1 min 23 s")
-	replaceCanonicalSeedFill(&video, "FrameCount", "2496", "", "")
-	replaceCanonicalSeedFill(&video, "FrameRate", "29.970", "Frame rate", "29.970 FPS")
-
-	audio := Stream{Kind: StreamAudio}
-	replaceCanonicalSeedFill(&audio, "BitRate", "384000", "Bit rate", "384 kb/s")
-	streams := []Stream{video, audio}
-
-	const (
-		payloadSize    = int64(7272744960)
-		sampledSeconds = 83.3
-	)
-	deriveDVDPSVideoBitRateAndSize(streams, payloadSize, sampledSeconds, true)
-
-	overall := math.Round(float64(payloadSize) * 8 / sampledSeconds)
-	derivedBitRate := (overall*0.99 - 384000/0.99) * 0.99
-	wantBitRate := strconv.FormatInt(int64(math.Round(derivedBitRate)), 10)
-	if got, _ := canonicalSeedValue(streams[0], "BitRate"); got != wantBitRate {
-		t.Fatalf("video bit rate = %q, want bounded-clock rate %s", got, wantBitRate)
-	}
-	if got, _ := canonicalSeedValue(streams[0], "BitRate_Maximum"); got != "6000000" {
-		t.Fatalf("maximum video bit rate = %q, want retained sequence-header rate", got)
-	}
-	wantSize := int64(math.Round(derivedBitRate / 8 * (2496 / 29.970)))
-	gotSizeValue, _ := canonicalSeedValue(streams[0], "StreamSize")
-	gotSize, err := strconv.ParseInt(gotSizeValue, 10, 64)
-	if err != nil {
-		t.Fatalf("parse StreamSize %q: %v", gotSizeValue, err)
-	}
-	if gotSize != wantSize {
-		t.Fatalf("video stream size = %d, want %d from bounded frame clock", gotSize, wantSize)
 	}
 }
 
@@ -924,7 +509,7 @@ func TestExpandDVDPrimaryAudioDurationUsesCanonicalMilliseconds(t *testing.T) {
 	replaceCanonicalSeedFill(&audio, "SamplingCount", "48000", "", "")
 
 	streams := []Stream{video, audio}
-	expandDVDPrimaryAudioDuration(streams, false)
+	expandDVDPrimaryAudioDuration(streams)
 
 	if got, _ := canonicalSeedValue(streams[1], "Duration"); got != "120000" {
 		t.Fatalf("canonical Duration = %q, want milliseconds", got)

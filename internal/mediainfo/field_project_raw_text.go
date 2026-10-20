@@ -193,7 +193,7 @@ func projectRawTextReport(report Report) rawTextReportProjection {
 	defer store.projectionMu.RUnlock()
 
 	projected := rawTextReportProjection{Ref: store.ref, Streams: make([]rawTextStreamProjection, 0, len(store.streams))}
-	dvd, dvdAggregate := rawTextDVDContext(store)
+	dvd := rawTextDVDContext(store)
 	generalFormat := rawTextGeneralFormat(store)
 	totalFileSize := int64(0)
 	streamIndexes := make([]int, len(store.streams))
@@ -317,7 +317,7 @@ func projectRawTextReport(report Report) rawTextReportProjection {
 			}
 		}
 		if dvd {
-			fields = normalizeDVDRawTextFields(stream, fields, structured, dvdAggregate)
+			fields = normalizeDVDRawTextFields(stream, fields, structured)
 		}
 		sort.SliceStable(fields, func(left, right int) bool {
 			if fields[left].Order != fields[right].Order {
@@ -363,53 +363,28 @@ func rawTextContainerFieldVisible(generalFormat string, entry fieldEntry, rule r
 }
 
 // rawTextDVDContext identifies DVD projections from canonical container facts.
-// Aggregate IFO reports are distinguished by payload-stream provenance, not by
-// input path or sample identity.
-func rawTextDVDContext(store *fieldStore) (dvd, aggregate bool) {
+func rawTextDVDContext(store *fieldStore) bool {
 	if store == nil {
-		return false, false
+		return false
 	}
-	generalFormat := ""
 	for index := range store.streams {
 		stream := &store.streams[index]
 		structured := rawTextStructuredValues(stream)
-		if stream.Kind == StreamGeneral {
-			generalFormat = structured["Format"]
-			if generalFormat == "DVD Video" {
-				dvd = true
-			}
+		if stream.Kind == StreamGeneral && structured["Format"] == "DVD Video" {
+			return true
 		}
 		if stream.Kind == StreamMenu && structured["Format"] == "DVD-Video" {
-			dvd = true
+			return true
 		}
 	}
-	if generalFormat != "DVD Video" {
-		return dvd, false
-	}
-	for index := range store.streams {
-		stream := &store.streams[index]
-		if stream.Kind == StreamGeneral || stream.Kind == StreamMenu {
-			continue
-		}
-		extra, ok := rawTextExtraNode(stream)
-		if !ok {
-			continue
-		}
-		for _, member := range extra.Object {
-			if member.Key == "Source" && structuredNodeText(member.Value) != "" {
-				return true, true
-			}
-		}
-	}
-	return dvd, false
+	return false
 }
 
 // normalizeDVDRawTextFields projects DVD raw text from the same canonical
-// values that already back JSON. Legacy friendly fields can contain the
-// pre-aggregation IFO values, so canonical values and the ordered extra object
-// are authoritative here. Raw registry labels, including /String suffixes, are
-// preserved exactly.
-func normalizeDVDRawTextFields(stream *storedStream, fields []rawTextFieldProjection, structured map[string]string, aggregate bool) []rawTextFieldProjection {
+// values that already back JSON. The canonical values and the ordered extra
+// object win over the legacy friendly fields. Raw registry labels, including
+// /String suffixes, stay as they are.
+func normalizeDVDRawTextFields(stream *storedStream, fields []rawTextFieldProjection, structured map[string]string) []rawTextFieldProjection {
 	if stream == nil {
 		return fields
 	}
@@ -514,16 +489,14 @@ func normalizeDVDRawTextFields(stream *storedStream, fields []rawTextFieldProjec
 	if hasExtra && stream.Kind != StreamGeneral {
 		for _, member := range extra.Object {
 			value := structuredNodeText(member.Value)
-			if !rawTextDVDExtraVisible(stream.Kind, member.Key, value, aggregate) {
+			if !rawTextDVDExtraVisible(stream.Kind, member.Key, value) {
 				continue
 			}
 			label := rawTextDVDExtraLabel(member.Key)
 			if label == "" {
 				continue
 			}
-			if !aggregate || stream.Kind == StreamText || stream.Kind == StreamMenu {
-				value = rawTextExtraValue(member.Key, value)
-			}
+			value = rawTextExtraValue(member.Key, value)
 			normalized = append(normalized, rawTextFieldProjection{
 				Label: label, Value: value, Order: rawTextDVDFieldOrder(stream.Kind, label), Sequence: sequence,
 			})
@@ -555,23 +528,8 @@ func rawTextDVDFieldHidden(kind StreamKind, label string) bool {
 
 // rawTextDVDExtraVisible applies DVD-specific visibility rules before falling
 // back to the shared raw-text extra policy.
-func rawTextDVDExtraVisible(kind StreamKind, key, value string, aggregate bool) bool {
+func rawTextDVDExtraVisible(kind StreamKind, key, value string) bool {
 	if kind == StreamMenu {
-		return value != ""
-	}
-	if aggregate && kind == StreamText && key == "CaptionServiceName" {
-		return value != ""
-	}
-	if aggregate && kind == StreamAudio {
-		switch key {
-		case "IsTruncated", "format_identifier", "OverallBitRate_Precision_Min", "OverallBitRate_Precision_Max",
-			"CaptionServiceName", "CaptionServiceContent_IsPresent", "CaptionServiceDescriptor_IsPresent":
-			return false
-		default:
-			return value != ""
-		}
-	}
-	if aggregate && kind == StreamVideo && (key == "intra_dc_precision" || key == "Source") {
 		return value != ""
 	}
 	return rawTextExtraVisible(key, value)

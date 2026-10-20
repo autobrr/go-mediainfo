@@ -66,7 +66,6 @@ type psStream struct {
 	videoFrameCount      int
 	derivedDuration      float64
 	ccFound              bool
-	ccHeaderFound        bool
 	ccOdd                ccTrack
 	ccEven               ccTrack
 	firstPacketOrder     int

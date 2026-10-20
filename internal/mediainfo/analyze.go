@@ -196,14 +196,6 @@ func analyzeFileWithOptions(ctx context.Context, path string, opts AnalyzeOption
 			fileSize = set.TotalSize
 		}
 	}
-	var dvdVOBPaths []string
-	if format == "MPEG-PS" && isDVDTitleVOBPath(path) {
-		if paths, total := dvdTitleSetVOBs(path); len(paths) > 1 && total > 0 {
-			dvdVOBPaths = paths
-			fileSize = total
-			completeNameLast = paths[len(paths)-1]
-		}
-	}
 
 	general := Stream{Kind: StreamGeneral}
 	general.Fields = append(general.Fields,
@@ -1708,22 +1700,16 @@ func analyzeFileWithOptions(ctx context.Context, path string, opts AnalyzeOption
 		}
 	case "MPEG-PS":
 		psSize := fileSize
-		psPaths := []string{path}
 		dvdTitleSequence := isDVDTitleVOBPath(path)
 		dvdMenu := isDVDMenuVOBPath(path)
-		dvdParsing := dvdTitleSequence || dvdMenu
-		dvdExtras := false
-		if len(dvdVOBPaths) > 1 {
-			psPaths = dvdVOBPaths
-		}
-		parseSpeed := opts.ParseSpeed
+		psOpts := mpegPSOptions{dvdParsing: dvdTitleSequence || dvdMenu, dvdMenu: dvdMenu, parseSpeed: opts.ParseSpeed}
 		var parsedInfo ContainerInfo
 		var parsedStreams []Stream
 		var ok bool
-		if len(psPaths) > 1 || dvdMenu {
-			parsedInfo, parsedStreams, ok = ParseMPEGPSFiles(psPaths, psSize, mpegPSOptions{dvdExtras: dvdExtras, dvdParsing: dvdParsing, dvdMenu: dvdMenu, parseSpeed: parseSpeed, inputContext: ctx, inputPath: path})
+		if dvdMenu {
+			parsedInfo, parsedStreams, ok = parseMPEGPSMenu(file, psSize, psOpts)
 		} else {
-			parsedInfo, parsedStreams, ok = ParseMPEGPSWithOptions(file, psSize, mpegPSOptions{dvdExtras: dvdExtras, dvdParsing: dvdParsing, parseSpeed: parseSpeed})
+			parsedInfo, parsedStreams, ok = ParseMPEGPSWithOptions(file, psSize, psOpts)
 		}
 		if ok {
 			info = parsedInfo
@@ -2124,7 +2110,7 @@ func analyzeFileWithOptions(ctx context.Context, path string, opts AnalyzeOption
 			generalFacts.ApplyToStream(&general)
 		}
 	case "DVD Video":
-		if parsed, ok := parseDVDVideo(path, file, stat.Size(), opts); ok {
+		if parsed, ok := parseDVDVideo(path, file, stat.Size()); ok {
 			info = parsed.Container
 			generalFacts := &parsed.GeneralFacts
 			if parsed.FileSize > 0 {
