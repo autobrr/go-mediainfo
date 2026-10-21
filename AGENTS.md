@@ -5,9 +5,9 @@
 go-mediainfo must be accurate. Official MediaInfo is the reference we diff against because it is usually right.
 
 - A measured fact (a size, count, duration, bit rate, stream presence, metadata value, or error) must be correct. When official MediaInfo reports a wrong fact, fix the value in go-mediainfo. Do not port the bug. "MediaInfoLib does it this way" does not close a correctness issue.
-- A reporting convention (rounding, frame-rate snapping, num/den display, units, names, the stream that General takes a value from) follows official v23.04. The rules and the rejected options are in `docs/adr/0001-parity-baseline-and-output-scope.md`.
+- A reporting convention (rounding, frame-rate snapping, num/den display, units, names, the stream that General takes a value from) follows official v26.10 for DVD output and v23.04 otherwise. See `docs/adr/0001-parity-baseline-and-output-scope.md` and its DVD-specific successor, `docs/adr/0002-dvd-parity-reference.md`.
 - Prove each deliberate difference with a real file before you ship it. Say why in the commit and pin it with a test.
-- Keep the output shape compatible. Field names, JSON schema, text labels, and field order come from official MediaInfo, because tools such as upbrr parse this output. A field comes from v23.04, or from v26.10 where ADR 0001 allows it. Never invent a field or a label.
+- Keep the output shape compatible. Field names, JSON schema, text labels, and field order come from official MediaInfo, because tools such as upbrr parse this output. A field comes from v23.04, or from v26.10 where ADR 0001 or the DVD-specific ADR 0002 allows it. Never invent a field or a label.
 - Pure Go, no CGO, cross-platform.
 - Not implemented yet: ARIB/ISDB metadata and captions in TS, `.mpls` playlists, HDR10 and Dolby Vision metadata for HEVC in MP4, raw `.hevc` elementary streams.
 
@@ -24,7 +24,7 @@ Never put release names or media-library paths in anything that lands on GitHub:
 
 ## Parity harness
 
-- Reference: official MediaInfo CLI with MediaInfoLib v23.04. Run the selected binary with `--Version` and verify that it reports `MediaInfoLib - v23.04` before comparing. A matching local binary on Windows, Linux, or macOS satisfies the reference requirement; it need not be on `PATH`. Do not substitute another version without explicitly recording and resolving the baseline difference.
+- Reference: official MediaInfo CLI with MediaInfoLib v26.10 for all DVD output, and v23.04 otherwise. Run the selected binary with `--Version` and verify the applicable version before comparing. Record its official artifact URL, platform, SHA-256, runtime version and applicable source revision as described in ADR 0002. A matching local binary on Windows, Linux, or macOS satisfies the reference requirement; it need not be on `PATH`. Do not substitute another version without explicitly recording and resolving the baseline difference.
 - Local validation: invoke the verified reference binary by its full path and build go-mediainfo for the local platform. Compare both binaries against the same real files with the JSON and text options below. Record the reference version, sample IDs, commands, and results. Successful local validation satisfies the pre-push requirement; SSH access is not additionally required.
 - Media host alternative: `root@media` is an environment-specific SSH destination, not a universal hostname or a prerequisite for local validation. When configured, connect with `ssh -o RemoteCommand=none -T root@media`. The `-o RemoteCommand=none -T` part is required for this route.
 - Remote deployment only: `GOOS=linux GOARCH=amd64 go build -o /tmp/go-mediainfo-linux-amd64 ./cmd/mediainfo`, then copy the binary to `/tmp/go-mediainfo` on the host.
@@ -37,9 +37,13 @@ Never put release names or media-library paths in anything that lands on GitHub:
 
 ## Deliberate differences from official v23.04
 
-Do not change these back to official. Each line is a measured fact, a newer upstream convention, or a safety rule. Before you add a line, read `docs/adr/0001-parity-baseline-and-output-scope.md`: it sets when v26.10 behavior wins and which outputs count.
+Do not change these back to official. Each line is a measured fact, a newer upstream convention, or a safety rule, except the specific maintainer-approved DVD gap convention in ADR 0002. Before you add a line, read `docs/adr/0001-parity-baseline-and-output-scope.md`: it sets when v26.10 behavior wins and which outputs count.
+
+DVD uses the reference in `docs/adr/0002-dvd-parity-reference.md`. Keep evidence-backed corrections and safety rules even when that reference disagrees.
 
 - Safety: hostile input gets the limits, omissions and escaping in the "Embedded metadata safety" section of `README.md`. These protect against denial of service and output injection, and `output_safety_test.go` pins them.
+- Newer upstream convention: all DVD output uses the v26.10 reference, including title-set joining and IFO reports. v26.10 preserves IFO stream languages after VOB merge. Wrong upstream facts are still corrected with evidence and tests; this is a reference decision, not a claim of completed parity. ADR 0002, issue #248.
+- Maintainer-approved convention: for incomplete DVD title sets, continuation retains existing numbered members after a gap. v26.10 sometimes stops before a gap and sometimes selects later members; its sizes are accurate for its selection. Keep go-mediainfo's existing selection rather than reproducing that inconsistent convention. ADR 0002, issue #248.
 - Measured fact: AAC `Errors: Missing ID_END` on sample `mkv-07`: official reports it, but its SBR parser overruns the fill element. Our walk consumes each frame bit-exactly and finds `ID_END`. Issue #34, PR #35.
 - Newer upstream convention: `Encoded_Application_Name` and `Encoded_Application_Version` are split, as in newer MediaInfo. The Matroska General `Encoded_Library` (MuxingApp) is split into name and version the same way. Issue #83.
 - Measured fact: a Matroska cover attachment produces an Image track, and General shows `Cover_Description`, `Cover_Mime`, `Cover_Type` and `ImageCount`. Official v23.04 has none.
