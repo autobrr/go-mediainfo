@@ -13,7 +13,8 @@ func testDVDSPU() []byte {
 }
 
 func testDVDSPUPES(id byte, payload []byte) []byte {
-	packet := []byte{0, 0, 1, 0xbd, 0, 0, 0x80, 0, 0, id}
+	packet := make([]byte, 0, 10+len(payload))
+	packet = append(packet, 0, 0, 1, 0xbd, 0, 0, 0x80, 0, 0, id)
 	binary.BigEndian.PutUint16(packet[4:6], uint16(4+len(payload)))
 	return append(packet, payload...)
 }
