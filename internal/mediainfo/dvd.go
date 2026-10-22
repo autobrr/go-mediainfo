@@ -146,10 +146,12 @@ func parseDVDVideo(path string, file io.ReadSeeker, size int64, opts AnalyzeOpti
 	if isVTS && !isBUP {
 		backupData = dvdMatchingBackupData(path)
 	}
-	// Title-set IFOs inside VIDEO_TS describe the logical program formed by the
-	// sibling VTS_nn_1.VOB...VTS_nn_9.VOB files. BUP and VMG files remain
-	// metadata-only: BUP is a navigation backup, while VMG describes menus.
-	aggregateMode := isVTS && !isBUP && isDVDVideoTSPath(path)
+	// A title-set 0.IFO delegates to its first VOB, which may continue to
+	// sibling title members. The supplied extension is case-sensitive, as in
+	// v26.10. BUP and VMG files remain metadata-only.
+	titleSource := dvdTitleSetSource(base)
+	aggregateMode := isVTS && len(base) == len("VTS_00_0.IFO") &&
+		strings.HasSuffix(base, "0.IFO") && isDVDTitleVOBName(titleSource)
 	programMode := !aggregateMode
 
 	var videoAttrs dvdVideoAttrs
@@ -240,11 +242,13 @@ func parseDVDVideo(path string, file io.ReadSeeker, size int64, opts AnalyzeOpti
 	payloadBitRateCorrected := false
 	payloadFileSize := int64(0)
 	if aggregateMode {
-		if vobPaths, vobSize := dvdTitleSetVOBs(path); len(vobPaths) > 0 && vobSize > 0 {
-			if len(backupData) == 0 && len(vobPaths) > 1 {
-				vobPaths = vobPaths[:1]
-				if firstInfo, err := os.Stat(vobPaths[0]); err == nil { //nolint:gosec // path came from root-bounded DVD grammar discovery
-					vobSize = firstInfo.Size()
+		if vobPaths, vobSize := dvdTitleSetVOBs(path); len(vobPaths) > 0 && dvdVOBIndex(vobPaths[0]) == 1 && vobSize > 0 {
+			if len(vobPaths) > 1 {
+				firstInfo, err := os.Stat(vobPaths[0]) //nolint:gosec // path came from root-bounded DVD grammar discovery
+				if err != nil {
+					vobPaths, vobSize = nil, 0
+				} else if !dvdVOBMayContinue(titleSource, firstInfo.Size()) {
+					vobPaths, vobSize = vobPaths[:1], firstInfo.Size()
 				}
 			}
 			aggregateSize := vobSize
@@ -1798,12 +1802,13 @@ func isDVDVideoTSPath(path string) bool {
 	return strings.EqualFold(filepath.Base(filepath.Dir(filepath.Clean(path))), "VIDEO_TS")
 }
 
-// isDVDTitleVOBPath reports whether path names a numbered title VOB directly
-// inside a VIDEO_TS directory.
+// isDVDTitleVOBPath identifies title VOBs with the existing VIDEO_TS parsing context.
 func isDVDTitleVOBPath(path string) bool {
-	if !isDVDVideoTSPath(path) {
-		return false
-	}
+	return isDVDVideoTSPath(path) && isDVDTitleVOBName(path)
+}
+
+// isDVDTitleVOBName reports whether path has an exact numbered title VOB basename.
+func isDVDTitleVOBName(path string) bool {
 	base := strings.ToUpper(filepath.Base(path))
 	if len(base) != len("VTS_00_0.VOB") || !strings.HasPrefix(base, "VTS_") || !strings.HasSuffix(base, ".VOB") {
 		return false
@@ -1825,6 +1830,12 @@ func isDVDMenuVOBPath(path string) bool {
 	return len(name) == len("VTS_00_0.VOB") && strings.HasPrefix(name, "VTS_") &&
 		name[4] >= '0' && name[4] <= '9' && name[5] >= '0' && name[5] <= '9' &&
 		name[6:] == "_0.VOB"
+}
+
+// dvdVOBMayContinue reports whether a validated title VOB starts automatic
+// continuation under the MediaInfo v26.10 supplied-spelling and size rules.
+func dvdVOBMayContinue(path string, size int64) bool {
+	return strings.HasSuffix(path, "1.VOB") && dvdVOBIndex(path) == 1 && size >= 0x3F000000 && size < 0x40000000
 }
 
 // dvdTitleSetVOBs returns the sorted title VOB paths associated with an IFO and

@@ -88,7 +88,11 @@ func ParseMPEGPSWithOptions(file io.ReadSeeker, size int64, opts mpegPSOptions) 
 				}
 			}
 			if parsedAny {
-				return finalizeMPEGPS(parser.streams, parser.streamOrder, parser.videoParsers, parser.videoPTS, parser.anyPTS, size, opts2)
+				info, streams, ok := finalizeMPEGPS(parser.streams, parser.streamOrder, parser.videoParsers, parser.videoPTS, parser.anyPTS, size, opts2)
+				if ok && opts.dvdParsing && opts2.sampled && parserHasClosedCaptions(parser) {
+					streams = appendDVDPayloadSubpictures(readerAt, size, opts, streams)
+				}
+				return info, streams, ok
 			}
 		}
 	}
@@ -103,6 +107,49 @@ func ParseMPEGPSWithOptions(file io.ReadSeeker, size int64, opts mpegPSOptions) 
 		return ContainerInfo{}, nil, false
 	}
 	return finalizeMPEGPS(parser.streams, parser.streamOrder, parser.videoParsers, parser.videoPTS, parser.anyPTS, size, opts)
+}
+
+// appendDVDPayloadSubpictures discovers missing RLE identities in wider DVD
+// edges without replacing the original timing, statistics, or existing streams.
+func appendDVDPayloadSubpictures(reader io.ReaderAt, size int64, opts mpegPSOptions, streams []Stream) []Stream {
+	opts.dvdWideWindow = true
+	head, tail := mpegPSEdgeWindows(min(int64(20_160_000), size), opts)
+	head = min(head, size)
+	tail = min(tail, size-head)
+	parser := newPSStreamParser(opts)
+	parser.dvdSubpictures = make(map[uint16]*dvdSPUProbe)
+	parser.parseReader(bufio.NewReaderSize(io.NewSectionReader(reader, 0, head), 1<<20))
+	if tail > 0 {
+		parser.beginSection()
+		parser.parseReader(bufio.NewReaderSize(io.NewSectionReader(reader, size-tail, tail), 1<<20))
+	}
+	for key, stream := range parser.streams {
+		if stream.kind == StreamText && stream.format == "RLE" {
+			if probe := parser.dvdSubpictures[key]; probe == nil || !probe.accepted {
+				delete(parser.streams, key)
+			}
+		}
+	}
+	opts.sampled = size > head+tail
+	opts.sampledBytes = head + tail
+	_, discovered, ok := finalizeMPEGPS(parser.streams, parser.streamOrder, parser.videoParsers, parser.videoPTS, parser.anyPTS, size, opts)
+	if !ok {
+		return streams
+	}
+	seen := make(map[string]bool, len(streams))
+	for _, stream := range streams {
+		id, _ := canonicalSeedValue(stream, "ID")
+		seen[id] = true
+	}
+	for _, stream := range discovered {
+		format, _ := canonicalSeedValue(stream, "Format")
+		id, _ := canonicalSeedValue(stream, "ID")
+		if stream.Kind == StreamText && format == "RLE" && !seen[id] {
+			streams = append(streams, stream)
+			seen[id] = true
+		}
+	}
+	return streams
 }
 
 // mpegPSOptions controls bounded program-stream parsing and DVD-specific

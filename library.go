@@ -46,7 +46,9 @@ func WithParseSpeed(value float64) AnalyzeOption {
 	}
 }
 
-// WithTestContinuousFileNames enables MediaInfo-style continuous file probing.
+// WithTestContinuousFileNames sets MediaInfo-style continuous file probing.
+// False disables automatic continuation for a directly opened DVD title VOB;
+// IFO child analysis retains its default DVD continuation behavior.
 func WithTestContinuousFileNames(enabled bool) AnalyzeOption {
 	return func(opts *core.AnalyzeOptions) {
 		opts.TestContinuousFileNames = enabled

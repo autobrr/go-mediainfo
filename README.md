@@ -99,10 +99,14 @@ aligned label column: `ReportBy ... : go-mediainfo - vX.Y.Z`.
 - `--LogFile=...` (write output to a file)
 - `--BOM` (write UTF-8 BOM on Windows)
 - `--ParseSpeed=0..1` (speed/accuracy tradeoff; default `0.5`)
-- `--File_TestContinuousFileNames=0|1` (MediaInfo-style continuous filename probing; default `0`)
+- `--File_TestContinuousFileNames=0|1` (MediaInfo-style continuous filename probing; default `0`, except automatic DVD title-VOB continuation)
 - `--Help`, `--Help-Output`
 - `--Info-Parameters`
 - `-f, --Full` (reserved; currently no-op)
+
+DVD continuation follows the v26.10 first-member and size rules. Passing `0`
+disables continuation when opening a VOB directly. An IFO opens its title VOB
+with the default DVD continuation behavior, independently of this outer option.
 
 ## Embedded metadata safety
 
