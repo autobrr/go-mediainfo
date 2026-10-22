@@ -43,10 +43,10 @@ func TestAnalyzeDVDStandaloneRetainsPayloadSubpictures(t *testing.T) {
 			if _, err := file.WriteAt(packet, 0); err != nil {
 				t.Fatal(err)
 			}
-			// These PES headers pin identity discovery beyond the old 8 MiB sample,
-			// not SPU bitmap decoding. Real-file validation covers the bitmap payloads.
+			// Complete structural SPUs lie beyond the original 8 MiB sample.
+			// Real-file validation separately covers bitmap decoding.
 			for i, id := range []byte{0x21, 0x22} {
-				packet := []byte{0, 0, 1, 0xBD, 0, 5, 0x80, 0, 0, id, 0}
+				packet := testDVDSPUPES(id, testDVDSPU())
 				if _, err := file.WriteAt(packet, 12<<20+int64(i*len(packet))); err != nil {
 					t.Fatal(err)
 				}

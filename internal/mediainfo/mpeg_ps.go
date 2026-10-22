@@ -117,10 +117,18 @@ func appendDVDPayloadSubpictures(reader io.ReaderAt, size int64, opts mpegPSOpti
 	head = min(head, size)
 	tail = min(tail, size-head)
 	parser := newPSStreamParser(opts)
+	parser.dvdSubpictures = make(map[uint16]*dvdSPUProbe)
 	parser.parseReader(bufio.NewReaderSize(io.NewSectionReader(reader, 0, head), 1<<20))
 	if tail > 0 {
 		parser.beginSection()
 		parser.parseReader(bufio.NewReaderSize(io.NewSectionReader(reader, size-tail, tail), 1<<20))
+	}
+	for key, stream := range parser.streams {
+		if stream.kind == StreamText && stream.format == "RLE" {
+			if probe := parser.dvdSubpictures[key]; probe == nil || !probe.accepted {
+				delete(parser.streams, key)
+			}
+		}
 	}
 	opts.sampled = size > head+tail
 	opts.sampledBytes = head + tail

@@ -459,3 +459,21 @@ func FuzzAACRawDataBlock(f *testing.F) {
 		_ = state.walkFrame(frame)
 	})
 }
+
+func FuzzDVDSPUAcceptance(f *testing.F) {
+	f.Add(testDVDSPU())
+	f.Add([]byte{0, 10, 0, 4, 0, 0, 0, 4, 0xff, 0})
+	f.Fuzz(func(t *testing.T, data []byte) {
+		data = fuzzLimit(data)
+		_ = validDVDSPU(data)
+		probe := dvdSPUProbe{}
+		for len(data) > 0 {
+			n := min(len(data), 257)
+			probe.consume(data[:n], 0, false)
+			data = data[n:]
+			if len(probe.pending) > 65535 {
+				t.Fatal("SPU reassembly exceeded 16-bit bound")
+			}
+		}
+	})
+}
