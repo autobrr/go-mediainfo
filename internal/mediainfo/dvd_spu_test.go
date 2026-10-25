@@ -3,6 +3,7 @@ package mediainfo
 import (
 	"bytes"
 	"encoding/binary"
+	"strconv"
 	"testing"
 )
 
@@ -62,6 +63,71 @@ func TestSupplementalDVDSubpictureDiscontinuity(t *testing.T) {
 	}
 }
 
+func TestSupplementalDVDSubpictureShortUnitRecovery(t *testing.T) {
+	for size := 2; size < 10; size++ {
+		short := bytes.Repeat([]byte{0xa5}, size)
+		binary.BigEndian.PutUint16(short, uint16(size))
+		for _, tc := range []struct {
+			name      string
+			fragments [][]byte
+			want      bool
+		}{
+			{"same PES", [][]byte{append(append([]byte{}, short...), testDVDSPU()...)}, true},
+			{"split PES", [][]byte{short[:1], short[1 : size-1], append(append([]byte{}, short[size-1:]...), testDVDSPU()...)}, true},
+			{"short only", [][]byte{short}, false},
+		} {
+			t.Run(strconv.Itoa(size)+"/"+tc.name, func(t *testing.T) {
+				var data []byte
+				for _, fragment := range tc.fragments {
+					data = append(data, testDVDSPUPES(0x20, fragment)...)
+				}
+				streams := appendDVDPayloadSubpictures(bytes.NewReader(data), int64(len(data)), mpegPSOptions{dvdParsing: true, parseSpeed: 0.5}, nil)
+				if !tc.want {
+					if len(streams) != 0 {
+						t.Fatal("short unit admitted a subtitle stream")
+					}
+					return
+				}
+				if len(streams) != 1 {
+					t.Fatalf("accepted %d streams, want the valid trailing SPU", len(streams))
+				}
+				if id, _ := canonicalSeedValue(streams[0], "ID"); id != "189-32" {
+					t.Fatalf("subtitle ID = %q, want 189-32", id)
+				}
+			})
+		}
+	}
+}
+
+func TestDVDSPUProbeImpossibleSize(t *testing.T) {
+	for _, size := range []byte{0, 1} {
+		t.Run(strconv.Itoa(int(size)), func(t *testing.T) {
+			probe := dvdSPUProbe{}
+			probe.consume(append([]byte{0, size}, testDVDSPU()...), 0, false)
+			if probe.accepted || len(probe.pending) != 0 {
+				t.Fatal("impossible size did not discard the current payload")
+			}
+			probe.consume(testDVDSPU(), 0, false)
+			if !probe.accepted {
+				t.Fatal("next payload did not recover after an impossible size")
+			}
+		})
+	}
+}
+
+func TestDVDSPUProbeShortUnitSectionReset(t *testing.T) {
+	parser := newPSStreamParser(mpegPSOptions{})
+	parser.dvdSubpictures = map[uint16]*dvdSPUProbe{}
+	key := psStreamKey(0xbd, 0x20)
+	entry := parser.ensureStream(0xbd, 0x20, StreamText, "RLE")
+	parser.consumePayload(entry, key, 0, 1, true, []byte{0, 9, 0xa5})
+	parser.beginSection()
+	parser.consumePayload(entry, key, 0, 1, true, testDVDSPU())
+	if !parser.dvdSubpictures[key].accepted {
+		t.Fatal("sampled gap retained a partial rejected unit")
+	}
+}
+
 func TestDVDSPUProbeTimestampRecovery(t *testing.T) {
 	valid := testDVDSPU()
 	split := dvdSPUProbe{}
@@ -75,6 +141,12 @@ func TestDVDSPUProbeTimestampRecovery(t *testing.T) {
 	probe.consume(testDVDSPU(), 2, true)
 	if !probe.accepted {
 		t.Fatal("new timestamp did not abandon incomplete unit")
+	}
+	short := dvdSPUProbe{}
+	short.consume([]byte{0, 9, 0xa5}, 1, true)
+	short.consume(testDVDSPU(), 2, true)
+	if !short.accepted {
+		t.Fatal("new timestamp retained a partial rejected unit")
 	}
 }
 

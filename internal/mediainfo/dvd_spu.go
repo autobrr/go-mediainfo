@@ -13,6 +13,7 @@ type dvdSPUProbe struct {
 
 // consume reassembles a 16-bit-sized SPU across PES payloads. A new timestamp
 // abandons an incomplete previous unit; accepted evidence remains valid.
+// Rejected units of at least two bytes are consumed to their declared end.
 func (p *dvdSPUProbe) consume(data []byte, pts uint64, hasPTS bool) {
 	if p.accepted {
 		return
@@ -34,7 +35,7 @@ func (p *dvdSPUProbe) consume(data []byte, pts uint64, hasPTS bool) {
 			return
 		}
 		size := int(binary.BigEndian.Uint16(p.pending))
-		if size < 10 {
+		if size < 2 {
 			p.pending = nil
 			return
 		}

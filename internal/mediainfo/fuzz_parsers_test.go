@@ -463,6 +463,11 @@ func FuzzAACRawDataBlock(f *testing.F) {
 func FuzzDVDSPUAcceptance(f *testing.F) {
 	f.Add(testDVDSPU())
 	f.Add([]byte{0, 10, 0, 4, 0, 0, 0, 4, 0xff, 0})
+	for _, size := range []int{2, 9} {
+		short := bytes.Repeat([]byte{0xa5}, size)
+		binary.BigEndian.PutUint16(short, uint16(size))
+		f.Add(append(short, testDVDSPU()...))
+	}
 	f.Fuzz(func(t *testing.T, data []byte) {
 		data = fuzzLimit(data)
 		_ = validDVDSPU(data)
