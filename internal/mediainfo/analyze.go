@@ -1712,7 +1712,7 @@ func analyzeFileWithOptions(ctx context.Context, path string, opts AnalyzeOption
 		psPaths := []string{path}
 		dvdTitleSequence := isDVDTitleVOBPath(path)
 		dvdMenu := isDVDMenuVOBPath(path)
-		dvdParsing := dvdTitleSequence || dvdMenu
+		dvdParsing := dvdTitleSequence || dvdMenu || len(dvdVOBPaths) > 1
 		dvdExtras := false
 		if len(dvdVOBPaths) > 1 {
 			psPaths = dvdVOBPaths

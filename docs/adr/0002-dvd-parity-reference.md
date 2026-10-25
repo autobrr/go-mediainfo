@@ -57,8 +57,13 @@ The official release tags resolve to:
 
 The official Windows x64 CLI package is
 [MediaInfo_CLI_26.10_Windows_x64.zip](https://mediaarea.net/download/binary/mediainfo/26.10/MediaInfo_CLI_26.10_Windows_x64.zip).
-This identifies an available artifact, not a verified local executable. Its
-checksum and runtime version must be recorded when used. Other platforms may
+The [verified Windows reference record](https://github.com/autobrr/go-mediainfo/issues/248#issuecomment-6326999896)
+confirms MediaInfoLib v26.10 at runtime and records these SHA-256 hashes:
+
+- Executable: `35d5bdf5bd3ef0776c50e22492b4e5b0ee687f9c115d9b61f4feba3e881dfbf9`.
+- Package: `4cc94bd272903914c04f4f9a9f53a6c94b5ea6c6454cf738d29fa182c41e8a29`.
+
+Verify the artifact and runtime version when reusing it. Other platforms may
 use their official v26.10 CLI artifact under the same verification rules.
 
 ## Consequences

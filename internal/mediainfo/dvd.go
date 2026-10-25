@@ -15,8 +15,10 @@ import (
 )
 
 const (
-	dvdSectorSize    = 2048
-	dvdMaxMuxBitRate = 10_080_000
+	dvdSectorSize             = 2048
+	dvdMaxMuxBitRate          = 10_080_000
+	dvdVOBContinuationMinSize = 0x3F000000
+	dvdVOBContinuationLimit   = 0x40000000 // exclusive
 )
 
 const (
@@ -247,7 +249,7 @@ func parseDVDVideo(path string, file io.ReadSeeker, size int64, opts AnalyzeOpti
 				firstInfo, err := os.Stat(vobPaths[0]) //nolint:gosec // path came from root-bounded DVD grammar discovery
 				if err != nil {
 					vobPaths, vobSize = nil, 0
-				} else if firstInfo.Size() < 0x3F000000 || firstInfo.Size() >= 0x40000000 {
+				} else if firstInfo.Size() < dvdVOBContinuationMinSize || firstInfo.Size() >= dvdVOBContinuationLimit {
 					vobPaths, vobSize = vobPaths[:1], firstInfo.Size()
 				}
 			}
@@ -1835,7 +1837,7 @@ func isDVDMenuVOBPath(path string) bool {
 // dvdVOBMayContinue reports whether a validated title VOB starts automatic
 // continuation under the MediaInfo v26.10 supplied-spelling and size rules.
 func dvdVOBMayContinue(path string, size int64) bool {
-	return strings.HasSuffix(path, "1.VOB") && dvdVOBIndex(path) == 1 && size >= 0x3F000000 && size < 0x40000000
+	return strings.HasSuffix(path, "1.VOB") && dvdVOBIndex(path) == 1 && size >= dvdVOBContinuationMinSize && size < dvdVOBContinuationLimit
 }
 
 // dvdTitleSetVOBs returns the sorted title VOB paths associated with an IFO and

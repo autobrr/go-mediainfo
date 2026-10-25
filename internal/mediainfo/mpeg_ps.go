@@ -89,6 +89,7 @@ func ParseMPEGPSWithOptions(file io.ReadSeeker, size int64, opts mpegPSOptions) 
 			}
 			if parsedAny {
 				info, streams, ok := finalizeMPEGPS(parser.streams, parser.streamOrder, parser.videoParsers, parser.videoPTS, parser.anyPTS, size, opts2)
+				// Renderable captions trigger DVD-wide discovery; retain the original A/V sampling results.
 				if ok && opts.dvdParsing && opts2.sampled && parserHasClosedCaptions(parser) {
 					streams = appendDVDPayloadSubpictures(readerAt, size, opts, streams)
 				}
@@ -1659,6 +1660,13 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 		case StreamText:
 			if st.pts.has() {
 				duration := float64(ptsDelta(st.pts.first, st.pts.last)) / 90000.0
+				if st.format == "RLE" {
+					// Only observed wraps can extend the subtitle PTS span across the modulus.
+					duration = 0
+					if !st.rleDurationInvalid {
+						duration = (float64(st.pts.last) - float64(st.pts.first) + float64(st.pts.resets)*(1<<33)) / 90000.0
+					}
+				}
 				if duration > 0 {
 					fields = addStreamDuration(fields, duration)
 					builder.Fill("Duration", strconv.FormatInt(int64(math.Round(duration*1000)), 10), "Duration", formatDuration(duration))

@@ -90,12 +90,21 @@ func (p *psStreamParser) recordPTS(entry *psStream, currentPTS uint64) {
 		entry.sampleSection = p.section
 		entry.clockHasPTS = false
 	}
+	previousPTS, previousResets := entry.pts.last, entry.pts.resets
+	continuousPTS := entry.clockHasPTS
 	entry.clockPTS = currentPTS
 	entry.clockAudioStart = entry.audioFrames
 	entry.clockVideoStart = entry.videoFrameCount
 	entry.clockHasPTS = true
 	p.anyPTS.add(currentPTS)
 	entry.pts.add(currentPTS)
+	if entry.format == "RLE" && entry.pts.resets > previousResets {
+		// Only a wrap observed within one continuous sample establishes a span.
+		// The 33-bit half-range rule distinguishes wraps from backward resets.
+		if !continuousPTS || previousPTS-currentPTS <= 1<<32 {
+			entry.rleDurationInvalid = true
+		}
+	}
 	if entry.kind == StreamVideo {
 		p.videoPTS.add(currentPTS)
 	}

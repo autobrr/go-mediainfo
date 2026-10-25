@@ -1,11 +1,81 @@
 package mediainfo
 
 import (
+	"bytes"
+	"encoding/binary"
 	"os"
 	"path/filepath"
 	"strconv"
 	"testing"
 )
+
+func TestAnalyzeDVDJoinedParsing(t *testing.T) {
+	for _, tc := range []struct {
+		name, directory          string
+		ifo, disabled, singleton bool
+		wantCount                string
+	}{
+		{name: "direct inside", directory: "VIDEO_TS", wantCount: "130"},
+		{name: "direct outside", directory: "standalone", wantCount: "130"},
+		{name: "IFO inside", directory: "VIDEO_TS", ifo: true, wantCount: "130"},
+		{name: "IFO outside", directory: "standalone", ifo: true, wantCount: "130"},
+		{name: "disabled outside", directory: "standalone", disabled: true, wantCount: "128"},
+		{name: "singleton outside", directory: "standalone", singleton: true, wantCount: "128"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := filepath.Join(t.TempDir(), tc.directory)
+			if err := os.Mkdir(root, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			// More than 128 complete AC-3 frames distinguishes DVD parsing from
+			// generic MPEG-PS's bounded statistics pass at ParseSpeed 0.5.
+			frame := buildBoundaryAC3Frame(t, 0x20)
+			packet := append([]byte{0, 0, 1, 0xBD, 0, 0, 0x80, 0, 0, 0x80, 0, 0, 0}, frame...)
+			binary.BigEndian.PutUint16(packet[4:6], uint16(len(packet)-6))
+			first := filepath.Join(root, "VTS_01_1.VOB")
+			if err := os.WriteFile(first, bytes.Repeat(packet, 130), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Truncate(first, 0x3F000000); err != nil {
+				t.Fatal(err)
+			}
+			if !tc.singleton {
+				if err := os.WriteFile(filepath.Join(root, "VTS_01_2.VOB"), []byte{0, 0, 1, 0xB9}, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			input := first
+			if tc.ifo {
+				data, _ := remappedSubpictureDVDFixture()
+				input = filepath.Join(root, "VTS_01_0.IFO")
+				if err := os.WriteFile(input, data, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			report, err := AnalyzeFileWithOptions(input, AnalyzeOptions{ParseSpeed: 0.5, HasTestContinuousFileNames: tc.disabled})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, stream := range report.Streams {
+				if stream.Kind != StreamAudio {
+					continue
+				}
+				extra := canonicalSeedStructuredNode(&stream, "extra")
+				if extra != nil {
+					for _, member := range extra.Object {
+						if member.Key == "compr_Count" {
+							if member.Value.Text != tc.wantCount {
+								t.Errorf("compr_Count = %q, want %q", member.Value.Text, tc.wantCount)
+							}
+							return
+						}
+					}
+				}
+			}
+			t.Fatal("missing AC-3 compression statistics")
+		})
+	}
+}
 
 func TestAnalyzeDVDContinuationEligibility(t *testing.T) {
 	for _, tc := range []struct {
