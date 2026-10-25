@@ -26,10 +26,6 @@ func (p *dvdSPUProbe) consume(data []byte, pts uint64, hasPTS bool) {
 		target := 2
 		if len(p.pending) >= 2 {
 			target = int(binary.BigEndian.Uint16(p.pending))
-			if target < 10 {
-				p.pending = nil
-				return
-			}
 		}
 		n := min(target-len(p.pending), len(data))
 		p.pending = append(p.pending, data[:n]...)

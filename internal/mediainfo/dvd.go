@@ -247,7 +247,7 @@ func parseDVDVideo(path string, file io.ReadSeeker, size int64, opts AnalyzeOpti
 				firstInfo, err := os.Stat(vobPaths[0]) //nolint:gosec // path came from root-bounded DVD grammar discovery
 				if err != nil {
 					vobPaths, vobSize = nil, 0
-				} else if !dvdVOBMayContinue(titleSource, firstInfo.Size()) {
+				} else if firstInfo.Size() < 0x3F000000 || firstInfo.Size() >= 0x40000000 {
 					vobPaths, vobSize = vobPaths[:1], firstInfo.Size()
 				}
 			}
