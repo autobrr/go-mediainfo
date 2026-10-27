@@ -15,13 +15,20 @@ func TestMPEGPSRLEDurationEvidence(t *testing.T) {
 		gap      bool
 		sampled  bool
 		noPTS    bool
+		generic  bool
 		duration string
 	}{
 		{name: "monotonic", pts: []uint64{90_000, 180_000}, duration: "1000"},
 		{name: "small reorder", pts: []uint64{90_000, 180_000, 170_000}, duration: "1000"},
 		{name: "continuous wrap", pts: []uint64{wrap - 90_000, 90_000}, duration: "2000"},
-		{name: "wrap with forward endpoint", pts: []uint64{90_000, wrap - 90_000, 0, 180_000}, duration: "95444718"},
-		{name: "two observed wraps", pts: []uint64{wrap - 90_000, 90_000, wrap - 90_000, 90_000}, duration: "95445718"},
+		{name: "wrap with forward endpoint", pts: []uint64{90_000, wrap - 90_000, 0, 180_000}},
+		{name: "two observed wraps", pts: []uint64{wrap - 90_000, 90_000, wrap - 90_000, 90_000}},
+		{name: "forward step over half range", pts: []uint64{90_000, wrap - 90_000}},
+		{name: "forward step at half range", pts: []uint64{90_000, 90_000 + wrap/2}},
+		{name: "forward half range after reorder", pts: []uint64{180_000, 90_000, 90_000 + wrap/2}},
+		{name: "backward half range after reorder", pts: []uint64{wrap/2 + 90_000, wrap / 2, 0}},
+		{name: "generic backward reset", pts: []uint64{900_000, 90_000}, generic: true},
+		{name: "generic ambiguous forward step", pts: []uint64{90_000, wrap - 90_000, 0, 180_000}, generic: true},
 		{name: "wrap within sampled section", pts: []uint64{wrap - 90_000, 90_000}, sampled: true, duration: "2000"},
 		{name: "sampled monotonic span", pts: []uint64{90_000, 180_000}, gap: true, sampled: true, duration: "1000"},
 		{name: "backward reset", pts: []uint64{900_000, 90_000}},
@@ -55,7 +62,7 @@ func TestMPEGPSRLEDurationEvidence(t *testing.T) {
 			var videoPTS ptsTracker
 			videoPTS.add(0)
 			_, streams, ok := finalizeMPEGPS(parser.streams, parser.streamOrder, nil, videoPTS, parser.anyPTS, 4096,
-				mpegPSOptions{dvdParsing: true, parseSpeed: 0.5, sampled: tc.sampled})
+				mpegPSOptions{dvdParsing: !tc.generic, parseSpeed: 0.5, sampled: tc.sampled})
 			if !ok || len(streams) != 1 {
 				t.Fatalf("finalization lost payload stream: ok=%v streams=%d", ok, len(streams))
 			}

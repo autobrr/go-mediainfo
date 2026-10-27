@@ -104,7 +104,8 @@ aligned label column: `ReportBy ... : go-mediainfo - vX.Y.Z`.
 - `--Info-Parameters`
 - `-f, --Full` (reserved; currently no-op)
 
-DVD continuation follows the v26.10 first-member and size rules. Passing `0`
+Automatic continuation is limited to recognized `VTS_nn_1.VOB` title sets and
+uses the v26.10 size eligibility bounds. Passing `0`
 disables continuation when opening a VOB directly. An IFO opens its title VOB
 with the default DVD continuation behavior, independently of this outer option.
 

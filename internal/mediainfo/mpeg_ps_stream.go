@@ -90,7 +90,8 @@ func (p *psStreamParser) recordPTS(entry *psStream, currentPTS uint64) {
 		entry.sampleSection = p.section
 		entry.clockHasPTS = false
 	}
-	previousPTS, previousResets := entry.pts.last, entry.pts.resets
+	previousPTS, previousResets := entry.clockPTS, entry.pts.resets
+	hadPTS := entry.pts.has()
 	continuousPTS := entry.clockHasPTS
 	entry.clockPTS = currentPTS
 	entry.clockAudioStart = entry.audioFrames
@@ -98,10 +99,12 @@ func (p *psStreamParser) recordPTS(entry *psStream, currentPTS uint64) {
 	entry.clockHasPTS = true
 	p.anyPTS.add(currentPTS)
 	entry.pts.add(currentPTS)
-	if entry.format == "RLE" && entry.pts.resets > previousResets {
-		// Only a wrap observed within one continuous sample establishes a span.
-		// The 33-bit half-range rule distinguishes wraps from backward resets.
-		if !continuousPTS || previousPTS-currentPTS <= 1<<32 {
+	if entry.format == "RLE" && hadPTS {
+		// Half-range steps have no unique modular ordering. A backward wrap
+		// also needs continuous observation rather than a sampled jump.
+		ambiguousForward := currentPTS > previousPTS && currentPTS-previousPTS >= 1<<32
+		unsupportedReset := entry.pts.resets > previousResets && (!continuousPTS || previousPTS-currentPTS <= 1<<32)
+		if ambiguousForward || unsupportedReset {
 			entry.rleDurationInvalid = true
 		}
 	}

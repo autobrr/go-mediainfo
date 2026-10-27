@@ -117,6 +117,10 @@ func appendDVDPayloadSubpictures(reader io.ReaderAt, size int64, opts mpegPSOpti
 	head, tail := mpegPSEdgeWindows(min(int64(20_160_000), size), opts)
 	head = min(head, size)
 	tail = min(tail, size-head)
+	if head+tail == size {
+		// One reader preserves PES and SPU assembly when no bytes are skipped.
+		head, tail = size, 0
+	}
 	parser := newPSStreamParser(opts)
 	parser.dvdSubpictures = make(map[uint16]*dvdSPUProbe)
 	parser.parseReader(bufio.NewReaderSize(io.NewSectionReader(reader, 0, head), 1<<20))
@@ -1659,13 +1663,14 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 			}
 		case StreamText:
 			if st.pts.has() {
-				duration := float64(ptsDelta(st.pts.first, st.pts.last)) / 90000.0
+				var duration float64
 				if st.format == "RLE" {
 					// Only observed wraps can extend the subtitle PTS span across the modulus.
-					duration = 0
 					if !st.rleDurationInvalid {
 						duration = (float64(st.pts.last) - float64(st.pts.first) + float64(st.pts.resets)*(1<<33)) / 90000.0
 					}
+				} else {
+					duration = float64(ptsDelta(st.pts.first, st.pts.last)) / 90000.0
 				}
 				if duration > 0 {
 					fields = addStreamDuration(fields, duration)

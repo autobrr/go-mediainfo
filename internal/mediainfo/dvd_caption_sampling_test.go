@@ -15,10 +15,13 @@ func TestAnalyzeDVDStandaloneRetainsPayloadSubpictures(t *testing.T) {
 		name, input, sibling string
 		size                 int64
 		captions             bool
+		boundary             string
 	}{
-		{"eligible first", "VTS_01_1.VOB", "VTS_01_2.VOB", 0x3F000000, true},
-		{"later member", "VTS_01_2.VOB", "VTS_01_1.VOB", 64 << 20, true},
-		{"no captions", "VTS_01_2.VOB", "VTS_01_1.VOB", 64 << 20, false},
+		{"eligible first", "VTS_01_1.VOB", "VTS_01_2.VOB", 0x3F000000, true, ""},
+		{"later member", "VTS_01_2.VOB", "VTS_01_1.VOB", 64 << 20, true, ""},
+		{"no captions", "VTS_01_2.VOB", "VTS_01_1.VOB", 64 << 20, false, ""},
+		{"contiguous PES boundary", "VTS_01_2.VOB", "VTS_01_1.VOB", 32 << 20, true, "PES"},
+		{"contiguous SPU boundary", "VTS_01_2.VOB", "VTS_01_1.VOB", 32 << 20, true, "SPU"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := filepath.Join(t.TempDir(), "VIDEO_TS")
@@ -47,7 +50,17 @@ func TestAnalyzeDVDStandaloneRetainsPayloadSubpictures(t *testing.T) {
 			// Real-file validation separately covers bitmap decoding.
 			for i, id := range []byte{0x21, 0x22} {
 				packet := testDVDSPUPES(id, testDVDSPU())
-				if _, err := file.WriteAt(packet, 12<<20+int64(i*len(packet))); err != nil {
+				offset := int64(12 << 20)
+				if tc.boundary != "" {
+					// The rounded supplemental head ends outside both original samples.
+					offset = 20_185_088 - int64(len(packet)/2)
+					if tc.boundary == "SPU" {
+						prefix := testDVDSPUPES(id, testDVDSPU()[:12])
+						packet = append(prefix, testDVDSPUPES(id, testDVDSPU()[12:])...)
+						offset = 20_185_088 - int64(len(prefix))
+					}
+				}
+				if _, err := file.WriteAt(packet, offset+int64(i*len(packet))); err != nil {
 					t.Fatal(err)
 				}
 			}
