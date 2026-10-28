@@ -9,6 +9,7 @@ type psStream struct {
 	format               string
 	bytes                uint64
 	pts                  ptsTracker
+	rleDurationInvalid   bool
 	audioProfile         string
 	audioObject          int
 	audioMPEGVersion     int

@@ -2,6 +2,10 @@
 
 Status: accepted, 2026-10-18.
 
+Partially superseded for DVD output by [ADR 0002](0002-dvd-parity-reference.md).
+The v23.04 reference remains in effect for non-DVD output; the correctness,
+safety and output-scope rules below remain in effect for DVD too.
+
 ## Context
 
 An external contributor ran go-mediainfo and official MediaInfo against a corpus of 3173 files. The run compared all six output formats against MediaInfo v23.04, and the presence of each field against MediaInfo v26.10. It found 1812 difference patterns.

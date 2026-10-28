@@ -18,6 +18,7 @@ type mpegPSFile interface {
 }
 
 type psStreamParser struct {
+	dvdSubpictures  map[uint16]*dvdSPUProbe
 	streams         map[uint16]*psStream
 	streamOrder     []uint16
 	videoParsers    map[uint16]*mpeg2VideoParser
@@ -60,6 +61,10 @@ func newPSStreamParser(opts mpegPSOptions) *psStreamParser {
 // beginSection resets only state that cannot cross a bounded-read jump and
 // starts a new timing section for per-stream frame-clock reconstruction.
 func (p *psStreamParser) beginSection() {
+	for _, probe := range p.dvdSubpictures {
+		probe.pending = nil
+		probe.hasPTS = false
+	}
 	p.section++
 	for key, entry := range p.streams {
 		entry.audioBuffer = nil
@@ -85,12 +90,24 @@ func (p *psStreamParser) recordPTS(entry *psStream, currentPTS uint64) {
 		entry.sampleSection = p.section
 		entry.clockHasPTS = false
 	}
+	previousPTS, previousResets := entry.clockPTS, entry.pts.resets
+	hadPTS := entry.pts.has()
+	continuousPTS := entry.clockHasPTS
 	entry.clockPTS = currentPTS
 	entry.clockAudioStart = entry.audioFrames
 	entry.clockVideoStart = entry.videoFrameCount
 	entry.clockHasPTS = true
 	p.anyPTS.add(currentPTS)
 	entry.pts.add(currentPTS)
+	if entry.format == "RLE" && hadPTS {
+		// Half-range steps have no unique modular ordering. A backward wrap
+		// also needs continuous observation rather than a sampled jump.
+		ambiguousForward := currentPTS > previousPTS && currentPTS-previousPTS >= 1<<32
+		unsupportedReset := entry.pts.resets > previousResets && (!continuousPTS || previousPTS-currentPTS <= 1<<32)
+		if ambiguousForward || unsupportedReset {
+			entry.rleDurationInvalid = true
+		}
+	}
 	if entry.kind == StreamVideo {
 		p.videoPTS.add(currentPTS)
 	}
@@ -568,6 +585,14 @@ func (p *psStreamParser) consumePayload(entry *psStream, key uint16, flags byte,
 		return
 	}
 	entry.bytes += uint64(len(payload))
+	if p.dvdSubpictures != nil && entry.kind == StreamText && entry.format == "RLE" {
+		probe := p.dvdSubpictures[key]
+		if probe == nil {
+			probe = &dvdSPUProbe{}
+			p.dvdSubpictures[key] = probe
+		}
+		probe.consume(payload, pts, hasPTS)
+	}
 	if entry.kind == StreamVideo {
 		consumeMPEG2Captions(entry, payload, pts, hasPTS)
 		parser := p.videoParsers[key]

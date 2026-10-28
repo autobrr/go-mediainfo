@@ -88,7 +88,12 @@ func ParseMPEGPSWithOptions(file io.ReadSeeker, size int64, opts mpegPSOptions) 
 				}
 			}
 			if parsedAny {
-				return finalizeMPEGPS(parser.streams, parser.streamOrder, parser.videoParsers, parser.videoPTS, parser.anyPTS, size, opts2)
+				info, streams, ok := finalizeMPEGPS(parser.streams, parser.streamOrder, parser.videoParsers, parser.videoPTS, parser.anyPTS, size, opts2)
+				// Renderable captions trigger DVD-wide discovery; retain the original A/V sampling results.
+				if ok && opts.dvdParsing && opts2.sampled && parserHasClosedCaptions(parser) {
+					streams = appendDVDPayloadSubpictures(readerAt, size, opts, streams)
+				}
+				return info, streams, ok
 			}
 		}
 	}
@@ -103,6 +108,53 @@ func ParseMPEGPSWithOptions(file io.ReadSeeker, size int64, opts mpegPSOptions) 
 		return ContainerInfo{}, nil, false
 	}
 	return finalizeMPEGPS(parser.streams, parser.streamOrder, parser.videoParsers, parser.videoPTS, parser.anyPTS, size, opts)
+}
+
+// appendDVDPayloadSubpictures discovers missing RLE identities in wider DVD
+// edges without replacing the original timing, statistics, or existing streams.
+func appendDVDPayloadSubpictures(reader io.ReaderAt, size int64, opts mpegPSOptions, streams []Stream) []Stream {
+	opts.dvdWideWindow = true
+	head, tail := mpegPSEdgeWindows(min(int64(20_160_000), size), opts)
+	head = min(head, size)
+	tail = min(tail, size-head)
+	if head+tail == size {
+		// One reader preserves PES and SPU assembly when no bytes are skipped.
+		head, tail = size, 0
+	}
+	parser := newPSStreamParser(opts)
+	parser.dvdSubpictures = make(map[uint16]*dvdSPUProbe)
+	parser.parseReader(bufio.NewReaderSize(io.NewSectionReader(reader, 0, head), 1<<20))
+	if tail > 0 {
+		parser.beginSection()
+		parser.parseReader(bufio.NewReaderSize(io.NewSectionReader(reader, size-tail, tail), 1<<20))
+	}
+	for key, stream := range parser.streams {
+		if stream.kind == StreamText && stream.format == "RLE" {
+			if probe := parser.dvdSubpictures[key]; probe == nil || !probe.accepted {
+				delete(parser.streams, key)
+			}
+		}
+	}
+	opts.sampled = size > head+tail
+	opts.sampledBytes = head + tail
+	_, discovered, ok := finalizeMPEGPS(parser.streams, parser.streamOrder, parser.videoParsers, parser.videoPTS, parser.anyPTS, size, opts)
+	if !ok {
+		return streams
+	}
+	seen := make(map[string]bool, len(streams))
+	for _, stream := range streams {
+		id, _ := canonicalSeedValue(stream, "ID")
+		seen[id] = true
+	}
+	for _, stream := range discovered {
+		format, _ := canonicalSeedValue(stream, "Format")
+		id, _ := canonicalSeedValue(stream, "ID")
+		if stream.Kind == StreamText && format == "RLE" && !seen[id] {
+			streams = append(streams, stream)
+			seen[id] = true
+		}
+	}
+	return streams
 }
 
 // mpegPSOptions controls bounded program-stream parsing and DVD-specific
@@ -450,9 +502,13 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 	observedPayloadBytes := int64(0)
 	videoCount := 0
 	hasMenuStream := false
+	rejectedRLETiming := false
 	for _, st := range streams {
 		if st == nil {
 			continue
+		}
+		if st.format == "RLE" && st.rleDurationInvalid {
+			rejectedRLETiming = true
 		}
 		switch st.kind {
 		case StreamVideo:
@@ -752,7 +808,8 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 					if frameRateRounded > 0 && info.GOPLength > 0 {
 						duration = float64(info.GOPLength) / frameRateRounded
 						fromGOP = true
-					} else {
+					} else if !rejectedRLETiming {
+						// Rejected RLE timestamps cannot establish an untimed video's clock.
 						duration = ptsDurationPS(anyPTS, opts)
 					}
 				}
@@ -1611,7 +1668,15 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 			}
 		case StreamText:
 			if st.pts.has() {
-				duration := float64(ptsDelta(st.pts.first, st.pts.last)) / 90000.0
+				var duration float64
+				if st.format == "RLE" {
+					// Only observed wraps can extend the subtitle PTS span across the modulus.
+					if !st.rleDurationInvalid {
+						duration = (float64(st.pts.last) - float64(st.pts.first) + float64(st.pts.resets)*(1<<33)) / 90000.0
+					}
+				} else {
+					duration = float64(ptsDelta(st.pts.first, st.pts.last)) / 90000.0
+				}
 				if duration > 0 {
 					fields = addStreamDuration(fields, duration)
 					builder.Fill("Duration", strconv.FormatInt(int64(math.Round(duration*1000)), 10), "Duration", formatDuration(duration))
@@ -1751,6 +1816,9 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 		if st == nil || st.kind == StreamMenu {
 			continue
 		}
+		if st.format == "RLE" && st.rleDurationInvalid {
+			continue
+		}
 		duration := ptsDurationPS(st.pts, opts)
 		if st.kind == StreamAudio {
 			duration = audioDurationPS(st, opts)
@@ -1768,6 +1836,10 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 	if videoDuration > maxDuration {
 		maxDuration = videoDuration
 	}
+	// The global tracker includes rejected RLE timestamps and cannot then supply a clean fallback.
+	if maxDuration == 0 && !rejectedRLETiming {
+		maxDuration = ptsDurationPS(anyPTS, opts)
+	}
 	if maxDuration > 0 {
 		// MediaInfo often quantizes very short durations (e.g. 1-frame menu VOBs)
 		// to milliseconds, which affects derived overall bitrate rounding.
@@ -1775,8 +1847,6 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 			maxDuration = math.Round(maxDuration*1000) / 1000
 		}
 		info.DurationSeconds = maxDuration
-	} else if duration := ptsDurationPS(anyPTS, opts); duration > 0 {
-		info.DurationSeconds = duration
 	}
 
 	if ccEntry != nil {

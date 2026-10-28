@@ -142,8 +142,8 @@ func shouldApplyBDAVSizing(primaryVideoFormat string, audioCount, audioSizedCoun
 }
 
 // AnalyzeFileWithOptions analyzes one local media file with opts and returns
-// filesystem or open errors. A numbered title VOB inside VIDEO_TS is analyzed
-// with its matching title-set members as one logical input.
+// filesystem or open errors. A size-eligible first title VOB with the supplied
+// .VOB extension includes title-set members unless continuation is disabled.
 func AnalyzeFileWithOptions(path string, opts AnalyzeOptions) (Report, error) {
 	return AnalyzeFileWithOptionsContext(context.Background(), path, opts)
 }
@@ -197,7 +197,8 @@ func analyzeFileWithOptions(ctx context.Context, path string, opts AnalyzeOption
 		}
 	}
 	var dvdVOBPaths []string
-	if format == "MPEG-PS" && isDVDTitleVOBPath(path) {
+	dvdContinuation := !opts.HasTestContinuousFileNames || opts.TestContinuousFileNames
+	if format == "MPEG-PS" && isDVDTitleVOBName(path) && dvdContinuation && dvdVOBMayContinue(path, fileSize) {
 		if paths, total := dvdTitleSetVOBs(path); len(paths) > 1 && total > 0 {
 			dvdVOBPaths = paths
 			fileSize = total
@@ -1711,7 +1712,7 @@ func analyzeFileWithOptions(ctx context.Context, path string, opts AnalyzeOption
 		psPaths := []string{path}
 		dvdTitleSequence := isDVDTitleVOBPath(path)
 		dvdMenu := isDVDMenuVOBPath(path)
-		dvdParsing := dvdTitleSequence || dvdMenu
+		dvdParsing := dvdTitleSequence || dvdMenu || len(dvdVOBPaths) > 1
 		dvdExtras := false
 		if len(dvdVOBPaths) > 1 {
 			psPaths = dvdVOBPaths
