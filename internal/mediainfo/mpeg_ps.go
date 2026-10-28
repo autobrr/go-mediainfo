@@ -502,9 +502,13 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 	observedPayloadBytes := int64(0)
 	videoCount := 0
 	hasMenuStream := false
+	rejectedRLETiming := false
 	for _, st := range streams {
 		if st == nil {
 			continue
+		}
+		if st.format == "RLE" && st.rleDurationInvalid {
+			rejectedRLETiming = true
 		}
 		switch st.kind {
 		case StreamVideo:
@@ -804,7 +808,8 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 					if frameRateRounded > 0 && info.GOPLength > 0 {
 						duration = float64(info.GOPLength) / frameRateRounded
 						fromGOP = true
-					} else {
+					} else if !rejectedRLETiming {
+						// Rejected RLE timestamps cannot establish an untimed video's clock.
 						duration = ptsDurationPS(anyPTS, opts)
 					}
 				}
@@ -1811,6 +1816,9 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 		if st == nil || st.kind == StreamMenu {
 			continue
 		}
+		if st.format == "RLE" && st.rleDurationInvalid {
+			continue
+		}
 		duration := ptsDurationPS(st.pts, opts)
 		if st.kind == StreamAudio {
 			duration = audioDurationPS(st, opts)
@@ -1828,6 +1836,10 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 	if videoDuration > maxDuration {
 		maxDuration = videoDuration
 	}
+	// The global tracker includes rejected RLE timestamps and cannot then supply a clean fallback.
+	if maxDuration == 0 && !rejectedRLETiming {
+		maxDuration = ptsDurationPS(anyPTS, opts)
+	}
 	if maxDuration > 0 {
 		// MediaInfo often quantizes very short durations (e.g. 1-frame menu VOBs)
 		// to milliseconds, which affects derived overall bitrate rounding.
@@ -1835,8 +1847,6 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 			maxDuration = math.Round(maxDuration*1000) / 1000
 		}
 		info.DurationSeconds = maxDuration
-	} else if duration := ptsDurationPS(anyPTS, opts); duration > 0 {
-		info.DurationSeconds = duration
 	}
 
 	if ccEntry != nil {
