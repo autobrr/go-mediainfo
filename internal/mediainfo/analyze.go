@@ -2129,15 +2129,15 @@ func analyzeFileWithOptions(ctx context.Context, path string, opts AnalyzeOption
 			info = parsed.Container
 			generalFacts := &parsed.GeneralFacts
 			if parsed.FileSize > 0 {
-				general.Fields = setFieldValue(general.Fields, "File size", formatBytes(parsed.FileSize))
+				displaySize := formatBytes(parsed.FileSize)
+				general.Fields = setFieldValue(general.Fields, "File size", displaySize)
+				// Replace the physical IFO size in both canonical projections.
+				replaceCanonicalSeedFill(&general, "FileSize", strconv.FormatInt(parsed.FileSize, 10), "File size", displaySize)
 			}
 			for _, field := range parsed.General {
 				general.Fields = appendFieldUnique(general.Fields, field)
 			}
 			streams = append(streams, parsed.Streams...)
-			if parsed.FileSize > 0 {
-				generalFacts.SetSame("FileSize", strconv.FormatInt(parsed.FileSize, 10))
-			}
 			if info.DurationSeconds > 0 {
 				projectedDuration := formatJSONSeconds(info.DurationSeconds)
 				if duration, ok := decimalSecondsToMilliseconds(projectedDuration); ok {
