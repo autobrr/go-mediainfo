@@ -113,6 +113,7 @@ func refreshCanonicalCompatibilitySnapshot(stream *Stream) {
 	store := &fieldStore{}
 	ref := store.Prepare(stream.Kind)
 	appendCanonicalSeed(store, ref, stream.canonicalSeed)
+	store.streams[ref].CodecIdentity = stream.codecIdentity
 	snapshot := canonicalStreamSnapshot(store, ref, stream.canonicalPolicy)
 	stream.Fields = snapshot.Fields
 	stream.JSON = snapshot.JSON
@@ -141,6 +142,7 @@ func canonicalStoreForReport(report Report) *fieldStore {
 func publicReportMutationDelta(report Report, snapshot legacyReportState) Report {
 	report.General = cloneLegacyStream(report.General)
 	stripUnchangedSnapshotMaps(&report.General, snapshot.General)
+	report.Streams = append([]Stream(nil), report.Streams...)
 	for index := range report.Streams {
 		report.Streams[index] = cloneLegacyStream(report.Streams[index])
 		if index < len(snapshot.Streams) {
@@ -150,8 +152,13 @@ func publicReportMutationDelta(report Report, snapshot legacyReportState) Report
 	return report
 }
 
-// stripUnchangedSnapshotMaps keeps only compatibility-map values changed by a caller.
+// stripUnchangedSnapshotMaps keeps explicit compatibility-map changes and
+// invalidates parser lookup identity when the caller changes its codec ID.
 func stripUnchangedSnapshotMaps(stream *Stream, snapshot legacyStreamState) {
+	if firstNonEmpty(findField(stream.Fields, "Codec ID"), findField(stream.Fields, "CodecID")) !=
+		firstNonEmpty(findField(snapshot.Fields, "Codec ID"), findField(snapshot.Fields, "CodecID")) {
+		stream.codecIdentity = codecTableIdentity{}
+	}
 	for key := range snapshot.JSON {
 		if _, exists := stream.JSON[key]; !exists {
 			if stream.legacyJSONDeleted == nil {
@@ -171,11 +178,15 @@ func stripUnchangedSnapshotMaps(stream *Stream, snapshot legacyStreamState) {
 	for key, value := range stream.JSON {
 		if snapshot.JSON[key] == value {
 			delete(stream.JSON, key)
+		} else if key == "CodecID" {
+			stream.codecIdentity = codecTableIdentity{}
 		}
 	}
 	for key, value := range stream.JSONRaw {
 		if snapshot.JSONRaw[key] == value {
 			delete(stream.JSONRaw, key)
+		} else if key == "CodecID" {
+			stream.codecIdentity = codecTableIdentity{}
 		}
 	}
 }
@@ -195,20 +206,13 @@ func reportToFieldStore(report Report, useCanonicalSeeds bool) *fieldStore {
 	if needsLegacyInput {
 		legacyMedia = buildJSONMedia(report)
 	}
-	containerFormat, _ := canonicalSeedValue(report.General, "Format")
-	containerFormat = firstNonEmpty(containerFormat, report.General.JSON["Format"], findField(report.General.Fields, "Format"))
 	store := &fieldStore{ref: report.Ref}
 	generalRef := store.Prepare(StreamGeneral)
 	store.streams[generalRef].TextSequence = 0
 	store.streams[generalRef].TextKind = report.General.Kind
 	store.streams[generalRef].StructuredSequence = 0
-	store.streams[generalRef].StructuredAlreadyOrdered = true
-	store.streams[generalRef].TextAlreadyOrdered = true
 	if useCanonicalSeeds && len(report.General.canonicalSeed) > 0 {
 		store.streams[generalRef].DirectCanonical = true
-		store.streams[generalRef].StructuredAlreadyOrdered = false
-		store.streams[generalRef].TextAlreadyOrdered = false
-		store.streams[generalRef].StructuredOrder = structuredFieldOrderForContainer(StreamGeneral, containerFormat)
 		appendCanonicalSeed(store, generalRef, report.General.canonicalSeed)
 	} else {
 		appendLegacyTextFields(store, generalRef, report.General.Fields)
@@ -224,18 +228,17 @@ func reportToFieldStore(report Report, useCanonicalSeeds bool) *fieldStore {
 		refs[index] = ref
 		stored := store.stream(ref)
 		stored.TextKind = stream.Kind
+		stored.CodecIdentity = stream.codecIdentity
+		if stream.canonicalPolicy.DVDOrder {
+			store.tableVersion = reportTables26
+		}
 		stored.TextSequence = index + 1
-		stored.StructuredAlreadyOrdered = !useCanonicalSeeds || len(stream.canonicalSeed) == 0
-		stored.TextAlreadyOrdered = !useCanonicalSeeds || len(stream.canonicalSeed) == 0
 		if useCanonicalSeeds && len(stream.canonicalSeed) > 0 {
 			stored.DirectCanonical = true
 			stored.SkipStreamOrder = stream.canonicalPolicy.SkipStreamOrder
 			stored.SkipComputed = stream.canonicalPolicy.SkipComputed
 			stored.HideTypeOrderXML = stream.canonicalPolicy.HideTypeOrderXML
-			stored.StructuredOrder = structuredFieldOrderForContainer(stream.Kind, containerFormat)
-			if stream.canonicalPolicy.DVDOrder {
-				stored.StructuredOrder = structuredDVDFieldOrderPolicy(stream.Kind)
-			}
+
 			appendCanonicalSeed(store, ref, stream.canonicalSeed)
 		} else {
 			appendLegacyTextFields(store, ref, stream.Fields)
@@ -461,14 +464,11 @@ func fieldStoreToLegacyReport(store *fieldStore) Report {
 	}
 	if store.legacyGeneral != nil {
 		compat := cloneLegacyStream(*store.legacyGeneral)
-		compat.Fields = report.General.Fields
 		report.General = compat
 	}
 	if len(store.legacyStreams) == len(report.Streams) {
 		for index := range report.Streams {
-			fields := report.Streams[index].Fields
 			report.Streams[index] = cloneLegacyStream(store.legacyStreams[index])
-			report.Streams[index].Fields = fields
 		}
 	}
 	snapshot := captureLegacyReportState(report, true)
@@ -507,6 +507,13 @@ func appendLegacyStructuredFields(store *fieldStore, ref streamRef, fields []jso
 			Path:          []string{field.Key},
 			StructuredKey: field.Key,
 			Projected:     true,
+		}
+		if spec.Measure == fieldMeasureMilliseconds && !field.Raw {
+			if milliseconds, ok := decimalSecondsToMilliseconds(field.Val); ok {
+				entry.Value.Text = milliseconds
+				entry.Projected = false
+				entry.StructuredOverride = &structuredNode{Kind: structuredString, Text: field.Val}
+			}
 		}
 		if target == structuredProjectionJSON {
 			entry.Options.ShowStructured = true

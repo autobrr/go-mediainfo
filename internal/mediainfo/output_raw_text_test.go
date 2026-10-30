@@ -214,9 +214,6 @@ func TestRawTextCanonicalValueFormatting(t *testing.T) {
 	if got := formatRawTextServiceKind("CM / O / C"); got != "Complete Main / Original / Commentary" {
 		t.Fatalf("formatRawTextServiceKind = %q", got)
 	}
-	if got := rawTextCodecIDInfo("S_HDMV/PGS"); got != "Picture based subtitle format used on BDs/HD-DVDs" {
-		t.Fatalf("rawTextCodecIDInfo = %q", got)
-	}
 	if got := formatRawTextDerivedBitRate("109000000"); got != "109 Mbps" {
 		t.Fatalf("formatRawTextDerivedBitRate = %q", got)
 	}
@@ -238,7 +235,7 @@ func TestRawTextCanonicalValueFormatting(t *testing.T) {
 	if got := formatRawTextEncodedLibrary("XviD0064"); got != "XviD 64" {
 		t.Fatalf("formatRawTextEncodedLibrary(unknown-date XviD) = %q", got)
 	}
-	if got := rawTextValue(StreamVideo, "FrameRate_Original/String", "23.976 fps", map[string]string{"Format": "MPEG-4 Visual", "CodecID": "XVID"}, 0); got != "23.976 (23976/1000) fps" {
+	if got := rawTextValue(StreamVideo, "FrameRate_Original/String", "23.976 fps", map[string]string{"Format": "MPEG-4 Visual", "CodecID": "XVID", "FrameRate_Original": "23.976"}, 0); got != "23.976 (23976/1000) fps" {
 		t.Fatalf("original frame rate = %q", got)
 	}
 }
@@ -319,7 +316,7 @@ func TestRawTextBDAVStructuredFormatting(t *testing.T) {
 		})
 	}
 
-	if got := rawTextValue(StreamGeneral, "ID/String", "1 (0x1)", map[string]string{"Format": "BDAV"}, 0); got != "0 (0x0)" {
+	if got := rawTextValue(StreamGeneral, "ID/String", "1 (0x1)", map[string]string{"Format": "BDAV", "ID": "0"}, 0); got != "0 (0x0)" {
 		t.Fatalf("BDAV general ID/String = %q", got)
 	}
 	if got := rawTextValue(StreamAudio, "ID/String", "7", map[string]string{"Format": "Vorbis", "ID": "7"}, 0); got != "7 (0x7)" {
@@ -334,20 +331,11 @@ func TestRawTextBDAVStructuredFormatting(t *testing.T) {
 	if rawTextOggStream(map[string]string{"Format": "Vorbis", "CodecID": "A_VORBIS"}) {
 		t.Fatal("Matroska Vorbis identified as Ogg")
 	}
-	if got := rawTextScanStoreMethod(map[string]string{"ScanType": "MBAFF"}); got != "InterleavedFields" {
-		t.Fatalf("MBAFF scan store method = %q", got)
-	}
-	if got := rawTextScanStoreMethod(map[string]string{"ScanType": "Interlaced"}); got != "" {
-		t.Fatalf("interlaced scan store method = %q; want no invented fallback", got)
-	}
 	if got := rawTextValue(StreamAudio, "BedChannelCount", "1", map[string]string{"BedChannelCount": "1"}, 0); got != "1 channel" {
 		t.Fatalf("BedChannelCount = %q", got)
 	}
 	if got := rawTextExtraValue("BedChannelCount", "1"); got != "1 channel" {
 		t.Fatalf("extra BedChannelCount = %q", got)
-	}
-	if got := rawTextValue(StreamAudio, "Format/String", "AC-3 Dep", nil, 0); got != "E-AC-3" {
-		t.Fatalf("dependent AC-3 Format/String = %q", got)
 	}
 	if got := rawTextValue(StreamAudio, "Format/String", "AC-3", map[string]string{"Format": "AC-3", "Format_AdditionalFeatures": "Dep"}, 0); got != "E-AC-3" {
 		t.Fatalf("structured dependent AC-3 Format/String = %q", got)
@@ -523,6 +511,18 @@ func TestRawTextFrameRateDropsUnexposedRatio(t *testing.T) {
 		want       string
 	}{
 		{
+			name:       "MPEG video producer fraction",
+			structured: map[string]string{"Format": "MPEG Video", "FrameRate": "29.970", "FrameRate_Num": "29970", "FrameRate_Den": "1000"},
+			display:    "29.970 (29970/1000) FPS",
+			want:       "29.970 (29970/1000) fps",
+		},
+		{
+			name:       "AVC producer fraction",
+			structured: map[string]string{"Format": "AVC", "FrameRate": "23.976", "FrameRate_Num": "24000", "FrameRate_Den": "1001"},
+			display:    "23.976 (24000/1001) FPS",
+			want:       "23.976 (24000/1001) fps",
+		},
+		{
 			name:       "integer denominator",
 			structured: map[string]string{"Format": "AVC", "FrameRate": "24.000", "FrameRate_Num": "24", "FrameRate_Den": "1"},
 			display:    "24.000 (24/1) fps",
@@ -544,9 +544,6 @@ func TestRawTextFrameRateDropsUnexposedRatio(t *testing.T) {
 }
 
 func TestRawTextFormattingIgnoresCorpusUniqueIDs(t *testing.T) {
-	if got := rawTextScanStoreMethod(map[string]string{"UniqueID": "15018893693280564553"}); got != "" {
-		t.Fatalf("scan store method = %q; identity must not synthesize a value", got)
-	}
 	if rawTextAV1UsesFilmGrain(map[string]string{"UniqueID": "18229823285062969326"}) {
 		t.Fatal("identity must not synthesize AV1 film-grain signaling")
 	}

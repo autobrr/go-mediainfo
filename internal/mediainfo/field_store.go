@@ -83,9 +83,12 @@ func canonicalStreamSnapshot(store *fieldStore, ref streamRef, policy canonicalS
 	store.streams[ref].SkipStreamOrder = policy.SkipStreamOrder
 	store.streams[ref].SkipComputed = policy.SkipComputed
 	store.streams[ref].HideTypeOrderXML = policy.HideTypeOrderXML
+	if policy.DVDOrder {
+		store.tableVersion = reportTables26
+	}
 	finalizeFieldStore(store)
 	projection := projectTextStore(store, "")
-	stream := Stream{Kind: store.streams[ref].Kind, canonicalPolicy: policy}
+	stream := Stream{Kind: store.streams[ref].Kind, canonicalPolicy: policy, codecIdentity: store.streams[ref].CodecIdentity}
 	for _, projected := range projection.Streams {
 		if projected.Kind == stream.Kind {
 			stream.Fields = append([]Field(nil), projected.Fields...)
@@ -106,19 +109,17 @@ func canonicalStreamSnapshot(store *fieldStore, ref streamRef, policy canonicalS
 
 // storedStream owns one stream's canonical entries and projection ordering metadata.
 type storedStream struct {
-	Kind                     StreamKind
-	TextKind                 StreamKind
-	Fields                   []fieldEntry
-	TextSequence             int
-	StructuredSequence       int
-	TypeOrder                int
-	StructuredAlreadyOrdered bool
-	StructuredOrder          map[string]int
-	TextAlreadyOrdered       bool
-	SkipStreamOrder          bool
-	SkipComputed             bool
-	HideTypeOrderXML         bool
-	DirectCanonical          bool
+	Kind               StreamKind
+	TextKind           StreamKind
+	Fields             []fieldEntry
+	TextSequence       int
+	StructuredSequence int
+	TypeOrder          int
+	SkipStreamOrder    bool
+	SkipComputed       bool
+	HideTypeOrderXML   bool
+	DirectCanonical    bool
+	CodecIdentity      codecTableIdentity
 }
 
 // fieldStore is an ordered, per-report canonical field store.
@@ -127,6 +128,7 @@ type storedStream struct {
 // initialized at most once before XML projection acquires the read lock.
 type fieldStore struct {
 	ref            string
+	tableVersion   reportTableVersion
 	streams        []storedStream
 	nextSequence   uint32
 	legacyGeneral  *Stream

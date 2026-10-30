@@ -1904,9 +1904,11 @@ func parseCanonicalMatroskaTrackEntry(buf []byte, segmentDuration float64, durat
 	if kind == StreamAudio && audioChannels == 0 {
 		audioChannels = 1
 	}
+	codecIdentity := codecTableIdentity{Namespace: "Matroska", ID: codecID}
 	var vc1Info vc1Meta
 	if kind == StreamVideo && codecID == "V_MS/VFW/FOURCC" && len(codecPrivate) >= 20 {
 		fourCC := strings.TrimRight(string(codecPrivate[16:20]), "\x00 ")
+		codecIdentity = codecTableIdentity{Namespace: "Riff", ID: fourCC}
 		if strings.EqualFold(fourCC, "WVC1") {
 			format = "VC-1"
 			codecID += " / WVC1"
@@ -1919,6 +1921,7 @@ func parseCanonicalMatroskaTrackEntry(buf []byte, segmentDuration float64, durat
 	var acmBitRate uint64
 	if kind == StreamAudio && codecID == "A_MS/ACM" && len(codecPrivate) >= 16 {
 		formatTag := binary.LittleEndian.Uint16(codecPrivate[0:2])
+		codecIdentity = codecTableIdentity{Namespace: "Riff", ID: strings.ToUpper(strconv.FormatUint(uint64(formatTag), 16))}
 		pcm := formatTag == 1
 		validBits := uint16(0)
 		if formatTag == 0xfffe && len(codecPrivate) >= 40 && binary.LittleEndian.Uint16(codecPrivate[16:18]) >= 22 {
@@ -2987,6 +2990,7 @@ func parseCanonicalMatroskaTrackEntry(buf []byte, segmentDuration float64, durat
 		insertCanonicalSeedTextBefore(&stream, "Muxing mode", value, "Codec ID")
 	}
 	stream.matroskaDeferredFacts = deferredFacts
+	stream.codecIdentity = codecIdentity
 	stream.mkvDefaultDuration = defaultDuration
 	stream.mkvTimecodeScale = timecodeScale
 	return stream, true

@@ -88,6 +88,8 @@ type Stream struct {
 	canonicalSeed []fieldEntry
 	// canonicalPolicy retains format-neutral projection policy until adapters publish legacy flags.
 	canonicalPolicy canonicalStreamPolicy
+	// codecIdentity retains a parser-resolved table namespace and inner codec key.
+	codecIdentity codecTableIdentity
 }
 
 // Report contains the public compatibility snapshot for one analyzed input.

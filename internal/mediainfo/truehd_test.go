@@ -327,8 +327,8 @@ func TestApplyMatroskaAudioProbes_TrueHDNonAtmosKeepsMatroskaLayout(t *testing.T
 	if got := findField(stream.Fields, "Maximum bit rate"); got != "8 199 kb/s" {
 		t.Fatalf("Maximum bit rate=%q want 8 199 kb/s", got)
 	}
-	if got := findField(stream.Fields, "Frame rate"); got != "1102.500 FPS (40 SPF)" {
-		t.Fatalf("Frame rate=%q want 1102.500 FPS (40 SPF)", got)
+	if got := findField(stream.Fields, "Frame rate"); got != "1 102.500 FPS (40 SPF)" {
+		t.Fatalf("Frame rate=%q want 1 102.500 FPS (40 SPF)", got)
 	}
 	if got := stream.JSON["FrameRate"]; got != "1102.500" {
 		t.Fatalf("FrameRate=%q want 1102.500", got)

@@ -88,6 +88,7 @@ func projectStructuredReportFor(report Report, target structuredProjectionTarget
 func projectStructuredStore(store *fieldStore, target structuredProjectionTarget) structuredReport {
 	store.projectionMu.RLock()
 	defer store.projectionMu.RUnlock()
+	version := reportVersion(store)
 	projected := structuredReport{Ref: store.ref, Streams: make([]structuredStream, 0, len(store.streams))}
 	streamIndexes := make([]int, len(store.streams))
 	for index := range store.streams {
@@ -104,27 +105,23 @@ func projectStructuredStore(store *fieldStore, target structuredProjectionTarget
 				fields = append(fields, entry)
 			}
 		}
-		if !stream.StructuredAlreadyOrdered {
-			sort.SliceStable(fields, func(left, right int) bool {
-				leftKey := firstNonEmpty(fields[left].StructuredKey, string(fields[left].Name))
-				rightKey := firstNonEmpty(fields[right].StructuredKey, string(fields[right].Name))
-				leftOrder, leftKnown := stream.StructuredOrder[leftKey]
-				rightOrder, rightKnown := stream.StructuredOrder[rightKey]
-				if stream.StructuredOrder == nil {
-					leftSpec, leftSpecKnown := structuredFieldSpec(stream.Kind, leftKey)
-					rightSpec, rightSpecKnown := structuredFieldSpec(stream.Kind, rightKey)
-					leftOrder, leftKnown = leftSpec.Order, leftSpecKnown
-					rightOrder, rightKnown = rightSpec.Order, rightSpecKnown
-				}
-				switch {
-				case leftKnown && rightKnown && leftOrder != rightOrder:
-					return leftOrder < rightOrder
-				case leftKnown != rightKnown:
-					return leftKnown
-				}
-				return fields[left].Sequence < fields[right].Sequence
-			})
+		order := structuredFieldOrderPolicy(stream.Kind)
+		if version == reportTables26 {
+			order = structuredDVDFieldOrderPolicy(stream.Kind)
 		}
+		sort.SliceStable(fields, func(left, right int) bool {
+			leftKey := firstNonEmpty(fields[left].StructuredKey, string(fields[left].Name))
+			rightKey := firstNonEmpty(fields[right].StructuredKey, string(fields[right].Name))
+			leftOrder, leftKnown := order[leftKey]
+			rightOrder, rightKnown := order[rightKey]
+			switch {
+			case leftKnown && rightKnown && leftOrder != rightOrder:
+				return leftOrder < rightOrder
+			case leftKnown != rightKnown:
+				return leftKnown
+			}
+			return fields[left].Sequence < fields[right].Sequence
+		})
 		projectedStream := structuredStream{Kind: stream.Kind, TypeOrder: stream.TypeOrder, Fields: make([]structuredField, 0, len(fields))}
 		for _, entry := range fields {
 			key := firstNonEmpty(entry.StructuredKey, string(entry.Name))

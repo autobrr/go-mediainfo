@@ -61,6 +61,7 @@ func parseFLAC(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, *canoni
 	var audioStart int64
 	var encoder string
 	tags := map[string]string{}
+	var tagOrder []string
 	var coverMIME string
 	var coverType string
 	assetBudget := &embeddedAssetBudget{}
@@ -115,6 +116,7 @@ func parseFLAC(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, *canoni
 						}
 						if tags[kv.Key] == "" {
 							tags[kv.Key] = kv.Val
+							tagOrder = append(tagOrder, kv.Key)
 							continue
 						}
 						if tags[kv.Key] != kv.Val {
@@ -190,7 +192,7 @@ func parseFLAC(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, *canoni
 			}
 		}
 	}
-	generalFacts, generalExtra := flacTagsToGeneralFacts(tags, encoder)
+	generalFacts, generalExtra := flacTagsToGeneralFacts(tags, tagOrder, encoder)
 	if coverMIME != "" && len(generalFacts.values) > 0 {
 		generalFacts.SetSame("Cover", "Yes")
 		generalFacts.SetSame("Cover_Mime", coverMIME)
@@ -246,7 +248,8 @@ func canonicalFLACAudioStream(params flacAudioStreamParams) Stream {
 	store, ref := builder.store, builder.ref
 	store.streams[ref].SkipStreamOrder = true
 	if params.id != "" {
-		store.Fill(ref, "ID", params.id, fillReplace)
+		id, _ := strconv.ParseUint(params.id, 10, 32)
+		builder.Fill("ID", params.id, "ID", formatID(id))
 	}
 	store.Fill(ref, "Format", "FLAC", fillReplace)
 	builder.Text("Format/Info", "Free Lossless Audio Codec")
@@ -699,8 +702,8 @@ func flacChannelPositionsFromMask(mask uint32) string {
 }
 
 // flacTagsToGeneralFacts maps Vorbis comments to canonical General scalars and
-// retains unrecognized comments as one ordered extra object.
-func flacTagsToGeneralFacts(tags map[string]string, encoder string) (*canonicalStructuredFacts, *structuredNode) {
+// retains unrecognized comments in first-encounter order after duplicate merging.
+func flacTagsToGeneralFacts(tags map[string]string, tagOrder []string, encoder string) (*canonicalStructuredFacts, *structuredNode) {
 	general := &canonicalStructuredFacts{}
 
 	mapped := map[string]bool{}
@@ -796,7 +799,8 @@ func flacTagsToGeneralFacts(tags map[string]string, encoder string) (*canonicalS
 
 	// Remaining tags go under General.extra (raw JSON object).
 	extraFields := make([]jsonKV, 0, len(tags))
-	for k, v := range tags {
+	for _, k := range tagOrder {
+		v := tags[k]
 		if v == "" || mapped[k] || k == "ENCODER" {
 			continue
 		}

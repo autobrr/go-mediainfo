@@ -44,7 +44,6 @@ func matroskaOpusCanonicalSeed(facts matroskaOpusCanonicalFacts) []fieldEntry {
 	if facts.codecID != "" {
 		builder.Fill("CodecID", facts.codecID, "Codec ID", facts.codecID)
 	}
-	builder.Text("Format/Info", "Opus")
 	if facts.trackUID > 0 {
 		builder.Structured("UniqueID", strconv.FormatUint(facts.trackUID, 10))
 	}

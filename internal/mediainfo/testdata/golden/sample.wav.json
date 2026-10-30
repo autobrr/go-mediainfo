@@ -15,6 +15,7 @@
 "File_Modified_Date_Local":"<redacted>",
 "Encoded_Application":"Lavf62.3.100"},{"@type":"Audio","Format":"PCM",
 "Format_Settings_Endianness":"Little",
+"Format_Settings_Sign":"Signed",
 "CodecID":"1",
 "Duration":"4.000",
 "BitRate_Mode":"CBR",
@@ -22,7 +23,6 @@
 "Channels":"1",
 "SamplingRate":"48000",
 "SamplingCount":"192000",
-"StreamSize":"384000",
 "BitDepth":"16",
-"Format_Settings_Sign":"Signed"}]}
+"StreamSize":"384000"}]}
 }

@@ -1,0 +1,1818 @@
+General	Count	N NI	Count
+General	Status	N NI	Status
+General	StreamCount	N NI	Count of stream of this kind
+General	StreamKind	N NT	Kind of stream
+General	StreamKind/String	N NT	Kind of stream
+General	StreamKindID	N NI	Stream identifier
+General	StreamKindPos	N NI	Stream identifier
+General	StreamOrder	N YIY	StreamOrder
+General	FirstPacketOrder	N NIY	FirstPacketOrder
+General	Inform	N NT	Inform
+General	ID	N YTY	ID
+General	ID/String	Y NT	ID
+General	OriginalSourceMedium_ID	N YTY	ID in the original source medium
+General	OriginalSourceMedium_ID/String	Y NT	ID in the original source medium
+General	UniqueID	N YTY	Unique ID
+General	UniqueID/String	Y NT	Unique ID
+General	MenuID	N YTY	Menu ID
+General	MenuID/String	Y NT	Menu ID
+General	GeneralCount	N NIY	GeneralCount
+General	VideoCount	N NIY	Count of video streams
+General	AudioCount	N NIY	Count of audio streams
+General	TextCount	N NIY	Count of text streams
+General	OtherCount	N NIY	OtherCount
+General	ImageCount	N NIY	Count of image streams
+General	MenuCount	N NIY	Count of menu streams
+General	Video_Format_List	N NT	Video_Format_List
+General	Video_Format_WithHint_List	N NT	Video_Format_WithHint_List
+General	Video_Codec_List	N NT	Codecs Video
+General	Video_Language_List	N NT	Video_Language_List
+General	Audio_Format_List	N NT	Audio_Format_List
+General	Audio_Format_WithHint_List	N NT	Audio_Format_WithHint_List
+General	Audio_Codec_List	N NT	Audio codecs
+General	Audio_Language_List	N NT	Audio_Language_List
+General	Audio_Channels_Total	N NI	Audio_Channels_Total
+General	Text_Format_List	N NT	Text_Format_List
+General	Text_Format_WithHint_List	N NT	Text_Format_WithHint_List
+General	Text_Codec_List	N NT	Text codecs
+General	Text_Language_List	N NT	Text_Language_List
+General	Other_Format_List	N NT	Other_Format_List
+General	Other_Format_WithHint_List	N NT	Other_Format_WithHint_List
+General	Other_Codec_List	N NT	Other_Codec_List
+General	Other_Language_List	N NT	Other_Language_List
+General	Image_Format_List	N NT	Image_Format_List
+General	Image_Format_WithHint_List	N NT	Image_Format_WithHint_List
+General	Image_Codec_List	N NT	Codecs Image
+General	Image_Language_List	N NT	Image_Language_List
+General	Menu_Format_List	N NT	Menu_Format_List
+General	Menu_Format_WithHint_List	N NT	Menu_Format_WithHint_List
+General	Menu_Codec_List	N NT	Menu codecs
+General	Menu_Language_List	N NT	Menu_Language_List
+General	CompleteName	Y YT	Complete name
+General	FolderName	N NT	Folder name
+General	FileNameExtension	N NT	File name extension
+General	FileName	N NT	File name
+General	FileExtension	N NTY	File extension
+General	CompleteName_Last	Y YTY	CompleteName_Last
+General	FolderName_Last	N NT	FolderName_Last
+General	FileNameExtension_Last	N NT	FileNameExtension_Last
+General	FileName_Last	N NT	FileName_Last
+General	FileExtension_Last	N NT	FileExtension_Last
+General	Format	N YTY	Format
+General	Format/String	Y NT	Format
+General	Format/Info	Y NT	Format/Info
+General	Format/Url	N NT	Format/Url
+General	Format/Extensions	N NT	Format/Extensions
+General	Format_Commercial	N NT	Commercial name
+General	Format_Commercial_IfAny	Y YTY	Commercial name
+General	Format_Version	Y YTY	Format version
+General	Format_Profile	Y YTY	Format profile
+General	Format_Level	Y YTY	Format level
+General	Format_Compression	Y YTY	Compression
+General	Format_Settings	Y YTY	Format settings
+General	Format_AdditionalFeatures	N YTY	Format_AdditionalFeatures
+General	InternetMediaType	N YT	Internet media type
+General	CodecID	N YTY	Codec ID
+General	CodecID/String	Y NT	Codec ID
+General	CodecID/Info	Y NT	Codec ID/Info
+General	CodecID/Hint	Y NT	Codec ID/Hint
+General	CodecID/Url	N NT	Codec ID/Url
+General	CodecID_Description	Y YTY	Description of the codec
+General	CodecID_Version	N YTY	CodecID_Version
+General	CodecID_Compatible	N YTY	CodecID_Compatible
+General	Interleaved	N YTY	Interleaved
+General	Codec	N NT	Codec
+General	Codec/String	N NT	Codec
+General	Codec/Info	N NT	Codec/Info
+General	Codec/Url	N NT	Codec/Url
+General	Codec/Extensions	N NT	Codec/Extensions
+General	Codec_Settings	N NT	Codec settings
+General	Codec_Settings_Automatic	N NT	Codec_Settings_Automatic
+General	FileSize	N YTY	File size
+General	FileSize/String	Y NT	File size
+General	FileSize/String1	N NT	File size
+General	FileSize/String2	N NT	File size
+General	FileSize/String3	N NT	File size
+General	FileSize/String4	N NT	File size
+General	Duration	N YFY	Duration
+General	Duration/String	Y NT	Duration
+General	Duration/String1	N NT	Duration
+General	Duration/String2	N NT	Duration
+General	Duration/String3	N NT	Duration
+General	Duration/String4	N NT	Duration
+General	Duration/String5	N NT	Duration
+General	Duration_Start	N YFY	Start time
+General	Duration_Start/String	Y NT	Start time
+General	Duration_Start/String1	N NT	Start time
+General	Duration_Start/String2	N NT	Start time
+General	Duration_Start/String3	N NT	Start time
+General	Duration_Start/String4	N NT	Start time
+General	Duration_Start/String5	N NT	Start time
+General	Duration_End	N YFY	End time
+General	Duration_End/String	Y NT	End time
+General	Duration_End/String1	N NT	End time
+General	Duration_End/String2	N NT	End time
+General	Duration_End/String3	N NT	End time
+General	Duration_End/String4	N NT	End time
+General	Duration_End/String5	N NT	End time
+General	OverallBitRate_Mode	N YTY	Overall bit rate mode
+General	OverallBitRate_Mode/String	Y NT	Overall bit rate mode
+General	OverallBitRate	N YFY	Overall bit rate
+General	OverallBitRate/String	Y NT	Overall bit rate
+General	OverallBitRate_Minimum	N YFY	Minimum Overall bit rate
+General	OverallBitRate_Minimum/String	Y NT	Minimum Overall bit rate
+General	OverallBitRate_Nominal	N YFY	Nominal Overall bit rate
+General	OverallBitRate_Nominal/String	Y NT	Nominal Overall bit rate
+General	OverallBitRate_Maximum	N YFY	Maximum Overall bit rate
+General	OverallBitRate_Maximum/String	Y NT	Maximum Overall bit rate
+General	FrameRate	N YFY	Frame rate
+General	FrameRate/String	Y NT	Frame rate
+General	FrameRate_Num	N NIY	FrameRate_Num
+General	FrameRate_Den	N NIY	FrameRate_Den
+General	FrameCount	N YIY	Frame count
+General	Delay	N YI	Delay
+General	Delay/String	N NT	Delay
+General	Delay/String1	N NT	Delay
+General	Delay/String2	N NT	Delay
+General	Delay/String3	N NT	Delay
+General	Delay/String4	N NT	Delay
+General	Delay/String5	N NT	Delay
+General	Delay_Settings	N YTY	Delay_Settings
+General	Delay_DropFrame	N YTY	Delay_DropFrame
+General	Delay_Source	N YTY	Delay, origin
+General	Delay_Source/String	N NT	Delay, origin
+General	StreamSize	N YIY	Stream size
+General	StreamSize/String	N NT	Stream size
+General	StreamSize/String1	N NT	Stream size
+General	StreamSize/String2	N NT	Stream size
+General	StreamSize/String3	N NT	Stream size
+General	StreamSize/String4	N NT	Stream size
+General	StreamSize/String5	N NT	Stream size
+General	StreamSize_Proportion	N NT	Proportion of this stream
+General	StreamSize_Demuxed	N NIN	Stream size when demuxed
+General	StreamSize_Demuxed/String	N NT	Stream size when demuxed
+General	StreamSize_Demuxed/String1	N NT	Stream size when demuxed
+General	StreamSize_Demuxed/String2	N NT	Stream size when demuxed
+General	StreamSize_Demuxed/String3	N NT	Stream size when demuxed
+General	StreamSize_Demuxed/String4	N NT	Stream size when demuxed
+General	StreamSize_Demuxed/String5	N NT	Stream size when demuxed
+General	HeaderSize	N YIY	HeaderSize
+General	DataSize	N YIY	DataSize
+General	FooterSize	N YIY	FooterSize
+General	IsStreamable	N YTY	IsStreamable
+General	Album_ReplayGain_Gain	N YTY	Album replay gain
+General	Album_ReplayGain_Gain/String	Y NT	Album replay gain
+General	Album_ReplayGain_Peak	Y YTY	Album replay gain peak
+General	Encryption	Y YT	Encryption
+General	Encryption_Format	N YTY	Encryption_Format
+General	Encryption_Length	N YTY	Encryption_Length
+General	Encryption_Method	N YTY	Encryption_Method
+General	Encryption_Mode	N YTY	Encryption_Mode
+General	Encryption_Padding	N YTY	Encryption_Padding
+General	Encryption_InitializationVector	N YTY	Encryption_InitializationVector
+General	UniversalAdID/String	Y NT	Universal Ad ID
+General	UniversalAdID_Registry	N YTY	Universal Ad ID registry
+General	UniversalAdID_Value	N YTY	Universal Ad ID value
+General	Title	Y YTY	Title
+General	Title_More	Y YTY	Title, more info
+General	Title/Url	Y NT	Title/Url
+General	Domain	Y YTY	Domain
+General	Collection	Y YTY	Collection
+General	Season	Y YTY	Season
+General	Season_Position	Y YIY	Season_Position
+General	Season_Position_Total	Y YIY	Season_Position_Total
+General	Movie	N YTY	Movie name
+General	Movie_More	N YTY	Movie_More
+General	Movie/Country	N YTY	Movie/Country
+General	Movie/Url	N YT	Movie name/Url
+General	Album	Y YTY	Album
+General	Album_More	Y YTY	Album_More
+General	Album/Sort	Y YTY	Album/Sort
+General	Album/Performer	Y YTY	Album/Performer
+General	Album/Performer/Sort	Y YTY	Album/Performer/Sort
+General	Album/Performer/Url	Y YT	Album/Performer/Url
+General	Comic	Y YTY	Comic
+General	Comic_More	Y YTY	Comic_More
+General	Comic/Position_Total	Y YIY	Comic/Position_Total
+General	Part	Y YTY	Part
+General	Part/Position	Y YIY	Part/Position
+General	Part/Position_Total	Y YIY	Part/Position_Total
+General	Reel	Y YTY	Reel
+General	Reel/Position	Y YIY	Reel/Position
+General	Reel/Position_Total	Y YIY	Reel/Position_Total
+General	Track	N YTY	Track name
+General	Track_More	N YTY	Track_More
+General	Track/Url	N YT	Track name/Url
+General	Track/Sort	Y YTY	Track/Sort
+General	Track/Position	Y YIY	Track/Position
+General	Track/Position_Total	Y YIY	Track/Position_Total
+General	PackageName	Y YTY	Package name
+General	Grouping	Y YTY	Grouping
+General	Chapter	Y YTY	Chapter
+General	SubTrack	Y YTY	SubTrack
+General	Original/Album	Y YTY	Original/Album
+General	Original/Movie	Y YTY	Original/Movie
+General	Original/Part	Y YTY	Original/Part
+General	Original/Track	Y YTY	Original/Track
+General	Compilation	N YTY	Compilation
+General	Compilation/String	Y NT	Compilation
+General	Performer	Y YTY	Performer
+General	Performer/Sort	Y YTY	Performer/Sort
+General	Performer/Url	Y YT	Performer/Url
+General	Original/Performer	Y YTY	Original/Performer
+General	Accompaniment	Y YTY	Accompaniment
+General	Composer	Y YTY	Composer
+General	Composer/Nationality	Y YTY	Composer/Nationality
+General	Composer/Sort	Y YTY	Composer/Sort
+General	Arranger	Y YTY	Arranger
+General	Lyricist	Y YTY	Lyricist
+General	Original/Lyricist	Y YTY	Original/Lyricist
+General	Conductor	Y YTY	Conductor
+General	Director	Y YTY	Director
+General	CoDirector	Y YTY	Codirector
+General	AssistantDirector	Y YTY	AssistantDirector
+General	DirectorOfPhotography	Y YTY	Director of photography
+General	SoundEngineer	Y YTY	Sound engineer
+General	ArtDirector	Y YTY	ArtDirector
+General	ProductionDesigner	Y YTY	Production designer
+General	Choreographer	Y YTY	Choreographer
+General	CostumeDesigner	Y YTY	Costume designer
+General	Actor	Y YTY	Actor
+General	Actor_Character	Y YTY	Character played
+General	WrittenBy	Y YTY	Written by
+General	ScreenplayBy	Y YTY	Screenplay by
+General	EditedBy	Y YTY	Edited by
+General	CommissionedBy	Y YTY	Commissioned by
+General	Producer	Y YTY	Producer
+General	CoProducer	Y YTY	Coproducer
+General	ExecutiveProducer	Y YTY	Executive producer
+General	MusicBy	Y YTY	Music by
+General	DistributedBy	Y YTY	Distributed by
+General	OriginalSourceForm/DistributedBy	Y YTY	OriginalSourceForm/DistributedBy
+General	MasteredBy	Y YTY	Mastered by
+General	EncodedBy	Y YTY	Encoded by
+General	RemixedBy	Y YTY	Remixed by
+General	ProductionStudio	Y YTY	Production studio
+General	ThanksTo	Y YTY	Thanks to
+General	Publisher	Y YTY	Publisher
+General	Publisher/URL	Y YTY	Publisher/URL
+General	Label	Y YTY	Label
+General	Genre	Y YTY	Genre
+General	PodcastCategory	Y YTY	Podcast category
+General	Mood	Y YTY	Mood
+General	ContentType	Y YTY	ContentType
+General	Subject	Y YTY	Subject
+General	Description	Y YTY	Description
+General	Keywords	Y YTY	Keywords
+General	Summary	Y YTY	Summary
+General	Synopsis	Y YTY	Synopsis
+General	Period	Y YTY	Period
+General	LawRating	Y YTY	Law rating
+General	LawRating_Reason	Y YTY	LawRating_Reason
+General	ICRA	Y YTY	ICRA
+General	Released_Date	Y YTY	Released date
+General	Original/Released_Date	Y YTY	Original/Released_Date
+General	Recorded_Date	Y YTY	Recorded date
+General	Encoded_Date	Y YTY	Encoded date
+General	Tagged_Date	Y YTY	Tagged date
+General	Written_Date	Y YTY	Written date
+General	Mastered_Date	Y YTY	Mastered date
+General	File_Created_Date	N YTY	File creation date
+General	File_Created_Date_Local	N YTY	File creation date (local)
+General	File_Modified_Date	N NTY	File last modification date
+General	File_Modified_Date_Local	N NTY	File last modification date (local)
+General	Recorded_Location	Y YTY	Recorded location
+General	Written_Location	Y YTY	Written location
+General	Archival_Location	Y YTY	Archival location
+General	Encoded_Application	N YTY	Writing application
+General	Encoded_Application/String	Y NT	Writing application
+General	Encoded_Application_CompanyName	N YTY	Encoded_Application_CompanyName
+General	Encoded_Application_Name	N YTY	Encoded_Application_Name
+General	Encoded_Application_Version	N YTY	Encoded_Application_Version
+General	Encoded_Application_Url	N YTY	Encoded_Application_Url
+General	Encoded_Library	N YTY	Writing library
+General	Encoded_Library/String	Y NT	Writing library
+General	Encoded_Library_CompanyName	N YTY	Encoded_Library_CompanyName
+General	Encoded_Library_Name	N YTY	Encoded_Library_Name
+General	Encoded_Library_Version	N YTY	Encoded_Library_Version
+General	Encoded_Library_Date	N YTY	Encoded_Library_Date
+General	Encoded_Library_Settings	Y YTY	Encoding settings
+General	Encoded_OperatingSystem	N YTY	Writing operating system
+General	Encoded_OperatingSystem/String	Y NT	Writing operating system
+General	Encoded_OperatingSystem_CompanyName	N YTY	Encoded_OperatingSystem_CompanyName
+General	Encoded_OperatingSystem_Name	N YTY	Encoded_OperatingSystem_Name
+General	Encoded_OperatingSystem_Version	N YTY	Encoded_OperatingSystem_Version
+General	Encoded_Hardware	N YTY	Writing hardware
+General	Encoded_Hardware/String	Y NT	Writing hardware
+General	Encoded_Hardware_CompanyName	N YTY	Encoded_Hardware_CompanyName
+General	Encoded_Hardware_Name	N YTY	Encoded_Hardware_Name
+General	Encoded_Hardware_Model	N YTY	Encoded_Hardware_Model
+General	Encoded_Hardware_Version	N YTY	Encoded_Hardware_Version
+General	Cropped	Y YTY	Crop dimensions
+General	Dimensions	Y YTY	Dimensions
+General	DotsPerInch	Y YTY	Dots per inch
+General	Lightness	Y YTY	Lightness
+General	OriginalSourceMedium	Y YTY	Original source medium
+General	OriginalSourceForm	Y YTY	Original source form
+General	OriginalSourceForm/NumColors	Y YTY	OriginalSourceForm/NumColors
+General	OriginalSourceForm/Name	Y YTY	OriginalSourceForm/Name
+General	OriginalSourceForm/Cropped	Y YTY	OriginalSourceForm/Cropped
+General	OriginalSourceForm/Sharpness	Y YTY	OriginalSourceForm/Sharpness
+General	Tagged_Application	Y YTY	Tagging application
+General	BPM	Y YTY	BPM
+General	ISRC	Y YTY	ISRC
+General	ISBN	Y YTY	ISBN
+General	ISAN	Y YTY	ISAN
+General	BarCode	Y YTY	BarCode
+General	LCCN	Y YTY	LCCN
+General	UMID	Y YTY	UMID
+General	CatalogNumber	Y YTY	Catalog number 
+General	LabelCode	Y YTY	LabelCode
+General	Owner	Y YTY	Owner
+General	Copyright	Y YTY	Copyright
+General	Copyright/Url	Y YTY	Copyright/Url
+General	Producer_Copyright	Y YTY	Producer_Copyright
+General	TermsOfUse	Y YTY	Terms of use
+General	ServiceName	Y YTY	Service name
+General	ServiceChannel	Y YTY	Service channel number
+General	Service/Url	Y YTY	Service/Url
+General	ServiceProvider	Y YTY	Service provider
+General	ServiceProvider/Url	Y YTN	Service provider/Url
+General	ServiceType	Y YTY	Service type
+General	NetworkName	Y YTY	Network name
+General	OriginalNetworkName	Y YTY	Original network name
+General	Country	Y YTY	Country
+General	TimeZone	Y YTY	Timezone
+General	Cover	Y YTY	Cover
+General	Cover_Description	Y YTY	Cover description
+General	Cover_Type	Y YTY	Cover type
+General	Cover_Mime	Y YTY	Cover MIME
+General	Cover_Data	N YTY	Cover_Data
+General	Lyrics	Y YTY	Lyrics
+General	Comment	Y YTY	Comment
+General	Rating	Y YTY	Rating
+General	Added_Date	Y YTY	Added date
+General	Played_First_Date	Y YTY	First played
+General	Played_Last_Date	Y YTY	Last played
+General	Played_Count	Y YIY	Times played
+General	EPG_Positions_Begin	N YIY	EPG_Positions_Begin
+General	EPG_Positions_End	N YIY	EPG_Positions_End
+Video	Count	N NI	Count
+Video	Status	N NI	Status
+Video	StreamCount	N NI	Count of stream of this kind
+Video	StreamKind	N NT	Kind of stream
+Video	StreamKind/String	N NT	Kind of stream
+Video	StreamKindID	N NI	Stream identifier
+Video	StreamKindPos	N NI	Stream identifier
+Video	StreamOrder	N YIY	StreamOrder
+Video	FirstPacketOrder	N NIY	FirstPacketOrder
+Video	Inform	N NT	Inform
+Video	ID	N YTY	ID
+Video	ID/String	Y NT	ID
+Video	OriginalSourceMedium_ID	N YTY	ID in the original source medium
+Video	OriginalSourceMedium_ID/String	Y NT	ID in the original source medium
+Video	UniqueID	N YTY	Unique ID
+Video	UniqueID/String	Y NT	Unique ID
+Video	MenuID	N YTY	Menu ID
+Video	MenuID/String	Y NT	Menu ID
+Video	Format	N YTY	Format
+Video	Format/String	Y NT	Format
+Video	Format/Info	Y NT	Format/Info
+Video	Format/Url	N NT	Format/Url
+Video	Format_Commercial	N NT	Commercial name
+Video	Format_Commercial_IfAny	Y YTY	Commercial name
+Video	Format_Version	Y YTY	Format version
+Video	Format_Profile	Y YTY	Format profile
+Video	Format_Level	Y YTY	Format level
+Video	Format_Tier	Y YTY	Format tier
+Video	Format_Compression	Y YTY	Compression
+Video	Format_AdditionalFeatures	N YTY	Format_AdditionalFeatures
+Video	MultiView_BaseProfile	Y YTY	MultiView_BaseProfile
+Video	MultiView_Count	Y YTY	Count of views
+Video	MultiView_Layout	Y YTY	MultiView_Layout
+Video	HDR_Format	N YTY	HDR format
+Video	HDR_Format/String	Y NT	HDR format
+Video	HDR_Format_Commercial	N YT	HDR_Format_Commercial
+Video	HDR_Format_Version	N YTY	HDR_Format_Version
+Video	HDR_Format_Profile	N YTY	HDR_Format_Profile
+Video	HDR_Format_Level	N YTY	HDR_Format_Level
+Video	HDR_Format_Settings	N YTY	HDR_Format_Settings
+Video	HDR_Format_Compression	N YTY	HDR_Format_Compression
+Video	HDR_Format_Compatibility	N YTY	HDR_Format_Compatibility
+Video	Format_Settings	Y NT	Format settings
+Video	Format_Settings_BVOP	N YTY	Format settings, BVOP
+Video	Format_Settings_BVOP/String	Y NT	Format settings, BVOP
+Video	Format_Settings_QPel	N YTY	Format settings, QPel
+Video	Format_Settings_QPel/String	Y NT	Format settings, QPel
+Video	Format_Settings_GMC	N YIY	Format settings, GMC
+Video	Format_Settings_GMC/String	Y NT	Format settings, GMC
+Video	Format_Settings_Matrix	N YTY	Format settings, Matrix
+Video	Format_Settings_Matrix/String	Y NT	Format settings, Matrix
+Video	Format_Settings_Matrix_Data	N NTY	Format_Settings_Matrix_Data
+Video	Format_Settings_CABAC	N YTY	Format settings, CABAC
+Video	Format_Settings_CABAC/String	Y NT	Format settings, CABAC
+Video	Format_Settings_RefFrames	N YIY	Format settings, Reference frames
+Video	Format_Settings_RefFrames/String	Y NT	Format settings, Reference frames
+Video	Format_Settings_Pulldown	Y YTY	Format settings, Pulldown
+Video	Format_Settings_Endianness	N YTY	Format settings, Endianness
+Video	Format_Settings_Packing	N YTY	Format_Settings_Packing
+Video	Format_Settings_FrameMode	Y YTY	Frame mode
+Video	Format_Settings_GOP	Y YTY	Format settings, GOP
+Video	Format_Settings_PictureStructure	Y YTY	Format settings, picture structure
+Video	Format_Settings_Wrapping	Y YTY	Format settings, wrapping mode
+Video	Format_Settings_SliceCount	N YIY	Format settings, Slice count
+Video	Format_Settings_SliceCount/String	Y NTN	Format settings, Slice count
+Video	InternetMediaType	N YT	Internet media type
+Video	MuxingMode	Y YTY	Muxing mode
+Video	CodecID	Y YTY	Codec ID
+Video	CodecID/String	Y NT	Codec ID
+Video	CodecID/Info	Y NT	Codec ID/Info
+Video	CodecID/Hint	Y NT	Codec ID/Hint
+Video	CodecID/Url	N NT	Codec ID/Url
+Video	CodecID_Description	Y YT	Description of the codec
+Video	Codec	N NT	Codec
+Video	Codec/String	N NT	Codec
+Video	Codec/Family	N NT	Codec/Family
+Video	Codec/Info	N NT	Codec/Info
+Video	Codec/Url	N NT	Codec/Url
+Video	Codec/CC	N NT	Codec/CC
+Video	Codec_Profile	N NT	Codec profile
+Video	Codec_Description	N NT	Codec description
+Video	Codec_Settings	N NT	Codec settings
+Video	Codec_Settings_PacketBitStream	N NT	Codec settings, Packet bitstream
+Video	Codec_Settings_BVOP	N NT	Codec settings, BVOP
+Video	Codec_Settings_QPel	N NT	Codec settings, QPel
+Video	Codec_Settings_GMC	N NT	Codec settings, GMC
+Video	Codec_Settings_GMC/String	N NT	Codec settings, GMC
+Video	Codec_Settings_Matrix	N NT	Codec settings, Matrix
+Video	Codec_Settings_Matrix_Data	N NT	Codec_Settings_Matrix_Data
+Video	Codec_Settings_CABAC	N NT	Codec settings, CABAC
+Video	Codec_Settings_RefFrames	N NT	Codec_Settings_RefFrames
+Video	Duration	N YFY	Duration
+Video	Duration/String	Y NT	Duration
+Video	Duration/String1	N NT	Duration
+Video	Duration/String2	N NT	Duration
+Video	Duration/String3	N NT	Duration
+Video	Duration/String4	N NT	Duration
+Video	Duration/String5	N NT	Duration
+Video	Duration_FirstFrame	N YFY	Duration_FirstFrame
+Video	Duration_FirstFrame/String	Y NT	Duration_FirstFrame
+Video	Duration_FirstFrame/String1	N NT	Duration_FirstFrame
+Video	Duration_FirstFrame/String2	N NT	Duration_FirstFrame
+Video	Duration_FirstFrame/String3	N NT	Duration_FirstFrame
+Video	Duration_FirstFrame/String4	N NT	Duration_FirstFrame
+Video	Duration_FirstFrame/String5	N NT	Duration_FirstFrame
+Video	Duration_LastFrame	N YFY	Duration_LastFrame
+Video	Duration_LastFrame/String	Y NT	Duration_LastFrame
+Video	Duration_LastFrame/String1	N NT	Duration_LastFrame
+Video	Duration_LastFrame/String2	N NT	Duration_LastFrame
+Video	Duration_LastFrame/String3	N NT	Duration_LastFrame
+Video	Duration_LastFrame/String4	N NT	Duration_LastFrame
+Video	Duration_LastFrame/String5	N NT	Duration_LastFrame
+Video	Source_Duration	N YFY	Source duration
+Video	Source_Duration/String	Y NT	Source duration
+Video	Source_Duration/String1	N NT	Source duration
+Video	Source_Duration/String2	N NT	Source duration
+Video	Source_Duration/String3	N NT	Source duration
+Video	Source_Duration/String4	N NT	Source duration
+Video	Source_Duration/String5	N NT	Source duration
+Video	Source_Duration_FirstFrame	N YFY	Source_Duration_FirstFrame
+Video	Source_Duration_FirstFrame/String	Y NT	Source_Duration_FirstFrame
+Video	Source_Duration_FirstFrame/String1	N NT	Source_Duration_FirstFrame
+Video	Source_Duration_FirstFrame/String2	N NT	Source_Duration_FirstFrame
+Video	Source_Duration_FirstFrame/String3	N NT	Source_Duration_FirstFrame
+Video	Source_Duration_FirstFrame/String4	N NT	Source_Duration_FirstFrame
+Video	Source_Duration_FirstFrame/String5	N NT	Source_Duration_FirstFrame
+Video	Source_Duration_LastFrame	N YFY	Source_Duration_LastFrame
+Video	Source_Duration_LastFrame/String	Y NT	Source_Duration_LastFrame
+Video	Source_Duration_LastFrame/String1	N NT	Source_Duration_LastFrame
+Video	Source_Duration_LastFrame/String2	N NT	Source_Duration_LastFrame
+Video	Source_Duration_LastFrame/String3	N NT	Source_Duration_LastFrame
+Video	Source_Duration_LastFrame/String4	N NT	Source_Duration_LastFrame
+Video	Source_Duration_LastFrame/String5	N NT	Source_Duration_LastFrame
+Video	BitRate_Mode	N YTY	Bit rate mode
+Video	BitRate_Mode/String	Y NT	Bit rate mode
+Video	BitRate	N YFY	Bit rate
+Video	BitRate/String	Y NT	Bit rate
+Video	BitRate_Minimum	N YFY	Minimum bit rate
+Video	BitRate_Minimum/String	Y NT	Minimum bit rate
+Video	BitRate_Nominal	N YFY	Nominal bit rate
+Video	BitRate_Nominal/String	Y NT	Nominal bit rate
+Video	BitRate_Maximum	N YFY	Maximum bit rate
+Video	BitRate_Maximum/String	Y NT	Maximum bit rate
+Video	BitRate_Encoded	N YFY	Encoded bit rate
+Video	BitRate_Encoded/String	N NT	Encoded bit rate
+Video	Width	N YIY	Width
+Video	Width/String	Y NT	Width
+Video	Width_Offset	N YIY	Width_Offset
+Video	Width_Offset/String	N NT	Width_Offset
+Video	Width_Original	N NIY	Original width
+Video	Width_Original/String	Y NT	Original width
+Video	Width_CleanAperture	N YIY	Clean aperture width
+Video	Width_CleanAperture/String	Y NT	Clean aperture width
+Video	Height	N YIY	Height
+Video	Height/String	Y NT	Height
+Video	Height_Offset	N YIY	Height_Offset
+Video	Height_Offset/String	N NT	Height_Offset
+Video	Height_Original	N NIY	Original height
+Video	Height_Original/String	Y NT	Original height
+Video	Height_CleanAperture	N YI	Clean aperture height
+Video	Height_CleanAperture/String	Y NT	Clean aperture height
+Video	Stored_Width	N YIY	Stored_Width
+Video	Stored_Height	N YIY	Stored_Height
+Video	Sampled_Width	N YIY	Sampled_Width
+Video	Sampled_Height	N YIY	Sampled_Height
+Video	PixelAspectRatio	N YFY	Pixel aspect ratio
+Video	PixelAspectRatio/String	N NT	Pixel aspect ratio
+Video	PixelAspectRatio_Original	N NFY	Original pixel aspect ratio
+Video	PixelAspectRatio_Original/String	N NT	Original pixel aspect ratio
+Video	PixelAspectRatio_CleanAperture	N YF	Clean aperture pixel aspect ratio
+Video	PixelAspectRatio_CleanAperture/String	N NT	Clean aperture pixel aspect ratio
+Video	DisplayAspectRatio	N YFY	Display aspect ratio
+Video	DisplayAspectRatio/String	Y NT	Display aspect ratio
+Video	DisplayAspectRatio_Original	N NFY	Original display aspect ratio
+Video	DisplayAspectRatio_Original/String	Y NT	Original display aspect ratio
+Video	DisplayAspectRatio_CleanAperture	N YF	Clean aperture display aspect ratio
+Video	DisplayAspectRatio_CleanAperture/String	Y NT	Clean aperture display aspect ratio
+Video	ActiveFormatDescription	N YNY	Active Format Description
+Video	ActiveFormatDescription/String	Y NT	Active Format Description
+Video	ActiveFormatDescription_MuxingMode	N YT	Active Format Description, Muxing mode
+Video	Active_Width	N YIY	Active width
+Video	Active_Width/String	Y NT	Active width
+Video	Active_Height	N YIY	Active height
+Video	Active_Height/String	Y NT	Active height
+Video	Active_DisplayAspectRatio	N YFY	Active display aspect ratio
+Video	Active_DisplayAspectRatio/String	Y NT	Active display aspect ratio
+Video	Rotation	N YTY	Rotation
+Video	Rotation/String	Y NT	Rotation
+Video	FrameRate_Mode	N YTY	Frame rate mode
+Video	FrameRate_Mode/String	Y NT	Frame rate mode
+Video	FrameRate_Mode_Original	N NTY	FrameRate_Mode_Original
+Video	FrameRate_Mode_Original/String	Y NT	FrameRate_Mode_Original
+Video	FrameRate	N YFY	Frame rate
+Video	FrameRate/String	Y NT	Frame rate
+Video	FrameRate_Num	N NIY	FrameRate_Num
+Video	FrameRate_Den	N NIY	FrameRate_Den
+Video	FrameRate_Minimum	N YFY	Minimum frame rate
+Video	FrameRate_Minimum/String	Y NT	Minimum frame rate
+Video	FrameRate_Nominal	N YFY	Nominal frame rate
+Video	FrameRate_Nominal/String	Y NT	Nominal frame rate
+Video	FrameRate_Maximum	N YFY	Maximum frame rate
+Video	FrameRate_Maximum/String	Y NT	Maximum frame rate
+Video	FrameRate_Original	N NFY	Original frame rate
+Video	FrameRate_Original/String	Y NT	Original frame rate
+Video	FrameRate_Original_Num	N NFN	FrameRate_Original_Num
+Video	FrameRate_Original_Den	N NFN	FrameRate_Original_Den
+Video	FrameRate_Real	N YFY	Real frame rate
+Video	FrameRate_Real/String	Y NT	Real frame rate
+Video	FrameCount	N YIY	Frame count
+Video	Source_FrameCount	N YI	Source frame count
+Video	Standard	Y YTY	Standard
+Video	Resolution	N NI	Resolution
+Video	Resolution/String	N NT	Resolution
+Video	Colorimetry	N NT	Colorimetry
+Video	ColorSpace	Y YTY	Color space
+Video	ChromaSubsampling	N YTY	Chroma subsampling
+Video	ChromaSubsampling/String	Y NT	Chroma subsampling
+Video	ChromaSubsampling_Position	N YTY	ChromaSubsampling_Position
+Video	BitDepth	N YIY	Bit depth
+Video	BitDepth/String	Y NT	Bit depth
+Video	ScanType	N YTY	Scan type
+Video	ScanType/String	Y NT	Scan type
+Video	ScanType_Original	N NTY	Original scan type
+Video	ScanType_Original/String	Y NT	Original scan type
+Video	ScanType_StoreMethod	N YT	Scan type, store method
+Video	ScanType_StoreMethod_FieldsPerBlock	N YT	ScanType_StoreMethod_FieldsPerBlock
+Video	ScanType_StoreMethod/String	Y NT	Scan type, store method
+Video	ScanOrder	N YTY	Scan order
+Video	ScanOrder/String	Y NT	Scan order
+Video	ScanOrder_Stored	N YTY	Stored scan order
+Video	ScanOrder_Stored/String	Y NT	Stored scan order
+Video	ScanOrder_StoredDisplayedInverted	N NT	Scan order, stored/displayed order inverted
+Video	ScanOrder_Original	N NTY	Original scan order
+Video	ScanOrder_Original/String	Y NT	Original scan order
+Video	Interlacement	N NT	Interlacement
+Video	Interlacement/String	N NT	Interlacement
+Video	Compression_Mode	N YTY	Compression mode
+Video	Compression_Mode/String	Y NT	Compression mode
+Video	Compression_Ratio	Y NFY	Compression ratio
+Video	Bits-(Pixel*Frame)	Y NFN	Bits/(Pixel*Frame)
+Video	Delay	N YFY	Delay
+Video	Delay/String	N NT	Delay
+Video	Delay/String1	N NT	Delay
+Video	Delay/String2	N NT	Delay
+Video	Delay/String3	N NT	Delay
+Video	Delay/String4	N NT	Delay
+Video	Delay/String5	N NT	Delay
+Video	Delay_Settings	N NTY	Delay_Settings
+Video	Delay_DropFrame	N NTY	Delay_DropFrame
+Video	Delay_Source	N NTY	Delay, origin
+Video	Delay_Source/String	N NT	Delay, origin
+Video	Delay_Original	N NIY	Delay_Original
+Video	Delay_Original/String	N NT	Delay_Original
+Video	Delay_Original/String1	N NT	Delay_Original
+Video	Delay_Original/String2	N NT	Delay_Original
+Video	Delay_Original/String3	N NT	Delay_Original
+Video	Delay_Original/String4	N NT	Delay_Original
+Video	Delay_Original/String5	N NT	Delay_Original
+Video	Delay_Original_Settings	N NT	Delay_Original_Settings
+Video	Delay_Original_DropFrame	N NTY	Delay_Original_DropFrame
+Video	Delay_Original_Source	N NTY	Delay_Original_Source
+Video	TimeStamp_FirstFrame	N YFY	TimeStamp_FirstFrame
+Video	TimeStamp_FirstFrame/String	Y NT	TimeStamp_FirstFrame
+Video	TimeStamp_FirstFrame/String1	N NT	TimeStamp_FirstFrame
+Video	TimeStamp_FirstFrame/String2	N NT	TimeStamp_FirstFrame
+Video	TimeStamp_FirstFrame/String3	N NT	TimeStamp_FirstFrame
+Video	TimeStamp_FirstFrame/String4	N NT	TimeStamp_FirstFrame
+Video	TimeStamp_FirstFrame/String5	N NT	TimeStamp_FirstFrame
+Video	TimeCode_FirstFrame	Y YCY	Time code of first frame
+Video	TimeCode_LastFrame	Y YCY	Time code of last frame
+Video	TimeCode_DropFrame	N NT	TimeCode_DropFrame
+Video	TimeCode_Settings	Y YTY	Time code settings
+Video	TimeCode_Source	Y YTY	Time code source
+Video	Gop_OpenClosed	N YTY	GOP, Open/Closed
+Video	Gop_OpenClosed/String	Y NT	GOP, Open/Closed
+Video	Gop_OpenClosed_FirstFrame	N YTY	GOP, Open/Closed of first frame
+Video	Gop_OpenClosed_FirstFrame/String	Y NT	GOP, Open/Closed of first frame
+Video	StreamSize	N YIY	Stream size
+Video	StreamSize/String	Y NT	Stream size
+Video	StreamSize/String1	N NT	Stream size
+Video	StreamSize/String2	N NT	Stream size
+Video	StreamSize/String3	N NT	Stream size
+Video	StreamSize/String4	N NT	Stream size
+Video	StreamSize/String5	N NT	Stream size
+Video	StreamSize_Proportion	N NT	Proportion of this stream
+Video	StreamSize_Demuxed	N NIN	Stream size when demuxed
+Video	StreamSize_Demuxed/String	N NT	Stream size when demuxed
+Video	StreamSize_Demuxed/String1	N NT	Stream size when demuxed
+Video	StreamSize_Demuxed/String2	N NT	Stream size when demuxed
+Video	StreamSize_Demuxed/String3	N NT	Stream size when demuxed
+Video	StreamSize_Demuxed/String4	N NT	Stream size when demuxed
+Video	StreamSize_Demuxed/String5	N NT	Stream size when demuxed
+Video	Source_StreamSize	N YIY	Source stream size
+Video	Source_StreamSize/String	Y NT	Source stream size
+Video	Source_StreamSize/String1	N NT	Source stream size
+Video	Source_StreamSize/String2	N NT	Source stream size
+Video	Source_StreamSize/String3	N NT	Source stream size
+Video	Source_StreamSize/String4	N NT	Source stream size
+Video	Source_StreamSize/String5	N NT	Source stream size
+Video	Source_StreamSize_Proportion	N NT	Source_StreamSize_Proportion
+Video	StreamSize_Encoded	N YIY	Encoded stream size
+Video	StreamSize_Encoded/String	N NT	Encoded stream size
+Video	StreamSize_Encoded/String1	N NT	Encoded stream size
+Video	StreamSize_Encoded/String2	N NT	Encoded stream size
+Video	StreamSize_Encoded/String3	N NT	Encoded stream size
+Video	StreamSize_Encoded/String4	N NT	Encoded stream size
+Video	StreamSize_Encoded/String5	N NT	Encoded stream size
+Video	StreamSize_Encoded_Proportion	N NT	StreamSize_Encoded_Proportion
+Video	Source_StreamSize_Encoded	N YIY	Source encoded stream size
+Video	Source_StreamSize_Encoded/String	N NT	Source encoded stream size
+Video	Source_StreamSize_Encoded/String1	N NT	Source encoded stream size
+Video	Source_StreamSize_Encoded/String2	N NT	Source encoded stream size
+Video	Source_StreamSize_Encoded/String3	N NT	Source encoded stream size
+Video	Source_StreamSize_Encoded/String4	N NT	Source encoded stream size
+Video	Source_StreamSize_Encoded/String5	N NT	Source encoded stream size
+Video	Source_StreamSize_Encoded_Proportion	N NT	Source_StreamSize_Encoded_Proportion
+Video	Alignment	N YTY	Alignment
+Video	Alignment/String	Y NT	Alignment
+Video	Title	Y YTY	Title
+Video	Encoded_Application	N YTY	Writing application
+Video	Encoded_Application/String	Y NT	Writing application
+Video	Encoded_Application_CompanyName	N YTY	Encoded_Application_CompanyName
+Video	Encoded_Application_Name	N YTY	Encoded_Application_Name
+Video	Encoded_Application_Version	N YTY	Encoded_Application_Version
+Video	Encoded_Application_Url	N YTY	Encoded_Application_Url
+Video	Encoded_Library	N YTY	Writing library
+Video	Encoded_Library/String	Y NT	Writing library
+Video	Encoded_Library_CompanyName	N YTY	Encoded_Library_CompanyName
+Video	Encoded_Library_Name	N YTY	Encoded_Library_Name
+Video	Encoded_Library_Version	N YTY	Encoded_Library_Version
+Video	Encoded_Library_Date	N YTY	Encoded_Library_Date
+Video	Encoded_Library_Settings	Y YTY	Encoding settings
+Video	Encoded_OperatingSystem	N YTY	Writing operating system
+Video	Language	N YTY	Language
+Video	Language/String	Y NT	Language
+Video	Language/String1	N NT	Language
+Video	Language/String2	N NT	Language
+Video	Language/String3	N NT	Language
+Video	Language/String4	N NT	Language
+Video	Language_More	Y YTY	Language, more info
+Video	ServiceKind	N YTY	Service kind
+Video	ServiceKind/String	Y NT	Service kind
+Video	Disabled	N YTY	Disabled
+Video	Disabled/String	Y NT	Disabled
+Video	Default	N YTY	Default
+Video	Default/String	Y NT	Default
+Video	Forced	N YTY	Forced
+Video	Forced/String	Y NT	Forced
+Video	AlternateGroup	N YTY	Alternate group
+Video	AlternateGroup/String	Y NT	Alternate group
+Video	Encoded_Date	Y YTY	Encoded date
+Video	Tagged_Date	Y YTY	Tagged date
+Video	Encryption	Y YTY	Encryption
+Video	BufferSize	N YTY	Buffer size
+Video	colour_description_present	N YTY	colour_description_present
+Video	colour_description_present_Source	N YTY	colour_description_present_Source
+Video	colour_description_present_Original	N NTY	colour_description_present_Original
+Video	colour_description_present_Original_Source	N NTY	colour_description_present_Original_Source
+Video	colour_range	Y YTY	Color range
+Video	colour_range_Source	N YTY	colour_range_Source
+Video	colour_range_Original	Y NTY	colour_range_Original
+Video	colour_range_Original_Source	N NTY	colour_range_Original_Source
+Video	colour_primaries	Y YTY	Color primaries
+Video	colour_primaries_Source	N YTY	colour_primaries_Source
+Video	colour_primaries_Original	Y NTY	colour_primaries_Original
+Video	colour_primaries_Original_Source	N NTY	colour_primaries_Original_Source
+Video	transfer_characteristics	Y YTY	Transfer characteristics
+Video	transfer_characteristics_Source	N YTY	transfer_characteristics_Source
+Video	transfer_characteristics_Original	Y NTY	transfer_characteristics_Original
+Video	transfer_characteristics_Original_Source	N NTY	transfer_characteristics_Original_Source
+Video	matrix_coefficients	Y YTY	Matrix coefficients
+Video	matrix_coefficients_Source	N YTY	matrix_coefficients_Source
+Video	matrix_coefficients_Original	Y NTY	matrix_coefficients_Original
+Video	matrix_coefficients_Original_Source	N NTY	matrix_coefficients_Original_Source
+Video	MasteringDisplay_ColorPrimaries	Y YTY	Mastering display color primaries
+Video	MasteringDisplay_ColorPrimaries_Source	N YTY	MasteringDisplay_ColorPrimaries_Source
+Video	MasteringDisplay_ColorPrimaries_Original	Y NTY	MasteringDisplay_ColorPrimaries_Original
+Video	MasteringDisplay_ColorPrimaries_Original_Source	N NTY	MasteringDisplay_ColorPrimaries_Original_Source
+Video	MasteringDisplay_Luminance	Y YTY	Mastering display luminance
+Video	MasteringDisplay_Luminance_Source	N YTY	MasteringDisplay_Luminance_Source
+Video	MasteringDisplay_Luminance_Min	N YTY	MasteringDisplay_Luminance_Min
+Video	MasteringDisplay_Luminance_Max	N YTY	MasteringDisplay_Luminance_Max
+Video	MasteringDisplay_Luminance_Original	Y NTY	MasteringDisplay_Luminance_Original
+Video	MasteringDisplay_Luminance_Original_Source	N NTY	MasteringDisplay_Luminance_Original_Source
+Video	MasteringDisplay_Luminance_Original_Min	N YTY	MasteringDisplay_Luminance_Original_Min
+Video	MasteringDisplay_Luminance_Original_Max	N YTY	MasteringDisplay_Luminance_Original_Max
+Video	MaxCLL	N YTY	Maximum Content Light Level
+Video	MaxCLL/String	Y NTN	Maximum Content Light Level
+Video	MaxCLL_Source	N YTY	MaxCLL_Source
+Video	MaxCLL_Original	N NTY	MaxCLL_Original
+Video	MaxCLL_Original/String	Y NTN	MaxCLL_Original
+Video	MaxCLL_Original_Source	N NTY	MaxCLL_Original_Source
+Video	MaxFALL	N YTY	Maximum Frame-Average Light Level
+Video	MaxFALL/String	Y NTN	Maximum Frame-Average Light Level
+Video	MaxFALL_Source	N YTY	MaxFALL_Source
+Video	MaxFALL_Original	N NTY	MaxFALL_Original
+Video	MaxFALL_Original/String	Y NTN	MaxFALL_Original
+Video	MaxFALL_Original_Source	N NTY	MaxFALL_Original_Source
+Audio	Count	N NI	Count
+Audio	Status	N NI	Status
+Audio	StreamCount	N NI	Count of stream of this kind
+Audio	StreamKind	N NT	Kind of stream
+Audio	StreamKind/String	N NT	Kind of stream
+Audio	StreamKindID	N NI	Stream identifier
+Audio	StreamKindPos	N NI	Stream identifier
+Audio	StreamOrder	N YIY	StreamOrder
+Audio	FirstPacketOrder	N NIY	FirstPacketOrder
+Audio	Inform	N NT	Inform
+Audio	ID	N YTY	ID
+Audio	ID/String	Y NT	ID
+Audio	OriginalSourceMedium_ID	N YTY	ID in the original source medium
+Audio	OriginalSourceMedium_ID/String	Y NT	ID in the original source medium
+Audio	UniqueID	N YTY	Unique ID
+Audio	UniqueID/String	Y NT	Unique ID
+Audio	MenuID	N YTY	Menu ID
+Audio	MenuID/String	Y NT	Menu ID
+Audio	Format	N YTY	Format
+Audio	Format/String	Y NT	Format
+Audio	Format/Info	Y NT	Format/Info
+Audio	Format/Url	N NT	Format/Url
+Audio	Format_Commercial	N NT	Commercial name
+Audio	Format_Commercial_IfAny	Y YTY	Commercial name
+Audio	Format_Version	Y YTY	Format version
+Audio	Format_Profile	Y YTY	Format profile
+Audio	Format_Level	Y YTY	Format level
+Audio	Format_Compression	Y YTY	Compression
+Audio	Format_Settings	Y NT	Format settings
+Audio	Format_Settings_SBR	N YTY	Format settings, SBR
+Audio	Format_Settings_SBR/String	N NT	Format settings, SBR
+Audio	Format_Settings_PS	N YTY	Format settings, PS
+Audio	Format_Settings_PS/String	N NT	Format settings, PS
+Audio	Format_Settings_Mode	N YTY	Mode
+Audio	Format_Settings_ModeExtension	N YTY	Mode extension
+Audio	Format_Settings_Emphasis	N YTY	Emphasis
+Audio	Format_Settings_Floor	Y YTY	Format settings, Floor
+Audio	Format_Settings_Firm	N YTY	Format settings, Firm
+Audio	Format_Settings_Endianness	N YTY	Format settings, Endianness
+Audio	Format_Settings_Sign	N YTY	Format settings, Sign
+Audio	Format_Settings_Law	Y YTY	Format settings, Law
+Audio	Format_Settings_ITU	N YTY	Format settings, ITU
+Audio	Format_Settings_Wrapping	Y YTY	Format settings, wrapping mode
+Audio	Format_AdditionalFeatures	N YTY	Format_AdditionalFeatures
+Audio	Matrix_Format	Y YTY	Matrix encoding, format
+Audio	InternetMediaType	N YT	Internet media type
+Audio	MuxingMode	Y YTY	Muxing mode
+Audio	MuxingMode_MoreInfo	Y NT	Muxing mode, more info
+Audio	CodecID	Y YTY	Codec ID
+Audio	CodecID/String	Y NT	Codec ID
+Audio	CodecID/Info	Y NT	Codec ID/Info
+Audio	CodecID/Hint	Y NT	Codec ID/Hint
+Audio	CodecID/Url	N NT	Codec ID/Url
+Audio	CodecID_Description	Y YT	Description of the codec
+Audio	Codec	N NT	Codec
+Audio	Codec/String	N NT	Codec
+Audio	Codec/Family	N NT	Codec/Family
+Audio	Codec/Info	N NT	Codec/Info
+Audio	Codec/Url	N NT	Codec/Url
+Audio	Codec/CC	N NT	Codec/CC
+Audio	Codec_Description	N NT	Codec description
+Audio	Codec_Profile	N NT	Codec profile
+Audio	Codec_Settings	N NT	Codec settings
+Audio	Codec_Settings_Automatic	N NT	Codec_Settings_Automatic
+Audio	Codec_Settings_Floor	N NT	Codec settings, Floor
+Audio	Codec_Settings_Firm	N NT	Codec settings, Firm
+Audio	Codec_Settings_Endianness	N NT	Codec settings, Endianness
+Audio	Codec_Settings_Sign	N NT	Codec settings, Sign
+Audio	Codec_Settings_Law	N NT	Codec settings, Law
+Audio	Codec_Settings_ITU	N NT	Codec settings, ITU
+Audio	Duration	N YFY	Duration
+Audio	Duration/String	Y NT	Duration
+Audio	Duration/String1	N NT	Duration
+Audio	Duration/String2	N NT	Duration
+Audio	Duration/String3	N NT	Duration
+Audio	Duration/String4	N NT	Duration
+Audio	Duration/String5	N NT	Duration
+Audio	Duration_FirstFrame	N YFY	Duration_FirstFrame
+Audio	Duration_FirstFrame/String	Y NT	Duration_FirstFrame
+Audio	Duration_FirstFrame/String1	N NT	Duration_FirstFrame
+Audio	Duration_FirstFrame/String2	N NT	Duration_FirstFrame
+Audio	Duration_FirstFrame/String3	N NT	Duration_FirstFrame
+Audio	Duration_FirstFrame/String4	N NT	Duration_FirstFrame
+Audio	Duration_FirstFrame/String5	N NT	Duration_FirstFrame
+Audio	Duration_LastFrame	N YFY	Duration_LastFrame
+Audio	Duration_LastFrame/String	Y NT	Duration_LastFrame
+Audio	Duration_LastFrame/String1	N NT	Duration_LastFrame
+Audio	Duration_LastFrame/String2	N NT	Duration_LastFrame
+Audio	Duration_LastFrame/String3	N NT	Duration_LastFrame
+Audio	Duration_LastFrame/String4	N NT	Duration_LastFrame
+Audio	Duration_LastFrame/String5	N NT	Duration_LastFrame
+Audio	Source_Duration	N YFY	Source duration
+Audio	Source_Duration/String	Y NT	Source duration
+Audio	Source_Duration/String1	N NT	Source duration
+Audio	Source_Duration/String2	N NT	Source duration
+Audio	Source_Duration/String3	N NT	Source duration
+Audio	Source_Duration/String4	N NT	Source duration
+Audio	Source_Duration/String5	N NT	Source duration
+Audio	Source_Duration_FirstFrame	N YFY	Source_Duration_FirstFrame
+Audio	Source_Duration_FirstFrame/String	Y NT	Source_Duration_FirstFrame
+Audio	Source_Duration_FirstFrame/String1	N NT	Source_Duration_FirstFrame
+Audio	Source_Duration_FirstFrame/String2	N NT	Source_Duration_FirstFrame
+Audio	Source_Duration_FirstFrame/String3	N NT	Source_Duration_FirstFrame
+Audio	Source_Duration_FirstFrame/String4	N NT	Source_Duration_FirstFrame
+Audio	Source_Duration_FirstFrame/String5	N NT	Source_Duration_FirstFrame
+Audio	Source_Duration_LastFrame	N YFY	Source_Duration_LastFrame
+Audio	Source_Duration_LastFrame/String	Y NT	Source_Duration_LastFrame
+Audio	Source_Duration_LastFrame/String1	N NT	Source_Duration_LastFrame
+Audio	Source_Duration_LastFrame/String2	N NT	Source_Duration_LastFrame
+Audio	Source_Duration_LastFrame/String3	N NT	Source_Duration_LastFrame
+Audio	Source_Duration_LastFrame/String4	N NT	Source_Duration_LastFrame
+Audio	Source_Duration_LastFrame/String5	N NT	Source_Duration_LastFrame
+Audio	BitRate_Mode	N YTY	Bit rate mode
+Audio	BitRate_Mode/String	Y NT	Bit rate mode
+Audio	BitRate	N YFY	Bit rate
+Audio	BitRate/String	Y NT	Bit rate
+Audio	BitRate_Minimum	N YFY	Minimum bit rate
+Audio	BitRate_Minimum/String	Y NT	Minimum bit rate
+Audio	BitRate_Nominal	N YFY	Nominal bit rate
+Audio	BitRate_Nominal/String	Y NT	Nominal bit rate
+Audio	BitRate_Maximum	N YFY	Maximum bit rate
+Audio	BitRate_Maximum/String	Y NT	Maximum bit rate
+Audio	BitRate_Encoded	N YFY	Encoded bit rate
+Audio	BitRate_Encoded/String	N NT	Encoded bit rate
+Audio	Channel(s)	N YIY	Channel(s)
+Audio	Channel(s)/String	Y NT	Channel(s)
+Audio	Channel(s)_Original	N NIY	Channel(s)_Original
+Audio	Channel(s)_Original/String	Y NT	Channel(s)_Original
+Audio	Matrix_Channel(s)	N YIY	Matrix encoding, Channel(s)
+Audio	Matrix_Channel(s)/String	Y NT	Matrix encoding, Channel(s)
+Audio	ChannelPositions	N YTY	Channel positions
+Audio	ChannelPositions_Original	N NTY	ChannelPositions_Original
+Audio	ChannelPositions/String2	N NT	Channel positions
+Audio	ChannelPositions_Original/String2	N NT	ChannelPositions_Original
+Audio	Matrix_ChannelPositions	Y YTY	Matrix encoding, channel positions
+Audio	Matrix_ChannelPositions/String2	N NT	Matrix encoding, channel positions
+Audio	ChannelLayout	Y YTY	Channel layout
+Audio	ChannelLayout_Original	Y NTY	ChannelLayout_Original
+Audio	ChannelLayoutID	N YT	ChannelLayoutID
+Audio	SamplesPerFrame	N YFY	Samples per frame
+Audio	SamplingRate	N YFY	Sampling rate
+Audio	SamplingRate/String	Y NT	Sampling rate
+Audio	SamplingCount	N YIY	Samples count
+Audio	Source_SamplingCount	N YIY	Source sample count
+Audio	FrameRate	N YFY	Frame rate
+Audio	FrameRate/String	Y NT	Frame rate
+Audio	FrameRate_Num	N NIY	FrameRate_Num
+Audio	FrameRate_Den	N NIY	FrameRate_Den
+Audio	FrameCount	N YIY	Frame count
+Audio	Source_FrameCount	N YIY	Source frame count
+Audio	Resolution	N NI	Resolution
+Audio	Resolution/String	N NT	Resolution
+Audio	BitDepth	N YIY	Bit depth
+Audio	BitDepth/String	Y NT	Bit depth
+Audio	BitDepth_Detected	N YIY	Detected bit depth
+Audio	BitDepth_Detected/String	Y NT	Detected bit depth
+Audio	BitDepth_Stored	N YIY	Stored bit depth
+Audio	BitDepth_Stored/String	Y NT	Stored bit depth
+Audio	Compression_Mode	N YTY	Compression mode
+Audio	Compression_Mode/String	Y NT	Compression mode
+Audio	Compression_Ratio	Y NF	Compression ratio
+Audio	Delay	N YFY	Delay
+Audio	Delay/String	N NT	Delay
+Audio	Delay/String1	N NT	Delay
+Audio	Delay/String2	N NT	Delay
+Audio	Delay/String3	N NT	Delay
+Audio	Delay/String4	N NT	Delay
+Audio	Delay/String5	N NT	Delay
+Audio	Delay_Settings	N NTY	Delay_Settings
+Audio	Delay_DropFrame	N NTY	Delay_DropFrame
+Audio	Delay_Source	N NTY	Delay, origin
+Audio	Delay_Source/String	N NT	Delay, origin
+Audio	Delay_Original	N NIY	Delay_Original
+Audio	Delay_Original/String	N NT	Delay_Original
+Audio	Delay_Original/String1	N NT	Delay_Original
+Audio	Delay_Original/String2	N NT	Delay_Original
+Audio	Delay_Original/String3	N NT	Delay_Original
+Audio	Delay_Original/String4	N NT	Delay_Original
+Audio	Delay_Original/String5	N NT	Delay_Original
+Audio	Delay_Original_Settings	N NT	Delay_Original_Settings
+Audio	Delay_Original_DropFrame	N NTY	Delay_Original_DropFrame
+Audio	Delay_Original_Source	N NTY	Delay_Original_Source
+Audio	Video_Delay	N NFY	Delay relative to video
+Audio	Video_Delay/String	Y NT	Delay relative to video
+Audio	Video_Delay/String1	N NT	Delay relative to video
+Audio	Video_Delay/String2	N NT	Delay relative to video
+Audio	Video_Delay/String3	N NT	Delay relative to video
+Audio	Video_Delay/String4	N NT	Delay relative to video
+Audio	Video_Delay/String5	N NT	Delay relative to video
+Audio	Video0_Delay	N NI	Video0 delay
+Audio	Video0_Delay/String	N NT	Video0 delay
+Audio	Video0_Delay/String1	N NT	Video0 delay
+Audio	Video0_Delay/String2	N NT	Video0 delay
+Audio	Video0_Delay/String3	N NT	Video0 delay
+Audio	Video0_Delay/String4	N NT	Video0 delay
+Audio	Video0_Delay/String5	N NT	Video0 delay
+Audio	TimeCode_FirstFrame	Y YCY	Time code of first frame
+Audio	TimeCode_LastFrame	Y YCY	Time code of last frame
+Audio	TimeCode_DropFrame	N NT	TimeCode_DropFrame
+Audio	TimeCode_Settings	Y YTY	Time code settings
+Audio	TimeCode_Source	Y YTY	Time code source
+Audio	ReplayGain_Gain	N YTY	Replay gain
+Audio	ReplayGain_Gain/String	Y NTN	Replay gain
+Audio	ReplayGain_Peak	Y YTY	Replay gain peak
+Audio	StreamSize	N YIY	Stream size
+Audio	StreamSize/String	Y NT	Stream size
+Audio	StreamSize/String1	N NT	Stream size
+Audio	StreamSize/String2	N NT	Stream size
+Audio	StreamSize/String3	N NT	Stream size
+Audio	StreamSize/String4	N NT	Stream size
+Audio	StreamSize/String5	N NT	Stream size
+Audio	StreamSize_Proportion	N NT	Proportion of this stream
+Audio	StreamSize_Demuxed	N NIN	Stream size when demuxed
+Audio	StreamSize_Demuxed/String	N NT	Stream size when demuxed
+Audio	StreamSize_Demuxed/String1	N NT	Stream size when demuxed
+Audio	StreamSize_Demuxed/String2	N NT	Stream size when demuxed
+Audio	StreamSize_Demuxed/String3	N NT	Stream size when demuxed
+Audio	StreamSize_Demuxed/String4	N NT	Stream size when demuxed
+Audio	StreamSize_Demuxed/String5	N NT	Stream size when demuxed
+Audio	Source_StreamSize	N YIY	Source stream size
+Audio	Source_StreamSize/String	Y NT	Source stream size
+Audio	Source_StreamSize/String1	N NT	Source stream size
+Audio	Source_StreamSize/String2	N NT	Source stream size
+Audio	Source_StreamSize/String3	N NT	Source stream size
+Audio	Source_StreamSize/String4	N NT	Source stream size
+Audio	Source_StreamSize/String5	N NT	Source stream size
+Audio	Source_StreamSize_Proportion	N NT	Source_StreamSize_Proportion
+Audio	StreamSize_Encoded	N YIY	Encoded stream size
+Audio	StreamSize_Encoded/String	N NT	Encoded stream size
+Audio	StreamSize_Encoded/String1	N NT	Encoded stream size
+Audio	StreamSize_Encoded/String2	N NT	Encoded stream size
+Audio	StreamSize_Encoded/String3	N NT	Encoded stream size
+Audio	StreamSize_Encoded/String4	N NT	Encoded stream size
+Audio	StreamSize_Encoded/String5	N NT	Encoded stream size
+Audio	StreamSize_Encoded_Proportion	N NT	StreamSize_Encoded_Proportion
+Audio	Source_StreamSize_Encoded	N YIY	Source encoded stream size
+Audio	Source_StreamSize_Encoded/String	N NT	Source encoded stream size
+Audio	Source_StreamSize_Encoded/String1	N NT	Source encoded stream size
+Audio	Source_StreamSize_Encoded/String2	N NT	Source encoded stream size
+Audio	Source_StreamSize_Encoded/String3	N NT	Source encoded stream size
+Audio	Source_StreamSize_Encoded/String4	N NT	Source encoded stream size
+Audio	Source_StreamSize_Encoded/String5	N NT	Source encoded stream size
+Audio	Source_StreamSize_Encoded_Proportion	N NT	Source_StreamSize_Encoded_Proportion
+Audio	Alignment	N YTY	Alignment
+Audio	Alignment/String	Y NT	Alignment
+Audio	Interleave_VideoFrames	N YFY	Interleave, duration
+Audio	Interleave_Duration	N YFY	Interleave, duration
+Audio	Interleave_Duration/String	Y NT	Interleave, duration
+Audio	Interleave_Preload	N YFY	Interleave, preload duration
+Audio	Interleave_Preload/String	Y NT	Interleave, preload duration
+Audio	Title	Y YTY	Title
+Audio	Encoded_Application	N YTY	Writing application
+Audio	Encoded_Application/String	Y NT	Writing application
+Audio	Encoded_Application_CompanyName	N YTY	Encoded_Application_CompanyName
+Audio	Encoded_Application_Name	N YTY	Encoded_Application_Name
+Audio	Encoded_Application_Version	N YTY	Encoded_Application_Version
+Audio	Encoded_Application_Url	N YTY	Encoded_Application_Url
+Audio	Encoded_Library	N YTY	Writing library
+Audio	Encoded_Library/String	Y NT	Writing library
+Audio	Encoded_Library_CompanyName	N YTY	Encoded_Library_CompanyName
+Audio	Encoded_Library_Name	N YTY	Encoded_Library_Name
+Audio	Encoded_Library_Version	N YTY	Encoded_Library_Version
+Audio	Encoded_Library_Date	N YTY	Encoded_Library_Date
+Audio	Encoded_Library_Settings	Y YTY	Encoding settings
+Audio	Encoded_OperatingSystem	N YTY	Writing operating system
+Audio	Language	N YTY	Language
+Audio	Language/String	Y NT	Language
+Audio	Language/String1	N NT	Language
+Audio	Language/String2	N NT	Language
+Audio	Language/String3	N NT	Language
+Audio	Language/String4	N NT	Language
+Audio	Language_More	Y YTY	Language, more info
+Audio	ServiceKind	N YTY	Service kind
+Audio	ServiceKind/String	Y NT	Service kind
+Audio	Disabled	N YTY	Disabled
+Audio	Disabled/String	Y NT	Disabled
+Audio	Default	N YTY	Default
+Audio	Default/String	Y NT	Default
+Audio	Forced	N YTY	Forced
+Audio	Forced/String	Y NT	Forced
+Audio	AlternateGroup	N YTY	Alternate group
+Audio	AlternateGroup/String	Y NT	Alternate group
+Audio	Encoded_Date	Y YTY	Encoded date
+Audio	Tagged_Date	Y YTY	Tagged date
+Audio	Encryption	Y YTY	Encryption
+Text	Count	N NI	Count
+Text	Status	N NI	Status
+Text	StreamCount	N NI	Count of stream of this kind
+Text	StreamKind	N NT	Kind of stream
+Text	StreamKind/String	N NT	Kind of stream
+Text	StreamKindID	N NI	Stream identifier
+Text	StreamKindPos	N NI	Stream identifier
+Text	StreamOrder	N YIY	StreamOrder
+Text	FirstPacketOrder	N NIY	FirstPacketOrder
+Text	Inform	N NT	Inform
+Text	ID	N YTY	ID
+Text	ID/String	Y NT	ID
+Text	OriginalSourceMedium_ID	N YTY	ID in the original source medium
+Text	OriginalSourceMedium_ID/String	Y NT	ID in the original source medium
+Text	UniqueID	N YTY	Unique ID
+Text	UniqueID/String	Y NT	Unique ID
+Text	MenuID	N YTY	Menu ID
+Text	MenuID/String	Y NT	Menu ID
+Text	Format	N YTY	Format
+Text	Format/String	Y NT	Format
+Text	Format/Info	Y NT	Format/Info
+Text	Format/Url	N NT	Format/Url
+Text	Format_Commercial	N NT	Commercial name
+Text	Format_Commercial_IfAny	Y YTY	Commercial name
+Text	Format_Version	Y YTY	Format version
+Text	Format_Profile	Y YTY	Format profile
+Text	Format_Compression	Y YTY	Compression
+Text	Format_Settings	Y YTY	Format settings
+Text	Format_Settings_Wrapping	Y YTY	Format settings, wrapping mode
+Text	Format_AdditionalFeatures	N YTY	Format_AdditionalFeatures
+Text	InternetMediaType	N YT	Internet media type
+Text	MuxingMode	Y YTY	Muxing mode
+Text	MuxingMode_MoreInfo	Y YTY	Muxing mode, more info
+Text	CodecID	Y YTY	Codec ID
+Text	CodecID/String	Y NT	Codec ID
+Text	CodecID/Info	Y NT	Codec ID/Info
+Text	CodecID/Hint	Y NT	Codec ID/Hint
+Text	CodecID/Url	N NT	Codec ID/Url
+Text	CodecID_Description	Y YT	Description of the codec
+Text	Codec	N NT	Codec
+Text	Codec/String	N NT	Codec
+Text	Codec/Info	N NT	Codec/Info
+Text	Codec/Url	N NT	Codec/Url
+Text	Codec/CC	N NT	Codec/CC
+Text	Duration	N YFY	Duration
+Text	Duration/String	Y NT	Duration
+Text	Duration/String1	N NT	Duration
+Text	Duration/String2	N NT	Duration
+Text	Duration/String3	N NT	Duration
+Text	Duration/String4	N NT	Duration
+Text	Duration/String5	N NT	Duration
+Text	Duration_Start2End	N YFY	Duration of the visible content
+Text	Duration_Start2End/String	Y NT	Duration of the visible content
+Text	Duration_Start2End/String1	N NT	Duration of the visible content
+Text	Duration_Start2End/String2	N NT	Duration of the visible content
+Text	Duration_Start2End/String3	N NT	Duration of the visible content
+Text	Duration_Start2End/String4	N NT	Duration of the visible content
+Text	Duration_Start2End/String5	N NT	Duration of the visible content
+Text	Duration_Start_Command	N YFY	Start time (commands)
+Text	Duration_Start_Command/String	N NT	Start time (commands)
+Text	Duration_Start_Command/String1	N NT	Start time (commands)
+Text	Duration_Start_Command/String2	N NT	Start time (commands)
+Text	Duration_Start_Command/String3	N NT	Start time (commands)
+Text	Duration_Start_Command/String4	N NT	Start time (commands)
+Text	Duration_Start_Command/String5	N NT	Start time (commands)
+Text	Duration_Start	N YFY	Start time
+Text	Duration_Start/String	Y NT	Start time
+Text	Duration_Start/String1	N NT	Start time
+Text	Duration_Start/String2	N NT	Start time
+Text	Duration_Start/String3	N NT	Start time
+Text	Duration_Start/String4	N NT	Start time
+Text	Duration_Start/String5	N NT	Start time
+Text	Duration_End	N YFY	End time
+Text	Duration_End/String	Y NT	End time
+Text	Duration_End/String1	N NT	End time
+Text	Duration_End/String2	N NT	End time
+Text	Duration_End/String3	N NT	End time
+Text	Duration_End/String4	N NT	End time
+Text	Duration_End/String5	N NT	End time
+Text	Duration_End_Command	N YFY	End time (commands)
+Text	Duration_End_Command/String	N NT	End time (commands)
+Text	Duration_End_Command/String1	N NT	End time (commands)
+Text	Duration_End_Command/String2	N NT	End time (commands)
+Text	Duration_End_Command/String3	N NT	End time (commands)
+Text	Duration_End_Command/String4	N NT	End time (commands)
+Text	Duration_End_Command/String5	N NT	End time (commands)
+Text	Duration_FirstFrame	N YFY	Duration_FirstFrame
+Text	Duration_FirstFrame/String	Y NT	Duration_FirstFrame
+Text	Duration_FirstFrame/String1	N NT	Duration_FirstFrame
+Text	Duration_FirstFrame/String2	N NT	Duration_FirstFrame
+Text	Duration_FirstFrame/String3	N NT	Duration_FirstFrame
+Text	Duration_FirstFrame/String4	N NT	Duration_FirstFrame
+Text	Duration_FirstFrame/String5	N NT	Duration_FirstFrame
+Text	Duration_LastFrame	N YFY	Duration_LastFrame
+Text	Duration_LastFrame/String	Y NT	Duration_LastFrame
+Text	Duration_LastFrame/String1	N NT	Duration_LastFrame
+Text	Duration_LastFrame/String2	N NT	Duration_LastFrame
+Text	Duration_LastFrame/String3	N NT	Duration_LastFrame
+Text	Duration_LastFrame/String4	N NT	Duration_LastFrame
+Text	Duration_LastFrame/String5	N NT	Duration_LastFrame
+Text	Duration_Base	Y YTY	Duration_Base
+Text	Source_Duration	N YFY	Source duration
+Text	Source_Duration/String	Y NT	Source duration
+Text	Source_Duration/String1	N NT	Source duration
+Text	Source_Duration/String2	N NT	Source duration
+Text	Source_Duration/String3	N NT	Source duration
+Text	Source_Duration/String4	N NT	Source duration
+Text	Source_Duration/String5	N NT	Source duration
+Text	Source_Duration_FirstFrame	N YFY	Source_Duration_FirstFrame
+Text	Source_Duration_FirstFrame/String	Y NT	Source_Duration_FirstFrame
+Text	Source_Duration_FirstFrame/String1	N NT	Source_Duration_FirstFrame
+Text	Source_Duration_FirstFrame/String2	N NT	Source_Duration_FirstFrame
+Text	Source_Duration_FirstFrame/String3	N NT	Source_Duration_FirstFrame
+Text	Source_Duration_FirstFrame/String4	N NT	Source_Duration_FirstFrame
+Text	Source_Duration_FirstFrame/String5	N NT	Source_Duration_FirstFrame
+Text	Source_Duration_LastFrame	N YFY	Source_Duration_LastFrame
+Text	Source_Duration_LastFrame/String	Y NT	Source_Duration_LastFrame
+Text	Source_Duration_LastFrame/String1	N NT	Source_Duration_LastFrame
+Text	Source_Duration_LastFrame/String2	N NT	Source_Duration_LastFrame
+Text	Source_Duration_LastFrame/String3	N NT	Source_Duration_LastFrame
+Text	Source_Duration_LastFrame/String4	N NT	Source_Duration_LastFrame
+Text	Source_Duration_LastFrame/String5	N NT	Source_Duration_LastFrame
+Text	BitRate_Mode	N YTY	Bit rate mode
+Text	BitRate_Mode/String	Y NT	Bit rate mode
+Text	BitRate	N YFY	Bit rate
+Text	BitRate/String	Y NT	Bit rate
+Text	BitRate_Minimum	N YFY	Minimum bit rate
+Text	BitRate_Minimum/String	Y NT	Minimum bit rate
+Text	BitRate_Nominal	N YFY	Nominal bit rate
+Text	BitRate_Nominal/String	Y NT	Nominal bit rate
+Text	BitRate_Maximum	N YFY	Maximum bit rate
+Text	BitRate_Maximum/String	Y NT	Maximum bit rate
+Text	BitRate_Encoded	N YFY	Encoded bit rate
+Text	BitRate_Encoded/String	N NT	Encoded bit rate
+Text	Width	N YIY	Width
+Text	Width/String	Y NT	Width
+Text	Height	N YIY	Height
+Text	Height/String	Y NT	Height
+Text	DisplayAspectRatio	N YFY	Display aspect ratio
+Text	DisplayAspectRatio/String	Y NT	Display aspect ratio
+Text	DisplayAspectRatio_Original	N YFY	Original display aspect ratio
+Text	DisplayAspectRatio_Original/String	Y NT	Original display aspect ratio
+Text	FrameRate_Mode	N YTY	Frame rate mode
+Text	FrameRate_Mode/String	N NT	Frame rate mode
+Text	FrameRate_Mode_Original	N YTY	FrameRate_Mode_Original
+Text	FrameRate_Mode_Original/String	Y NT	FrameRate_Mode_Original
+Text	FrameRate	N YFY	Frame rate
+Text	FrameRate/String	Y NT	Frame rate
+Text	FrameRate_Num	N NIY	FrameRate_Num
+Text	FrameRate_Den	N NIY	FrameRate_Den
+Text	FrameRate_Minimum	N YFY	Minimum frame rate
+Text	FrameRate_Minimum/String	N NT	Minimum frame rate
+Text	FrameRate_Nominal	N YFY	Nominal frame rate
+Text	FrameRate_Nominal/String	Y NT	Nominal frame rate
+Text	FrameRate_Maximum	N YFY	Maximum frame rate
+Text	FrameRate_Maximum/String	Y NT	Maximum frame rate
+Text	FrameRate_Original	N YFY	Original frame rate
+Text	FrameRate_Original/String	Y NT	Original frame rate
+Text	FrameRate_Original_Num	N NFN	FrameRate_Original_Num
+Text	FrameRate_Original_Den	N NFN	FrameRate_Original_Den
+Text	FrameCount	N NIY	Frame count
+Text	ElementCount	Y NIY	Count of elements
+Text	Source_FrameCount	N NIY	Source frame count
+Text	ColorSpace	Y YTY	Color space
+Text	ChromaSubsampling	Y YTY	Chroma subsampling
+Text	Resolution	N NI	Resolution
+Text	Resolution/String	N NT	Resolution
+Text	BitDepth	N YIY	Bit depth
+Text	BitDepth/String	Y NT	Bit depth
+Text	Compression_Mode	N YTY	Compression mode
+Text	Compression_Mode/String	Y NT	Compression mode
+Text	Compression_Ratio	Y NF	Compression ratio
+Text	Delay	N YFY	Delay
+Text	Delay/String	N NT	Delay
+Text	Delay/String1	N NT	Delay
+Text	Delay/String2	N NT	Delay
+Text	Delay/String3	N NT	Delay
+Text	Delay/String4	N NT	Delay
+Text	Delay/String5	N NT	Delay
+Text	Delay_Settings	N NTY	Delay_Settings
+Text	Delay_DropFrame	N NTY	Delay_DropFrame
+Text	Delay_Source	N NTY	Delay, origin
+Text	Delay_Source/String	N NT	Delay, origin
+Text	Delay_Original	N NIY	Delay_Original
+Text	Delay_Original/String	N NT	Delay_Original
+Text	Delay_Original/String1	N NT	Delay_Original
+Text	Delay_Original/String2	N NT	Delay_Original
+Text	Delay_Original/String3	N NT	Delay_Original
+Text	Delay_Original/String4	N NT	Delay_Original
+Text	Delay_Original/String5	N NT	Delay_Original
+Text	Delay_Original_Settings	N NT	Delay_Original_Settings
+Text	Delay_Original_DropFrame	N NTY	Delay_Original_DropFrame
+Text	Delay_Original_Source	N NTY	Delay_Original_Source
+Text	Video_Delay	N NFY	Delay relative to video
+Text	Video_Delay/String	Y NT	Delay relative to video
+Text	Video_Delay/String1	N NT	Delay relative to video
+Text	Video_Delay/String2	N NT	Delay relative to video
+Text	Video_Delay/String3	N NT	Delay relative to video
+Text	Video_Delay/String4	N NT	Delay relative to video
+Text	Video_Delay/String5	N NT	Delay relative to video
+Text	Video0_Delay	N NI	Video0 delay
+Text	Video0_Delay/String	N NT	Video0 delay
+Text	Video0_Delay/String1	N NT	Video0 delay
+Text	Video0_Delay/String2	N NT	Video0 delay
+Text	Video0_Delay/String3	N NT	Video0 delay
+Text	Video0_Delay/String4	N NT	Video0 delay
+Text	Video0_Delay/String5	N NT	Video0 delay
+Text	TimeCode_FirstFrame	Y YCY	Time code of first frame
+Text	TimeCode_LastFrame	Y YCY	Time code of last frame
+Text	TimeCode_DropFrame	N NT	TimeCode_DropFrame
+Text	TimeCode_Settings	Y YTY	Time code settings
+Text	TimeCode_Source	Y YTY	Time code source
+Text	TimeCode_MaxFrameNumber	Y YTY	Maximum frame number in time codes
+Text	TimeCode_MaxFrameNumber_Theory	Y YTY	Theoritical maximum frame number in time codes
+Text	StreamSize	N YIY	Stream size
+Text	StreamSize/String	Y NT	Stream size
+Text	StreamSize/String1	N NT	Stream size
+Text	StreamSize/String2	N NT	Stream size
+Text	StreamSize/String3	N NT	Stream size
+Text	StreamSize/String4	N NT	Stream size
+Text	StreamSize/String5	N NT	Stream size
+Text	StreamSize_Proportion	N NT	Proportion of this stream
+Text	StreamSize_Demuxed	N NIN	Stream size when demuxed
+Text	StreamSize_Demuxed/String	N NT	Stream size when demuxed
+Text	StreamSize_Demuxed/String1	N NT	Stream size when demuxed
+Text	StreamSize_Demuxed/String2	N NT	Stream size when demuxed
+Text	StreamSize_Demuxed/String3	N NT	Stream size when demuxed
+Text	StreamSize_Demuxed/String4	N NT	Stream size when demuxed
+Text	StreamSize_Demuxed/String5	N NT	Stream size when demuxed
+Text	Source_StreamSize	N YIY	Source stream size
+Text	Source_StreamSize/String	Y NT	Source stream size
+Text	Source_StreamSize/String1	N NT	Source stream size
+Text	Source_StreamSize/String2	N NT	Source stream size
+Text	Source_StreamSize/String3	N NT	Source stream size
+Text	Source_StreamSize/String4	N NT	Source stream size
+Text	Source_StreamSize/String5	N NT	Source stream size
+Text	Source_StreamSize_Proportion	N NT	Source_StreamSize_Proportion
+Text	StreamSize_Encoded	N YIY	Encoded stream size
+Text	StreamSize_Encoded/String	N NT	Encoded stream size
+Text	StreamSize_Encoded/String1	N NT	Encoded stream size
+Text	StreamSize_Encoded/String2	N NT	Encoded stream size
+Text	StreamSize_Encoded/String3	N NT	Encoded stream size
+Text	StreamSize_Encoded/String4	N NT	Encoded stream size
+Text	StreamSize_Encoded/String5	N NT	Encoded stream size
+Text	StreamSize_Encoded_Proportion	N NT	StreamSize_Encoded_Proportion
+Text	Source_StreamSize_Encoded	N YIY	Source encoded stream size
+Text	Source_StreamSize_Encoded/String	N NT	Source encoded stream size
+Text	Source_StreamSize_Encoded/String1	N NT	Source encoded stream size
+Text	Source_StreamSize_Encoded/String2	N NT	Source encoded stream size
+Text	Source_StreamSize_Encoded/String3	N NT	Source encoded stream size
+Text	Source_StreamSize_Encoded/String4	N NT	Source encoded stream size
+Text	Source_StreamSize_Encoded/String5	N NT	Source encoded stream size
+Text	Source_StreamSize_Encoded_Proportion	N NT	Source_StreamSize_Encoded_Proportion
+Text	Title	Y YTY	Title
+Text	Encoded_Application	N YTY	Writing application
+Text	Encoded_Application/String	Y NT	Writing application
+Text	Encoded_Application_CompanyName	N YTY	Encoded_Application_CompanyName
+Text	Encoded_Application_Name	N YTY	Encoded_Application_Name
+Text	Encoded_Application_Version	N YTY	Encoded_Application_Version
+Text	Encoded_Application_Url	N YTY	Encoded_Application_Url
+Text	Encoded_Library	N YTY	Writing library
+Text	Encoded_Library/String	Y NT	Writing library
+Text	Encoded_Library_CompanyName	N YTY	Encoded_Library_CompanyName
+Text	Encoded_Library_Name	N YTY	Encoded_Library_Name
+Text	Encoded_Library_Version	N YTY	Encoded_Library_Version
+Text	Encoded_Library_Date	N YTY	Encoded_Library_Date
+Text	Encoded_Library_Settings	Y YTY	Encoding settings
+Text	Encoded_OperatingSystem	N YTY	Writing operating system
+Text	Language	N YTY	Language
+Text	Language/String	Y NT	Language
+Text	Language/String1	N NT	Language
+Text	Language/String2	N NT	Language
+Text	Language/String3	N NT	Language
+Text	Language/String4	N NT	Language
+Text	Language_More	Y YTY	Language, more info
+Text	ServiceKind	N YTY	Service kind
+Text	ServiceKind/String	Y NT	Service kind
+Text	Disabled	N YTY	Disabled
+Text	Disabled/String	Y NT	Disabled
+Text	Default	N YTY	Default
+Text	Default/String	Y NT	Default
+Text	Forced	N YTY	Forced
+Text	Forced/String	Y NT	Forced
+Text	AlternateGroup	N YTY	Alternate group
+Text	AlternateGroup/String	Y NT	Alternate group
+Text	Summary	N YTY	Summary
+Text	Encoded_Date	Y YTY	Encoded date
+Text	Tagged_Date	Y YTY	Tagged date
+Text	Encryption	Y YTY	Encryption
+Text	Events_Total	Y YTY	Count of events
+Text	Events_MinDuration	N YFY	Minimum duration per event
+Text	Events_MinDuration/String	Y NT	Minimum duration per event
+Text	Events_MinDuration/String1	N NT	Minimum duration per event
+Text	Events_MinDuration/String2	N NT	Minimum duration per event
+Text	Events_MinDuration/String3	N NT	Minimum duration per event
+Text	Events_MinDuration/String4	N NT	Minimum duration per event
+Text	Events_MinDuration/String5	N NT	Minimum duration per event
+Text	Events_PopOn	Y YTY	Count of PopOn events
+Text	Events_RollUp	Y YTY	Count of RollUp events
+Text	Events_PaintOn	Y YTY	Count of PaintOn events
+Text	Lines_Count	Y YTY	Count of lines
+Text	Lines_MaxCountPerEvent	Y YTY	Maximum count of lines per event
+Text	Lines_MaxCharacterCount	Y YTY	Maximum count of characters per line
+Text	FirstDisplay_Delay_Frames	Y YTY	Count of frames before first event
+Text	FirstDisplay_Type	Y YTY	Type of the first event
+Image	Count	N NI	Count
+Image	Status	N NI	Status
+Image	StreamCount	N NI	Count of stream of this kind
+Image	StreamKind	N NT	Kind of stream
+Image	StreamKind/String	N NT	Kind of stream
+Image	StreamKindID	N NI	Stream identifier
+Image	StreamKindPos	N NI	Stream identifier
+Image	StreamOrder	N YIY	StreamOrder
+Image	FirstPacketOrder	N NIY	FirstPacketOrder
+Image	Inform	N NT	Inform
+Image	ID	N YTY	ID
+Image	ID/String	Y NT	ID
+Image	OriginalSourceMedium_ID	N YTY	ID in the original source medium
+Image	OriginalSourceMedium_ID/String	Y NT	ID in the original source medium
+Image	UniqueID	N YTY	Unique ID
+Image	UniqueID/String	Y NT	Unique ID
+Image	MenuID	N YTY	Menu ID
+Image	MenuID/String	Y NT	Menu ID
+Image	Type	N YTY	Type
+Image	Type/String	Y NT	Type
+Image	Title	Y YTY	Title
+Image	Format	N YTY	Format
+Image	Format/String	Y NT	Format
+Image	Format/Info	Y NT	Format/Info
+Image	Format/Url	N NT	Format/Url
+Image	Format_Commercial	N NT	Commercial name
+Image	Format_Commercial_IfAny	Y YTY	Commercial name
+Image	Format_Version	Y NTY	Format version
+Image	Format_Profile	Y NTY	Format profile
+Image	Format_Compression	Y YTY	Compression
+Image	Format_AdditionalFeatures	N YTY	Format_AdditionalFeatures
+Image	HDR_Format	N YTY	HDR format
+Image	HDR_Format/String	Y NT	HDR format
+Image	HDR_Format_Commercial	N YT	HDR_Format_Commercial
+Image	HDR_Format_Version	N YTY	HDR_Format_Version
+Image	HDR_Format_Profile	N YTY	HDR_Format_Profile
+Image	HDR_Format_Level	N YTY	HDR_Format_Level
+Image	HDR_Format_Settings	N YTY	HDR_Format_Settings
+Image	HDR_Format_Compatibility	N YTY	HDR_Format_Compatibility
+Image	Format_Settings	Y NT	Format settings
+Image	Format_Settings_Endianness	N YTY	Format settings, Endianness
+Image	Format_Settings_Packing	N YTY	Format_Settings_Packing
+Image	Format_Settings_Wrapping	Y YTY	Format settings, wrapping mode
+Image	MuxingMode	Y YTY	Muxing mode
+Image	InternetMediaType	N YT	Internet media type
+Image	CodecID	Y YTY	Codec ID
+Image	CodecID/String	Y NT	Codec ID
+Image	CodecID/Info	Y NT	Codec ID/Info
+Image	CodecID/Hint	Y NT	Codec ID/Hint
+Image	CodecID/Url	N NT	Codec ID/Url
+Image	CodecID_Description	Y YT	Description of the codec
+Image	Codec	N NT	Codec
+Image	Codec/String	N NT	Codec
+Image	Codec/Family	N NT	Codec/Family
+Image	Codec/Info	N NT	Codec/Info
+Image	Codec/Url	N NT	Codec/Url
+Image	Width	N YIY	Width
+Image	Width/String	Y NT	Width
+Image	Width_Offset	N YIY	Width_Offset
+Image	Width_Offset/String	N NT	Width_Offset
+Image	Width_Original	N YIY	Original width
+Image	Width_Original/String	Y NT	Original width
+Image	Height	N YIY	Height
+Image	Height/String	Y NT	Height
+Image	Height_Offset	N YIY	Height_Offset
+Image	Height_Offset/String	N NT	Height_Offset
+Image	Height_Original	N YIY	Original height
+Image	Height_Original/String	Y NT	Original height
+Image	PixelAspectRatio	N YFY	Pixel aspect ratio
+Image	PixelAspectRatio/String	N NT	Pixel aspect ratio
+Image	PixelAspectRatio_Original	N YFY	Original pixel aspect ratio
+Image	PixelAspectRatio_Original/String	N NT	Original pixel aspect ratio
+Image	DisplayAspectRatio	N YFY	Display aspect ratio
+Image	DisplayAspectRatio/String	Y NT	Display aspect ratio
+Image	DisplayAspectRatio_Original	N YFY	Original display aspect ratio
+Image	DisplayAspectRatio_Original/String	Y NT	Original display aspect ratio
+Image	Active_Width	N YIY	Active width
+Image	Active_Width/String	Y NT	Active width
+Image	Active_Height	N YIY	Active height
+Image	Active_Height/String	Y NT	Active height
+Image	Active_DisplayAspectRatio	N YFY	Active display aspect ratio
+Image	Active_DisplayAspectRatio/String	Y NT	Active display aspect ratio
+Image	ColorSpace	Y YTY	Color space
+Image	ChromaSubsampling	Y YTY	Chroma subsampling
+Image	Resolution	N NI	Resolution
+Image	Resolution/String	N NT	Resolution
+Image	BitDepth	N YIY	Bit depth
+Image	BitDepth/String	Y NT	Bit depth
+Image	Compression_Mode	N YTY	Compression mode
+Image	Compression_Mode/String	Y NT	Compression mode
+Image	Compression_Ratio	Y NF	Compression ratio
+Image	StreamSize	N YIY	Stream size
+Image	StreamSize/String	Y NT	Stream size
+Image	StreamSize/String1	N NT	Stream size
+Image	StreamSize/String2	N NT	Stream size
+Image	StreamSize/String3	N NT	Stream size
+Image	StreamSize/String4	N NT	Stream size
+Image	StreamSize/String5	N NT	Stream size
+Image	StreamSize_Proportion	N NT	Proportion of this stream
+Image	StreamSize_Demuxed	N NIN	Stream size when demuxed
+Image	StreamSize_Demuxed/String	N NT	Stream size when demuxed
+Image	StreamSize_Demuxed/String1	N NT	Stream size when demuxed
+Image	StreamSize_Demuxed/String2	N NT	Stream size when demuxed
+Image	StreamSize_Demuxed/String3	N NT	Stream size when demuxed
+Image	StreamSize_Demuxed/String4	N NT	Stream size when demuxed
+Image	StreamSize_Demuxed/String5	N NT	Stream size when demuxed
+Image	Encoded_Library	N YTY	Writing library
+Image	Encoded_Library/String	Y NT	Writing library
+Image	Encoded_Library_Name	N YTY	Encoded_Library_Name
+Image	Encoded_Library_Version	N YTY	Encoded_Library_Version
+Image	Encoded_Library_Date	N YTY	Encoded_Library_Date
+Image	Encoded_Library_Settings	Y YTY	Encoding settings
+Image	Language	N YTY	Language
+Image	Language/String	Y NT	Language
+Image	Language/String1	N NT	Language
+Image	Language/String2	N NT	Language
+Image	Language/String3	N NT	Language
+Image	Language/String4	N NT	Language
+Image	Language_More	Y YTY	Language, more info
+Image	ServiceKind	N YTY	Service kind
+Image	ServiceKind/String	Y NT	Service kind
+Image	Disabled	N YTY	Disabled
+Image	Disabled/String	Y NT	Disabled
+Image	Default	N YTY	Default
+Image	Default/String	Y NT	Default
+Image	Forced	N YTY	Forced
+Image	Forced/String	Y NT	Forced
+Image	AlternateGroup	N YTY	Alternate group
+Image	AlternateGroup/String	Y NT	Alternate group
+Image	Summary	N YTY	Summary
+Image	Encoded_Date	Y YTY	Encoded date
+Image	Tagged_Date	Y YTY	Tagged date
+Image	Encryption	Y YTY	Encryption
+Image	colour_description_present	N YTY	colour_description_present
+Image	colour_description_present_Source	N YTY	colour_description_present_Source
+Image	colour_description_present_Original	N NTY	colour_description_present_Original
+Image	colour_description_present_Original_Source	N NTY	colour_description_present_Original_Source
+Image	colour_range	Y YTY	Color range
+Image	colour_range_Source	N YTY	colour_range_Source
+Image	colour_range_Original	Y NTY	colour_range_Original
+Image	colour_range_Original_Source	N NTY	colour_range_Original_Source
+Image	colour_primaries	Y YTY	Color primaries
+Image	colour_primaries_Source	N YTY	colour_primaries_Source
+Image	colour_primaries_Original	Y NTY	colour_primaries_Original
+Image	colour_primaries_Original_Source	N NTY	colour_primaries_Original_Source
+Image	transfer_characteristics	Y YTY	Transfer characteristics
+Image	transfer_characteristics_Source	N YTY	transfer_characteristics_Source
+Image	transfer_characteristics_Original	Y NTY	transfer_characteristics_Original
+Image	transfer_characteristics_Original_Source	N NTY	transfer_characteristics_Original_Source
+Image	matrix_coefficients	Y YTY	Matrix coefficients
+Image	matrix_coefficients_Source	N YTY	matrix_coefficients_Source
+Image	matrix_coefficients_Original	Y NTY	matrix_coefficients_Original
+Image	matrix_coefficients_Original_Source	N NTY	matrix_coefficients_Original_Source
+Image	MasteringDisplay_ColorPrimaries	Y YTY	Mastering display color primaries
+Image	MasteringDisplay_ColorPrimaries_Source	N YTY	MasteringDisplay_ColorPrimaries_Source
+Image	MasteringDisplay_ColorPrimaries_Original	Y NTY	MasteringDisplay_ColorPrimaries_Original
+Image	MasteringDisplay_ColorPrimaries_Original_Source	N NTY	MasteringDisplay_ColorPrimaries_Original_Source
+Image	MasteringDisplay_Luminance	Y YTY	Mastering display luminance
+Image	MasteringDisplay_Luminance_Source	N YTY	MasteringDisplay_Luminance_Source
+Image	MasteringDisplay_Luminance_Min	N YTY	MasteringDisplay_Luminance_Min
+Image	MasteringDisplay_Luminance_Max	N YTY	MasteringDisplay_Luminance_Max
+Image	MasteringDisplay_Luminance_Original	Y NTY	MasteringDisplay_Luminance_Original
+Image	MasteringDisplay_Luminance_Original_Source	N NTY	MasteringDisplay_Luminance_Original_Source
+Image	MasteringDisplay_Luminance_Original_Min	N YTY	MasteringDisplay_Luminance_Original_Min
+Image	MasteringDisplay_Luminance_Original_Max	N YTY	MasteringDisplay_Luminance_Original_Max
+Image	MaxCLL	N YTY	Maximum Content Light Level
+Image	MaxCLL/String	Y NTN	Maximum Content Light Level
+Image	MaxCLL_Source	N YTY	MaxCLL_Source
+Image	MaxCLL_Original	N NTY	MaxCLL_Original
+Image	MaxCLL_Original/String	Y NTN	MaxCLL_Original
+Image	MaxCLL_Original_Source	N NTY	MaxCLL_Original_Source
+Image	MaxFALL	N YTY	Maximum Frame-Average Light Level
+Image	MaxFALL/String	Y NTN	Maximum Frame-Average Light Level
+Image	MaxFALL_Source	N YTY	MaxFALL_Source
+Image	MaxFALL_Original	N NTY	MaxFALL_Original
+Image	MaxFALL_Original/String	Y NTN	MaxFALL_Original
+Image	MaxFALL_Original_Source	N NTY	MaxFALL_Original_Source
+Other	Count	N NI	Count
+Other	Status	N NI	Status
+Other	StreamCount	N NI	Count of stream of this kind
+Other	StreamKind	N NT	Kind of stream
+Other	StreamKind/String	N NT	Kind of stream
+Other	StreamKindID	N NI	Stream identifier
+Other	StreamKindPos	N NI	Stream identifier
+Other	StreamOrder	N YIY	StreamOrder
+Other	FirstPacketOrder	N NIY	FirstPacketOrder
+Other	Inform	N NT	Inform
+Other	ID	N YTY	ID
+Other	ID/String	Y NT	ID
+Other	OriginalSourceMedium_ID	N YTY	ID in the original source medium
+Other	OriginalSourceMedium_ID/String	Y NT	ID in the original source medium
+Other	UniqueID	N YTY	Unique ID
+Other	UniqueID/String	Y NT	Unique ID
+Other	MenuID	N YTY	Menu ID
+Other	MenuID/String	Y NT	Menu ID
+Other	Type	Y YTY	Type
+Other	Format	N YTY	Format
+Other	Format/String	Y NT	Format
+Other	Format/Info	Y NT	Format/Info
+Other	Format/Url	N NT	Format/Url
+Other	Format_Commercial	N NT	Commercial name
+Other	Format_Commercial_IfAny	Y YTY	Commercial name
+Other	Format_Version	Y NTY	Format version
+Other	Format_Profile	Y NTY	Format profile
+Other	Format_Compression	Y NTY	Compression
+Other	Format_Settings	Y NTY	Format settings
+Other	Format_Settings_Wrapping	Y YTY	Format settings, wrapping mode
+Other	Format_AdditionalFeatures	N YTY	Format_AdditionalFeatures
+Other	MuxingMode	Y YTY	Muxing mode
+Other	MuxingMode_MoreInfo	Y NT	Muxing mode, more info
+Other	CodecID	Y YTY	Codec ID
+Other	CodecID/String	Y NT	Codec ID
+Other	CodecID/Info	Y NT	Codec ID/Info
+Other	CodecID/Hint	Y NT	Codec ID/Hint
+Other	CodecID/Url	N NT	Codec ID/Url
+Other	CodecID_Description	Y YT	Description of the codec
+Other	Duration	N YFY	Duration
+Other	Duration/String	Y NT	Duration
+Other	Duration/String1	N NT	Duration
+Other	Duration/String2	N NT	Duration
+Other	Duration/String3	N NT	Duration
+Other	Duration/String4	N NT	Duration
+Other	Duration/String5	N NT	Duration
+Other	Duration_Start	Y YTY	Start time
+Other	Duration_End	Y YTY	End time
+Other	Source_Duration	N YFY	Source duration
+Other	Source_Duration/String	Y NT	Source duration
+Other	Source_Duration/String1	N NT	Source duration
+Other	Source_Duration/String2	N NT	Source duration
+Other	Source_Duration/String3	N NT	Source duration
+Other	Source_Duration/String4	N NT	Source duration
+Other	Source_Duration/String5	N NT	Source duration
+Other	Source_Duration_FirstFrame	N YFY	Source_Duration_FirstFrame
+Other	Source_Duration_FirstFrame/String	Y NT	Source_Duration_FirstFrame
+Other	Source_Duration_FirstFrame/String1	N NT	Source_Duration_FirstFrame
+Other	Source_Duration_FirstFrame/String2	N NT	Source_Duration_FirstFrame
+Other	Source_Duration_FirstFrame/String3	N NT	Source_Duration_FirstFrame
+Other	Source_Duration_FirstFrame/String4	N NT	Source_Duration_FirstFrame
+Other	Source_Duration_FirstFrame/String5	N NT	Source_Duration_FirstFrame
+Other	Source_Duration_LastFrame	N YFY	Source_Duration_LastFrame
+Other	Source_Duration_LastFrame/String	Y NT	Source_Duration_LastFrame
+Other	Source_Duration_LastFrame/String1	N NT	Source_Duration_LastFrame
+Other	Source_Duration_LastFrame/String2	N NT	Source_Duration_LastFrame
+Other	Source_Duration_LastFrame/String3	N NT	Source_Duration_LastFrame
+Other	Source_Duration_LastFrame/String4	N NT	Source_Duration_LastFrame
+Other	Source_Duration_LastFrame/String5	N NT	Source_Duration_LastFrame
+Other	BitRate_Mode	N YTY	Bit rate mode
+Other	BitRate_Mode/String	Y NT	Bit rate mode
+Other	BitRate	N YFY	Bit rate
+Other	BitRate/String	Y NT	Bit rate
+Other	BitRate_Minimum	N YFY	Minimum bit rate
+Other	BitRate_Minimum/String	Y NT	Minimum bit rate
+Other	BitRate_Nominal	N YFY	Nominal bit rate
+Other	BitRate_Nominal/String	Y NT	Nominal bit rate
+Other	BitRate_Maximum	N YFY	Maximum bit rate
+Other	BitRate_Maximum/String	Y NT	Maximum bit rate
+Other	BitRate_Encoded	N YFY	Encoded bit rate
+Other	BitRate_Encoded/String	N NT	Encoded bit rate
+Other	FrameRate	N YFY	Frame rate
+Other	FrameRate/String	Y NT	Frame rate
+Other	FrameRate_Num	N NIY	FrameRate_Num
+Other	FrameRate_Den	N NIY	FrameRate_Den
+Other	FrameCount	N NIY	Frame count
+Other	Source_FrameCount	N NI	Source frame count
+Other	Delay	N YFY	Delay
+Other	Delay/String	N NT	Delay
+Other	Delay/String1	N NT	Delay
+Other	Delay/String2	N NT	Delay
+Other	Delay/String3	N NT	Delay
+Other	Delay/String4	N NT	Delay
+Other	Delay/String5	N NT	Delay
+Other	Delay_Settings	N NTY	Delay_Settings
+Other	Delay_DropFrame	N NTY	Delay_DropFrame
+Other	Delay_Source	N NTY	Delay, origin
+Other	Delay_Source/String	N NT	Delay, origin
+Other	Delay_Original	N NIY	Delay_Original
+Other	Delay_Original/String	N NT	Delay_Original
+Other	Delay_Original/String1	N NT	Delay_Original
+Other	Delay_Original/String2	N NT	Delay_Original
+Other	Delay_Original/String3	N NT	Delay_Original
+Other	Delay_Original/String4	N NT	Delay_Original
+Other	Delay_Original/String5	N NT	Delay_Original
+Other	Delay_Original_Settings	N NT	Delay_Original_Settings
+Other	Delay_Original_DropFrame	N NTY	Delay_Original_DropFrame
+Other	Delay_Original_Source	N NTY	Delay_Original_Source
+Other	Video_Delay	N NFY	Delay relative to video
+Other	Video_Delay/String	Y NT	Delay relative to video
+Other	Video_Delay/String1	N NT	Delay relative to video
+Other	Video_Delay/String2	N NT	Delay relative to video
+Other	Video_Delay/String3	N NT	Delay relative to video
+Other	Video_Delay/String4	N NT	Delay relative to video
+Other	Video_Delay/String5	N NT	Delay relative to video
+Other	Video0_Delay	N NI	Video0 delay
+Other	Video0_Delay/String	N NT	Video0 delay
+Other	Video0_Delay/String1	N NT	Video0 delay
+Other	Video0_Delay/String2	N NT	Video0 delay
+Other	Video0_Delay/String3	N NT	Video0 delay
+Other	Video0_Delay/String4	N NT	Video0 delay
+Other	Video0_Delay/String5	N NT	Video0 delay
+Other	TimeStamp_FirstFrame	N YFY	TimeStamp_FirstFrame
+Other	TimeStamp_FirstFrame/String	Y NT	TimeStamp_FirstFrame
+Other	TimeStamp_FirstFrame/String1	N NT	TimeStamp_FirstFrame
+Other	TimeStamp_FirstFrame/String2	N NT	TimeStamp_FirstFrame
+Other	TimeStamp_FirstFrame/String3	N NT	TimeStamp_FirstFrame
+Other	TimeStamp_FirstFrame/String4	N NT	TimeStamp_FirstFrame
+Other	TimeStamp_FirstFrame/String5	N NT	TimeStamp_FirstFrame
+Other	TimeCode_FirstFrame	Y YCY	Time code of first frame
+Other	TimeCode_LastFrame	Y YCY	Time code of last frame
+Other	TimeCode_DropFrame	N NT	TimeCode_DropFrame
+Other	TimeCode_Settings	Y YTY	Time code settings
+Other	TimeCode_Stripped	N YTY	Time code, stripped
+Other	TimeCode_Stripped/String	Y NT	Time code, stripped
+Other	TimeCode_Source	Y YTY	Time code source
+Other	StreamSize	N YIY	Stream size
+Other	StreamSize/String	Y NT	Stream size
+Other	StreamSize/String1	N NT	Stream size
+Other	StreamSize/String2	N NT	Stream size
+Other	StreamSize/String3	N NT	Stream size
+Other	StreamSize/String4	N NT	Stream size
+Other	StreamSize/String5	N NT	Stream size
+Other	StreamSize_Proportion	N NT	Proportion of this stream
+Other	StreamSize_Demuxed	N NIN	Stream size when demuxed
+Other	StreamSize_Demuxed/String	N NT	Stream size when demuxed
+Other	StreamSize_Demuxed/String1	N NT	Stream size when demuxed
+Other	StreamSize_Demuxed/String2	N NT	Stream size when demuxed
+Other	StreamSize_Demuxed/String3	N NT	Stream size when demuxed
+Other	StreamSize_Demuxed/String4	N NT	Stream size when demuxed
+Other	StreamSize_Demuxed/String5	N NT	Stream size when demuxed
+Other	Source_StreamSize	N YIY	Source stream size
+Other	Source_StreamSize/String	Y NT	Source stream size
+Other	Source_StreamSize/String1	N NT	Source stream size
+Other	Source_StreamSize/String2	N NT	Source stream size
+Other	Source_StreamSize/String3	N NT	Source stream size
+Other	Source_StreamSize/String4	N NT	Source stream size
+Other	Source_StreamSize/String5	N NT	Source stream size
+Other	Source_StreamSize_Proportion	N NT	Source_StreamSize_Proportion
+Other	StreamSize_Encoded	N YIY	Encoded stream size
+Other	StreamSize_Encoded/String	N NT	Encoded stream size
+Other	StreamSize_Encoded/String1	N NT	Encoded stream size
+Other	StreamSize_Encoded/String2	N NT	Encoded stream size
+Other	StreamSize_Encoded/String3	N NT	Encoded stream size
+Other	StreamSize_Encoded/String4	N NT	Encoded stream size
+Other	StreamSize_Encoded/String5	N NT	Encoded stream size
+Other	StreamSize_Encoded_Proportion	N NT	StreamSize_Encoded_Proportion
+Other	Source_StreamSize_Encoded	N YIY	Source encoded stream size
+Other	Source_StreamSize_Encoded/String	N NT	Source encoded stream size
+Other	Source_StreamSize_Encoded/String1	N NT	Source encoded stream size
+Other	Source_StreamSize_Encoded/String2	N NT	Source encoded stream size
+Other	Source_StreamSize_Encoded/String3	N NT	Source encoded stream size
+Other	Source_StreamSize_Encoded/String4	N NT	Source encoded stream size
+Other	Source_StreamSize_Encoded/String5	N NT	Source encoded stream size
+Other	Source_StreamSize_Encoded_Proportion	N NT	Source_StreamSize_Encoded_Proportion
+Other	Title	Y YTY	Title
+Other	Language	N YTY	Language
+Other	Language/String	Y NT	Language
+Other	Language/String1	N NT	Language
+Other	Language/String2	N NT	Language
+Other	Language/String3	N NT	Language
+Other	Language/String4	N NT	Language
+Other	Language_More	Y YTY	Language, more info
+Other	ServiceKind	N YTY	Service kind
+Other	ServiceKind/String	Y NT	Service kind
+Other	Disabled	N YTY	Disabled
+Other	Disabled/String	Y NT	Disabled
+Other	Default	N YTY	Default
+Other	Default/String	Y NT	Default
+Other	Forced	N YTY	Forced
+Other	Forced/String	Y NT	Forced
+Other	AlternateGroup	N YTY	Alternate group
+Other	AlternateGroup/String	Y NT	Alternate group
+Menu	Count	N NI	Count
+Menu	Status	N NI	Status
+Menu	StreamCount	N NI	Count of stream of this kind
+Menu	StreamKind	N NT	Kind of stream
+Menu	StreamKind/String	N NT	Kind of stream
+Menu	StreamKindID	N NI	Stream identifier
+Menu	StreamKindPos	N NI	Stream identifier
+Menu	StreamOrder	N YIY	StreamOrder
+Menu	FirstPacketOrder	N NIY	FirstPacketOrder
+Menu	Inform	N NT	Inform
+Menu	ID	N YTY	ID
+Menu	ID/String	Y NT	ID
+Menu	OriginalSourceMedium_ID	N YTY	ID in the original source medium
+Menu	OriginalSourceMedium_ID/String	Y NT	ID in the original source medium
+Menu	UniqueID	N YTY	Unique ID
+Menu	UniqueID/String	Y NT	Unique ID
+Menu	MenuID	N YTY	Menu ID
+Menu	MenuID/String	Y NT	Menu ID
+Menu	Format	N YTY	Format
+Menu	Format/String	Y NT	Format
+Menu	Format/Info	Y NT	Format/Info
+Menu	Format/Url	N NT	Format/Url
+Menu	Format_Commercial	N NT	Commercial name
+Menu	Format_Commercial_IfAny	Y YTY	Commercial name
+Menu	Format_Version	Y NTY	Format version
+Menu	Format_Profile	Y NTY	Format profile
+Menu	Format_Compression	Y NTY	Compression
+Menu	Format_Settings	Y NTY	Format settings
+Menu	Format_AdditionalFeatures	N YTY	Format_AdditionalFeatures
+Menu	CodecID	Y YTY	Codec ID
+Menu	CodecID/String	Y NT	Codec ID
+Menu	CodecID/Info	Y NT	Codec ID/Info
+Menu	CodecID/Hint	Y NT	Codec ID/Hint
+Menu	CodecID/Url	N NT	Codec ID/Url
+Menu	CodecID_Description	Y YT	Description of the codec
+Menu	Codec	N NT	Codec
+Menu	Codec/String	N NT	Codec
+Menu	Codec/Info	N NT	Codec/Info
+Menu	Codec/Url	N NT	Codec/Url
+Menu	Duration	N YFY	Duration
+Menu	Duration/String	Y NT	Duration
+Menu	Duration/String1	N NT	Duration
+Menu	Duration/String2	N NT	Duration
+Menu	Duration/String3	N NT	Duration
+Menu	Duration/String4	N NT	Duration
+Menu	Duration/String5	N NT	Duration
+Menu	Duration_Start	Y YTY	Start time
+Menu	Duration_End	Y YTY	End time
+Menu	Delay	N YFY	Delay
+Menu	Delay/String	N NT	Delay
+Menu	Delay/String1	N NT	Delay
+Menu	Delay/String2	N NT	Delay
+Menu	Delay/String3	N NT	Delay
+Menu	Delay/String4	N NT	Delay
+Menu	Delay/String5	N NT	Delay
+Menu	Delay_Settings	N NTY	Delay_Settings
+Menu	Delay_DropFrame	N NTY	Delay_DropFrame
+Menu	Delay_Source	N NTY	Delay, origin
+Menu	FrameRate_Mode	N YTY	Frame rate mode
+Menu	FrameRate_Mode/String	N NT	Frame rate mode
+Menu	FrameRate	N YFY	Frame rate
+Menu	FrameRate/String	N NT	Frame rate
+Menu	FrameRate_Num	N NIY	FrameRate_Num
+Menu	FrameRate_Den	N NIY	FrameRate_Den
+Menu	FrameCount	N NIY	Frame count
+Menu	List_StreamKind	N YTY	List_StreamKind
+Menu	List_StreamPos	N YTY	List_StreamPos
+Menu	List	N YT	List
+Menu	List/String	Y NT	List
+Menu	Title	Y YTY	Title
+Menu	Language	N YTY	Language
+Menu	Language/String	Y NT	Language
+Menu	Language/String1	N NT	Language
+Menu	Language/String2	N NT	Language
+Menu	Language/String3	N NT	Language
+Menu	Language/String4	N NT	Language
+Menu	Language_More	Y YTY	Language, more info
+Menu	ServiceKind	N YTY	Service kind
+Menu	ServiceKind/String	Y NT	Service kind
+Menu	ServiceName	Y YTY	Service name
+Menu	ServiceChannel	Y YTY	Service channel number
+Menu	Service/Url	Y YTY	Service/Url
+Menu	ServiceProvider	Y YTY	Service provider
+Menu	ServiceProvider/Url	Y YTN	Service provider/Url
+Menu	ServiceType	Y YTY	Service type
+Menu	NetworkName	Y YTY	Network name
+Menu	Original/NetworkName	Y YTY	Original/NetworkName
+Menu	Countries	Y YTY	Countries
+Menu	TimeZones	Y YTY	TimeZones
+Menu	LawRating	Y YTY	Law rating
+Menu	LawRating_Reason	Y YTY	LawRating_Reason
+Menu	Disabled	N YTY	Disabled
+Menu	Disabled/String	Y NT	Disabled
+Menu	Default	N YTY	Default
+Menu	Default/String	Y NT	Default
+Menu	Forced	N YTY	Forced
+Menu	Forced/String	Y NT	Forced
+Menu	AlternateGroup	N YTY	Alternate group
+Menu	AlternateGroup/String	Y NT	Alternate group
+Menu	Chapters_Pos_Begin	N NI	Chapters_Pos_Begin
+Menu	Chapters_Pos_End	N NI	Chapters_Pos_End

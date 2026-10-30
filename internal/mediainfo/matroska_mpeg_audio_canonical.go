@@ -52,7 +52,6 @@ func matroskaMPEGAudioCanonicalSeed(facts matroskaMPEGAudioCanonicalFacts) []fie
 	if facts.codecID != "" {
 		builder.Fill("CodecID", facts.codecID, "Codec ID", facts.codecID)
 	}
-	builder.Text("Format/Info", "MPEG Audio")
 	if facts.trackUID > 0 {
 		builder.Structured("UniqueID", strconv.FormatUint(facts.trackUID, 10))
 	}

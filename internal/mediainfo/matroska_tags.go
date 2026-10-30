@@ -410,7 +410,7 @@ func applyMatroskaTrackTags(info *MatroskaInfo) {
 			if member.Key == "" || member.Value.Kind != structuredString || member.Value.Text == "" {
 				continue
 			}
-			replaceCanonicalSeedText(stream, member.Key, member.Value.Text)
+			insertCanonicalSeedTextBefore(stream, member.Key, member.Value.Text, flacUnencodedMD5Label)
 		}
 	}
 }

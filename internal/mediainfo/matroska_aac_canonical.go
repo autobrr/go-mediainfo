@@ -60,16 +60,6 @@ func matroskaAACCanonicalSeed(facts matroskaAACCanonicalFacts) []fieldEntry {
 	if facts.codecID != "" {
 		builder.Fill("CodecID", facts.codecID, "Codec ID", facts.codecID)
 	}
-	switch {
-	case facts.profile == "LC" && hasSBR && hasPS:
-		builder.Text("Format/Info", "Advanced Audio Codec Low Complexity with Spectral Band Replication and Parametric Stereo")
-	case facts.profile == "LC" && hasSBR:
-		builder.Text("Format/Info", "Advanced Audio Codec Low Complexity with Spectral Band Replication")
-	case facts.profile == "LC":
-		builder.Text("Format/Info", "Advanced Audio Codec Low Complexity")
-	default:
-		builder.Text("Format/Info", "Advanced Audio Codec")
-	}
 	if hasSBR {
 		commercial := "HE-AAC"
 		if hasPS {

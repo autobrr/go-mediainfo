@@ -1,0 +1,36 @@
+General
+CompleteName                     : samples/sample.mpg
+Format/String                    : MPEG Video
+Format_Version                   : Version 2
+FileSize/String                  : 694 KiB
+Duration/String                  : 4s 4ms
+OverallBitRate_Mode/String       : VBR
+OverallBitRate/String            : 1421 Kbps
+FrameRate/String                 : 29.970 fps
+FileExtension_Invalid            : mpgv mpv mp1v m1v mp2v m2v
+
+Video
+Format/String                    : MPEG Video
+Format_Version                   : Version 2
+Format_Profile                   : Main@Main
+Format_Settings                  : BVOPNo
+Format_Settings_BVOP/String      : No
+Format_Settings_Matrix/String    : Default
+Format_Settings_GOP              : N=12
+Duration/String                  : 4s 4ms
+BitRate_Mode/String              : VBR
+BitRate/String                   : 1421 Kbps
+Width/String                     : 640 pixel
+Height/String                    : 360 pixel
+DisplayAspectRatio/String        : 16:9
+FrameRate/String                 : 29.970 (30000/1001) fps
+ColorSpace                       : YUV
+ChromaSubsampling/String         : 4:2:0
+BitDepth/String                  : 8 bit
+ScanType/String                  : Progressive
+Compression_Mode/String          : Lossy
+Bits-(Pixel*Frame)               : 0.206
+TimeCode_FirstFrame              : 00:00:00:00
+Gop_OpenClosed/String            : Open
+Gop_OpenClosed_FirstFrame/String : Closed
+StreamSize/String                : 694 KiB (100%)

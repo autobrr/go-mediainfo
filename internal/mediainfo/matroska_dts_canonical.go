@@ -43,7 +43,6 @@ func matroskaDTSCanonicalSeed(facts matroskaDTSCanonicalFacts) []fieldEntry {
 	if facts.codecID != "" {
 		builder.Fill("CodecID", facts.codecID, "Codec ID", facts.codecID)
 	}
-	builder.Text("Format/Info", "Digital Theater Systems")
 	if facts.trackUID > 0 {
 		builder.Structured("UniqueID", strconv.FormatUint(facts.trackUID, 10))
 	}

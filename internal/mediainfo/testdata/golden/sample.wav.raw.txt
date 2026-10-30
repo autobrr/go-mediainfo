@@ -1,0 +1,21 @@
+General
+CompleteName                     : samples/sample.wav
+Format/String                    : Wave
+Format_Settings                  : PcmWaveformat
+FileSize/String                  : 375 KiB
+Duration/String                  : 4s 0ms
+OverallBitRate_Mode/String       : CBR
+OverallBitRate/String            : 768 Kbps
+Encoded_Application/String       : Lavf62.3.100
+
+Audio
+Format/String                    : PCM
+Format_Settings                  : Little / Signed
+CodecID                          : 1
+Duration/String                  : 4s 0ms
+BitRate_Mode/String              : CBR
+BitRate/String                   : 768 Kbps
+Channel(s)/String                : 1 channel
+SamplingRate/String              : 48.0 KHz
+BitDepth/String                  : 16 bit
+StreamSize/String                : 375 KiB (100%)
