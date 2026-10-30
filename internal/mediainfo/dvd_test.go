@@ -99,8 +99,19 @@ func TestDVDIFOAndBUPDurationPresentation(t *testing.T) {
 			if !menuFound {
 				t.Fatal("fixture did not produce a Menu")
 			}
-			if !strings.Contains(RenderHTML([]Report{report}), tc.want) || !strings.Contains(RenderCSV([]Report{report}), tc.want) {
-				t.Fatal("friendly renderers lost duration")
+			html := RenderHTML([]Report{report})
+			csv := RenderCSV([]Report{report})
+			for _, kind := range []StreamKind{StreamGeneral, StreamMenu} {
+				_, section, found := strings.Cut(html, `<tr><th colspan="2">`+string(kind)+`</th></tr>`)
+				section, _, _ = strings.Cut(section, "<tr><th")
+				if !found || !strings.Contains(section, "<tr><td>Duration</td><td>"+tc.want+"</td></tr>") {
+					t.Errorf("HTML %s lost its Duration row", kind)
+				}
+				_, section, found = strings.Cut(csv, string(kind)+"\n")
+				section, _, _ = strings.Cut(section, "\n\n")
+				if !found || !strings.Contains("\n"+section+"\n", "\nDuration,"+tc.want+"\n") {
+					t.Errorf("CSV %s lost its Duration row", kind)
+				}
 			}
 		}
 	}

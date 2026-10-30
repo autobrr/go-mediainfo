@@ -236,7 +236,7 @@ func projectRawTextReport(report Report) rawTextReportProjection {
 			if !reportTextVisible(version, stream.Kind, identity) {
 				continue
 			}
-			rule, known := rawTextProjectionRule(stream.Kind, entry)
+			rule, known := rawTextProjectionRule(version, stream.Kind, entry)
 			if !rule.Visible {
 				continue
 			}
@@ -661,10 +661,10 @@ func formatDVDRawTextBitRate(value string) string {
 }
 
 // rawTextProjectionRule resolves one canonical or imported text entry to its
-// single raw-text policy. Unknown labels remain visible Go extensions.
-func rawTextProjectionRule(kind StreamKind, entry fieldEntry) (rawTextFieldRule, bool) {
+// raw-text policy for the selected reference version. Unknown labels remain visible Go extensions.
+func rawTextProjectionRule(version reportTableVersion, kind StreamKind, entry fieldEntry) (rawTextFieldRule, bool) {
 	identity := reportFieldIdentity(kind, string(entry.Name), entry.TextLabel)
-	if table := reportKindPolicy(reportTables23, kind); table != nil {
+	if table := reportKindPolicy(version, kind); table != nil {
 		for _, name := range []string{identity + "/String", identity} {
 			if row, ok := table.Fields[name]; ok {
 				label := name

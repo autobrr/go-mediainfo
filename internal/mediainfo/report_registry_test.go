@@ -10,6 +10,69 @@ import (
 	"testing"
 )
 
+func TestRawVisibilityUsesSelectedReportVersion(t *testing.T) {
+	for _, dvd := range []bool{false, true} {
+		t.Run(strconv.FormatBool(dvd), func(t *testing.T) {
+			general := newCanonicalStreamBuilder(StreamGeneral)
+			general.Fill("Format", "MPEG-PS", "Format", "MPEG-PS")
+			general.Fill("Title", "Example", "Title", "Example")
+			general.Fill("Title_More", "Details", "More", "Details")
+			video := newCanonicalStreamBuilder(StreamVideo)
+			video.Fill("Format", "MPEG Video", "Format", "MPEG Video")
+			report := Report{General: general.Snapshot(canonicalStreamPolicy{}), Streams: []Stream{video.Snapshot(canonicalStreamPolicy{DVDOrder: dvd})}}
+			attachCanonicalStore(&report)
+			before := RenderJSON([]Report{report})
+			raw := RenderTextWithOptions([]Report{report}, TextRenderOptions{Language: "raw"})
+			if got := strings.Contains(normalizeText(raw), padRawTextLabel("Title", 33)+": Example\n"); got != dvd {
+				t.Errorf("raw Title present=%v, want %v: %s", got, dvd, raw)
+			}
+			if got := strings.Contains(normalizeText(raw), padRawTextLabel("Title_More", 33)+": Details\n"); got != dvd {
+				t.Errorf("raw Title_More present=%v, want %v: %s", got, dvd, raw)
+			}
+			if !strings.Contains(before, `"Title":"Example"`) || RenderJSON([]Report{report}) != before || RenderTextWithOptions([]Report{report}, TextRenderOptions{Language: "raw"}) != raw {
+				t.Fatal("visibility changed structured facts or repeated rendering")
+			}
+		})
+	}
+}
+
+func TestPublicDVDVOBMutationRetainsReportVersion(t *testing.T) {
+	for _, dvd := range []bool{false, true} {
+		general := newCanonicalStreamBuilder(StreamGeneral)
+		general.Fill("Format", "MPEG-PS", "Format", "MPEG-PS")
+		video := newCanonicalStreamBuilder(StreamVideo)
+		video.Fill("Format", "MPEG Video", "Format", "MPEG Video")
+		report := Report{General: general.Snapshot(canonicalStreamPolicy{}), Streams: []Stream{video.Snapshot(canonicalStreamPolicy{DVDOrder: dvd})}}
+		attachCanonicalStore(&report)
+		original := report.General.reportStore
+		if canonicalStoreForReport(report) != original {
+			t.Fatal("unchanged analysis store was rebuilt")
+		}
+		wantVersion := reportTables23
+		if dvd {
+			wantVersion = reportTables26
+		}
+		report.General.Fields = append(report.General.Fields, Field{Name: "Title", Value: "Caller title"})
+		before := captureLegacyReportState(report, true)
+		if got := reportVersion(canonicalStoreForReport(report)); got != wantVersion {
+			t.Errorf("DVD=%v rebuilt version=%s, want %s", dvd, got, wantVersion)
+		}
+		json := RenderJSON([]Report{report})
+		raw := RenderTextWithOptions([]Report{report}, TextRenderOptions{Language: "raw"})
+		if got := strings.Contains(normalizeText(raw), padRawTextLabel("Title", 33)+": Caller title\n"); got != dvd {
+			t.Errorf("DVD=%v raw caller Title present=%v: %s", dvd, got, raw)
+		}
+		for _, want := range []string{`"Format":"MPEG-PS"`, `"Title":"Caller title"`} {
+			if !strings.Contains(json, want) {
+				t.Errorf("DVD=%v mutation lost %s", dvd, want)
+			}
+		}
+		if RenderJSON([]Report{report}) != json || RenderTextWithOptions([]Report{report}, TextRenderOptions{Language: "raw"}) != raw || !reflect.DeepEqual(before, captureLegacyReportState(report, true)) || report.General.reportStore != original {
+			t.Fatal("mutation rendering changed the caller or repeated output")
+		}
+	}
+}
+
 func TestBDAVGeneralZeroIDPreservesTransportFallback(t *testing.T) {
 	for _, tc := range []struct {
 		bdav      bool

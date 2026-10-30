@@ -125,13 +125,20 @@ func refreshCanonicalCompatibilitySnapshot(stream *Stream) {
 }
 
 // canonicalStoreForReport reuses an unchanged analysis store or rebuilds one from legacy input.
+// Rebuilds retain a parser-selected reference version when legacy input does not select one.
 func canonicalStoreForReport(report Report) *fieldStore {
 	if report.General.reportStore != nil && report.General.reportSnapshot != nil {
 		current := captureLegacyReportState(report, false)
 		if reflect.DeepEqual(*report.General.reportSnapshot, current) {
 			return report.General.reportStore
 		}
+		version := report.General.reportStore.tableVersion
 		report = publicReportMutationDelta(report, *report.General.reportSnapshot)
+		store := reportToFieldStore(report, false)
+		if store.tableVersion == "" {
+			store.tableVersion = version
+		}
+		return store
 	}
 	return reportToFieldStore(report, false)
 }

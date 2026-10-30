@@ -113,7 +113,6 @@ func loadReportTables() map[reportTableVersion]*reportVersionTables {
 				table.Order[name] = anchor + 1
 			}
 		}
-
 	}
 	return result
 }
