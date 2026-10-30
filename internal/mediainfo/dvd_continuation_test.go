@@ -231,7 +231,7 @@ func TestAnalyzeDVDIFOPayloadSelection(t *testing.T) {
 			for _, output := range []struct {
 				name, rendered, want string
 			}{
-				{"text", RenderText(reports), fmt.Sprintf("%-41s: %s\n", "File size", tc.wantDisplay)},
+				{"text", RenderText(reports), padRight("File size", textLabelWidth) + ": " + tc.wantDisplay + "\n"},
 				{"HTML", RenderHTML(reports), "<td>File size</td><td>" + tc.wantDisplay + "</td>"},
 				{"CSV", RenderCSV(reports), "File size," + tc.wantDisplay + "\n"},
 				{"JSON", RenderJSON(reports), fmt.Sprintf(`"FileSize":"%d"`, wantSize)},
