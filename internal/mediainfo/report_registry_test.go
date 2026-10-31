@@ -10,6 +10,60 @@ import (
 	"testing"
 )
 
+func TestRawMissingExtraRowsKeepOrderedSiblingPosition(t *testing.T) {
+	for _, tc := range []struct{ first, second, sibling string }{
+		{"Statistics_Tags_Issue", "FromStats_BitRate", "FromStats_BitRate"},
+		{"Menus", "CodecConfigurationBox", "Codec configuration box"},
+	} {
+		t.Run(tc.first, func(t *testing.T) {
+			builder := newCanonicalStreamBuilder(StreamVideo)
+			builder.Fill("Format", "AVC", "Format", "AVC")
+			if tc.first == "Statistics_Tags_Issue" {
+				builder.Text("Statistics Tags Issue", "friendly")
+			}
+			builder.Text(tc.sibling, "second")
+			builder.StructuredNode("extra", structuredNode{Kind: structuredObject, Object: []structuredMember{
+				{Key: tc.first, Value: structuredNode{Kind: structuredString, Text: "canonical"}},
+				{Key: tc.second, Value: structuredNode{Kind: structuredString, Text: "second"}},
+			}})
+			report := Report{General: Stream{Kind: StreamGeneral}, Streams: []Stream{builder.Snapshot(canonicalStreamPolicy{})}}
+			attachCanonicalStore(&report)
+			before := RenderJSON([]Report{report})
+			raw := RenderTextWithOptions([]Report{report}, TextRenderOptions{Language: "raw"})
+			first := rawTextLabel(tc.first)
+			assertRowOrder(t, raw, first, tc.second)
+			if strings.Count(raw, first) != 1 || !strings.Contains(raw, padRawTextLabel(first, 33)+": canonical") {
+				t.Fatal("missing-extra projection lost canonical value or duplicate policy")
+			}
+			if RenderJSON([]Report{report}) != before || RenderTextWithOptions([]Report{report}, TextRenderOptions{Language: "raw"}) != raw {
+				t.Fatal("ordered-extra projection mutated canonical facts or repeated output")
+			}
+		})
+	}
+}
+
+func TestRawExtraRowsFollowCanonicalEncounterSequence(t *testing.T) {
+	general := newCanonicalStreamBuilder(StreamGeneral)
+	general.Fill("Format", "Matroska", "Format", "Matroska")
+	general.Fill("FileSize", "1024", "File size", "1.00 KiB")
+	general.Fill("Duration", "1000", "Duration", "1 s 0 ms")
+	video := newCanonicalStreamBuilder(StreamVideo)
+	video.Structured("Width", "1920")
+	video.Structured("Height", "1080")
+	audio := newCanonicalStreamBuilder(StreamAudio)
+	audio.Fill("Format", "AC-3", "Format", "AC-3")
+	audio.Text("A_TAG", "first")
+	audio.StructuredNode("extra", structuredNode{Kind: structuredObject, Object: []structuredMember{{Key: "Z_CODEC", Value: structuredNode{Kind: structuredString, Text: "later"}}}})
+	report := Report{General: general.Snapshot(canonicalStreamPolicy{}), Streams: []Stream{video.Snapshot(canonicalStreamPolicy{}), audio.Snapshot(canonicalStreamPolicy{})}}
+	attachCanonicalStore(&report)
+	json := RenderJSON([]Report{report})
+	raw := RenderTextWithOptions([]Report{report}, TextRenderOptions{Language: "raw"})
+	assertRowOrder(t, raw, "A_TAG", "Z_CODEC")
+	if RenderJSON([]Report{report}) != json || RenderTextWithOptions([]Report{report}, TextRenderOptions{Language: "raw"}) != raw {
+		t.Fatal("raw ordering mutated structured facts or repeated output")
+	}
+}
+
 func TestRawVisibilityUsesSelectedReportVersion(t *testing.T) {
 	for _, dvd := range []bool{false, true} {
 		t.Run(strconv.FormatBool(dvd), func(t *testing.T) {

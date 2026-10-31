@@ -249,6 +249,20 @@ func reportToFieldStore(report Report, useCanonicalSeeds bool) *fieldStore {
 			appendCanonicalSeed(store, ref, stream.canonicalSeed)
 		} else {
 			appendLegacyTextFields(store, ref, stream.Fields)
+			// Retain parser-owned ordering for surviving tag labels when
+			// callers edit the public compatibility snapshot.
+			tags := make(map[string]bool)
+			for label := range stream.canonicalPolicy.LegacyTagIdentities {
+				tags[label] = true
+			}
+			for _, entry := range stream.canonicalSeed {
+				if entry.MatroskaTag {
+					tags[reportFieldIdentity(stream.Kind, string(entry.Name), entry.TextLabel)] = true
+				}
+			}
+			for index := range stored.Fields {
+				stored.Fields[index].MatroskaTag = tags[reportFieldIdentity(stream.Kind, string(stored.Fields[index].Name), stored.Fields[index].TextLabel)]
+			}
 		}
 	}
 	sortedIndexes := make([]int, len(report.Streams))
@@ -636,8 +650,17 @@ func captureLegacyStreamState(stream Stream, clone bool) legacyStreamState {
 func cloneLegacyStream(stream Stream) Stream {
 	stream.reportStore = nil
 	stream.reportSnapshot = nil
+	tags := maps.Clone(stream.canonicalPolicy.LegacyTagIdentities)
+	for _, entry := range stream.canonicalSeed {
+		if entry.MatroskaTag {
+			if tags == nil {
+				tags = make(map[string]bool)
+			}
+			tags[reportFieldIdentity(stream.Kind, string(entry.Name), entry.TextLabel)] = true
+		}
+	}
 	stream.canonicalSeed = nil
-	stream.canonicalPolicy = canonicalStreamPolicy{}
+	stream.canonicalPolicy = canonicalStreamPolicy{LegacyTagIdentities: tags}
 	stream.Fields = append([]Field(nil), stream.Fields...)
 	stream.JSON = maps.Clone(stream.JSON)
 	stream.JSONRaw = maps.Clone(stream.JSONRaw)

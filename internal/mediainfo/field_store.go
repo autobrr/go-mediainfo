@@ -20,13 +20,15 @@ type streamRef int
 
 // fieldEntry is one ordered canonical value plus its projection metadata.
 type fieldEntry struct {
-	Name          fieldName
-	Value         fieldValue
-	Dynamic       bool
-	Options       fieldOptions
-	Path          []string
-	Sequence      uint32
-	TextLabel     string
+	Name      fieldName
+	Value     fieldValue
+	Dynamic   bool
+	Options   fieldOptions
+	Path      []string
+	Sequence  uint32
+	TextLabel string
+	// MatroskaTag keeps producer-owned tag rows ahead of raw-only codec extras.
+	MatroskaTag   bool
 	StructuredKey string
 	Node          *structuredNode
 	// StructuredOverride retains an exact serializer representation without
@@ -41,9 +43,11 @@ type fieldEntry struct {
 
 // canonicalStreamPolicy retains legacy rendering exceptions for canonical snapshots.
 type canonicalStreamPolicy struct {
-	SkipStreamOrder bool
-	SkipComputed    bool
-	DVDOrder        bool
+	// LegacyTagIdentities retains tag ordering when legacy ingestion discards seeds.
+	LegacyTagIdentities map[string]bool
+	SkipStreamOrder     bool
+	SkipComputed        bool
+	DVDOrder            bool
 	// HideTypeOrderXML retains generated JSON type order while omitting the
 	// redundant XML child used only by direct canonical streams.
 	HideTypeOrderXML bool

@@ -220,7 +220,7 @@ func projectRawTextReport(report Report) rawTextReportProjection {
 			totalFileSize, _ = strconv.ParseInt(structured["FileSize"], 10, 64)
 		}
 		fields := make([]rawTextFieldProjection, 0, len(stream.Fields))
-		seen := make(map[string]struct{}, len(stream.Fields))
+		seen := make(map[string]bool, len(stream.Fields))
 		for _, entry := range stream.Fields {
 			if !entry.Options.ShowText {
 				continue
@@ -257,9 +257,10 @@ func projectRawTextReport(report Report) rawTextReportProjection {
 				Label: rule.Label, Value: value,
 				Sequence: entry.Sequence, Extension: !known,
 			})
-			seen[rule.Label] = struct{}{}
+			seen[rule.Label] = entry.MatroskaTag
 		}
-		sequence := uint32(len(stream.Fields))
+		// Derived rows follow the store-wide canonical encounter sequences.
+		sequence := store.nextSequence
 		appendDerived := func(label, value string) {
 			if value == "" {
 				return
@@ -270,7 +271,7 @@ func projectRawTextReport(report Report) rawTextReportProjection {
 			fields = append(fields, rawTextFieldProjection{
 				Label: label, Value: value, Sequence: sequence,
 			})
-			seen[label] = struct{}{}
+			seen[label] = false
 			sequence++
 		}
 		codec := storedCodecDescription(version, generalFormat, stream, structured)
@@ -281,7 +282,7 @@ func projectRawTextReport(report Report) rawTextReportProjection {
 			appendDerived(derived.Label, derived.Value)
 		}
 		if extra, ok := rawTextExtraNode(stream); ok && stream.Kind != StreamMenu {
-			for _, member := range extra.Object {
+			for memberIndex, member := range extra.Object {
 				if member.Key == "ConformanceErrors" {
 					for _, derived := range rawTextConformanceFields(member.Value) {
 						if _, exists := seen[derived.Label]; exists {
@@ -291,7 +292,7 @@ func projectRawTextReport(report Report) rawTextReportProjection {
 							Label: derived.Label, Value: derived.Value,
 							Sequence: sequence,
 						})
-						seen[derived.Label] = struct{}{}
+						seen[derived.Label] = false
 						sequence++
 					}
 					continue
@@ -305,7 +306,7 @@ func projectRawTextReport(report Report) rawTextReportProjection {
 							Label: derived.Label, Value: derived.Value,
 							Sequence: sequence,
 						})
-						seen[derived.Label] = struct{}{}
+						seen[derived.Label] = false
 						sequence++
 					}
 					continue
@@ -318,11 +319,28 @@ func projectRawTextReport(report Report) rawTextReportProjection {
 				if _, exists := seen[label]; exists {
 					continue
 				}
-				fields = append(fields, rawTextFieldProjection{
+				field := rawTextFieldProjection{
 					Label: label, Value: rawTextExtraValue(member.Key, value),
 					Sequence: sequence,
-				})
-				seen[label] = struct{}{}
+				}
+				// Fill a missing extra at its ordered sibling position while
+				// retaining the encounter order of existing text rows.
+				position := len(fields)
+				for _, next := range extra.Object[memberIndex+1:] {
+					nextLabel := rawTextLabel(next.Key)
+					if tag, exists := seen[nextLabel]; !exists || tag {
+						continue
+					}
+					if index := slices.IndexFunc(fields, func(existing rawTextFieldProjection) bool {
+						return existing.Label == nextLabel
+					}); index >= 0 {
+						position = index
+						field.Sequence = fields[index].Sequence
+						break
+					}
+				}
+				fields = slices.Insert(fields, position, field)
+				seen[label] = false
 				sequence++
 			}
 		}
