@@ -64,6 +64,39 @@ func TestRawExtraRowsFollowCanonicalEncounterSequence(t *testing.T) {
 	}
 }
 
+func TestDVDRawExtrasFollowProjectedEncounterSequence(t *testing.T) {
+	general := newCanonicalStreamBuilder(StreamGeneral)
+	general.Fill("Format", "DVD Video", "Format", "DVD Video")
+	general.Text("GENERAL_A", "a")
+	general.Text("GENERAL_B", "b")
+	general.Text("GENERAL_C", "c")
+	general.Text("GENERAL_D", "d")
+	general.Text("GENERAL_E", "e")
+	audio := newCanonicalStreamBuilder(StreamAudio)
+	audio.Fill("Format", "AC-3", "Format", "AC-3")
+	audio.Text("dialnorm_Maximum", "-27")
+	audio.StructuredNode("extra", structuredNode{Kind: structuredObject, Object: []structuredMember{
+		{Key: "dialnorm", Value: structuredNode{Kind: structuredString, Text: "-27"}},
+		{Key: "dialnorm_Average", Value: structuredNode{Kind: structuredString, Text: "-27"}},
+		{Key: "dialnorm_Minimum", Value: structuredNode{Kind: structuredString, Text: "-27"}},
+	}})
+	menu := newCanonicalStreamBuilder(StreamMenu)
+	menu.Text("MENU_TAG", "literal")
+	menu.StructuredNode("extra", structuredNode{Kind: structuredObject, Object: []structuredMember{
+		{Key: "List_Audio", Value: structuredNode{Kind: structuredString, Text: "0"}},
+		{Key: "List_Subtitles_4_3", Value: structuredNode{Kind: structuredString, Text: "1"}},
+	}})
+	report := Report{General: general.Snapshot(canonicalStreamPolicy{}), Streams: []Stream{audio.Snapshot(canonicalStreamPolicy{}), menu.Snapshot(canonicalStreamPolicy{DVDOrder: true})}}
+	attachCanonicalStore(&report)
+	before := RenderJSON([]Report{report})
+	raw := RenderTextWithOptions([]Report{report}, TextRenderOptions{Language: "raw"})
+	assertRowOrder(t, raw, "MENU_TAG", "List (Audio)", "List (Subtitles 4/3)")
+	assertRowOrder(t, raw, padRawTextLabel("dialnorm", 33)+": ", "dialnorm_Average", "dialnorm_Minimum", "dialnorm_Maximum")
+	if RenderJSON([]Report{report}) != before || RenderTextWithOptions([]Report{report}, TextRenderOptions{Language: "raw"}) != raw {
+		t.Fatal("DVD extra ordering changed structured facts or repeated output")
+	}
+}
+
 func TestRawVisibilityUsesSelectedReportVersion(t *testing.T) {
 	for _, dvd := range []bool{false, true} {
 		t.Run(strconv.FormatBool(dvd), func(t *testing.T) {
@@ -77,11 +110,14 @@ func TestRawVisibilityUsesSelectedReportVersion(t *testing.T) {
 			attachCanonicalStore(&report)
 			before := RenderJSON([]Report{report})
 			raw := RenderTextWithOptions([]Report{report}, TextRenderOptions{Language: "raw"})
-			if got := strings.Contains(normalizeText(raw), padRawTextLabel("Title", 33)+": Example\n"); got != dvd {
-				t.Errorf("raw Title present=%v, want %v: %s", got, dvd, raw)
-			}
-			if got := strings.Contains(normalizeText(raw), padRawTextLabel("Title_More", 33)+": Details\n"); got != dvd {
-				t.Errorf("raw Title_More present=%v, want %v: %s", got, dvd, raw)
+			for _, row := range []struct{ label, value string }{{"Title", "Example"}, {"Title_More", "Details"}} {
+				needle := padRawTextLabel(row.label, 33) + ": "
+				if dvd {
+					needle += row.value + "\n"
+				}
+				if got := strings.Contains(normalizeText(raw), needle); got != dvd {
+					t.Errorf("raw %s present=%v, want %v: %s", row.label, got, dvd, raw)
+				}
 			}
 			if !strings.Contains(before, `"Title":"Example"`) || RenderJSON([]Report{report}) != before || RenderTextWithOptions([]Report{report}, TextRenderOptions{Language: "raw"}) != raw {
 				t.Fatal("visibility changed structured facts or repeated rendering")
@@ -113,7 +149,11 @@ func TestPublicDVDVOBMutationRetainsReportVersion(t *testing.T) {
 		}
 		json := RenderJSON([]Report{report})
 		raw := RenderTextWithOptions([]Report{report}, TextRenderOptions{Language: "raw"})
-		if got := strings.Contains(normalizeText(raw), padRawTextLabel("Title", 33)+": Caller title\n"); got != dvd {
+		needle := padRawTextLabel("Title", 33) + ": "
+		if dvd {
+			needle += "Caller title\n"
+		}
+		if got := strings.Contains(normalizeText(raw), needle); got != dvd {
 			t.Errorf("DVD=%v raw caller Title present=%v: %s", dvd, got, raw)
 		}
 		for _, want := range []string{`"Format":"MPEG-PS"`, `"Title":"Caller title"`} {

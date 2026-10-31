@@ -487,6 +487,9 @@ func normalizeDVDRawTextFields(stream *storedStream, fields []rawTextFieldProjec
 
 	normalized := make([]rawTextFieldProjection, 0, len(fields)+len(extra.Object))
 	seen := make(map[string]struct{}, len(fields)+len(extra.Object))
+	// Menu lists follow projected siblings; preserve the existing placement
+	// of the other DVD extra families, including Audio statistics.
+	sequence := uint32(len(stream.Fields))
 	for _, field := range fields {
 		if _, fromExtra := extraAliases[field.Label]; fromExtra {
 			continue
@@ -536,9 +539,11 @@ func normalizeDVDRawTextFields(stream *storedStream, fields []rawTextFieldProjec
 		}
 		normalized = append(normalized, field)
 		seen[field.Label] = struct{}{}
+		if stream.Kind == StreamMenu {
+			sequence = max(sequence, field.Sequence+1)
+		}
 	}
 
-	sequence := uint32(len(stream.Fields))
 	if stream.Kind == StreamAudio || stream.Kind == StreamText {
 		if value := formatRawTextDelay(structured["Video_Delay"]); value != "" {
 			label := "Video_Delay/String"
