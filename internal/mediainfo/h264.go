@@ -245,7 +245,7 @@ func buildH264Fields(profile string, level string, spsInfo h264SPSInfo, ppsCABAC
 		}
 	}
 	if spsInfo.RefFrames > 0 {
-		fields = append(fields, Field{Name: "Format settings, Reference frames", Value: fmt.Sprintf("%d frames", spsInfo.RefFrames)})
+		fields = append(fields, Field{Name: "Format settings, Reference frames", Value: formatReferenceFrames(spsInfo.RefFrames)})
 	}
 	if ppsCABAC != nil {
 		if *ppsCABAC {

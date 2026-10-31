@@ -68,8 +68,10 @@
 <BitRate_Mode>CBR</BitRate_Mode>
 <BitRate>128000</BitRate>
 <Channels>1</Channels>
+<SamplesPerFrame>1152</SamplesPerFrame>
 <SamplingRate>48000</SamplingRate>
 <SamplingCount>193536</SamplingCount>
+<FrameRate>41.667</FrameRate>
 <Compression_Mode>Lossy</Compression_Mode>
 <Delay>0.000</Delay>
 <Delay_Source>Stream</Delay_Source>

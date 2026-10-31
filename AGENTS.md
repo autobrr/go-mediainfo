@@ -17,6 +17,7 @@ go-mediainfo must be accurate. Official MediaInfo is the reference we diff again
 - Write the test first in `internal/mediainfo/*_test.go`. Run `gofmt -w` on touched `.go` files before you commit.
 - A new parser gets a fuzz target in `internal/mediainfo/fuzz_parsers_test.go`. `scripts/fuzz.sh` discovers every `Fuzz*` function, so CI needs no other change.
 - Verify a parser or formatter change against real files before you push, using either a verified local reference binary or the media host described below.
+- Report labels, visibility and per-kind ordering come from the pinned tables in `internal/mediainfo/report_tables`. Regenerate them with `python3 scripts/generate-report-tables.py <v23.04 MediaInfoLib root> <v26.10 MediaInfoLib root>` using the revisions recorded in the adjacent source manifests. Keep the source hashes and licenses; there are no runtime downloads. Codec table lookups use the parser's container namespace and exact key. Keep dynamic extras in producer order and keep media interpretation out of the renderers.
 
 ## Privacy
 
@@ -52,6 +53,8 @@ DVD uses the reference in `docs/adr/0002-dvd-parity-reference.md`. Keep evidence
 - Measured fact: Ogg FLAC General has no `Format/Info`. Official v23.04 shows the FLAC description there, but `Format/Info` describes the General format, which is Ogg, so the FLAC description is a wrong value. Issue #55.
 - Measured fact: MP4 audio `SamplingCount` (AAC, AC-3, FLAC) comes from the exact track duration. Official v23.04 rounds the duration to milliseconds first, so a 44.1 kHz track of 132304 samples shows 132300. PR #59.
 - Measured fact: Ogg with Theora and FLAC shows the measured video bit rate and stream size. FLAC has no nominal bit rate, and official v23.04 shows no video bit rate. PR #59.
+- Measured fact: for MPEG Audio in AVI, a validated MPEG header supplies `SamplesPerFrame` and `FrameRate` without a LAME/Xing tag. C000167 independently confirms 48 kHz and 1152 samples per frame (41.667 FPS); v23.04 omits these fields. AVI's tag-derived total `FrameCount` remains separate. Issue #107.
+- Measured fact: raw bit rate and bit density use parser-owned measured values, not a nearby encoder target. C000204's matching payload size and duration establish 7.90 Mb/s rather than the 8.00 Mb/s target shown by v23.04. Keep declared and nominal values separate. Issue #54.
 - Newer upstream convention: HDR fields have the v26 form. JSON `MaxCLL` and `MaxFALL` are numbers with no unit, raw text uses `MaxCLL/String` and `MaxFALL/String`, and Dolby Vision text shows the profile as "8.1". A number is the better JSON value, and "8.1" is the real profile name. Issue #67.
 - Measured fact: HDR fields that v23.04 does not fill: `MasteringDisplay_Luminance_Min`, `MasteringDisplay_Luminance_Max`, `HDR_Format_Compression`, and `HDR_Format_Compatibility` on MP4. Issue #67.
 - Measured fact: AC-3 metadata (dialnorm, compr, dynrng and the others) shows in text, and JSON has `cmixlev`, `surmixlev`, `mixlevel`, `roomtyp`, `dmixmod`, the `loro` and `ltrt` mix levels, `dialnorm_Count` and `adconvtyp`. v23.04 hides these values, and v26 shows them. Issue #78.

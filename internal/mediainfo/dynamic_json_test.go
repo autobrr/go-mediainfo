@@ -56,10 +56,10 @@ func TestMediaInfoJSONName(t *testing.T) {
 	}
 }
 
-func TestOrderMatroskaJSONExtraPreservesUnknownSlots(t *testing.T) {
-	got := orderMatroskaJSONExtra(`{"CustomA":"a","acmod":"2","CustomB":"b","bsid":"8","dialnorm":"-27"}`)
-	want := `{"CustomA":"a","bsid":"8","CustomB":"b","dialnorm":"-27","acmod":"2"}`
-	if got != want {
-		t.Fatalf("ordered extra = %s, want %s", got, want)
+func TestMatroskaJSONExtraPreservesProducerOrder(t *testing.T) {
+	raw := `{"CustomA":"a","acmod":"2","CustomB":"b","bsid":"8","dialnorm":"-27"}`
+	report := Report{General: Stream{Kind: StreamGeneral, Fields: []Field{{Name: "Format", Value: "Matroska"}}}, Streams: []Stream{{Kind: StreamAudio, JSONRaw: map[string]string{"extra": raw}}}}
+	if got := RenderJSON([]Report{report}); !strings.Contains(got, raw) {
+		t.Fatalf("extra order changed: %s", got)
 	}
 }

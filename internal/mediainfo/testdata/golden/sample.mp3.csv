@@ -12,4 +12,6 @@ Bit rate mode,Constant
 Bit rate,128 kb/s
 Channel(s),1 channel
 Sampling rate,48.0 kHz
+Frame rate,41.667 FPS (1152 SPF)
+Stream size,63.0 KiB (99%)
 

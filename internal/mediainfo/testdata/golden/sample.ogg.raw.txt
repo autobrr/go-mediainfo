@@ -1,0 +1,17 @@
+General
+CompleteName                     : samples/sample.ogg
+Format/String                    : Ogg
+FileSize/String                  : 67.4 KiB
+Duration/String                  : 4s 7ms
+OverallBitRate/String            : 138 Kbps
+Encoded_Application/String       : Lavc62.11.100 libopus
+
+Audio
+ID/String                        : 110100118 (0x68FFE96)
+Format/String                    : Opus
+Duration/String                  : 4s 7ms
+Channel(s)/String                : 1 channel
+ChannelLayout                    : M
+SamplingRate/String              : 48.0 KHz
+Compression_Mode/String          : Lossy
+Encoded_Library/String           : Lavf62.3.100

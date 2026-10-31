@@ -404,13 +404,69 @@ func applyMatroskaTrackTags(info *MatroskaInfo) {
 			}
 		}
 		mergeMatroskaDynamicCanonicalExtras(stream, dynamic)
-		// MediaInfo's Inform output lists unrecognized tags after the
-		// schema-backed stream fields.
+		// Keep the established tag-fill position before later codec extras,
+		// without moving provenance fields or reordering the JSON object.
+		tagNames := make(map[string]struct{}, len(dynamic))
+		for _, member := range dynamic {
+			tagNames[member.Key] = struct{}{}
+		}
+		before := []string{flacUnencodedMD5Label}
+		foundTag := false
+		for _, entry := range stream.canonicalSeed {
+			if !entry.Options.ShowText {
+				continue
+			}
+			if _, tag := tagNames[entry.TextLabel]; tag {
+				foundTag = true
+			} else if foundTag {
+				before = append(before, entry.TextLabel)
+				break
+			}
+		}
+		if !foundTag {
+			// A first tag fill has no established text boundary. Exclude
+			// provenance owned by the statistics-tag producer, then use an
+			// existing codec extra as the boundary without changing its rank.
+			provenance := make(map[string]bool)
+			stats := info.tagStats[streamTrackUID(*stream)]
+			for _, member := range stats.extras {
+				provenance[member.Key] = true
+			}
+			if stats.hasSource && stats.source != "" {
+				provenance["Source"] = true
+			}
+			if stats.hasSourceID && stats.sourceID > 0 {
+				provenance["OriginalSourceMedium"] = true
+				provenance["OriginalSourceMedium_ID"] = true
+			}
+			codecLabels := make(map[string]bool)
+			if extra := canonicalSeedStructuredNode(stream, "extra"); extra != nil {
+				for _, member := range extra.Object {
+					_, tag := tagNames[member.Key]
+					if !tag && !provenance[member.Key] && !isKnownStructuredField(stream.Kind, member.Key) {
+						codecLabels[rawTextLabel(member.Key)] = true
+					}
+				}
+			}
+			for _, entry := range stream.canonicalSeed {
+				if entry.Options.ShowText && codecLabels[rawTextLabel(entry.TextLabel)] {
+					before = append(before, entry.TextLabel)
+					break
+				}
+			}
+		}
 		for _, member := range dynamic {
 			if member.Key == "" || member.Value.Kind != structuredString || member.Value.Text == "" {
 				continue
 			}
-			replaceCanonicalSeedText(stream, member.Key, member.Value.Text)
+			insertCanonicalSeedTextBefore(stream, member.Key, member.Value.Text, before...)
+			for index := range stream.canonicalSeed {
+				entry := &stream.canonicalSeed[index]
+				if entry.Options.ShowText && entry.TextLabel == member.Key {
+					entry.MatroskaTag = true
+					break
+				}
+			}
 		}
 	}
 }

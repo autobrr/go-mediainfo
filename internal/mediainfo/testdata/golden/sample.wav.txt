@@ -10,6 +10,8 @@ Writing application                      : Lavf62.3.100
 
 Audio
 Format                                   : PCM
+Format settings, Endianness              : Little
+Format settings, Sign                    : Signed
 Codec ID                                 : 1
 Duration                                 : 4 s 0 ms
 Bit rate mode                            : Constant
@@ -17,8 +19,7 @@ Bit rate                                 : 768 kb/s
 Channel(s)                               : 1 channel
 Sampling rate                            : 48.0 kHz
 Bit depth                                : 16 bits
-Format settings, Endianness              : Little
-Format settings, Sign                    : Signed
+Stream size                              : 375 KiB (100%)
 
 ReportBy                                 : go-mediainfo - dev
 

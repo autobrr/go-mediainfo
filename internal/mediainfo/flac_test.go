@@ -10,6 +10,67 @@ import (
 	"testing"
 )
 
+func TestFLACExtraCommentsPreserveEncounterOrder(t *testing.T) {
+	streamInfo, err := hex.DecodeString("1000100000001000210c0bb802f00e5b6540864d55f003143d8bad47d3b997fae64c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := append([]byte("fLaC\x00\x00\x00\x22"), streamInfo...)
+	blocks := [][]string{
+		{"X_ZULU=first", "TITLE=Fixture", "X_ALPHA=alpha", "X_ZULU=second", "EMPTY=", "VALID_BITS=16", "X_BRAVO=bravo", "X_YANKEE=yankee", "X_DELTA=delta", "X_XRAY=xray"},
+		{"x_zulu=first", "X_ALPHA=alpha", "X_CHARLIE=charlie", "X_WHISKEY=whiskey", "X_ECHO=echo", "X_VICTOR=victor", "X_FOXTROT=foxtrot", "X_UNIFORM=uniform"},
+	}
+	for index, tags := range blocks {
+		comment := binary.LittleEndian.AppendUint32(nil, 7)
+		comment = append(comment, "fixture"...)
+		comment = binary.LittleEndian.AppendUint32(comment, uint32(len(tags)))
+		for _, tag := range tags {
+			comment = binary.LittleEndian.AppendUint32(comment, uint32(len(tag)))
+			comment = append(comment, tag...)
+		}
+		kind := byte(4)
+		if index == len(blocks)-1 {
+			kind |= 0x80
+		}
+		data = append(data, kind, byte(len(comment)>>16), byte(len(comment)>>8), byte(len(comment)))
+		data = append(data, comment...)
+	}
+	path := filepath.Join(t.TempDir(), "ordered.flac")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	keys := []string{"X_ZULU", "X_ALPHA", "X_BRAVO", "X_YANKEE", "X_DELTA", "X_XRAY", "X_CHARLIE", "X_WHISKEY", "X_ECHO", "X_VICTOR", "X_FOXTROT", "X_UNIFORM"}
+	var firstJSON, firstRaw string
+	for attempt := range 32 {
+		report, err := AnalyzeFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		reports := []Report{report}
+		structured := RenderJSON(reports)
+		raw := RenderTextWithOptions(reports, TextRenderOptions{Language: "raw"})
+		jsonKeys, rawKeys := make([]string, len(keys)), make([]string, len(keys))
+		for index, key := range keys {
+			jsonKeys[index] = `"` + key + `":`
+			rawKeys[index] = padRawTextLabel(key, 33) + ":"
+		}
+		assertRowOrder(t, structured, jsonKeys...)
+		assertRowOrder(t, raw, rawKeys...)
+		if strings.Count(structured, `"X_ZULU":`) != 1 || !strings.Contains(structured, "first / second / first") || strings.Count(structured, `"X_ALPHA":`) != 1 || strings.Contains(structured, `"EMPTY":`) {
+			t.Fatal("comment merge or omission changed")
+		}
+		_ = RenderText(reports)
+		if RenderJSON(reports) != structured || RenderTextWithOptions(reports, TextRenderOptions{Language: "raw"}) != raw {
+			t.Fatal("rendering changed comment order or values")
+		}
+		if attempt == 0 {
+			firstJSON, firstRaw = structured, raw
+		} else if structured != firstJSON || raw != firstRaw {
+			t.Fatal("reparsing changed comment order or values")
+		}
+	}
+}
+
 func TestFLACUnencodedMD5Output(t *testing.T) {
 	const label = "MD5 of the unencoded content"
 	for _, container := range []struct {

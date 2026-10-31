@@ -112,8 +112,6 @@ func buildJSONGeneralFields(report Report) []jsonKV {
 	containerFormat := firstNonEmpty(report.General.JSON["Format"], findField(report.General.Fields, "Format"))
 	rawExtras := report.General.JSONRaw
 	switch containerFormat {
-	case "Matroska":
-		rawExtras = withMatroskaJSONExtraOrder(rawExtras)
 	case "AVI":
 		rawExtras = withAVIJSONExtraOrder(rawExtras)
 	}
@@ -134,8 +132,6 @@ func buildJSONStreamFields(stream Stream, order int, typeOrder int, containerFor
 	fields = append(fields, mapStreamFieldsToJSON(stream.Kind, stream.Fields)...)
 	rawExtras := stream.JSONRaw
 	switch containerFormat {
-	case "Matroska":
-		rawExtras = withMatroskaJSONExtraOrder(rawExtras)
 	case "AVI":
 		rawExtras = withAVIJSONExtraOrder(rawExtras)
 	}
@@ -227,7 +223,9 @@ func mapStreamFieldsToJSON(kind StreamKind, fields []Field) []jsonKV {
 		case "Format level":
 			out = append(out, jsonKV{Key: "Format_Level", Val: field.Value})
 		case "ID":
-			out = append(out, jsonKV{Key: "ID", Val: field.Value})
+			out = append(out, jsonKV{Key: "ID", Val: canonicalDisplayID(field.Value)})
+		case "Original source medium ID", "ID in the original source medium":
+			out = append(out, jsonKV{Key: "OriginalSourceMedium_ID", Val: canonicalDisplayID(field.Value)})
 		case "Menu ID":
 			out = append(out, jsonKV{Key: "MenuID", Val: field.Value})
 		case "Unique ID":
@@ -260,7 +258,7 @@ func mapStreamFieldsToJSON(kind StreamKind, fields []Field) []jsonKV {
 			out = append(out, jsonKV{Key: "Format_Settings_Matrix", Val: field.Value})
 		case "Format settings, GOP":
 			out = append(out, jsonKV{Key: "Format_Settings_GOP", Val: field.Value})
-		case "Format settings, Picture structure":
+		case "Format settings, Picture structure", "Format settings, picture structure":
 			out = append(out, jsonKV{Key: "Format_Settings_PictureStructure", Val: field.Value})
 		case "Format settings, Reference frames":
 			out = append(out, jsonKV{Key: "Format_Settings_RefFrames", Val: extractLeadingNumber(field.Value)})
@@ -277,7 +275,11 @@ func mapStreamFieldsToJSON(kind StreamKind, fields []Field) []jsonKV {
 		case "Commercial name":
 			out = append(out, jsonKV{Key: "Format_Commercial_IfAny", Val: field.Value})
 		case "Muxing mode":
-			out = append(out, jsonKV{Key: "MuxingMode", Val: field.Value})
+			value := field.Value
+			if value == "Packed bitstream" {
+				value = "MuxingMode_PackedBitstream"
+			}
+			out = append(out, jsonKV{Key: "MuxingMode", Val: value})
 		case "Muxing mode, more info":
 			out = append(out, jsonKV{Key: "MuxingMode_MoreInfo", Val: field.Value})
 		case "Codec configuration box":
@@ -289,6 +291,10 @@ func mapStreamFieldsToJSON(kind StreamKind, fields []Field) []jsonKV {
 		case "Source duration":
 			if seconds, ok := parseDurationSeconds(field.Value); ok {
 				out = append(out, jsonKV{Key: "Source_Duration", Val: formatJSONSeconds(seconds)})
+			}
+		case "Delay relative to video":
+			if seconds, ok := parseDurationSeconds(field.Value); ok {
+				out = append(out, jsonKV{Key: "Video_Delay", Val: formatJSONSeconds(seconds)})
 			}
 		case "Source_Duration_LastFrame":
 			if seconds, ok := parseDurationSeconds(field.Value); ok {
@@ -322,6 +328,14 @@ func mapStreamFieldsToJSON(kind StreamKind, fields []Field) []jsonKV {
 				out = append(out, jsonKV{Key: "FrameRate_Num", Val: strconv.Itoa(num)})
 				out = append(out, jsonKV{Key: "FrameRate_Den", Val: strconv.Itoa(den)})
 			}
+		case "Minimum frame rate", "Maximum frame rate", "FrameRate_Minimum/String", "FrameRate_Maximum/String":
+			if value, ok := parseFloatValue(field.Value); ok {
+				key := "FrameRate_Minimum"
+				if field.Name == "Maximum frame rate" || field.Name == "FrameRate_Maximum/String" {
+					key = "FrameRate_Maximum"
+				}
+				out = append(out, jsonKV{Key: key, Val: formatJSONFloat(value)})
+			}
 		case "Frame rate mode":
 			out = append(out, jsonKV{Key: "FrameRate_Mode", Val: mapFrameRateMode(field.Value)})
 		case "Width":
@@ -343,7 +357,14 @@ func mapStreamFieldsToJSON(kind StreamKind, fields []Field) []jsonKV {
 		case "Scan type":
 			out = append(out, jsonKV{Key: "ScanType", Val: field.Value})
 		case "Scan order":
-			out = append(out, jsonKV{Key: "ScanOrder", Val: field.Value})
+			value := field.Value
+			switch value {
+			case "Top Field First":
+				value = "TFF"
+			case "Bottom Field First":
+				value = "BFF"
+			}
+			out = append(out, jsonKV{Key: "ScanOrder", Val: value})
 		case "Stream size":
 			if bytes, ok := parseSizeBytes(field.Value); ok {
 				out = append(out, jsonKV{Key: "StreamSize", Val: strconv.FormatInt(bytes, 10)})
@@ -818,16 +839,9 @@ func parseSizeBytes(value string) (int64, bool) {
 }
 
 func parseFloatValue(value string) (float64, bool) {
-	fields := strings.Fields(value)
-	if len(fields) == 0 {
-		return 0, false
-	}
-	number := strings.ReplaceAll(fields[0], " ", "")
+	number := extractLeadingNumber(strings.TrimPrefix(strings.TrimSpace(value), "+"))
 	parsed, err := strconv.ParseFloat(number, 64)
-	if err != nil {
-		return 0, false
-	}
-	return parsed, true
+	return parsed, err == nil
 }
 
 func parseRatioFloat(value string) (float64, bool) {
@@ -940,4 +954,30 @@ func fileSizeBytes(path string) int64 {
 		return 0
 	}
 	return info.Size()
+}
+
+// canonicalDisplayID imports only the decimal/hex notation emitted by the
+// compatibility projector. Opaque IDs retain their original spelling.
+func canonicalDisplayID(value string) string {
+	if !strings.Contains(value, " (0x") {
+		return value
+	}
+	parts := strings.Split(value, ")")
+	ids := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part == "" {
+			continue
+		}
+		decimal, hex, ok := strings.Cut(strings.TrimLeft(part, " -"), " (0x")
+		if !ok {
+			return value
+		}
+		id, decimalErr := strconv.ParseUint(decimal, 10, 64)
+		hexID, hexErr := strconv.ParseUint(hex, 16, 64)
+		if decimalErr != nil || hexErr != nil || id != hexID {
+			return value
+		}
+		ids = append(ids, decimal)
+	}
+	return strings.Join(ids, "-")
 }

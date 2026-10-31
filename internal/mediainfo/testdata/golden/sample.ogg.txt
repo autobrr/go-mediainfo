@@ -7,7 +7,7 @@ Overall bit rate                         : 138 kb/s
 Writing application                      : Lavc62.11.100 libopus
 
 Audio
-ID                                       : 110100118
+ID                                       : 110100118 (0x68FFE96)
 Format                                   : Opus
 Duration                                 : 4 s 7 ms
 Channel(s)                               : 1 channel

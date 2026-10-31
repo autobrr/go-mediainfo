@@ -2625,17 +2625,15 @@ func TestMatroskaAACCanonicalSeedShowsExplicitSBRInText(t *testing.T) {
 		"Format settings": "Explicit",
 		"Commercial name": "HE-AAC",
 	}
-	for _, entry := range seed {
-		if want, ok := wantText[entry.TextLabel]; ok && entry.Options.ShowText {
-			if entry.Value.Text != want {
-				t.Fatalf("%s = %q, want %q", entry.TextLabel, entry.Value.Text, want)
-			}
-			delete(wantText, entry.TextLabel)
+	report := Report{General: Stream{Kind: StreamGeneral}, Streams: []Stream{{Kind: StreamAudio, canonicalSeed: seed}}}
+	attachCanonicalStore(&report)
+	output := RenderText([]Report{report})
+	for label, want := range wantText {
+		if !strings.Contains(output, padRight(label, textLabelWidth)+": "+want) {
+			t.Fatalf("missing SBR row %s=%s: %s", label, want, output)
 		}
 	}
-	if len(wantText) != 0 {
-		t.Fatalf("missing SBR text entries: %v", wantText)
-	}
+
 }
 
 func TestMatroskaDTSCanonicalProbeShowsESXChInText(t *testing.T) {

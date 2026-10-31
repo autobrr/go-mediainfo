@@ -1,6 +1,7 @@
 General
 Complete name                            : samples/sample.flac
 Format                                   : FLAC
+Format/Info                              : Free Lossless Audio Codec
 File size                                : 59.6 KiB
 Duration                                 : 4 s 0 ms
 Overall bit rate mode                    : Variable
@@ -17,6 +18,7 @@ Channel layout                           : M
 Sampling rate                            : 48.0 kHz
 Bit depth                                : 16 bits
 Compression mode                         : Lossless
+Stream size                              : 51.5 KiB (86%)
 Writing library                          : Lavf62.3.100
 MD5 of the unencoded content             : 97EED3BC2F094D9221F0E9772AC7B3E7
 

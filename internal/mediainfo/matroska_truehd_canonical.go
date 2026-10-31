@@ -44,7 +44,6 @@ func matroskaTrueHDCanonicalSeed(facts matroskaTrueHDCanonicalFacts) []fieldEntr
 	if facts.codecID != "" {
 		builder.Fill("CodecID", facts.codecID, "Codec ID", facts.codecID)
 	}
-	builder.Text("Format/Info", "Dolby TrueHD")
 	if facts.trackUID > 0 {
 		builder.Structured("UniqueID", strconv.FormatUint(facts.trackUID, 10))
 	}
@@ -118,7 +117,6 @@ func applyMatroskaTrueHDCanonicalProbe(stream *Stream, info trueHDInfo) {
 		return
 	}
 	replaceCanonicalSeedFill(stream, "Format", "MLP FBA", "Format", "MLP FBA")
-	replaceCanonicalSeedText(stream, "Format/Info", "Dolby TrueHD")
 	replaceCanonicalSeedFill(stream, "Format_Commercial_IfAny", "Dolby TrueHD", "Commercial name", "Dolby TrueHD")
 
 	channels, _ := canonicalSeedValue(*stream, "Channels")
@@ -131,7 +129,6 @@ func applyMatroskaTrueHDCanonicalProbe(stream *Stream, info trueHDInfo) {
 
 	if atmos, ok := trueHDAtmosPresentationInfo(info); ok {
 		replaceCanonicalSeedFill(stream, "Format", "MLP FBA", "Format", "MLP FBA 16-ch")
-		replaceCanonicalSeedText(stream, "Format/Info", "Meridian Lossless Packing FBA with 16-channel presentation")
 		replaceCanonicalSeedFill(stream, "Format_Commercial_IfAny", "Dolby TrueHD with Dolby Atmos", "Commercial name", "Dolby TrueHD with Dolby Atmos")
 		replaceCanonicalSeedFill(stream, "Format_AdditionalFeatures", atmos.additionalFeatures, "", "")
 		applyMatroskaTrueHDCanonicalLayout(stream, "L R C LFE Ls Rs Lb Rb", "Front: L C R, Side: L R, Back: L R, LFE")

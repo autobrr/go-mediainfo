@@ -46,6 +46,77 @@ func TestDVDHasConstantVideoBitRateUsesFirstVideoStream(t *testing.T) {
 	}
 }
 
+func TestDVDIFOAndBUPDurationPresentation(t *testing.T) {
+	for _, extension := range []string{".IFO", ".BUP"} {
+		for _, tc := range []struct {
+			clock   [4]byte
+			seconds float64
+			want    string
+		}{
+			{[4]byte{0, 0, 0x25, 0x45}, 25.2, "25 s 200 ms"},
+			{[4]byte{0, 1, 0, 0x40}, 60, "1 min 0 s"},
+			{[4]byte{0, 0x57, 0x19, 0x40}, 3439, "57 min 19 s"},
+			{[4]byte{1, 2, 3, 0x40}, 3723, "1 h 2 min"},
+		} {
+			data, _ := remappedSubpictureDVDFixture()
+			ptt := dvdSectorSize
+			binary.BigEndian.PutUint16(data[ptt:], 1)
+			binary.BigEndian.PutUint32(data[ptt+4:], 15)
+			binary.BigEndian.PutUint16(data[ptt+14:], 1)
+			pgc := 2 * dvdSectorSize
+			data[pgc+8] = 0x80
+			copy(data[pgc+16+4:], tc.clock[:])
+			base := pgc + 16
+			data[base+2], data[base+3] = 1, 1
+			binary.BigEndian.PutUint16(data[base+0xE6:], 0xF0)
+			binary.BigEndian.PutUint16(data[base+0xE8:], 0xF1)
+			data[base+0xF0] = 1
+			copy(data[base+0xF1+4:], tc.clock[:])
+			path := filepath.Join(t.TempDir(), "VTS_01_0"+extension)
+			if err := os.WriteFile(path, data, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			report, err := AnalyzeFileWithOptions(path, AnalyzeOptions{HasTestContinuousFileNames: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := findField(report.General.Fields, "Duration"); got != tc.want {
+				t.Fatalf("%s duration = %q, want %q", extension, got, tc.want)
+			}
+			seconds, err := strconv.ParseFloat(report.General.JSON["Duration"], 64)
+			if err != nil || math.Abs(seconds-tc.seconds) > 0.000001 {
+				t.Fatalf("numeric duration changed: %s", report.General.JSON["Duration"])
+			}
+			menuFound := false
+			for _, stream := range report.Streams {
+				if stream.Kind == StreamMenu {
+					menuFound = true
+					if got := findField(stream.Fields, "Duration"); got != tc.want {
+						t.Fatalf("Menu duration=%q", got)
+					}
+				}
+			}
+			if !menuFound {
+				t.Fatal("fixture did not produce a Menu")
+			}
+			html := RenderHTML([]Report{report})
+			csv := RenderCSV([]Report{report})
+			for _, kind := range []StreamKind{StreamGeneral, StreamMenu} {
+				_, section, found := strings.Cut(html, `<tr><th colspan="2">`+string(kind)+`</th></tr>`)
+				section, _, _ = strings.Cut(section, "<tr><th")
+				if !found || !strings.Contains(section, "<tr><td>Duration</td><td>"+tc.want+"</td></tr>") {
+					t.Errorf("HTML %s lost its Duration row", kind)
+				}
+				_, section, found = strings.Cut(csv, string(kind)+"\n")
+				section, _, _ = strings.Cut(section, "\n\n")
+				if !found || !strings.Contains("\n"+section+"\n", "\nDuration,"+tc.want+"\n") {
+					t.Errorf("CSV %s lost its Duration row", kind)
+				}
+			}
+		}
+	}
+}
+
 func TestDVDTitleSetBitRateDurationFlagsMuxRateAboveDVDLimit(t *testing.T) {
 	const duration = 10.0
 	atLimitSize := int64(dvdMaxMuxBitRate * duration / 8)

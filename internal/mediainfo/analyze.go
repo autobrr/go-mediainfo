@@ -581,12 +581,10 @@ func analyzeFileWithOptions(ctx context.Context, path string, opts AnalyzeOption
 							if track.MaximumSampleDelta > 0 {
 								minimum := float64(track.Timescale) / float64(track.MaximumSampleDelta)
 								builder.Structured("FrameRate_Minimum", formatJSONFloat(minimum))
-								builder.Text("FrameRate_Minimum/String", fmt.Sprintf("%.3f fps", minimum))
 							}
 							if track.MinimumSampleDelta > 0 {
 								maximum := float64(track.Timescale) / float64(track.MinimumSampleDelta)
 								builder.Structured("FrameRate_Maximum", formatJSONFloat(maximum))
-								builder.Text("FrameRate_Maximum/String", fmt.Sprintf("%.3f fps", maximum))
 							}
 						}
 					}
@@ -1359,6 +1357,8 @@ func analyzeFileWithOptions(ctx context.Context, path string, opts AnalyzeOption
 			}
 			// MediaInfo reports BDAV/M2TS General ID as 0.
 			generalFacts.SetSame("ID", "0")
+			general.Fields = setFieldValue(general.Fields, "ID", formatID(0))
+			replaceCanonicalSeedFill(&general, "ID", "0", "ID", formatID(0))
 			if info.DurationSeconds > 0 {
 				projectedDuration := fmt.Sprintf("%.9f", info.DurationSeconds)
 				if duration, ok := decimalSecondsToMilliseconds(projectedDuration); ok {

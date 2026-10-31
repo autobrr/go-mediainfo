@@ -222,7 +222,7 @@ func parseVisualSampleEntry(entry []byte, sampleType string) sampleEntryResult {
 		{Name: "Codec ID", Value: sampleType},
 	}
 	structuredFacts := &mp4StructuredFacts{}
-	if formatInfo := mapVideoFormatInfo(sampleType); formatInfo != "" {
+	if formatInfo := mapMP4FormatInfo(sampleType); formatInfo != "" {
 		fields = append(fields, Field{Name: "Format/Info", Value: formatInfo})
 	}
 	if width > 0 {
@@ -748,10 +748,10 @@ func parseAudioSampleEntry(entry []byte, sampleType string) sampleEntryResult {
 			if sbrExplicitNo {
 				structuredFacts.Set("Format_Settings_SBR", "No (Explicit)")
 			}
-		} else if info := mapAudioFormatInfo(sampleType); info != "" {
+		} else if info := mapMP4FormatInfo(sampleType); info != "" {
 			fields = append(fields, Field{Name: "Format/Info", Value: info})
 		}
-	} else if info := mapAudioFormatInfo(sampleType); info != "" {
+	} else if info := mapMP4FormatInfo(sampleType); info != "" {
 		fields = append(fields, Field{Name: "Format/Info", Value: info})
 	}
 	if sampleType == "Opus" || sampleType == "opus" {
@@ -1257,46 +1257,10 @@ func parseBtrt(entry []byte, start int) (uint32, uint32, uint32, bool) {
 	return bufferSize, maxBitrate, avgBitrate, true
 }
 
-func mapVideoFormatInfo(sampleType string) string {
-	switch sampleType {
-	case "av01":
-		return "AOMedia Video 1"
-	case "avc1", "avc3":
-		return "Advanced Video Codec"
-	case "hvc1", "hev1":
-		return "High Efficiency Video Coding"
-	case "mp4v":
-		return "MPEG-4 Visual"
-	default:
-		return ""
-	}
+func mapMP4FormatInfo(sampleType string) string {
+	return reportTables[reportTables23].Formats[mapMP4SampleEntry(sampleType)]
 }
 
 func mapVideoCodecIDInfo(sampleType string) string {
-	switch sampleType {
-	// av01: info column in MediaInfoLib CodecID_Video_Mpeg4.csv is empty.
-	case "avc1", "avc3":
-		return "Advanced Video Coding"
-	case "hvc1", "hev1":
-		return "High Efficiency Video Coding"
-	case "mp4v":
-		return "MPEG-4 Visual"
-	default:
-		return ""
-	}
-}
-
-func mapAudioFormatInfo(sampleType string) string {
-	switch sampleType {
-	case "mp4a":
-		return "Advanced Audio Codec"
-	case "ac-3":
-		return "Audio Coding 3"
-	case "ec-3":
-		return "Enhanced AC-3"
-	case "fLaC", "flac":
-		return "Free Lossless Audio Codec"
-	default:
-		return ""
-	}
+	return reportCodecDescription(reportTables23, "MPEG-4", StreamVideo, sampleType).Info
 }

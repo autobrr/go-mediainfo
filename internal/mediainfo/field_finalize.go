@@ -1,6 +1,7 @@
 package mediainfo
 
 import (
+	"fmt"
 	"math"
 	"path/filepath"
 	"sort"
@@ -17,6 +18,7 @@ func finalizeFieldStore(store *fieldStore) {
 	finalizeGeneratedReportFields(store)
 	for streamIndex := range store.streams {
 		stream := &store.streams[streamIndex]
+		finalizeFixedAudioCadence(store, streamRef(streamIndex))
 		originalCount := len(stream.Fields)
 		for index := range originalCount {
 			entry := stream.Fields[index]
@@ -242,4 +244,28 @@ func formatCanonicalDisplay(measure fieldMeasure, value string) string {
 		}
 	}
 	return ""
+}
+
+// finalizeFixedAudioCadence derives only fixed-header cadences whose producers
+// establish SamplesPerFrame. Variable blocks, packet-duration codecs and PCM
+// need their own timing evidence; full-stream counts are never used here.
+func finalizeFixedAudioCadence(store *fieldStore, ref streamRef) {
+	stream := store.stream(ref)
+	if stream == nil || stream.Kind != StreamAudio || hasStoredField(stream, "FrameRate") {
+		return
+	}
+	format, _ := store.Get(ref, "Format")
+	switch format {
+	case "FLAC", "MPEG Audio", "AC-3", "E-AC-3", "AC-3 Dep":
+	default:
+		return
+	}
+	samplingText, _ := store.Get(ref, "SamplingRate")
+	spfText, _ := store.Get(ref, "SamplesPerFrame")
+	sampling, samplingErr := strconv.ParseFloat(samplingText, 64)
+	spf, spfErr := strconv.ParseFloat(spfText, 64)
+	if samplingErr != nil || spfErr != nil || sampling <= 0 || spf <= 0 || math.IsNaN(sampling) || math.IsInf(sampling, 0) || math.IsNaN(spf) || math.IsInf(spf, 0) {
+		return
+	}
+	fillGeneratedStructured(store, ref, "FrameRate", fmt.Sprintf("%.3f", sampling/spf))
 }

@@ -21,9 +21,9 @@
 "ChannelLayout":"M",
 "SamplingRate":"48000",
 "SamplingCount":"192000",
+"BitDepth":"16",
 "Compression_Mode":"Lossless",
-"Encoded_Library":"Lavf62.3.100",
 "StreamSize":"52747",
-"extra":{"MD5_Unencoded":"97EED3BC2F094D9221F0E9772AC7B3E7"},
-"BitDepth":"16"}]}
+"Encoded_Library":"Lavf62.3.100",
+"extra":{"MD5_Unencoded":"97EED3BC2F094D9221F0E9772AC7B3E7"}}]}
 }

@@ -1,0 +1,22 @@
+General
+CompleteName                     : samples/sample.mp3
+Format/String                    : MPEG Audio
+FileSize/String                  : 63.4 KiB
+Duration/String                  : 4s 32ms
+OverallBitRate_Mode/String       : CBR
+OverallBitRate/String            : 128 Kbps
+Encoded_Library/String           : LAME3.100
+
+Audio
+Format/String                    : MPEG Audio
+Format_Version                   : Version 1
+Format_Profile                   : Layer 3
+Duration/String                  : 4s 32ms
+BitRate_Mode/String              : CBR
+BitRate/String                   : 128 Kbps
+Channel(s)/String                : 1 channel
+SamplingRate/String              : 48.0 KHz
+FrameRate/String                 : 41.667 fps (1152 SPF)
+Compression_Mode/String          : Lossy
+StreamSize/String                : 63.0 KiB (99%)
+Encoded_Library/String           : LAME3.100

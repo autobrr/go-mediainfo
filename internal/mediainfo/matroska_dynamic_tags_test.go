@@ -2,8 +2,99 @@ package mediainfo
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
+
+func TestMatroskaTagsPrecedeRawOnlyCodecExtras(t *testing.T) {
+	for _, tag := range []string{"A_TAG", "ServiceName"} {
+		t.Run(tag, func(t *testing.T) {
+			stream := Stream{Kind: StreamAudio, canonicalSeed: matroskaAC3CanonicalSeed(matroskaAC3CanonicalFacts{format: "AC-3", trackUID: 42})}
+			applyMatroskaAC3CanonicalProbe(&stream, &matroskaAudioProbe{format: "AC-3"}, ac3Info{hasDialnorm: true, dialnorm: -27}, false)
+			set := &matroskaTagSet{}
+			set.set(matroskaTagField{rawName: tag, name: tag, value: "value"})
+			info := MatroskaInfo{Tracks: []Stream{stream}, scopedTags: matroskaScopedTags{tracks: map[uint64]*matroskaTagSet{42: set}}}
+			applyMatroskaTrackTags(&info)
+			refreshCanonicalCompatibilitySnapshot(&info.Tracks[0])
+			report := Report{General: Stream{Kind: StreamGeneral, Fields: []Field{{Name: "Format", Value: "Matroska"}}}, Streams: info.Tracks}
+			attachCanonicalStore(&report)
+			for _, mutate := range []bool{false, true} {
+				extra := `{"dialnorm":"-27","lfeon":"0","` + tag + `":"value"`
+				wantExtra := `"extra":` + extra + `}`
+				if mutate {
+					report.Streams[0].JSONRaw["extra"] = extra + `,"CALLER":"changed"}`
+					wantExtra = `"extra":` + report.Streams[0].JSONRaw["extra"]
+				}
+				before := RenderJSON([]Report{report})
+				raw := RenderTextWithOptions([]Report{report}, TextRenderOptions{Language: "raw"})
+				assertRowOrder(t, raw, tag, padRawTextLabel("dialnorm", 33)+": -27")
+				if !strings.Contains(before, wantExtra) || RenderJSON([]Report{report}) != before || RenderTextWithOptions([]Report{report}, TextRenderOptions{Language: "raw"}) != raw {
+					t.Fatalf("raw-only codec ordering changed canonical facts or repeated output (mutation=%v): %s", mutate, before)
+				}
+			}
+		})
+	}
+}
+
+func TestMatroskaTrackTagsWithoutExistingTagText(t *testing.T) {
+	stream := Stream{Kind: StreamAudio, canonicalSeed: matroskaTrueHDCanonicalSeed(matroskaTrueHDCanonicalFacts{trackUID: 42})}
+	applyMatroskaTrueHDCanonicalProbe(&stream, trueHDInfo{atmos: true, hasDynamicObjects: true, dynamicObjects: 3})
+	set := &matroskaTagSet{}
+	for _, name := range []string{"Z_TAG", "A_TAG"} {
+		set.set(matroskaTagField{rawName: name, name: name, value: "value"})
+	}
+	info := MatroskaInfo{Tracks: []Stream{stream}, scopedTags: matroskaScopedTags{tracks: map[uint64]*matroskaTagSet{42: set}}}
+	applyMatroskaTrackTags(&info)
+	report := Report{General: Stream{Kind: StreamGeneral, Fields: []Field{{Name: "Format", Value: "Matroska"}}}, Streams: info.Tracks}
+	attachCanonicalStore(&report)
+	json := RenderJSON([]Report{report})
+	text := RenderText([]Report{report})
+	raw := RenderTextWithOptions([]Report{report}, TextRenderOptions{Language: "raw"})
+	assertRowOrder(t, text, "A_TAG", "Z_TAG", "Number of dynamic objects")
+	assertRowOrder(t, raw, "A_TAG", "Z_TAG", "NumberOfDynamicObjects")
+	applyMatroskaTrackTags(&info)
+	repeated := Report{General: report.General, Streams: info.Tracks}
+	attachCanonicalStore(&repeated)
+	if RenderJSON([]Report{repeated}) != json || RenderText([]Report{repeated}) != text || RenderTextWithOptions([]Report{repeated}, TextRenderOptions{Language: "raw"}) != raw {
+		t.Fatal("first tag fill or repeated merge changed ordering or canonical facts")
+	}
+}
+
+func TestMatroskaTrackTagTextPrecedesCodecExtras(t *testing.T) {
+	builder := newCanonicalStreamBuilder(StreamAudio)
+	builder.Structured("UniqueID", "42")
+	builder.Fill("Format", "MLP FBA", "Format", "MLP FBA")
+	builder.Text("Original source medium", "synthetic medium")
+	builder.Text("Source", "disc")
+	builder.Text("Number of dynamic objects", "3")
+	builder.StructuredNode("extra", structuredNode{Kind: structuredObject, Object: []structuredMember{
+		{Key: "OriginalSourceMedium", Value: structuredNode{Kind: structuredString, Text: "synthetic medium"}},
+		{Key: "NumberOfDynamicObjects", Value: structuredNode{Kind: structuredString, Text: "3"}},
+		{Key: "Source", Value: structuredNode{Kind: structuredString, Text: "disc"}},
+	}})
+	set := &matroskaTagSet{}
+	for _, tag := range []matroskaTagField{{rawName: "Z_TAG", name: "Z_TAG", value: "z"}, {rawName: "Source", name: "Source", value: "disc"}, {rawName: "A_TAG", name: "A_TAG", value: "a"}} {
+		set.set(tag)
+	}
+	info := MatroskaInfo{Tracks: []Stream{builder.Snapshot(canonicalStreamPolicy{})}, scopedTags: matroskaScopedTags{tracks: map[uint64]*matroskaTagSet{42: set}}}
+	applyMatroskaTrackTags(&info)
+	report := Report{General: Stream{Kind: StreamGeneral, Fields: []Field{{Name: "Format", Value: "Matroska"}}}, Streams: info.Tracks}
+	attachCanonicalStore(&report)
+	json := RenderJSON([]Report{report})
+	if !strings.Contains(json, `"extra":{"OriginalSourceMedium":"synthetic medium","NumberOfDynamicObjects":"3","Source":"disc","A_TAG":"a","Z_TAG":"z"}`) {
+		t.Fatalf("structured extra order or values changed: %s", json)
+	}
+	text := RenderText([]Report{report})
+	raw := RenderTextWithOptions([]Report{report}, TextRenderOptions{Language: "raw"})
+	assertRowOrder(t, text, "Original source medium", "A_TAG", padRight("Source", textLabelWidth)+": disc", "Z_TAG", "Number of dynamic objects")
+	assertRowOrder(t, raw, "OriginalSourceMedium", "A_TAG", padRawTextLabel("Source", 33)+": disc", "Z_TAG", "NumberOfDynamicObjects")
+	applyMatroskaTrackTags(&info)
+	repeated := Report{General: report.General, Streams: info.Tracks}
+	attachCanonicalStore(&repeated)
+	if RenderJSON([]Report{repeated}) != json || RenderText([]Report{repeated}) != text || RenderTextWithOptions([]Report{repeated}, TextRenderOptions{Language: "raw"}) != raw {
+		t.Fatal("reapplying tags changed duplicate handling or presentation")
+	}
+}
 
 func TestParseMatroskaTagsRetainsArbitraryGeneralMetadata(t *testing.T) {
 	targets := buildMatroskaElement(mkvIDTagTargets, nil)
