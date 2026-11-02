@@ -29,7 +29,7 @@ This plan is the closing owner for the targets below once their complete accepte
 
 - [ ] Route typed tags to the correct General/track target; preserve ordered values and unknown metadata.
 - [ ] Keep parse-time handler eligibility separate from final fill-if-empty Movie/Track selection.
-- [ ] Implement the settled bounded BMP exception, mapped FLAC disc fields and Matroska display mappings without chapter-target expansion.
+- [ ] Implement the settled bounded BMP exception, mapped FLAC disc fields and Matroska display mappings without per-chapter scoping/output.
 
 The issue-specific acceptance and exclusions linked above remain required; a shared helper alone is not completion. Record full versus partial delivery for each target using the [scoped workflow](README.md#scoped-workflow).
 
@@ -37,7 +37,7 @@ The issue-specific acceptance and exclusions linked above remain required; a sha
 
 **Required contracts:** [Plan 01](plan-01.md)'s field identities and display interfaces.
 
-**Coordination and exclusions:** [Plan 04](plan-04.md) owns encoder provenance; chapter-target output is excluded from #30.
+**Coordination and exclusions:** [Plan 04](plan-04.md) owns encoder provenance. Under #30, chapter-, edition- or attachment-targeted tags without a track target still route to General; per-chapter scoping/output is excluded.
 
 These describe integration contracts, not new native issue-dependency edges. Follow [live blocker handling](README.md#execution-order-and-dependencies) before execution; this plan does not override an owner hold or create one for unrelated work.
 
