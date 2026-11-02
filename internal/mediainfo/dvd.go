@@ -217,7 +217,7 @@ func parseDVDVideo(path string, file io.ReadSeeker, size int64, opts AnalyzeOpti
 		if durationSeconds > 0 {
 			info.Container.DurationSeconds = durationSeconds
 			ifoDurationSeconds = durationSeconds
-			generalFields = append(generalFields, Field{Name: "Duration", Value: formatDVDDuration(durationSeconds)})
+			generalFields = append(generalFields, Field{Name: "Duration", Value: formatDuration(durationSeconds)})
 		}
 		audioAttrs = parseDVDAudioAttrs(data, dvdAudioCountVTSOffset, dvdAudioAttrVTSOffset)
 		subpicAttrs = parseDVDSubpicAttrs(data, dvdSubpicCountVTSOff, dvdSubpicCountVTSOff+2)
@@ -302,14 +302,14 @@ func parseDVDVideo(path string, file io.ReadSeeker, size int64, opts AnalyzeOpti
 	if aggregateMode && titleSetParsed && ifoDurationSeconds > 0 {
 		info.Container.DurationSeconds = ifoDurationSeconds
 		durationSeconds = ifoDurationSeconds
-		generalFields = setFieldValue(generalFields, "Duration", formatDVDDuration(ifoDurationSeconds))
+		generalFields = setFieldValue(generalFields, "Duration", formatDuration(ifoDurationSeconds))
 		for i := range streams {
-			streams[i].Fields = setFieldValue(streams[i].Fields, "Duration", formatDVDDuration(ifoDurationSeconds))
+			streams[i].Fields = setFieldValue(streams[i].Fields, "Duration", formatDuration(ifoDurationSeconds))
 			replaceCanonicalSeedProjection(
 				&streams[i], "Duration",
 				strconv.FormatFloat(ifoDurationSeconds*1000, 'f', -1, 64),
 				formatJSONSeconds(ifoDurationSeconds),
-				"Duration", formatDVDDuration(ifoDurationSeconds))
+				"Duration", formatDuration(ifoDurationSeconds))
 		}
 	}
 	if titleSetParsed && len(programs) > 1 {
@@ -395,7 +395,7 @@ func parseDVDVideo(path string, file io.ReadSeeker, size int64, opts AnalyzeOpti
 		videoFields = append(videoFields, Field{Name: "ID", Value: "224 (0xE0)"})
 		videoFields = append(videoFields, Field{Name: "Bit rate mode", Value: "Variable"})
 		if videoDurationSeconds > 0 {
-			videoFields = append(videoFields, Field{Name: "Duration", Value: formatDVDDuration(videoDurationSeconds)})
+			videoFields = append(videoFields, Field{Name: "Duration", Value: formatDuration(videoDurationSeconds)})
 		}
 		if videoAttrs.Width > 0 {
 			videoFields = append(videoFields, Field{Name: "Width", Value: formatPixels(uint64(videoAttrs.Width))})
@@ -463,7 +463,7 @@ func parseDVDVideo(path string, file io.ReadSeeker, size int64, opts AnalyzeOpti
 					audioFields = append(audioFields, Field{Name: "Format profile", Value: audio.FormatProfile})
 				}
 				if durationSeconds > 0 {
-					audioFields = append(audioFields, Field{Name: "Duration", Value: formatDVDDuration(durationSeconds)})
+					audioFields = append(audioFields, Field{Name: "Duration", Value: formatDuration(durationSeconds)})
 				}
 				if audio.Channels > 0 {
 					audioFields = append(audioFields, Field{Name: "Channel(s)", Value: formatChannels(uint64(audio.Channels))})
@@ -535,7 +535,7 @@ func parseDVDVideo(path string, file io.ReadSeeker, size int64, opts AnalyzeOpti
 				textFacts := &dvdStructuredFacts{}
 				if durationSeconds > 0 {
 					textFacts.Set("Duration", strconv.FormatFloat(durationSeconds*1000, 'f', -1, 64), formatJSONSeconds(durationSeconds))
-					textFields = append(textFields, Field{Name: "Duration", Value: formatDVDDuration(durationSeconds)})
+					textFields = append(textFields, Field{Name: "Duration", Value: formatDuration(durationSeconds)})
 				}
 				if subpic.LanguageCode != "" && !aggregateMode {
 					textFacts.SetSame("Language", subpic.LanguageCode)
@@ -561,7 +561,7 @@ func parseDVDVideo(path string, file io.ReadSeeker, size int64, opts AnalyzeOpti
 			continue
 		}
 		menuDelay := programDelays[programIndex]
-		menuFields := []Field{{Name: "Duration", Value: formatDVDDuration(program.duration)}}
+		menuFields := []Field{{Name: "Duration", Value: formatDuration(program.duration)}}
 		menuRate := 25.0
 		menuRateNum := "25"
 		if videoAttrs.Standard == "NTSC" {
@@ -1007,20 +1007,18 @@ func dvdAudioLanguageMore(code byte) string {
 // dvdAudioFormat maps a DVD audio coding-mode code to format and descriptive
 // information labels.
 func dvdAudioFormat(code byte) (string, string) {
+	format := ""
 	switch code {
 	case 0:
-		return "AC-3", "Audio Coding 3"
-	case 2:
-		return "MPEG Audio", "MPEG Audio"
-	case 3:
-		return "MPEG Audio", "MPEG Audio"
+		format = "AC-3"
+	case 2, 3:
+		format = "MPEG Audio"
 	case 4:
-		return "PCM", "Linear PCM"
+		format = "PCM"
 	case 6:
-		return "DTS", "Digital Theater Systems"
-	default:
-		return "", ""
+		format = "DTS"
 	}
+	return format, reportTables[reportTables26].Formats[format]
 }
 
 // dvdAudioSampleRate maps a DVD audio sampling-frequency code to hertz.
@@ -1728,24 +1726,6 @@ func formatDVDChapterTimeMs(msTotal int64) string {
 	s := msTotal / 1000
 	ms := msTotal - s*1000
 	return fmt.Sprintf("%02d:%02d:%02d.%03d", h, m, s, ms)
-}
-
-// formatDVDDuration formats positive DVD durations at MediaInfo's minute-level
-// precision, falling back to the common formatter below one minute.
-func formatDVDDuration(seconds float64) string {
-	if seconds <= 0 {
-		return ""
-	}
-	totalMinutes := int(seconds / 60)
-	if totalMinutes <= 0 {
-		return formatDuration(seconds)
-	}
-	hours := totalMinutes / 60
-	minutes := totalMinutes % 60
-	if hours > 0 {
-		return fmt.Sprintf("%d h %d min", hours, minutes)
-	}
-	return fmt.Sprintf("%d min", minutes)
 }
 
 // formatDVDFrameRate formats a positive DVD frame rate with its recognized
@@ -3013,7 +2993,7 @@ func buildDVDDeclaredAudioStream(audio dvdAudioAttrs, duration float64, source s
 		fields = append(fields, Field{Name: "Format profile", Value: audio.FormatProfile})
 	}
 	if duration > 0 {
-		fields = append(fields, Field{Name: "Duration", Value: formatDVDDuration(duration)})
+		fields = append(fields, Field{Name: "Duration", Value: formatDuration(duration)})
 	}
 	if audio.Channels > 0 {
 		fields = append(fields, Field{Name: "Channel(s)", Value: formatChannels(uint64(audio.Channels))})
@@ -3065,7 +3045,7 @@ func buildDVDDeclaredTextStream(subpic dvdSubpicAttrs, duration float64, source 
 		fields = append([]Field{{Name: "ID", Value: fmt.Sprintf("189 (0xBD)-%d (0x%X)", id, id)}}, fields...)
 	}
 	if duration > 0 {
-		fields = append(fields, Field{Name: "Duration", Value: formatDVDDuration(duration)})
+		fields = append(fields, Field{Name: "Duration", Value: formatDuration(duration)})
 	}
 	if subpic.Language != "" {
 		fields = append(fields, Field{Name: "Language", Value: subpic.Language})

@@ -15,7 +15,7 @@ func TestRenderCSVSingleReport(t *testing.T) {
 	}
 
 	output := RenderCSV([]Report{report})
-	expected := "General\nFormat,MPEG-4\n\nAudio,1\nFormat,AAC\n\nAudio,2\nFormat,AC-3\n\n"
+	expected := "General\nFormat,MPEG-4\n\nAudio,1\nFormat,AAC\nFormat/Info,Advanced Audio Codec\n\nAudio,2\nFormat,AC-3\nFormat/Info,Audio Coding 3\n\n"
 	if output != expected {
 		t.Fatalf("unexpected output:\n%s", output)
 	}

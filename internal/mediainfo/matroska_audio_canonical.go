@@ -68,9 +68,6 @@ func matroskaFallbackAudioCanonicalSeed(facts matroskaFallbackAudioCanonicalFact
 	if facts.codecID != "" {
 		builder.Fill("CodecID", facts.codecID, "Codec ID", facts.codecID)
 	}
-	if info := mapMatroskaFormatInfo(facts.format); info != "" {
-		builder.Text("Format/Info", info)
-	}
 	if facts.trackUID > 0 {
 		builder.Structured("UniqueID", strconv.FormatUint(facts.trackUID, 10))
 	}
@@ -149,7 +146,6 @@ func matroskaPCMCanonicalSeed(facts matroskaPCMCanonicalFacts) []fieldEntry {
 	if facts.codecID != "" {
 		builder.Fill("CodecID", facts.codecID, "Codec ID", facts.codecID)
 	}
-	builder.Text("Format/Info", "PCM")
 	if facts.trackUID > 0 {
 		builder.Structured("UniqueID", strconv.FormatUint(facts.trackUID, 10))
 	}

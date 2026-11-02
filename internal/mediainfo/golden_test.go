@@ -21,6 +21,9 @@ func TestGoldenOutputs(t *testing.T) {
 
 	cases := []goldenCase{
 		{name: "text", render: RenderText, ext: ".txt", norm: normalizeGoldenEOF},
+		{name: "raw", render: func(reports []Report) string {
+			return RenderTextWithOptions(reports, TextRenderOptions{Language: "raw"})
+		}, ext: ".raw.txt", norm: normalizeGoldenEOF},
 		{name: "json", render: RenderJSON, ext: ".json", norm: normalizeJSONLike},
 		{name: "xml", render: RenderXML, ext: ".xml", norm: normalizeXMLLike},
 		{name: "html", render: RenderHTML, ext: ".html", norm: normalizeGoldenEOF},

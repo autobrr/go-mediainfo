@@ -18,10 +18,12 @@ Format settings, QPel                    : No
 Format settings, GMC                     : No warppoints
 Format settings, Matrix                  : Default (H.263)
 Codec ID                                 : XVID
+Codec ID/Hint                            : XviD
 Duration                                 : 4 s 4 ms
 Bit rate                                 : 1 861 kb/s
 Width                                    : 640 pixels
 Height                                   : 360 pixels
+Pixel aspect ratio                       : 1.000
 Display aspect ratio                     : 16:9
 Frame rate                               : 29.970 (30000/1001) FPS
 Color space                              : YUV
@@ -32,17 +34,17 @@ Compression mode                         : Lossy
 Bits/(Pixel*Frame)                       : 0.269
 Stream size                              : 910 KiB (92%)
 Writing library                          : Lavc62.11.100
-Pixel aspect ratio                       : 1.000
-Delay                                    : 0.000
 
 Audio
 ID                                       : 1
 Format                                   : MPEG Audio
 Codec ID                                 : 55
+Codec ID/Hint                            : MP3
 Duration                                 : 4 s 32 ms
 Bit rate                                 : 128 kb/s
 Channel(s)                               : 1 channel
 Sampling rate                            : 48.0 kHz
+Frame rate                               : 41.667 FPS (1152 SPF)
 Stream size                              : 63.0 KiB (6%)
 
 ReportBy                                 : go-mediainfo - dev

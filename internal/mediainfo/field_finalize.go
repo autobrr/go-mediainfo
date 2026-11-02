@@ -1,6 +1,7 @@
 package mediainfo
 
 import (
+	"fmt"
 	"math"
 	"path/filepath"
 	"sort"
@@ -17,6 +18,8 @@ func finalizeFieldStore(store *fieldStore) {
 	finalizeGeneratedReportFields(store)
 	for streamIndex := range store.streams {
 		stream := &store.streams[streamIndex]
+		finalizeFixedAudioCadence(store, streamRef(streamIndex))
+		clearAudioSampleFrequencyFrameRate(store, streamRef(streamIndex))
 		originalCount := len(stream.Fields)
 		for index := range originalCount {
 			entry := stream.Fields[index]
@@ -36,6 +39,27 @@ func finalizeFieldStore(store *fieldStore) {
 				TextLabel: siblingSpec.TextLabel,
 			})
 		}
+	}
+}
+
+// clearAudioSampleFrequencyFrameRate omits audio cadence equal to the sample
+// frequency before any structured or display projection is built.
+func clearAudioSampleFrequencyFrameRate(store *fieldStore, ref streamRef) {
+	stream := store.stream(ref)
+	if stream == nil || stream.Kind != StreamAudio {
+		return
+	}
+	values := rawTextStructuredValues(stream)
+	rateText := values["FrameRate"]
+	if rateText == "" {
+		// Lazy XML compatibility entries may be the only remaining copy.
+		rateText, _ = store.Get(ref, "FrameRate")
+	}
+	rate, rateErr := strconv.ParseFloat(rateText, 64)
+	sampling, samplingErr := strconv.ParseFloat(values["SamplingRate"], 64)
+	if rateErr == nil && samplingErr == nil && rate > 0 && !math.IsInf(rate, 0) && rate == sampling {
+		store.Clear(ref, "FrameRate")
+		store.Clear(ref, "FrameRate/String")
 	}
 }
 
@@ -242,4 +266,28 @@ func formatCanonicalDisplay(measure fieldMeasure, value string) string {
 		}
 	}
 	return ""
+}
+
+// finalizeFixedAudioCadence derives only fixed-header cadences whose producers
+// establish SamplesPerFrame. Variable blocks, packet-duration codecs and PCM
+// need their own timing evidence; full-stream counts are never used here.
+func finalizeFixedAudioCadence(store *fieldStore, ref streamRef) {
+	stream := store.stream(ref)
+	if stream == nil || stream.Kind != StreamAudio || hasStoredField(stream, "FrameRate") {
+		return
+	}
+	format, _ := store.Get(ref, "Format")
+	switch format {
+	case "FLAC", "MPEG Audio", "AC-3", "E-AC-3", "AC-3 Dep":
+	default:
+		return
+	}
+	samplingText, _ := store.Get(ref, "SamplingRate")
+	spfText, _ := store.Get(ref, "SamplesPerFrame")
+	sampling, samplingErr := strconv.ParseFloat(samplingText, 64)
+	spf, spfErr := strconv.ParseFloat(spfText, 64)
+	if samplingErr != nil || spfErr != nil || sampling <= 0 || spf <= 0 || math.IsNaN(sampling) || math.IsInf(sampling, 0) || math.IsNaN(spf) || math.IsInf(spf, 0) {
+		return
+	}
+	fillGeneratedStructured(store, ref, "FrameRate", fmt.Sprintf("%.3f", sampling/spf))
 }

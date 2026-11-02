@@ -1,0 +1,11 @@
+Interlaced_BFF	Bottom Field First
+Interlaced_Interlaced	Interlaced
+Interlaced_PPF	Progressive
+Interlaced_Progressive	Progressive
+Interlaced_TFF	Top Field First
+MuxingMode_MoreInfo	Muxing mode, more info
+MuxingMode_PackedBitstream	Packed bitstream
+StoreMethod_InterleavedFields	Interleaved fields
+StoreMethod_SeparatedFields	Separated fields
+StoreMethod_SeparatedFields_1	Separated fields (1 field per block)
+StoreMethod_SeparatedFields_2	Separated fields (2 fields per block)

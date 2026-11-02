@@ -2222,7 +2222,7 @@ func formatAudioFrameRate(rate float64, spf int) string {
 	if rate <= 0 || spf <= 0 {
 		return ""
 	}
-	return fmt.Sprintf("%.3f FPS (%d SPF)", rate, spf)
+	return fmt.Sprintf("%s (%d SPF)", formatFrameRate(rate), spf)
 }
 
 func formatDelayMs(ms int64) string {

@@ -317,9 +317,9 @@ func canonicalMP3AudioStream(header mp3HeaderInfo, duration float64, mode string
 			jsonKV{Key: "FrameCount", Val: strconv.FormatInt(frameCount, 10)},
 			jsonKV{Key: "SamplingCount", Val: strconv.FormatInt(frameCount*int64(samplesPerFrame), 10)},
 		)
-		if duration > 0 {
-			overrides = append(overrides, jsonKV{Key: "FrameRate", Val: formatJSONFloat(float64(frameCount) / duration)})
-		}
+	}
+	if samplesPerFrame > 0 && header.sampleRate > 0 {
+		overrides = append(overrides, jsonKV{Key: "FrameRate", Val: formatJSONFloat(float64(header.sampleRate) / samplesPerFrame)})
 	}
 	if formatSettingsMode != "" {
 		overrides = append(overrides, jsonKV{Key: "Format_Settings_Mode", Val: formatSettingsMode})

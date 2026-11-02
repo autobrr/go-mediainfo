@@ -68,27 +68,8 @@ func renderOrderedJSONObject(members []orderedJSONMember) string {
 	return buf.String()
 }
 
-// matroskaJSONExtraFieldOrder defines the relative order of schema-backed
-// Matroska extra members without constraining dynamic tag placement.
-var matroskaJSONExtraFieldOrder = makeStructuredFieldOrder(
-	"SOURCE", "SOURCE_ID", "OriginalSourceMedium", "Source", "Statistics_Tags_Issue",
-	"FromStats_BitRate", "FromStats_Duration", "FromStats_FrameCount", "FromStats_StreamSize",
-	"ComplexityIndex", "NumberOfDynamicObjects", "BedChannelCount", "BedChannelConfiguration",
-	"bsid", "dialnorm", "compr", "dynrng", "dsurmod", "acmod", "lfeon", "cmixlev", "surmixlev", "mixlevel", "roomtyp",
-	"dmixmod", "ltrtcmixlev", "ltrtsurmixlev", "lorocmixlev", "lorosurmixlev", "adconvtyp",
-	"dialnorm_Average", "dialnorm_Minimum", "dialnorm_Maximum", "dialnorm_Count",
-	"compr_Average", "compr_Minimum", "compr_Maximum", "compr_Count",
-	"dynrng_Average", "dynrng_Minimum", "dynrng_Maximum", "dynrng_Count", "MD5_Unencoded",
-)
-
 // aviJSONExtraFieldOrder defines MediaInfo's ordering for known AVI extras.
 var aviJSONExtraFieldOrder = makeStructuredFieldOrder("IsTruncated", "ConformanceErrors")
-
-// orderMatroskaJSONExtra orders known Matroska extras around untouched dynamic
-// members and returns malformed input unchanged.
-func orderMatroskaJSONExtra(raw string) string {
-	return orderJSONExtra(raw, matroskaJSONExtraFieldOrder)
-}
 
 // orderJSONExtra reorders only registered members within their existing slots,
 // leaving dynamic members in their original positions.
@@ -122,16 +103,5 @@ func withAVIJSONExtraOrder(rawExtras map[string]string) map[string]string {
 	}
 	out := maps.Clone(rawExtras)
 	out["extra"] = orderJSONExtra(out["extra"], aviJSONExtraFieldOrder)
-	return out
-}
-
-// withMatroskaJSONExtraOrder returns a shallow copy with known Matroska extra
-// members reordered. It returns the original map when no extra object exists.
-func withMatroskaJSONExtraOrder(rawExtras map[string]string) map[string]string {
-	if rawExtras["extra"] == "" {
-		return rawExtras
-	}
-	out := maps.Clone(rawExtras)
-	out["extra"] = orderMatroskaJSONExtra(out["extra"])
 	return out
 }

@@ -178,6 +178,7 @@ func canonicalWAVAudioStream(format string, audioFormat, channels uint16, sample
 	store := &fieldStore{}
 	ref := store.Prepare(StreamAudio)
 	store.streams[ref].SkipStreamOrder = true
+	store.streams[ref].CodecIdentity = codecTableIdentity{Namespace: "Riff", ID: strings.ToUpper(strconv.FormatUint(uint64(audioFormat), 16))}
 	store.Fill(ref, "Format", format, fillReplace)
 	if audioFormat > 0 {
 		store.Fill(ref, "CodecID", strconv.Itoa(int(audioFormat)), fillReplace)
