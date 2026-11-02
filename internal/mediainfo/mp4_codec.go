@@ -1262,5 +1262,5 @@ func mapMP4FormatInfo(sampleType string) string {
 }
 
 func mapVideoCodecIDInfo(sampleType string) string {
-	return reportCodecDescription(reportTables23, "MPEG-4", StreamVideo, sampleType).Info
+	return reportCodecDescription("MPEG-4", StreamVideo, sampleType).Info
 }

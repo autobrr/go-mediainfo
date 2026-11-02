@@ -403,7 +403,7 @@ func canonicalOggVideoStream(stream *oggLogicalStream, duration float64, frameCo
 		pixelAspect = float64(stream.pixelAspectNum) / float64(stream.pixelAspectDen)
 	}
 	if pixelAspect > 0 {
-		store.Fill(ref, "PixelAspectRatio", formatJSONFloat(pixelAspect), fillReplace)
+		fillGeneratedStructured(store, ref, "PixelAspectRatio", formatJSONFloat(pixelAspect))
 		if stream.width > 0 && stream.height > 0 {
 			displayAspect := float64(stream.width) * pixelAspect / float64(stream.height)
 			store.Fill(ref, "DisplayAspectRatio", formatJSONFloat(displayAspect), fillReplace)
@@ -416,7 +416,7 @@ func canonicalOggVideoStream(stream *oggLogicalStream, duration float64, frameCo
 		store.Fill(ref, "FrameRate_Den", strconv.FormatUint(uint64(stream.frameRateDen), 10), fillReplace)
 	}
 	if frameCount > 0 {
-		store.Fill(ref, "FrameCount", strconv.FormatUint(frameCount, 10), fillReplace)
+		fillGeneratedStructured(store, ref, "FrameCount", strconv.FormatUint(frameCount, 10))
 	}
 	store.Fill(ref, "Compression_Mode", "Lossy", fillReplace)
 	if stream.payloadBytes > 0 {

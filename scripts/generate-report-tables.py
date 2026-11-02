@@ -3,6 +3,8 @@
 
 Usage: generate-report-tables.py <v23.04 source root> <v26.10 source root>
 The roots must contain Source/Resource/Text and License.html. No network is used.
+Codec-ID tables are extracted only for ordinary v23.04 container namespaces;
+v26.10 supplies DVD field, format, and language policy.
 """
 
 import hashlib
@@ -43,13 +45,15 @@ def generate(root, version, revision):
         row += [""] * 8
         rows.append("\t".join((row[0], row[5])))
     (DEST / f"{version}-formats.tsv").write_text("\n".join(rows) + "\n", encoding="utf-8", newline="\n")
-    rows = []
-    for namespace, kinds in (("Matroska", ("Audio", "Video", "Text")), ("Riff", ("Audio", "Video", "Text")), ("Mpeg4", ("General", "Audio", "Video", "Text", "Other"))):
-        for kind in kinds:
-            for row in read(base + f"DataBase/CodecID_{kind}_{namespace}.csv"):
-                row += [""] * 4
-                rows.append("\t".join((namespace, kind, row[0], row[1], row[2], row[3])))
-    (DEST / f"{version}-codecs.tsv").write_text("\n".join(rows) + "\n", encoding="utf-8", newline="\n")
+    # DVD has no container codec namespace; only ordinary reports use these.
+    if version == "23.04":
+        rows = []
+        for namespace, kinds in (("Matroska", ("Audio", "Video", "Text")), ("Riff", ("Audio", "Video", "Text")), ("Mpeg4", ("General", "Audio", "Video", "Text", "Other"))):
+            for kind in kinds:
+                for row in read(base + f"DataBase/CodecID_{kind}_{namespace}.csv"):
+                    row += [""] * 4
+                    rows.append("\t".join((namespace, kind, row[0], row[1], row[2], row[3])))
+        (DEST / f"{version}-codecs.tsv").write_text("\n".join(rows) + "\n", encoding="utf-8", newline="\n")
     (DEST / f"{version}-sources.txt").write_text("\n".join(manifest) + "\n", encoding="utf-8", newline="\n")
     (DEST / f"{version}-License.html").write_text("\n".join(line.rstrip() for line in (root / "License.html").read_text(encoding="utf-8").splitlines()) + "\n", encoding="utf-8", newline="\n")
 

@@ -24,9 +24,6 @@ func friendlyReportValue(kind StreamKind, identity, display string, values map[s
 			return ""
 		}
 		if kind == StreamAudio && identity == "FrameRate" {
-			if sampling, _ := strconv.ParseFloat(values["SamplingRate"], 64); sampling == rate {
-				return ""
-			}
 			result := formatFrameRate(rate)
 			if spf := validSamplesPerFrame(values["SamplesPerFrame"]); spf != "" {
 				result += " (" + spf + " SPF)"
@@ -107,8 +104,9 @@ func validSamplesPerFrame(value string) string {
 
 type codecTableIdentity struct{ Namespace, ID string }
 
-// reportCodecDescription looks up exact keys in their container namespace.
-func reportCodecDescription(version reportTableVersion, container string, kind StreamKind, id string) codecDescription {
+// reportCodecDescription uses exact keys in ordinary v23.04 container namespaces.
+// DVD formats have no codec-ID namespace.
+func reportCodecDescription(container string, kind StreamKind, id string) codecDescription {
 	namespace := ""
 	switch container {
 	case "Matroska", "WebM":
@@ -118,16 +116,16 @@ func reportCodecDescription(version reportTableVersion, container string, kind S
 	case "MPEG-4", "QuickTime":
 		namespace = "Mpeg4"
 	}
-	return reportTables[version].Codecs[namespace+"\t"+string(kind)+"\t"+id]
+	return reportTables[reportTables23].Codecs[namespace+"\t"+string(kind)+"\t"+id]
 }
 
-func storedCodecDescription(version reportTableVersion, container string, stream *storedStream, values map[string]string) codecDescription {
+func storedCodecDescription(container string, stream *storedStream, values map[string]string) codecDescription {
 	identity := stream.CodecIdentity
 	var result codecDescription
 	if identity.Namespace != "" {
-		result = reportTables[version].Codecs[identity.Namespace+"\t"+string(stream.Kind)+"\t"+identity.ID]
+		result = reportTables[reportTables23].Codecs[identity.Namespace+"\t"+string(stream.Kind)+"\t"+identity.ID]
 	} else {
-		result = reportCodecDescription(version, container, stream.Kind, values["CodecID"])
+		result = reportCodecDescription(container, stream.Kind, values["CodecID"])
 	}
 	result.Info = firstNonEmpty(values["CodecID/Info"], values["CodecID_Info"], result.Info)
 	result.Hint = firstNonEmpty(values["CodecID/Hint"], values["CodecID_Hint"], result.Hint)
@@ -240,11 +238,11 @@ func reportFormatPresentation(version reportTableVersion, kind StreamKind, value
 	return name, info
 }
 
-// friendlyExistingFieldVisible retains explicit compatibility display options.
-// Video delay rows and MP4 source-delay extras cannot bypass their default policy.
-func friendlyExistingFieldVisible(kind StreamKind, identity string) bool {
-	if identity == "Source_Delay" || identity == "Source_Delay_Source" {
-		return false
+// friendlyExistingFieldVisible applies native default visibility to these
+// imported fields while retaining explicit compatibility rows for other fields.
+func friendlyExistingFieldVisible(version reportTableVersion, kind StreamKind, identity string) bool {
+	if kind == StreamVideo && (identity == "Delay" || identity == "Delay_Original") || identity == "Source_Delay" || identity == "Source_Delay_Source" {
+		return reportTextVisible(version, kind, identity)
 	}
-	return kind != StreamVideo || identity != "Delay" && identity != "Delay_Original"
+	return true
 }

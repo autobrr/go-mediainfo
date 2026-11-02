@@ -194,7 +194,7 @@ func structuredFieldSpec(kind StreamKind, key string) (fieldSpec, bool) {
 
 // textFieldOrder returns the established display order, after all known fields for unknown labels.
 func textFieldOrder(kind StreamKind, label string) int {
-	identity := reportFieldIdentity(kind, label, label)
+	identity := reportFieldIdentity(reportTables23, kind, label, label)
 	return reportFieldRank(reportTables23, kind, identity)
 }
 

@@ -225,7 +225,7 @@ func projectRawTextReport(report Report) rawTextReportProjection {
 			if !entry.Options.ShowText {
 				continue
 			}
-			identity := reportFieldIdentity(stream.Kind, string(entry.Name), entry.TextLabel)
+			identity := reportFieldIdentity(version, stream.Kind, string(entry.Name), entry.TextLabel)
 			if identity == "Statistics_Tags_Issue" && stream.Kind != StreamMenu {
 				if extra, exists := rawTextExtraNode(stream); exists && slices.ContainsFunc(extra.Object, func(member structuredMember) bool {
 					return member.Key == identity
@@ -243,13 +243,10 @@ func projectRawTextReport(report Report) rawTextReportProjection {
 			if !rawTextContainerFieldVisible(generalFormat, entry, rule) {
 				continue
 			}
-			if stream.Kind == StreamVideo && structured["Format"] == "Theora" && rule.Label == "FrameCount" {
-				continue
-			}
 			if _, exists := seen[rule.Label]; exists {
 				continue
 			}
-			value := rawTextValue(stream.Kind, rule.Label, entry.Value.Text, structured, totalFileSize)
+			value := rawTextValue(version, stream.Kind, rule.Label, entry.Value.Text, structured, totalFileSize)
 			if known && value == "" {
 				continue
 			}
@@ -274,11 +271,11 @@ func projectRawTextReport(report Report) rawTextReportProjection {
 			seen[label] = false
 			sequence++
 		}
-		codec := storedCodecDescription(version, generalFormat, stream, structured)
+		codec := storedCodecDescription(generalFormat, stream, structured)
 		appendDerived("CodecID/Info", codec.Info)
 		appendDerived("CodecID/Hint", codec.Hint)
 		appendDerived("ServiceKind/String", formatRawTextServiceKind(structured["ServiceKind"]))
-		for _, derived := range rawTextStructuredDerivations(stream.Kind, structured, totalFileSize) {
+		for _, derived := range rawTextStructuredDerivations(version, stream.Kind, structured, totalFileSize) {
 			appendDerived(derived.Label, derived.Value)
 		}
 		if extra, ok := rawTextExtraNode(stream); ok && stream.Kind != StreamMenu {
@@ -349,7 +346,7 @@ func projectRawTextReport(report Report) rawTextReportProjection {
 		}
 		filtered := fields[:0]
 		for _, field := range fields {
-			identity := reportFieldIdentity(stream.Kind, field.Label, field.Label)
+			identity := reportFieldIdentity(version, stream.Kind, field.Label, field.Label)
 			if !reportTextVisible(version, stream.Kind, identity) {
 				continue
 			}
@@ -686,7 +683,7 @@ func formatDVDRawTextBitRate(value string) string {
 // rawTextProjectionRule resolves one canonical or imported text entry to its
 // raw-text policy for the selected reference version. Unknown labels remain visible Go extensions.
 func rawTextProjectionRule(version reportTableVersion, kind StreamKind, entry fieldEntry) (rawTextFieldRule, bool) {
-	identity := reportFieldIdentity(kind, string(entry.Name), entry.TextLabel)
+	identity := reportFieldIdentity(version, kind, string(entry.Name), entry.TextLabel)
 	if table := reportKindPolicy(version, kind); table != nil {
 		for _, name := range []string{identity + "/String", identity} {
 			if row, ok := table.Fields[name]; ok {
@@ -723,7 +720,7 @@ func rawTextProjectionRule(version reportTableVersion, kind StreamKind, entry fi
 
 // rawTextStructuredDerivations exposes structured-only canonical facts that
 // MediaInfo includes in raw text but the friendly renderer intentionally omits.
-func rawTextStructuredDerivations(kind StreamKind, structured map[string]string, totalFileSize int64) []rawTextDerivedField {
+func rawTextStructuredDerivations(version reportTableVersion, kind StreamKind, structured map[string]string, totalFileSize int64) []rawTextDerivedField {
 	fields := make([]rawTextDerivedField, 0, 24)
 	appendField := func(label, value string) {
 		if value != "" {
@@ -732,7 +729,7 @@ func rawTextStructuredDerivations(kind StreamKind, structured map[string]string,
 	}
 	appendField("MuxingMode", structured["MuxingMode"])
 	appendField("Format_Version", formatRawTextFormatVersion(structured["Format_Version"]))
-	appendField("Format/Info", rawTextFormatInfo(kind, structured))
+	appendField("Format/Info", rawTextFormatInfo(version, kind, structured))
 	appendField("Format_Commercial_IfAny", structured["Format_Commercial_IfAny"])
 	appendField("Format_Profile", formatRawTextProfile(kind, structured, structured["Format_Profile"]))
 	appendField("Format_Settings", formatRawTextSettings(structured))
@@ -769,7 +766,7 @@ func rawTextStructuredDerivations(kind StreamKind, structured map[string]string,
 	}
 	for _, key := range []string{"FrameRate", "FrameRate_Minimum", "FrameRate_Maximum"} {
 		if structured[key] != "" {
-			appendField(key+"/String", rawTextValue(kind, key+"/String", "", structured, totalFileSize))
+			appendField(key+"/String", rawTextValue(version, kind, key+"/String", "", structured, totalFileSize))
 		}
 	}
 	if frameRate := structured["FrameRate_Original"]; frameRate != "" {
@@ -1282,7 +1279,7 @@ func rawTextLabel(friendly string) string {
 }
 
 // rawTextValue applies raw-language presentation without changing canonical facts.
-func rawTextValue(kind StreamKind, label, display string, structured map[string]string, totalFileSize int64) string {
+func rawTextValue(version reportTableVersion, kind StreamKind, label, display string, structured map[string]string, totalFileSize int64) string {
 	switch label {
 	case "ID/String":
 		if kind == StreamGeneral && structured["Format"] == "BDAV" || rawTextOggStream(structured) {
@@ -1295,10 +1292,10 @@ func rawTextValue(kind StreamKind, label, display string, structured map[string]
 			return value
 		}
 	case "Format/String":
-		name, _ := reportFormatPresentation(reportTables23, kind, structured)
+		name, _ := reportFormatPresentation(version, kind, structured)
 		return name
 	case "Format/Info":
-		if value := rawTextFormatInfo(kind, structured); value != "" {
+		if value := rawTextFormatInfo(version, kind, structured); value != "" {
 			return value
 		}
 	case "HDR_Format/String":
@@ -1353,9 +1350,6 @@ func rawTextValue(kind StreamKind, label, display string, structured map[string]
 		}
 		result := fmt.Sprintf("%.3f", rate)
 		if kind == StreamAudio && key == "FrameRate" {
-			if sampling, _ := strconv.ParseFloat(structured["SamplingRate"], 64); sampling == rate {
-				return ""
-			}
 			result += " fps"
 			if spf := validSamplesPerFrame(structured["SamplesPerFrame"]); spf != "" {
 				result += " (" + spf + " SPF)"
@@ -1783,10 +1777,10 @@ func rawTextOggStream(structured map[string]string) bool {
 	}
 }
 
-// rawTextFormatInfo returns the few compound audio descriptions whose raw
-// value must be composed from canonical format facts.
-func rawTextFormatInfo(kind StreamKind, structured map[string]string) string {
-	_, info := reportFormatPresentation(reportTables23, kind, structured)
+// rawTextFormatInfo composes the selected reference's description from
+// canonical format facts.
+func rawTextFormatInfo(version reportTableVersion, kind StreamKind, structured map[string]string) string {
+	_, info := reportFormatPresentation(version, kind, structured)
 	return info
 }
 

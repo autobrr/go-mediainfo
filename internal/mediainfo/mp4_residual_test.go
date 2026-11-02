@@ -495,10 +495,10 @@ func TestMP4DolbyVisionRawTextUsesFullDescriptors(t *testing.T) {
 }
 
 func TestRawTextMP4AspectRatioClassification(t *testing.T) {
-	if got := rawTextValue(StreamVideo, "DisplayAspectRatio/String", "1.328", map[string]string{"CodecID": "vp09", "DisplayAspectRatio": "1.328"}, 0); got != "4:3" {
+	if got := rawTextValue(reportTables23, StreamVideo, "DisplayAspectRatio/String", "1.328", map[string]string{"CodecID": "vp09", "DisplayAspectRatio": "1.328"}, 0); got != "4:3" {
 		t.Fatalf("near-4:3 display = %q, want 4:3", got)
 	}
-	if got := rawTextValue(StreamVideo, "DisplayAspectRatio/String", "1.85:1", map[string]string{"CodecID": "hvc1", "DisplayAspectRatio": "1.850"}, 0); got != "1.85:1" {
+	if got := rawTextValue(reportTables23, StreamVideo, "DisplayAspectRatio/String", "1.85:1", map[string]string{"CodecID": "hvc1", "DisplayAspectRatio": "1.850"}, 0); got != "1.85:1" {
 		t.Fatalf("cinema display = %q, want 1.85:1", got)
 	}
 }

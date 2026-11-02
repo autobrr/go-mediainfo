@@ -257,11 +257,11 @@ func reportToFieldStore(report Report, useCanonicalSeeds bool) *fieldStore {
 			}
 			for _, entry := range stream.canonicalSeed {
 				if entry.MatroskaTag {
-					tags[reportFieldIdentity(stream.Kind, string(entry.Name), entry.TextLabel)] = true
+					tags[reportFieldIdentity(reportTables23, stream.Kind, string(entry.Name), entry.TextLabel)] = true
 				}
 			}
 			for index := range stored.Fields {
-				stored.Fields[index].MatroskaTag = tags[reportFieldIdentity(stream.Kind, string(stored.Fields[index].Name), stored.Fields[index].TextLabel)]
+				stored.Fields[index].MatroskaTag = tags[reportFieldIdentity(reportTables23, stream.Kind, string(stored.Fields[index].Name), stored.Fields[index].TextLabel)]
 			}
 		}
 	}
@@ -299,6 +299,10 @@ func reportToFieldStore(report Report, useCanonicalSeeds bool) *fieldStore {
 	}
 	if useCanonicalSeeds {
 		finalizeFieldStore(store)
+	} else {
+		for ref := range store.streams {
+			clearAudioSampleFrequencyFrameRate(store, streamRef(ref))
+		}
 	}
 	return store
 }
@@ -340,6 +344,7 @@ func ensureLegacyXMLProjection(store *fieldStore) {
 			}
 			fields := buildJSONStreamFields(report.Streams[originalIndex], order, 0, containerFormat)
 			appendLegacyStructuredFields(store, ref, fields, structuredProjectionXML)
+			clearAudioSampleFrequencyFrameRate(store, ref)
 		}
 	})
 }
@@ -656,7 +661,7 @@ func cloneLegacyStream(stream Stream) Stream {
 			if tags == nil {
 				tags = make(map[string]bool)
 			}
-			tags[reportFieldIdentity(stream.Kind, string(entry.Name), entry.TextLabel)] = true
+			tags[reportFieldIdentity(reportTables23, stream.Kind, string(entry.Name), entry.TextLabel)] = true
 		}
 	}
 	stream.canonicalSeed = nil

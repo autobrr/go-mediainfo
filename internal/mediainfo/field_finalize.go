@@ -19,6 +19,7 @@ func finalizeFieldStore(store *fieldStore) {
 	for streamIndex := range store.streams {
 		stream := &store.streams[streamIndex]
 		finalizeFixedAudioCadence(store, streamRef(streamIndex))
+		clearAudioSampleFrequencyFrameRate(store, streamRef(streamIndex))
 		originalCount := len(stream.Fields)
 		for index := range originalCount {
 			entry := stream.Fields[index]
@@ -38,6 +39,27 @@ func finalizeFieldStore(store *fieldStore) {
 				TextLabel: siblingSpec.TextLabel,
 			})
 		}
+	}
+}
+
+// clearAudioSampleFrequencyFrameRate omits audio cadence equal to the sample
+// frequency before any structured or display projection is built.
+func clearAudioSampleFrequencyFrameRate(store *fieldStore, ref streamRef) {
+	stream := store.stream(ref)
+	if stream == nil || stream.Kind != StreamAudio {
+		return
+	}
+	values := rawTextStructuredValues(stream)
+	rateText := values["FrameRate"]
+	if rateText == "" {
+		// Lazy XML compatibility entries may be the only remaining copy.
+		rateText, _ = store.Get(ref, "FrameRate")
+	}
+	rate, rateErr := strconv.ParseFloat(rateText, 64)
+	sampling, samplingErr := strconv.ParseFloat(values["SamplingRate"], 64)
+	if rateErr == nil && samplingErr == nil && rate > 0 && !math.IsInf(rate, 0) && rate == sampling {
+		store.Clear(ref, "FrameRate")
+		store.Clear(ref, "FrameRate/String")
 	}
 }
 

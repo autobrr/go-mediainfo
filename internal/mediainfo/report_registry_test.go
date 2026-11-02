@@ -126,6 +126,72 @@ func TestRawVisibilityUsesSelectedReportVersion(t *testing.T) {
 	}
 }
 
+func TestRawDescriptionsAndAliasesUseSelectedReportVersion(t *testing.T) {
+	newer := reportTables[reportTables26]
+	oldInfo := newer.Formats["AC-3"]
+	newer.Formats["AC-3"] = "DVD table description"
+	newer.Kinds[StreamAudio].Aliases["Version alias"] = "Title"
+	t.Cleanup(func() {
+		newer.Formats["AC-3"] = oldInfo
+		delete(newer.Kinds[StreamAudio].Aliases, "Version alias")
+	})
+	for _, dvd := range []bool{false, true} {
+		t.Run(strconv.FormatBool(dvd), func(t *testing.T) {
+			general := newCanonicalStreamBuilder(StreamGeneral)
+			format := "Matroska"
+			if dvd {
+				format = "DVD Video"
+			}
+			general.Fill("Format", format, "Format", format)
+			audio := newCanonicalStreamBuilder(StreamAudio)
+			audio.Fill("Format", "AC-3", "Format", "AC-3")
+			audio.Fill("Format/Info", "Audio Coding 3", "Format/Info", "Audio Coding 3")
+			audio.Text("Version alias", "example")
+			report := Report{General: general.Snapshot(canonicalStreamPolicy{}), Streams: []Stream{audio.Snapshot(canonicalStreamPolicy{DVDOrder: dvd})}}
+			attachCanonicalStore(&report)
+			before := RenderJSON([]Report{report})
+			raw := RenderTextWithOptions([]Report{report}, TextRenderOptions{Language: "raw"})
+			info, label := "Audio Coding 3", "Version alias"
+			if dvd {
+				info, label = "DVD table description", "Title"
+			}
+			for _, row := range []string{padRawTextLabel("Format/Info", 33) + ": " + info, padRawTextLabel(label, 33) + ": example"} {
+				if !strings.Contains(raw, row) {
+					t.Errorf("selected-version row missing %q: %s", row, raw)
+				}
+			}
+			if RenderJSON([]Report{report}) != before || RenderTextWithOptions([]Report{report}, TextRenderOptions{Language: "raw"}) != raw {
+				t.Fatal("versioned presentation changed facts or repeated output")
+			}
+		})
+	}
+}
+
+func TestVideoDelayVisibilityUsesSelectedReportTable(t *testing.T) {
+	table := reportTables[reportTables26].Kinds[StreamVideo]
+	original := table.Fields["Delay/String"]
+	visible := original
+	visible.Options = "Y NT"
+	table.Fields["Delay/String"] = visible
+	t.Cleanup(func() { table.Fields["Delay/String"] = original })
+	for _, dvd := range []bool{false, true} {
+		general := newCanonicalStreamBuilder(StreamGeneral)
+		general.Fill("Format", "MPEG-PS", "Format", "MPEG-PS")
+		video := newCanonicalStreamBuilder(StreamVideo)
+		video.Fill("Delay", "467", "Delay", "467 ms")
+		report := Report{General: general.Snapshot(canonicalStreamPolicy{}), Streams: []Stream{video.Snapshot(canonicalStreamPolicy{DVDOrder: dvd})}}
+		attachCanonicalStore(&report)
+		json := RenderJSON([]Report{report})
+		friendly := RenderText([]Report{report})
+		if strings.Contains(friendly, padRight("Delay", textLabelWidth)+": ") != dvd {
+			t.Errorf("DVD=%v delay visibility ignored selected table", dvd)
+		}
+		if !strings.Contains(json, `"Delay":"467"`) || RenderJSON([]Report{report}) != json {
+			t.Fatal("delay visibility changed canonical fact")
+		}
+	}
+}
+
 func TestPublicDVDVOBMutationRetainsReportVersion(t *testing.T) {
 	for _, dvd := range []bool{false, true} {
 		general := newCanonicalStreamBuilder(StreamGeneral)
@@ -426,6 +492,7 @@ func TestAudioFrameRateProjectionPresence(t *testing.T) {
 		{"list", "50", "480 / 960", "48000", "50.000 FPS (480 / 960 SPF)"},
 		{"invalid-spf", "50", "-1", "48000", "50.000 FPS"},
 		{"sample-frequency", "48000", "1", "48000", ""},
+		{"near-sample-frequency", "47999.999", "1", "48000", "47 999.999 FPS (1 SPF)"},
 		{"absent", "", "4096", "48000", ""},
 		{"invalid", "NaN", "4096", "48000", ""},
 	} {
@@ -437,6 +504,15 @@ func TestAudioFrameRateProjectionPresence(t *testing.T) {
 			report := Report{General: Stream{Kind: StreamGeneral}, Streams: []Stream{builder.Snapshot(canonicalStreamPolicy{})}}
 			attachCanonicalStore(&report)
 			friendly := RenderText([]Report{report})
+			if tc.name == "sample-frequency" {
+				json := RenderJSON([]Report{report})
+				if strings.Contains(json, `"FrameRate":`) || strings.Contains(RenderXML([]Report{report}), "<FrameRate>") || strings.Contains(RenderTextWithOptions([]Report{report}, TextRenderOptions{Language: "raw"}), "FrameRate/String") {
+					t.Fatal("sample frequency survived finalization as an audio frame rate")
+				}
+				if !strings.Contains(json, `"SamplingRate":"48000"`) || !strings.Contains(json, `"SamplesPerFrame":"1"`) || RenderJSON([]Report{report}) != json {
+					t.Fatal("audio frame-rate clearing changed sampling facts or repeated output")
+				}
+			}
 			if tc.want == "" {
 				if strings.Contains(friendly, "Frame rate") {
 					t.Fatal("unsupported frame-rate row")
@@ -451,6 +527,27 @@ func TestAudioFrameRateProjectionPresence(t *testing.T) {
 				t.Fatalf("raw frame rate: %s", raw)
 			}
 		})
+	}
+}
+
+func TestAudioSampleFrequencyFrameRateClearsLegacyDisplay(t *testing.T) {
+	report := Report{General: Stream{Kind: StreamGeneral}, Streams: []Stream{{
+		Kind:   StreamAudio,
+		Fields: []Field{{Name: "Frame rate", Value: "48 000 FPS"}, {Name: "Sampling rate", Value: "48.0 kHz"}},
+		JSON:   map[string]string{"FrameRate": "48000", "SamplingRate": "48000", "SamplesPerFrame": "1", "FrameCount": "10", "SamplingCount": "480000"},
+	}}}
+	before := captureLegacyReportState(report, true)
+	json := RenderJSON([]Report{report})
+	if strings.Contains(json, `"FrameRate":`) || strings.Contains(RenderXML([]Report{report}), "<FrameRate>") || strings.Contains(RenderText([]Report{report}), "Frame rate") {
+		t.Fatal("legacy display prevented sample-frequency frame-rate clearing")
+	}
+	for _, fact := range []string{`"SamplingRate":"48000"`, `"SamplesPerFrame":"1"`, `"FrameCount":"10"`, `"SamplingCount":"480000"`} {
+		if !strings.Contains(json, fact) {
+			t.Errorf("frame-rate clearing changed %s", fact)
+		}
+	}
+	if !reflect.DeepEqual(captureLegacyReportState(report, true), before) || RenderJSON([]Report{report}) != json {
+		t.Fatal("finalization mutated caller state or repeated rendering")
 	}
 }
 
@@ -578,7 +675,7 @@ func TestReferenceCodecNamespaces(t *testing.T) {
 		{"MPEG-4", StreamVideo, "avc1", "", "Advanced Video Coding"},
 		{"Matroska", StreamAudio, "unknown_XVID", "", ""},
 	} {
-		got := reportCodecDescription(reportTables23, tc.container, tc.kind, tc.id)
+		got := reportCodecDescription(tc.container, tc.kind, tc.id)
 		if got.Hint != tc.hint || got.Info != tc.info {
 			t.Errorf("%s/%s/%s = %#v", tc.container, tc.kind, tc.id, got)
 		}

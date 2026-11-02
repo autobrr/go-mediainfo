@@ -54,11 +54,8 @@ func projectTextStore(store *fieldStore, fallbackRef string) textReportProjectio
 			if !entry.Options.ShowText {
 				continue
 			}
-			identity := reportFieldIdentity(stream.Kind, string(entry.Name), entry.TextLabel)
-			if !friendlyExistingFieldVisible(stream.Kind, identity) {
-				continue
-			}
-			if stream.Kind == StreamVideo && values["Format"] == "Theora" && (identity == "FrameCount" || identity == "PixelAspectRatio") {
+			identity := reportFieldIdentity(version, stream.Kind, string(entry.Name), entry.TextLabel)
+			if !friendlyExistingFieldVisible(version, stream.Kind, identity) {
 				continue
 			}
 			label := reportFieldLabel(version, identity, firstNonEmpty(entry.TextLabel, string(entry.Name)))
@@ -91,7 +88,7 @@ func projectTextStore(store *fieldStore, fallbackRef string) textReportProjectio
 		}
 		_, info := reportFormatPresentation(version, stream.Kind, values)
 		appendDisplay("Format/Info", info)
-		codec := storedCodecDescription(version, container, stream, values)
+		codec := storedCodecDescription(container, stream, values)
 		appendDisplay("CodecID/Info", codec.Info)
 		appendDisplay("CodecID/Hint", codec.Hint)
 		sort.SliceStable(entries, func(left, right int) bool {

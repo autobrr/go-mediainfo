@@ -235,7 +235,7 @@ func TestRawTextCanonicalValueFormatting(t *testing.T) {
 	if got := formatRawTextEncodedLibrary("XviD0064"); got != "XviD 64" {
 		t.Fatalf("formatRawTextEncodedLibrary(unknown-date XviD) = %q", got)
 	}
-	if got := rawTextValue(StreamVideo, "FrameRate_Original/String", "23.976 fps", map[string]string{"Format": "MPEG-4 Visual", "CodecID": "XVID", "FrameRate_Original": "23.976"}, 0); got != "23.976 (23976/1000) fps" {
+	if got := rawTextValue(reportTables23, StreamVideo, "FrameRate_Original/String", "23.976 fps", map[string]string{"Format": "MPEG-4 Visual", "CodecID": "XVID", "FrameRate_Original": "23.976"}, 0); got != "23.976 (23976/1000) fps" {
 		t.Fatalf("original frame rate = %q", got)
 	}
 }
@@ -257,10 +257,10 @@ func TestRawTextAVISettingsAndFormatInfo(t *testing.T) {
 	}); got != "Custom Matrix" {
 		t.Fatalf("MPEG-4 Visual settings without BVOP = %q", got)
 	}
-	if got := rawTextFormatInfo(StreamAudio, map[string]string{"Format": "AC-3"}); got != "Audio Coding 3" {
+	if got := rawTextFormatInfo(reportTables23, StreamAudio, map[string]string{"Format": "AC-3"}); got != "Audio Coding 3" {
 		t.Fatalf("AC-3 format info = %q", got)
 	}
-	if got := rawTextFormatInfo(StreamAudio, map[string]string{"Format": "AAC", "Format_AdditionalFeatures": "LC"}); got != "Advanced Audio Codec Low Complexity" {
+	if got := rawTextFormatInfo(reportTables23, StreamAudio, map[string]string{"Format": "AAC", "Format_AdditionalFeatures": "LC"}); got != "Advanced Audio Codec Low Complexity" {
 		t.Fatalf("AAC LC format info = %q", got)
 	}
 }
@@ -307,7 +307,7 @@ func TestRawTextBDAVStructuredFormatting(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if got := rawTextFormatInfo(test.kind, test.structured); got != test.wantInfo {
+			if got := rawTextFormatInfo(reportTables23, test.kind, test.structured); got != test.wantInfo {
 				t.Fatalf("rawTextFormatInfo = %q, want %q", got, test.wantInfo)
 			}
 			if got := formatRawTextSettings(test.structured); got != test.wantSet {
@@ -316,13 +316,13 @@ func TestRawTextBDAVStructuredFormatting(t *testing.T) {
 		})
 	}
 
-	if got := rawTextValue(StreamGeneral, "ID/String", "1 (0x1)", map[string]string{"Format": "BDAV", "ID": "0"}, 0); got != "0 (0x0)" {
+	if got := rawTextValue(reportTables23, StreamGeneral, "ID/String", "1 (0x1)", map[string]string{"Format": "BDAV", "ID": "0"}, 0); got != "0 (0x0)" {
 		t.Fatalf("BDAV general ID/String = %q", got)
 	}
-	if got := rawTextValue(StreamAudio, "ID/String", "7", map[string]string{"Format": "Vorbis", "ID": "7"}, 0); got != "7 (0x7)" {
+	if got := rawTextValue(reportTables23, StreamAudio, "ID/String", "7", map[string]string{"Format": "Vorbis", "ID": "7"}, 0); got != "7 (0x7)" {
 		t.Fatalf("Ogg ID/String = %q", got)
 	}
-	if got := rawTextValue(StreamAudio, "ID/String", "7", map[string]string{"Format": "Vorbis", "CodecID": "A_VORBIS", "ID": "7"}, 0); got != "7" {
+	if got := rawTextValue(reportTables23, StreamAudio, "ID/String", "7", map[string]string{"Format": "Vorbis", "CodecID": "A_VORBIS", "ID": "7"}, 0); got != "7" {
 		t.Fatalf("Matroska ID/String = %q", got)
 	}
 	if got := formatRawTextEncodedLibraryForStream("Xiph.Org libVorbis I 20200704 (Reducing Environment)", map[string]string{"Format": "Vorbis"}); !strings.HasPrefix(got, "libVorbis") {
@@ -331,16 +331,16 @@ func TestRawTextBDAVStructuredFormatting(t *testing.T) {
 	if rawTextOggStream(map[string]string{"Format": "Vorbis", "CodecID": "A_VORBIS"}) {
 		t.Fatal("Matroska Vorbis identified as Ogg")
 	}
-	if got := rawTextValue(StreamAudio, "BedChannelCount", "1", map[string]string{"BedChannelCount": "1"}, 0); got != "1 channel" {
+	if got := rawTextValue(reportTables23, StreamAudio, "BedChannelCount", "1", map[string]string{"BedChannelCount": "1"}, 0); got != "1 channel" {
 		t.Fatalf("BedChannelCount = %q", got)
 	}
 	if got := rawTextExtraValue("BedChannelCount", "1"); got != "1 channel" {
 		t.Fatalf("extra BedChannelCount = %q", got)
 	}
-	if got := rawTextValue(StreamAudio, "Format/String", "AC-3", map[string]string{"Format": "AC-3", "Format_AdditionalFeatures": "Dep"}, 0); got != "E-AC-3" {
+	if got := rawTextValue(reportTables23, StreamAudio, "Format/String", "AC-3", map[string]string{"Format": "AC-3", "Format_AdditionalFeatures": "Dep"}, 0); got != "E-AC-3" {
 		t.Fatalf("structured dependent AC-3 Format/String = %q", got)
 	}
-	if got := rawTextValue(StreamVideo, "StreamSize/String", "1.00 KiB (13%)", map[string]string{"StreamSize": "4096"}, 8192); got != "4.00 KiB (50%)" {
+	if got := rawTextValue(reportTables23, StreamVideo, "StreamSize/String", "1.00 KiB (13%)", map[string]string{"StreamSize": "4096"}, 8192); got != "4.00 KiB (50%)" {
 		t.Fatalf("structured StreamSize/String = %q", got)
 	}
 }
@@ -355,7 +355,7 @@ func TestRawTextBDAVStructuredDerivations(t *testing.T) {
 		"MaxFALL":                         "400",
 	}
 	got := make(map[string]string)
-	for _, field := range rawTextStructuredDerivations(StreamVideo, structured, 0) {
+	for _, field := range rawTextStructuredDerivations(reportTables23, StreamVideo, structured, 0) {
 		got[field.Label] = field.Value
 	}
 	for label, want := range map[string]string{
@@ -385,7 +385,7 @@ func TestRawTextSliceCountKeepsNumericExtensionSeparate(t *testing.T) {
 		{count: "4", want: "4 slice per frame"},
 	} {
 		got := ""
-		for _, field := range rawTextStructuredDerivations(StreamVideo, map[string]string{"Format_Settings_SliceCount": test.count}, 0) {
+		for _, field := range rawTextStructuredDerivations(reportTables23, StreamVideo, map[string]string{"Format_Settings_SliceCount": test.count}, 0) {
 			if field.Label == "Format_Settings_SliceCount/Strin" {
 				got = field.Value
 			}
@@ -536,7 +536,7 @@ func TestRawTextFrameRateDropsUnexposedRatio(t *testing.T) {
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			if got := rawTextValue(StreamVideo, "FrameRate/String", test.display, test.structured, 0); got != test.want {
+			if got := rawTextValue(reportTables23, StreamVideo, "FrameRate/String", test.display, test.structured, 0); got != test.want {
 				t.Fatalf("FrameRate/String = %q, want %q", got, test.want)
 			}
 		})
@@ -547,7 +547,7 @@ func TestRawTextFormattingIgnoresCorpusUniqueIDs(t *testing.T) {
 	if rawTextAV1UsesFilmGrain(map[string]string{"UniqueID": "18229823285062969326"}) {
 		t.Fatal("identity must not synthesize AV1 film-grain signaling")
 	}
-	if got := rawTextValue(StreamVideo, "DisplayAspectRatio/String", "1.333", map[string]string{
+	if got := rawTextValue(reportTables23, StreamVideo, "DisplayAspectRatio/String", "1.333", map[string]string{
 		"UniqueID": "1337866033", "DisplayAspectRatio": "1.333",
 	}, 0); got != "1.333" {
 		t.Fatalf("display aspect ratio = %q, want parsed value", got)

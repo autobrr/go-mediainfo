@@ -72,12 +72,14 @@ func loadReportTables() map[reportTableVersion]*reportVersionTables {
 			cols := strings.Split(line, "\t")
 			tables.Formats[cols[0]] = cols[1]
 		}
-		data, _ = reportTableFiles.ReadFile("report_tables/" + string(version) + "-codecs.tsv")
-		for _, line := range strings.Split(strings.TrimSuffix(string(data), "\n"), "\n") {
-			cols := strings.Split(line, "\t")
-			key := strings.Join(cols[:3], "\t")
-			if _, exists := tables.Codecs[key]; !exists {
-				tables.Codecs[key] = codecDescription{Format: cols[3], Hint: cols[4], Info: cols[5]}
+		if version == reportTables23 {
+			data, _ = reportTableFiles.ReadFile("report_tables/" + string(version) + "-codecs.tsv")
+			for line := range strings.SplitSeq(strings.TrimSuffix(string(data), "\n"), "\n") {
+				cols := strings.Split(line, "\t")
+				key := strings.Join(cols[:3], "\t")
+				if _, exists := tables.Codecs[key]; !exists {
+					tables.Codecs[key] = codecDescription{Format: cols[3], Hint: cols[4], Info: cols[5]}
+				}
 			}
 		}
 		result[version] = tables
@@ -141,13 +143,13 @@ func reportVersion(store *fieldStore) reportTableVersion {
 	return reportTables23
 }
 
-// reportFieldIdentity unifies canonical, raw-sibling and legacy-label spellings.
+// reportFieldIdentity unifies spellings using the selected reference's aliases.
 // Unknown names remain literal metadata; no whitespace or underscore heuristic applies.
-func reportFieldIdentity(kind StreamKind, name, label string) string {
+func reportFieldIdentity(version reportTableVersion, kind StreamKind, name, label string) string {
 	name = strings.TrimPrefix(name, "Text/")
 	name = canonicalTableName(canonicalRawFieldName(name))
 	base := strings.TrimSuffix(name, "/String")
-	table := reportKindPolicy(reportTables23, kind)
+	table := reportKindPolicy(version, kind)
 	if table != nil {
 		if _, ok := table.Fields[name]; ok {
 			return strings.Split(name, "/String")[0]
@@ -183,7 +185,7 @@ func reportFieldIdentity(kind StreamKind, name, label string) string {
 		case "Service type":
 			return "ServiceType"
 		}
-		if _, ok := reportTables[reportTables23].Labels[candidate]; ok {
+		if _, ok := reportTables[version].Labels[candidate]; ok {
 			return candidate
 		}
 	}
