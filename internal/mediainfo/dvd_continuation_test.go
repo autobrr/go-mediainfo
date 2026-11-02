@@ -3,9 +3,11 @@ package mediainfo
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -168,17 +170,18 @@ func TestAnalyzeDVDIFOPayloadSelection(t *testing.T) {
 		metadataOnly     bool
 		lowercasePayload bool
 		second           string
+		wantDisplay      string
 	}{
-		{name: "small first without backup", first: true},
-		{name: "small first with backup", first: true, backup: true},
-		{name: "missing first", backup: true},
-		{name: "eligible first without backup", first: true, firstSize: 0x3F000000},
-		{name: "eligible first with backup", first: true, backup: true, firstSize: 0x3F000000},
-		{name: "eligible first outer continuation disabled", first: true, backup: true, firstSize: 0x3F000000, disable: true},
-		{name: "outside VIDEO_TS", first: true, firstSize: 0x3F000000, directory: "standalone"},
-		{name: "lowercase IFO extension", first: true, firstSize: 0x3F000000, ifoName: "VTS_01_0.ifo", metadataOnly: true},
-		{name: "lowercase payload spelling", first: true, firstSize: 0x3F000000, lowercasePayload: true},
-		{name: "retains payload after gap", first: true, firstSize: 0x3F000000, second: "VTS_01_3.VOB"},
+		{name: "small first without backup", first: true, wantDisplay: "6.01 KiB"},
+		{name: "small first with backup", first: true, backup: true, wantDisplay: "6.01 KiB"},
+		{name: "missing first", backup: true, wantDisplay: "6.00 KiB"},
+		{name: "eligible first without backup", first: true, firstSize: 0x3F000000, wantDisplay: "1008 MiB"},
+		{name: "eligible first with backup", first: true, backup: true, firstSize: 0x3F000000, wantDisplay: "1008 MiB"},
+		{name: "eligible first outer continuation disabled", first: true, backup: true, firstSize: 0x3F000000, disable: true, wantDisplay: "1008 MiB"},
+		{name: "outside VIDEO_TS", first: true, firstSize: 0x3F000000, directory: "standalone", wantDisplay: "1008 MiB"},
+		{name: "lowercase IFO extension", first: true, firstSize: 0x3F000000, ifoName: "VTS_01_0.ifo", metadataOnly: true, wantDisplay: "6.00 KiB"},
+		{name: "lowercase payload spelling", first: true, firstSize: 0x3F000000, lowercasePayload: true, wantDisplay: "1008 MiB"},
+		{name: "retains payload after gap", first: true, firstSize: 0x3F000000, second: "VTS_01_3.VOB", wantDisplay: "1008 MiB"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := filepath.Join(t.TempDir(), firstNonEmpty(tc.directory, "VIDEO_TS"))
@@ -223,6 +226,23 @@ func TestAnalyzeDVDIFOPayloadSelection(t *testing.T) {
 			}
 			if got, _ := canonicalSeedValue(report.General, "FileSize"); got != strconv.FormatInt(wantSize, 10) {
 				t.Errorf("FileSize = %q, want %d", got, wantSize)
+			}
+			reports := []Report{report}
+			for _, output := range []struct {
+				name, rendered, want string
+			}{
+				{"text", RenderText(reports), padRight("File size", textLabelWidth) + ": " + tc.wantDisplay + "\n"},
+				{"HTML", RenderHTML(reports), "<td>File size</td><td>" + tc.wantDisplay + "</td>"},
+				{"CSV", RenderCSV(reports), "File size," + tc.wantDisplay + "\n"},
+				{"JSON", RenderJSON(reports), fmt.Sprintf(`"FileSize":"%d"`, wantSize)},
+				{"XML", RenderXML(reports), fmt.Sprintf("<FileSize>%d</FileSize>", wantSize)},
+				{"raw text", normalizeText(RenderTextWithOptions(reports, TextRenderOptions{Language: "raw"})), fmt.Sprintf("%-33s: %s\n", "FileSize/String", tc.wantDisplay)},
+			} {
+				t.Run(output.name, func(t *testing.T) {
+					if !strings.Contains(output.rendered, output.want) {
+						t.Errorf("missing file size %q in:\n%s", output.want, output.rendered)
+					}
+				})
 			}
 			secondPayload := false
 			for _, stream := range report.Streams {
