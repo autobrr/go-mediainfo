@@ -40,4 +40,6 @@ Apply the [initiative validation requirements](README.md#validation-and-evidence
 
 Completed by [PR #252](https://github.com/autobrr/go-mediainfo/pull/252), merged in [3fde7a4](https://github.com/autobrr/go-mediainfo/commit/3fde7a44b3df8797734fabb3b56458cc57fdc2ff) on 2026-11-02. [#250](https://github.com/autobrr/go-mediainfo/issues/250) is closed completed. This records merge, not release.
 
+The separate [final follow-up review and cleanup](final-review-and-cleanup.md) follows completion of all 24 implementation groups; Plan 24's numeric position does not make this merged PR the cleanup owner.
+
 2026-11-02: recorded verified #252 merge and #250 completion; retained the existing implementation instead of budgeting a replacement PR.
