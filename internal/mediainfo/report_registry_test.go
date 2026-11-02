@@ -446,6 +446,7 @@ func TestReferenceFormatPresentationFamilies(t *testing.T) {
 		{"AC-3", "", "Dep JOC", "E-AC-3 JOC", "Enhanced AC-3 with Joint Object Coding"},
 		{"E-AC-3 JOC", "", "JOC", "E-AC-3 JOC", "Enhanced AC-3 with Joint Object Coding"},
 		{"MLP FBA", "", "16-ch AC-3", "MLP FBA 16-ch AC-3", "Meridian Lossless Packing FBA with 16-channel presentation"},
+		{"MLP FBA", "", "AC-3 ignored AC-3 16-ch", "MLP FBA AC-3 AC-3 16-ch", "Meridian Lossless Packing FBA with 16-channel presentation"},
 		{"MLP FBA", "", "Not16-ch", "MLP FBA", "Meridian Lossless Packing FBA"},
 	} {
 		name, info := reportFormatPresentation(reportTables23, StreamAudio, map[string]string{"Format": tc.format, "Format_Profile": tc.profile, "Format_AdditionalFeatures": tc.features})

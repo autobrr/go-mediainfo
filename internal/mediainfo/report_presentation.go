@@ -230,12 +230,13 @@ func reportFormatPresentation(version reportTableVersion, kind StreamKind, value
 	case "MLP FBA":
 		allowed = []string{"16-ch", "AC-3"}
 	}
+	parts := []string{name}
 	for _, feature := range features {
 		if slices.Contains(allowed, feature) {
-			name += " " + feature
+			parts = append(parts, feature)
 		}
 	}
-	return name, info
+	return strings.Join(parts, " "), info
 }
 
 // friendlyExistingFieldVisible applies native default visibility to these
