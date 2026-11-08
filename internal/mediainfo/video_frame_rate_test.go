@@ -13,34 +13,44 @@ import (
 
 // TestAnalyzeAVINormalizesCopiedGeneralFrameRate covers the header ratio and its General copy.
 func TestAnalyzeAVINormalizesCopiedGeneralFrameRate(t *testing.T) {
-	data, err := os.ReadFile(filepath.Join("samples", "sample.avi"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	offset := bytes.Index(data, []byte("strh")) + 8
-	if offset < 8 || offset+56 > len(data) || string(data[offset:offset+4]) != "vids" {
-		t.Fatal("fixture has no video stream header")
-	}
-	binary.LittleEndian.PutUint32(data[offset+20:], 1000)
-	binary.LittleEndian.PutUint32(data[offset+24:], 25010)
-	path := filepath.Join(t.TempDir(), "copied-rate.avi")
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	report, err := AnalyzeFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, stream := range []Stream{report.General, report.Streams[0]} {
-		if got := findField(stream.Fields, "Frame rate"); got != "25.000 FPS" {
-			t.Errorf("%s text rate = %q, want 25.000 FPS", stream.Kind, got)
-		}
-		if got := stream.JSON["FrameRate"]; got != "25.000" {
-			t.Errorf("%s JSON rate = %q, want 25.000", stream.Kind, got)
-		}
-	}
-	if video := report.Streams[0]; video.JSON["FrameRate_Num"] != "25" || video.JSON["FrameRate_Den"] != "1" {
-		t.Errorf("normalized video ratio = %s/%s, want 25/1", video.JSON["FrameRate_Num"], video.JSON["FrameRate_Den"])
+	for _, tc := range []struct {
+		scale, rate               uint32
+		display, value, numerator string
+	}{
+		{1000, 25010, "25.000 FPS", "25.000", "25"},
+		{1, 1200, "1 200.000 FPS", "1200.000", "1200"},
+	} {
+		t.Run(tc.value, func(t *testing.T) {
+			data, err := os.ReadFile(filepath.Join("samples", "sample.avi"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			offset := bytes.Index(data, []byte("strh")) + 8
+			if offset < 8 || offset+56 > len(data) || string(data[offset:offset+4]) != "vids" {
+				t.Fatal("fixture has no video stream header")
+			}
+			binary.LittleEndian.PutUint32(data[offset+20:], tc.scale)
+			binary.LittleEndian.PutUint32(data[offset+24:], tc.rate)
+			path := filepath.Join(t.TempDir(), "copied-rate.avi")
+			if err := os.WriteFile(path, data, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			report, err := AnalyzeFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, stream := range []Stream{report.General, report.Streams[0]} {
+				if got := findField(stream.Fields, "Frame rate"); got != tc.display {
+					t.Errorf("%s text rate = %q, want %q", stream.Kind, got, tc.display)
+				}
+				if got := stream.JSON["FrameRate"]; got != tc.value {
+					t.Errorf("%s JSON rate = %q, want %q", stream.Kind, got, tc.value)
+				}
+			}
+			if video := report.Streams[0]; video.JSON["FrameRate_Num"] != tc.numerator || video.JSON["FrameRate_Den"] != "1" {
+				t.Errorf("normalized video ratio = %s/%s, want %s/1", video.JSON["FrameRate_Num"], video.JSON["FrameRate_Den"], tc.numerator)
+			}
+		})
 	}
 }
 

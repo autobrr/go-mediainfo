@@ -301,6 +301,8 @@ func TestReportPresentationFromCanonicalFacts(t *testing.T) {
 	video.Structured("TimeCode_Source", "Group of pictures header")
 	video.Fill("Format_Settings_PictureStructure", "Frame", "Format settings, Picture structure", "Frame")
 	video.Fill("OriginalSourceMedium_ID", "189-128", "Original source medium ID", "189-128")
+	video.Fill("ChromaSubsampling", "4:2:0", "Chroma subsampling", "4:2:0")
+	video.Fill("ChromaSubsampling_Position", "Type 1", "Chroma subsampling position", "Type 1")
 	menu := newCanonicalStreamBuilder(StreamMenu)
 	menu.Fill("ServiceType", "Digital television", "Service type", "Digital television")
 	menu.Fill("ServiceProvider", "Example", "Service provider", "Example")
@@ -316,12 +318,12 @@ func TestReportPresentationFromCanonicalFacts(t *testing.T) {
 	json := RenderJSON([]Report{report})
 	text := RenderText([]Report{report})
 	raw := RenderTextWithOptions([]Report{report}, TextRenderOptions{Language: "raw"})
-	for _, want := range []string{"1 024 MiB", "11.719 FPS (4096 SPF)", "Maximum bit rate", "7 500 kb/s", "Minimum frame rate", "Maximum frame rate", "23.976 FPS", "29.970 FPS", "Top Field First", "Format settings, picture structure", "ID in the original source medium", "189 (0xBD)128 (0x80)", "Encoded date", "USER_TAG"} {
+	for _, want := range []string{"1 024 MiB", "11.719 FPS (4096 SPF)", "Maximum bit rate", "7 500 kb/s", "Minimum frame rate", "Maximum frame rate", "23.976 FPS", "29.970 FPS", "Top Field First", "Format settings, picture structure", "ID in the original source medium", "189 (0xBD)128 (0x80)", "Encoded date", "USER_TAG", "4:2:0 (Type 1)"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("friendly output missing %q", want)
 		}
 	}
-	for _, unwanted := range []string{"Original delay", "Delay                                    :", "Format/Info                              : MPEG Video", "Encoded_Date", "Format settings, Picture structure"} {
+	for _, unwanted := range []string{"Original delay", "Delay                                    :", "Format/Info                              : MPEG Video", "Encoded_Date", "Format settings, Picture structure", "Chroma subsampling position"} {
 		if strings.Contains(text, unwanted) {
 			t.Errorf("friendly output contains %q", unwanted)
 		}
@@ -346,9 +348,34 @@ func TestReportPresentationFromCanonicalFacts(t *testing.T) {
 	if !reflect.DeepEqual(before, captureLegacyReportState(report, true)) {
 		t.Error("rendering mutated the public report")
 	}
+	report.General.Fields = append(report.General.Fields, Field{Name: "Title", Value: "Caller title"})
+	mutated := RenderJSON([]Report{report})
+	for _, want := range []string{`"ChromaSubsampling":"4:2:0"`, `"ChromaSubsampling_Position":"Type 1"`} {
+		if !strings.Contains(mutated, want) {
+			t.Errorf("unrelated public mutation lost %s", want)
+		}
+	}
+	report.Streams[0].JSON["ChromaSubsampling_Position"] = "Type 2"
+	if !strings.Contains(RenderJSON([]Report{report}), `"ChromaSubsampling_Position":"Type 2"`) {
+		t.Error("explicit position mutation lost precedence")
+	}
+	delete(report.Streams[0].JSON, "ChromaSubsampling_Position")
+	if strings.Contains(RenderJSON([]Report{report}), `"ChromaSubsampling_Position":`) {
+		t.Error("explicit position deletion was restored from display")
+	}
 }
 
 func TestRawQuantitiesIgnoreFriendlyWording(t *testing.T) {
+	for _, tc := range []struct{ label, display string }{
+		{"SamplingRate/String", "44.1 kHz"},
+		{"Channel(s)/String", "2 channels"},
+		{"BitDepth/String", "24 bits"},
+		{"Format_Settings_RefFrames/String", "4 frames"},
+	} {
+		if got := rawTextValue(reportTables23, StreamAudio, tc.label, tc.display, nil, 0); got != "" {
+			t.Errorf("%s invented a raw quantity from display-only input: %q", tc.label, got)
+		}
+	}
 	report := Report{
 		General: Stream{Kind: StreamGeneral, Fields: []Field{{Name: "Duration", Value: "friendly duration"}, {Name: "Overall bit rate", Value: "friendly bitrate"}, {Name: "File size", Value: "friendly size"}}, JSON: map[string]string{"Duration": "1.234", "OverallBitRate": "25700000", "FileSize": "1073739776"}},
 		Streams: []Stream{
@@ -436,6 +463,7 @@ func TestReferenceFormatPresentationFamilies(t *testing.T) {
 	for _, tc := range []struct{ format, profile, features, name, info string }{
 		{"VP8", "", "", "VP8", ""}, {"PCM", "", "", "PCM", ""}, {"unknown", "", "fake", "unknown", ""},
 		{"FLAC", "", "", "FLAC", "Free Lossless Audio Codec"},
+		{"TrueHD", "", "", "TrueHD", ""},
 		{"BDAV", "", "", "BDAV", "Blu-ray Video"},
 		{"AAC", "", "LC SBR PS", "AAC LC SBR PS", "Advanced Audio Codec Low Complexity with Spectral Band Replication and Parametric Stereo"},
 		{"AAC", "HE-AAC+eSBR", "", "AAC LC SBR eSBR", "Advanced Audio Codec Low Complexity with Enhanced Spectral Band Replication"},
@@ -444,6 +472,7 @@ func TestReferenceFormatPresentationFamilies(t *testing.T) {
 		{"DTS", "MA / Core", "", "DTS XLL", "Digital Theater Systems"},
 		{"DTS", "", "LC SBR", "DTS", "Digital Theater Systems"},
 		{"AC-3", "", "Dep JOC", "E-AC-3 JOC", "Enhanced AC-3 with Joint Object Coding"},
+		{"AC-3 Dep", "", "", "E-AC-3", "Enhanced AC-3"},
 		{"E-AC-3 JOC", "", "JOC", "E-AC-3 JOC", "Enhanced AC-3 with Joint Object Coding"},
 		{"MLP FBA", "", "16-ch AC-3", "MLP FBA 16-ch AC-3", "Meridian Lossless Packing FBA with 16-channel presentation"},
 		{"MLP FBA", "", "AC-3 ignored AC-3 16-ch", "MLP FBA AC-3 AC-3 16-ch", "Meridian Lossless Packing FBA with 16-channel presentation"},
@@ -560,7 +589,7 @@ func TestReportRegistryStandardAndExtraOrder(t *testing.T) {
 			general.Structured(key, "value")
 		}
 		video := newCanonicalStreamBuilder(StreamVideo)
-		for _, key := range []fieldName{"Comment", "Standard", "BitDepth", "DisplayAspectRatio_Original", "Encoded_Library", "StreamSize", "Width"} {
+		for _, key := range []fieldName{"Comment", "Standard", "BitDepth", "DisplayAspectRatio_Original", "Encoded_Library", "StreamSize", "Width", "HDR_Format_Compatibility", "HDR_Format_Compression", "HDR_Format_Settings"} {
 			video.Structured(key, "1")
 		}
 		video.StructuredNode("extra", structuredNode{Kind: structuredObject, Object: []structuredMember{{Key: "z", Value: structuredNode{Kind: structuredString, Text: "first"}}, {Key: "a", Value: structuredNode{Kind: structuredString, Text: "second"}}}})
@@ -569,12 +598,51 @@ func TestReportRegistryStandardAndExtraOrder(t *testing.T) {
 		json := RenderJSON([]Report{report})
 		assertRowOrder(t, json, `"Title":`, `"Album":`, `"Album_Performer":`, `"Part":`, `"Part_Position_Total":`, `"Track":`, `"Track_Position":`, `"Track_Position_Total":`, `"Performer":`, `"File_Modified_Date":`, `"extra":`)
 		assertRowOrder(t, json, `"Width":`, `"DisplayAspectRatio_Original":`, `"Standard":`, `"BitDepth":`, `"StreamSize":`, `"Encoded_Library":`, `"extra":`)
+		assertRowOrder(t, json, `"HDR_Format_Settings":`, `"HDR_Format_Compression":`, `"HDR_Format_Compatibility":`, `"Width":`, `"extra":`)
 		assertRowOrder(t, json, `"z":`, `"a":`)
 		xml := RenderXML([]Report{report})
+		assertRowOrder(t, xml, "<HDR_Format_Settings>", "<HDR_Format_Compression>", "<HDR_Format_Compatibility>", "<Width>", "<extra>")
 		assertRowOrder(t, xml, "<Album_Performer>", "<Part>", "<Part_Position_Total>", "<Track>", "<Track_Position>", "<Track_Position_Total>", "<Performer>")
 		if RenderJSON([]Report{report}) != json || RenderXML([]Report{report}) != xml {
 			t.Fatal("schema ordering changed values or repeated results")
 		}
+	}
+}
+
+func TestLegacyAudioFrameRateRetainsExplicitSamplesPerFrame(t *testing.T) {
+	for _, tc := range []struct{ name, display, canonicalSPF, want, wantSPF string }{
+		{"legacy suffix", "41.667 FPS (1152 SPF)", "", "41.667 FPS (1152 SPF)", "1152"},
+		{"canonical precedence", "41.667 FPS (1152 SPF)", "1024", "41.667 FPS (1024 SPF)", "1024"},
+		{"absent suffix", "41.667 FPS", "", "41.667 FPS", ""},
+		{"invalid suffix", "41.667 FPS (unknown SPF)", "", "41.667 FPS", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stream := Stream{Kind: StreamAudio, Fields: []Field{{Name: "Format", Value: "MPEG Audio"}, {Name: "Frame rate", Value: tc.display}, {Name: "Sampling rate", Value: "48.0 kHz"}}, JSON: map[string]string{"Format": "MPEG Audio", "FrameRate": "41.667", "SamplingRate": "48000"}}
+			if tc.canonicalSPF != "" {
+				stream.JSON["SamplesPerFrame"] = tc.canonicalSPF
+			}
+			report := Report{General: Stream{Kind: StreamGeneral, Fields: []Field{{Name: "Format", Value: "AVI"}}}, Streams: []Stream{stream}}
+			before := captureLegacyReportState(report, true)
+			if !strings.Contains(normalizeText(RenderText([]Report{report})), padRight("Frame rate", textLabelWidth)+": "+tc.want+"\n") {
+				t.Fatal("friendly frame-rate row differs")
+			}
+			for _, output := range []string{RenderText([]Report{report}), RenderHTML([]Report{report}), RenderCSV([]Report{report})} {
+				if !strings.Contains(output, tc.want) || tc.wantSPF == "" && strings.Contains(output, " SPF)") {
+					t.Fatalf("missing frame-rate display %q: %s", tc.want, output)
+				}
+			}
+			raw := RenderTextWithOptions([]Report{report}, TextRenderOptions{Language: "raw"})
+			if !strings.Contains(raw, strings.Replace(tc.want, "FPS", "fps", 1)) {
+				t.Fatalf("raw frame-rate display lost explicit suffix: %s", raw)
+			}
+			json := RenderJSON([]Report{report})
+			if tc.wantSPF == "" && (strings.Contains(json, `"SamplesPerFrame":`) || strings.Contains(raw, " SPF)")) || tc.wantSPF != "" && !strings.Contains(json, `"SamplesPerFrame":"`+tc.wantSPF+`"`) {
+				t.Fatal("structured samples-per-frame presence or precedence changed")
+			}
+			if !reflect.DeepEqual(before, captureLegacyReportState(report, true)) {
+				t.Fatal("rendering mutated caller state")
+			}
+		})
 	}
 }
 

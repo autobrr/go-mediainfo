@@ -99,6 +99,9 @@ func TestFLACUnencodedMD5Output(t *testing.T) {
 				copy(streamInfo[18:], md5)
 				private := append([]byte("fLaC\x80\x00\x00\x22"), streamInfo...)
 				stream := container.parse(t, private)
+				if got := findField(stream.Fields, "Format/Info"); got != "Free Lossless Audio Codec" {
+					t.Fatalf("public FLAC description = %q", got)
+				}
 				reports := []Report{{
 					General: Stream{Kind: StreamGeneral, Fields: []Field{{Name: "Format", Value: container.name}}},
 					Streams: []Stream{stream},

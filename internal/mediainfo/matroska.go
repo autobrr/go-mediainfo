@@ -2020,7 +2020,6 @@ func parseCanonicalMatroskaTrackEntry(buf []byte, segmentDuration float64, durat
 		fields = append(fields, Field{Name: "Commercial name", Value: "Dolby Digital"})
 	}
 	if kind == StreamAudio && aacProfile == "LC" {
-		fields = append(fields, Field{Name: "Format/Info", Value: "Advanced Audio Codec Low Complexity"})
 		if strings.HasPrefix(aacSBRMode, "Yes") {
 			fields = append(fields, Field{Name: "Commercial name", Value: "HE-AAC"})
 		}

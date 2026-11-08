@@ -1369,18 +1369,18 @@ func rawTextValue(version reportTableVersion, kind StreamKind, label, display st
 		if value, present := structured[strings.TrimSuffix(label, "/String")]; present {
 			return formatRawTextSamplingRate(value)
 		}
-		return strings.ReplaceAll(display, " kHz", " KHz")
+		return ""
 	case "Channel(s)/String", "Channel(s)_Original/String":
 		key := strings.ReplaceAll(strings.TrimSuffix(label, "/String"), "Channel(s)", "Channels")
 		if value, present := structured[key]; present {
 			return formatRawTextCount(value, "channel")
 		}
-		return strings.ReplaceAll(display, " channels", " channel")
+		return ""
 	case "BitDepth/String", "BitDepth_Detected/String":
 		if value, present := structured[strings.TrimSuffix(label, "/String")]; present {
 			return formatRawTextCount(value, "bit")
 		}
-		return strings.ReplaceAll(display, " bits", " bit")
+		return ""
 	case "Width/String", "Height/String":
 		if value, present := structured[strings.TrimSuffix(label, "/String")]; present {
 			return formatRawTextCount(value, "pixel")
@@ -1485,7 +1485,7 @@ func rawTextValue(version reportTableVersion, kind StreamKind, label, display st
 		if value, present := structured["Format_Settings_RefFrames"]; present {
 			return formatRawTextCount(value, "frame")
 		}
-		return strings.ReplaceAll(display, " frames", " frame")
+		return ""
 	case "Format_Profile":
 		return formatRawTextProfile(kind, structured, display)
 	case "DisplayAspectRatio/String":

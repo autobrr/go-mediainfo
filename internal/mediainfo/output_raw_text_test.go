@@ -340,6 +340,10 @@ func TestRawTextBDAVStructuredFormatting(t *testing.T) {
 	if got := rawTextValue(reportTables23, StreamAudio, "Format/String", "AC-3", map[string]string{"Format": "AC-3", "Format_AdditionalFeatures": "Dep"}, 0); got != "E-AC-3" {
 		t.Fatalf("structured dependent AC-3 Format/String = %q", got)
 	}
+	legacy := Report{General: Stream{Kind: StreamGeneral}, Streams: []Stream{{Kind: StreamAudio, Fields: []Field{{Name: "Format", Value: "AC-3 Dep"}}}}}
+	if raw := RenderTextWithOptions([]Report{legacy}, TextRenderOptions{Language: "raw"}); !strings.Contains(normalizeText(raw), padRawTextLabel("Format/String", 33)+": E-AC-3\n") {
+		t.Fatalf("legacy dependent AC-3 format changed: %s", raw)
+	}
 	if got := rawTextValue(reportTables23, StreamVideo, "StreamSize/String", "1.00 KiB (13%)", map[string]string{"StreamSize": "4096"}, 8192); got != "4.00 KiB (50%)" {
 		t.Fatalf("structured StreamSize/String = %q", got)
 	}

@@ -603,9 +603,6 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 			builder.DirectStructured("Format_AdditionalFeatures", additional)
 		}
 		if st.kind == StreamText && format == "RLE" {
-			fields = append(fields, Field{Name: "Format/Info", Value: "Run-length encoding"})
-		}
-		if st.kind == StreamText && format == "RLE" {
 			fields = append(fields, Field{Name: "Muxing mode", Value: "DVD-Video"})
 			builder.Fill("MuxingMode", "DVD-Video", "Muxing mode", "DVD-Video")
 		}
@@ -623,7 +620,6 @@ func finalizeMPEGPS(streams map[uint16]*psStream, streamOrder []uint16, videoPar
 				fields = append(fields, Field{Name: "Muxing mode", Value: "DVD-Video"})
 				builder.Fill("MuxingMode", "DVD-Video", "Muxing mode", "DVD-Video")
 			case st.audioProfile == "LC":
-				fields = append(fields, Field{Name: "Format/Info", Value: "Advanced Audio Codec Low Complexity"})
 				version := formatAACVersion(st.audioMPEGVersion)
 				fields = append(fields, Field{Name: "Format version", Value: version})
 				builder.Fill("Format_Version", extractVersionNumber(version), "Format version", version)

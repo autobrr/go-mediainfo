@@ -3,6 +3,7 @@ package mediainfo
 import (
 	"encoding/binary"
 	"math"
+	"strings"
 	"testing"
 )
 
@@ -93,6 +94,13 @@ func TestMatroskaTrueHDTrackUIDThreeKeepsOwnFacts(t *testing.T) {
 		if !found || got != want {
 			t.Fatalf("%s = %q, %v; want %q from this track", key, got, found, want)
 		}
+	}
+	report := Report{General: Stream{Kind: StreamGeneral, Fields: []Field{{Name: "Format", Value: "Matroska"}}}, Streams: streams}
+	if text := RenderText([]Report{report}); !strings.Contains(text, padRight("Format", textLabelWidth)+": TrueHD\n") {
+		t.Fatalf("unprobed TrueHD format was reinterpreted: %s", text)
+	}
+	if json := RenderJSON([]Report{report}); !strings.Contains(json, `"Format":"TrueHD"`) {
+		t.Fatalf("unprobed TrueHD canonical format changed: %s", json)
 	}
 }
 

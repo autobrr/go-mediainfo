@@ -72,6 +72,10 @@ func friendlyReportValue(kind StreamKind, identity, display string, values map[s
 		return method
 	case "OriginalSourceMedium_ID":
 		return formatOriginalSourceID(value, display)
+	case "ChromaSubsampling":
+		if value != "" && values["ChromaSubsampling_Position"] != "" {
+			return value + " (" + values["ChromaSubsampling_Position"] + ")"
+		}
 	case "MuxingMode":
 		if translated := reportTables[version].Values[value]; translated != "" {
 			return translated
@@ -136,9 +140,6 @@ func storedCodecDescription(container string, stream *storedStream, values map[s
 // HighestFormat summaries; commercial naming remains a separate field.
 func reportFormatPresentation(version reportTableVersion, kind StreamKind, values map[string]string) (name, info string) {
 	name = values["Format"]
-	if name == "TrueHD" {
-		name = "MLP FBA"
-	}
 	info = reportTables[version].Formats[name]
 	if name == "DTS LBR" {
 		info = reportTables[version].Formats["DTS"]
@@ -242,7 +243,7 @@ func reportFormatPresentation(version reportTableVersion, kind StreamKind, value
 // friendlyExistingFieldVisible applies native default visibility to these
 // imported fields while retaining explicit compatibility rows for other fields.
 func friendlyExistingFieldVisible(version reportTableVersion, kind StreamKind, identity string) bool {
-	if kind == StreamVideo && (identity == "Delay" || identity == "Delay_Original") || identity == "Source_Delay" || identity == "Source_Delay_Source" {
+	if kind == StreamVideo && (identity == "Delay" || identity == "Delay_Original" || identity == "ChromaSubsampling_Position") || sourceDelayField(identity) {
 		return reportTextVisible(version, kind, identity)
 	}
 	return true

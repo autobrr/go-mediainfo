@@ -40,11 +40,20 @@ var reportTables = loadReportTables()
 
 type codecDescription struct{ Format, Hint, Info string }
 
+// readReportTable fails initialization if a required checked-in asset is missing.
+func readReportTable(version reportTableVersion, kind string) []byte {
+	data, err := reportTableFiles.ReadFile("report_tables/" + string(version) + "-" + kind + ".tsv")
+	if err != nil {
+		panic(err)
+	}
+	return data
+}
+
 func loadReportTables() map[reportTableVersion]*reportVersionTables {
 	result := make(map[reportTableVersion]*reportVersionTables)
 	for _, version := range []reportTableVersion{reportTables23, reportTables26} {
 		tables := &reportVersionTables{Kinds: make(map[StreamKind]*reportKindTable), Labels: make(map[string]string), Formats: make(map[string]string), Codecs: make(map[string]codecDescription), Values: make(map[string]string)}
-		data, _ := reportTableFiles.ReadFile("report_tables/" + string(version) + "-fields.tsv")
+		data := readReportTable(version, "fields")
 		for _, line := range strings.Split(strings.TrimSuffix(string(data), "\n"), "\n") {
 			cols := strings.Split(line, "\t")
 			kind := StreamKind(cols[0])
@@ -67,13 +76,13 @@ func loadReportTables() map[reportTableVersion]*reportVersionTables {
 				tables.Labels[base] = row.Label
 			}
 		}
-		data, _ = reportTableFiles.ReadFile("report_tables/" + string(version) + "-formats.tsv")
+		data = readReportTable(version, "formats")
 		for _, line := range strings.Split(strings.TrimSuffix(string(data), "\n"), "\n") {
 			cols := strings.Split(line, "\t")
 			tables.Formats[cols[0]] = cols[1]
 		}
 		if version == reportTables23 {
-			data, _ = reportTableFiles.ReadFile("report_tables/" + string(version) + "-codecs.tsv")
+			data = readReportTable(version, "codecs")
 			for line := range strings.SplitSeq(strings.TrimSuffix(string(data), "\n"), "\n") {
 				cols := strings.Split(line, "\t")
 				key := strings.Join(cols[:3], "\t")
@@ -83,7 +92,7 @@ func loadReportTables() map[reportTableVersion]*reportVersionTables {
 			}
 		}
 		result[version] = tables
-		data, _ = reportTableFiles.ReadFile("report_tables/" + string(version) + "-values.tsv")
+		data = readReportTable(version, "values")
 		for _, line := range strings.Split(strings.TrimSuffix(string(data), "\n"), "\n") {
 			key, value, _ := strings.Cut(line, "\t")
 			tables.Values[key] = value
@@ -95,6 +104,12 @@ func loadReportTables() map[reportTableVersion]*reportVersionTables {
 		table, newTable := old.Kinds[kind], newer.Kinds[kind]
 		if table == nil || newTable == nil {
 			continue
+		}
+		if row, exists := newTable.Fields["HDR_Format_Compression"]; exists {
+			if anchor, anchored := table.Order["HDR_Format_Settings"]; anchored {
+				table.Fields["HDR_Format_Compression"] = row
+				table.Order["HDR_Format_Compression"] = anchor + 1
+			}
 		}
 		for offset, name := range []string{"MasteringDisplay_Luminance_Min", "MasteringDisplay_Luminance_Max"} {
 			row, exists := newTable.Fields[name]
@@ -211,7 +226,7 @@ func reportFieldRank(version reportTableVersion, kind StreamKind, name string) i
 // reportTextVisible applies standard table options plus explicit runtime options
 // for MP4's source-delay extras. Unknown user metadata keeps its supplied policy.
 func reportTextVisible(version reportTableVersion, kind StreamKind, identity string) bool {
-	if identity == "Source_Delay" || identity == "Source_Delay_Source" {
+	if sourceDelayField(identity) {
 		return false
 	}
 	table := reportKindPolicy(version, kind)
@@ -224,6 +239,10 @@ func reportTextVisible(version reportTableVersion, kind StreamKind, identity str
 		}
 	}
 	return true
+}
+
+func sourceDelayField(identity string) bool {
+	return identity == "Source_Delay" || identity == "Source_Delay_Source"
 }
 
 // These existing raw aliases are the reference CLI's shortened field names.

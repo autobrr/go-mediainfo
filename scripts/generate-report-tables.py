@@ -2,13 +2,15 @@
 """Extract report policy from local, pinned MediaInfoLib source checkouts.
 
 Usage: generate-report-tables.py <v23.04 source root> <v26.10 source root>
-The roots must contain Source/Resource/Text and License.html. No network is used.
+The roots must be Git checkouts at the pinned revisions with unchanged
+Source/Resource/Text and License.html inputs. No network is used.
 Codec-ID tables are extracted only for ordinary v23.04 container namespaces;
 v26.10 supplies DVD field, format, and language policy.
 """
 
 import hashlib
 from pathlib import Path
+import subprocess
 import sys
 
 VERSIONS = ("23.04", "26.10")
@@ -18,6 +20,17 @@ DEST = Path(__file__).resolve().parents[1] / "internal/mediainfo/report_tables"
 
 
 def generate(root, version, revision):
+    checkout, actual = subprocess.check_output(
+        ["git", "-C", str(root), "rev-parse", "--show-toplevel", "HEAD"], text=True
+    ).splitlines()
+    if Path(checkout).resolve() != root.resolve() or actual != revision:
+        raise SystemExit(f"MediaInfoLib v{version} requires checkout revision {revision}")
+    state = subprocess.run(
+        ["git", "-C", str(root), "diff", "--quiet", revision, "--", "Source/Resource/Text", "License.html"]
+    )
+    if state.returncode == 1:
+        raise SystemExit(f"MediaInfoLib v{version} extraction inputs differ from {revision}")
+    state.check_returncode()
     manifest = [f"MediaInfoLib v{version}: {revision}"]
 
     def read(relative):

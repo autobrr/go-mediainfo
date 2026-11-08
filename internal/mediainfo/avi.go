@@ -398,7 +398,7 @@ func ParseAVIWithOptions(file io.ReadSeeker, size int64, opts AnalyzeOptions) (C
 	}
 
 	generalFields := []Field{}
-	generalFields = append(generalFields, Field{Name: "Format/Info", Value: "Audio Video Interleave"})
+	generalFields = append(generalFields, Field{Name: "Format/Info", Value: reportTables[reportTables23].Formats["AVI"]})
 	if main.openDML {
 		generalFields = append(generalFields, Field{Name: "Format profile", Value: "OpenDML"})
 	}
@@ -518,9 +518,6 @@ func canonicalAVIVideoStream(st *aviStream, main aviMainHeader, size int64) Stre
 	}
 	if numerator, denominator, frameRate := aviReportedFrameRateRatio(st, duration); frameRate > 0 {
 		frameRateDisplay := formatFrameRateRatio(numerator, denominator)
-		if denominator == 1 {
-			frameRateDisplay = fmt.Sprintf("%.3f FPS", frameRate)
-		}
 		builder.Fill("FrameRate", formatJSONFloat(frameRate), "Frame rate", frameRateDisplay)
 		builder.Structured("FrameRate_Num", strconv.FormatUint(uint64(numerator), 10))
 		builder.Structured("FrameRate_Den", strconv.FormatUint(uint64(denominator), 10))
@@ -632,7 +629,6 @@ func canonicalAVIAudioStream(st *aviStream, streams []*aviStream, size int64, vi
 		structuredFacts.SetSame("Compression_Mode", "Lossy")
 	case 0x00FF:
 		builder.Fill("Format", "AAC", "Format", "AAC")
-		builder.Text("Format/Info", "Advanced Audio Codec Low Complexity")
 		structuredFacts.SetSame("Compression_Mode", "Lossy")
 		if objectType := aviAACObjectType(st.audioExtra); objectType > 0 {
 			codec += "-" + strconv.Itoa(objectType)
@@ -642,7 +638,6 @@ func canonicalAVIAudioStream(st *aviStream, streams []*aviStream, size int64, vi
 		}
 	case 0x2000:
 		builder.Fill("Format", "AC-3", "Format", "AC-3")
-		builder.Text("Format/Info", "Audio Coding 3")
 		builder.Fill("Format_Commercial_IfAny", "Dolby Digital", "Commercial name", "Dolby Digital")
 		structuredFacts.SetSame("Format_Settings_Endianness", "Big")
 		structuredFacts.SetSame("BitRate_Mode", "CBR")

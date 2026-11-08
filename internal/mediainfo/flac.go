@@ -252,7 +252,6 @@ func canonicalFLACAudioStream(params flacAudioStreamParams) Stream {
 		builder.Fill("ID", params.id, "ID", formatID(id))
 	}
 	store.Fill(ref, "Format", "FLAC", fillReplace)
-	builder.Text("Format/Info", "Free Lossless Audio Codec")
 	if params.duration > 0 {
 		store.Fill(ref, "Duration", strconv.FormatInt(int64(math.Round(params.duration*1000)), 10), fillReplace)
 	}

@@ -462,6 +462,9 @@ func TestMergeDVDDeclaredStreamsKeepsEnabledSubpicturesDistinctFromCaptions(t *t
 	if language, _ := canonicalSeedValue(got[1], "Language"); language != "en" {
 		t.Fatalf("subpicture Language = %q, want en", language)
 	}
+	if info := findField(got[1].Fields, "Format/Info"); info != "Run-length encoding" {
+		t.Fatalf("public RLE description = %q", info)
+	}
 }
 
 func TestMergeDVDDeclaredStreamsOrdersSynthesizedSubpicturesByID(t *testing.T) {

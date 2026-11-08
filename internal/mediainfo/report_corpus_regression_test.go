@@ -41,6 +41,9 @@ func TestMPEGTSJOCFormatInfo(t *testing.T) {
 	if len(report.Streams) != 1 || report.Streams[0].JSON["Format"] != "E-AC-3 JOC" || report.Streams[0].JSON["Format_AdditionalFeatures"] != "JOC" {
 		t.Fatal("analyzed TS did not establish the existing JOC identity")
 	}
+	if got := findField(report.Streams[0].Fields, "Format/Info"); got != "Enhanced AC-3 with Joint Object Coding" {
+		t.Fatalf("public JOC description = %q", got)
+	}
 	reports := []Report{report}
 	before := RenderJSON(reports)
 	for _, out := range []string{RenderText(reports), RenderTextWithOptions(reports, TextRenderOptions{Language: "raw"}), RenderHTML(reports), RenderCSV(reports)} {

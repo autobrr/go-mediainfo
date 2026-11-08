@@ -276,7 +276,7 @@ func mapStreamFieldsToJSON(kind StreamKind, fields []Field) []jsonKV {
 			out = append(out, jsonKV{Key: "Format_Commercial_IfAny", Val: field.Value})
 		case "Muxing mode":
 			value := field.Value
-			if value == "Packed bitstream" {
+			if value == reportTables[reportTables23].Values["MuxingMode_PackedBitstream"] {
 				value = "MuxingMode_PackedBitstream"
 			}
 			out = append(out, jsonKV{Key: "MuxingMode", Val: value})
@@ -324,6 +324,11 @@ func mapStreamFieldsToJSON(kind StreamKind, fields []Field) []jsonKV {
 			if value, ok := parseFloatValue(field.Value); ok {
 				out = append(out, jsonKV{Key: "FrameRate", Val: formatJSONFloat(value)})
 			}
+			if _, suffix, found := strings.Cut(field.Value, " ("); kind == StreamAudio && found {
+				if spf, ok := strings.CutSuffix(suffix, " SPF)"); ok && validSamplesPerFrame(spf) != "" {
+					out = append(out, jsonKV{Key: "SamplesPerFrame", Val: spf})
+				}
+			}
 			if num, den, ok := parseFrameRateRatio(field.Value); ok {
 				out = append(out, jsonKV{Key: "FrameRate_Num", Val: strconv.Itoa(num)})
 				out = append(out, jsonKV{Key: "FrameRate_Den", Val: strconv.Itoa(den)})
@@ -347,7 +352,16 @@ func mapStreamFieldsToJSON(kind StreamKind, fields []Field) []jsonKV {
 				out = append(out, jsonKV{Key: "DisplayAspectRatio", Val: formatJSONFloat(value)})
 			}
 		case "Chroma subsampling":
-			out = append(out, jsonKV{Key: "ChromaSubsampling", Val: field.Value})
+			value := field.Value
+			if chroma, suffix, found := strings.Cut(value, " (Type "); found {
+				if position, ok := strings.CutSuffix(suffix, ")"); ok {
+					if _, err := strconv.ParseUint(position, 10, 32); err == nil {
+						value = chroma
+						out = append(out, jsonKV{Key: "ChromaSubsampling_Position", Val: "Type " + position})
+					}
+				}
+			}
+			out = append(out, jsonKV{Key: "ChromaSubsampling", Val: value})
 		case "Chroma subsampling position":
 			out = append(out, jsonKV{Key: "ChromaSubsampling_Position", Val: field.Value})
 		case "Color space":
@@ -359,9 +373,9 @@ func mapStreamFieldsToJSON(kind StreamKind, fields []Field) []jsonKV {
 		case "Scan order":
 			value := field.Value
 			switch value {
-			case "Top Field First":
+			case reportTables[reportTables23].Values["Interlaced_TFF"]:
 				value = "TFF"
-			case "Bottom Field First":
+			case reportTables[reportTables23].Values["Interlaced_BFF"]:
 				value = "BFF"
 			}
 			out = append(out, jsonKV{Key: "ScanOrder", Val: value})

@@ -524,7 +524,6 @@ func parseDVDVideo(path string, file io.ReadSeeker, size int64, opts AnalyzeOpti
 					textFields = append(textFields, Field{Name: "ID", Value: fmt.Sprintf("189 (0xBD)-%d (0x%X)", id, id)})
 				}
 				textFields = append(textFields, Field{Name: "Format", Value: "RLE"})
-				textFields = append(textFields, Field{Name: "Format/Info", Value: "Run-length encoding"})
 				textFields = append(textFields, Field{Name: "Bit depth", Value: "2 bits"})
 				if subpic.Language != "" && !aggregateMode {
 					textFields = append(textFields, Field{Name: "Language", Value: subpic.Language})
@@ -750,7 +749,6 @@ func buildCanonicalDVDTextStream(fields []Field, facts *dvdStructuredFacts, attr
 		builder.Fill("ID", firstNonEmpty(facts.Canonical("ID"), id), "ID", id)
 	}
 	builder.Fill("Format", "RLE", "Format", "RLE")
-	builder.Text("Format/Info", "Run-length encoding")
 	if duration := facts.Canonical("Duration"); duration != "" {
 		builder.Fill("Duration", duration, "Duration", findField(fields, "Duration"))
 	}
@@ -3038,7 +3036,6 @@ func buildDVDDeclaredTextStream(subpic dvdSubpicAttrs, duration float64, source 
 	id := 0x20 + subpic.StreamID
 	fields := []Field{
 		{Name: "Format", Value: "RLE"},
-		{Name: "Format/Info", Value: "Run-length encoding"},
 		{Name: "Bit depth", Value: "2 bits"},
 	}
 	if subpic.StreamID >= 0 {
