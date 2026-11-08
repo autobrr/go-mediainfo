@@ -4,11 +4,9 @@
 
 ## Goal and scope
 
-One coordinated MPEG sequence/picture/report-state change: pulldown/scan, exact GOP patterns, trusted clock, VBV/rate/matrices, Standard, display geometry and first-reported colour. Remove competing DVD/PS overwrites and unsupported delay heuristics.
+Coordinate MPEG sequence, picture and report state. Select pulldown/scan, GOP patterns, trusted timecode, VBV/rate/matrices, Standard, geometry and first-reported colour using their own supported rules. Remove competing DVD/PS overwrites and unsupported delay heuristics.
 
 ## Issue ownership and canonical decisions
-
-This plan is the closing owner for the targets below once their complete accepted requirements pass. Linked issue bodies and discussions are authoritative; titles alone can describe an older proposal.
 
 | Issue | Accepted work area | Canonical scope and decisions |
 | --- | --- | --- |
@@ -33,24 +31,16 @@ This plan is the closing owner for the targets below once their complete accepte
 - [ ] Remove demonstrated competing PS/DVD overwrites and unsupported delay heuristics while preserving supported fields.
 - [ ] Verify every #141 downstream-survival case and #249 protections, not merely one helper deletion.
 
-The issue-specific acceptance and exclusions linked above remain required; a shared helper alone is not completion. Record full versus partial delivery for each target using the [scoped workflow](README.md#scoped-workflow).
-
 ## Dependencies and non-goals
 
 **Required contracts:** [Plan 01](plan-01.md), [Plan 05](plan-05.md), [Plan 06](plan-06.md)'s contracts; supplies MPEG state to Plans 11/19.
 
 **Coordination and exclusions:** [Plan 13](plan-13.md) owns caption-parent discovery. Coordinate overwrite removals with Plans 11/12/19 rather than deleting whole normalizers independently.
 
-These describe integration contracts, not new native issue-dependency edges. Follow [live blocker handling](README.md#execution-order-and-dependencies) before execution; this plan does not override an owner hold or create one for unrelated work.
-
 ## Validation and evidence
 
-Apply the [initiative validation requirements](README.md#validation-and-evidence) and the current repository guidance. Test changing sequence/picture state, pulldown, clock trust, GOP completion, matrix/VBV updates and every DVD downstream survival route; preserve malformed-input and invalid-RLE controls.
-
-No new implementation or corpus run is claimed by this plan record. The linked discussions contain the prior source/witness evidence and its limits.
+[Shared validation requirements](README.md#validation-and-evidence). Test changing sequence/picture state, pulldown, clock trust, GOP completion, matrix/VBV updates and every DVD downstream survival route; preserve malformed-input and invalid-RLE controls.
 
 ## Implementation and outcome history
-
-Not implemented by this documentation change. Re-read the linked issues and live dependencies before starting.
 
 2026-11-02: migrated the approved consolidation grouping; preserved closing ownership and current issue decisions.

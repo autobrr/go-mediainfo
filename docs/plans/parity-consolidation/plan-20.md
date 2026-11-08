@@ -4,11 +4,9 @@
 
 ## Goal and scope
 
-One codec-scoped format-settings summary and corresponding friendly/raw bindings, with the missing bounded Vorbis floor setup parser included as real fact production.
+Compose format-settings summaries from facts for the relevant codec. Use those facts for friendly/raw bindings and parse the missing Vorbis floor setup within explicit bounds.
 
 ## Issue ownership and canonical decisions
-
-This plan is the closing owner for the targets below once their complete accepted requirements pass. Linked issue bodies and discussions are authoritative; titles alone can describe an older proposal.
 
 | Issue | Accepted work area | Canonical scope and decisions |
 | --- | --- | --- |
@@ -22,24 +20,16 @@ This plan is the closing owner for the targets below once their complete accepte
 - [ ] Do not invent BVOP/PNS or duplicate aggregates; keep GMC numeric facts separate from display.
 - [ ] Implement bounded Vorbis Floor0/Floor1 fact production and integration; presentation-only work cannot close #151.
 
-The issue-specific acceptance and exclusions linked above remain required; a shared helper alone is not completion. Record full versus partial delivery for each target using the [scoped workflow](README.md#scoped-workflow).
-
 ## Dependencies and non-goals
 
 **Required contracts:** [Plan 01](plan-01.md)'s shared projections.
 
 **Coordination and exclusions:** [Plan 17](plan-17.md) owns AC-3 semantic values. FLAC mask/cadence work is separate.
 
-These describe integration contracts, not new native issue-dependency edges. Follow [live blocker handling](README.md#execution-order-and-dependencies) before execution; this plan does not override an owner hold or create one for unrelated work.
-
 ## Validation and evidence
 
-Apply the [initiative validation requirements](README.md#validation-and-evidence) and the current repository guidance. Require Floor0/Floor1 controls, bounded malformed setup/fuzz cases and analysis-to-render checks; preserve non-Vorbis format summaries and numeric GMC.
-
-No new implementation or corpus run is claimed by this plan record. The linked discussions contain the prior source/witness evidence and its limits.
+[Shared validation requirements](README.md#validation-and-evidence). Require Floor0/Floor1 controls, bounded malformed setup/fuzz cases and analysis-to-render checks; preserve non-Vorbis format summaries and numeric GMC.
 
 ## Implementation and outcome history
-
-Not implemented by this documentation change. Re-read the linked issues and live dependencies before starting.
 
 2026-11-02: migrated the approved consolidation grouping; preserved closing ownership and current issue decisions.

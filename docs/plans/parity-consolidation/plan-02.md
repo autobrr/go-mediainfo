@@ -8,8 +8,6 @@ Unify typed metadata ingestion, scope/target routing, title selection and Genera
 
 ## Issue ownership and canonical decisions
 
-This plan is the closing owner for the targets below once their complete accepted requirements pass. Linked issue bodies and discussions are authoritative; titles alone can describe an older proposal.
-
 | Issue | Accepted work area | Canonical scope and decisions |
 | --- | --- | --- |
 | [#24](https://github.com/autobrr/go-mediainfo/issues/24) | recognize BMP cover art instead of "Unknown kind of value!" | [Discussion](https://github.com/autobrr/go-mediainfo/issues/24#issuecomment-5175388088) |
@@ -31,24 +29,16 @@ This plan is the closing owner for the targets below once their complete accepte
 - [ ] Keep parse-time handler eligibility separate from final fill-if-empty Movie/Track selection.
 - [ ] Implement the settled bounded BMP exception, mapped FLAC disc fields and Matroska display mappings without per-chapter scoping/output.
 
-The issue-specific acceptance and exclusions linked above remain required; a shared helper alone is not completion. Record full versus partial delivery for each target using the [scoped workflow](README.md#scoped-workflow).
-
 ## Dependencies and non-goals
 
 **Required contracts:** [Plan 01](plan-01.md)'s field identities and display interfaces.
 
 **Coordination and exclusions:** [Plan 04](plan-04.md) owns encoder provenance. Under #30, chapter-, edition- or attachment-targeted tags without a track target still route to General; per-chapter scoping/output is excluded.
 
-These describe integration contracts, not new native issue-dependency edges. Follow [live blocker handling](README.md#execution-order-and-dependencies) before execution; this plan does not override an owner hold or create one for unrelated work.
-
 ## Validation and evidence
 
-Apply the [initiative validation requirements](README.md#validation-and-evidence) and the current repository guidance. Exercise raw numeric mdta/ilst, duplicate/non-track tags, title and handler eligibility, BMP header bounds and malformed metadata; compare tag/title witnesses without publishing their values.
-
-No new implementation or corpus run is claimed by this plan record. The linked discussions contain the prior source/witness evidence and its limits.
+[Shared validation requirements](README.md#validation-and-evidence). Exercise raw numeric mdta/ilst, duplicate/non-track tags, title and handler eligibility, BMP header bounds and malformed metadata; compare tag/title witnesses without publishing their values.
 
 ## Implementation and outcome history
-
-Not implemented by this documentation change. Re-read the linked issues and live dependencies before starting.
 
 2026-11-02: migrated the approved consolidation grouping; preserved closing ownership and current issue decisions.

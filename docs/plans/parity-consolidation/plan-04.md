@@ -4,11 +4,9 @@
 
 ## Goal and scope
 
-One source-aware encoder pipeline from actual strings/tags through Name/Version/Date and Writing library. Combine Matroska General/track routing, repeated tags, Vorbis/Theora vendor strings, AVC/HEVC/MPEG user data, MP4 manufacturer and compressor exclusions. #49 folds into #190.
+Build one source-aware encoder pipeline from actual strings and tags to Name/Version/Date and Writing library. Route Matroska General and track tags correctly and preserve repeated values. Read Vorbis/Theora vendors, AVC/HEVC/MPEG user data and MP4 manufacturer metadata; exclude visual compressor labels. Handle #49 with #190.
 
 ## Issue ownership and canonical decisions
-
-This plan is the closing owner for the targets below once their complete accepted requirements pass. Linked issue bodies and discussions are authoritative; titles alone can describe an older proposal.
 
 | Issue | Accepted work area | Canonical scope and decisions |
 | --- | --- | --- |
@@ -33,24 +31,16 @@ This plan is the closing owner for the targets below once their complete accepte
 - [ ] Preserve ordered repeated/unknown vendor strings and distinct General/track ownership.
 - [ ] Exclude CodecName/visual-compressor inference and compose numeric dates once; keep codec-specific parsing rules.
 
-The issue-specific acceptance and exclusions linked above remain required; a shared helper alone is not completion. Record full versus partial delivery for each target using the [scoped workflow](README.md#scoped-workflow).
-
 ## Dependencies and non-goals
 
 **Required contracts:** [Plan 01](plan-01.md) and [Plan 02](plan-02.md)'s metadata ownership interfaces.
 
 **Coordination and exclusions:** [Plan 07](plan-07.md)'s HEVC producer ownership; do not duplicate its selection policy.
 
-These describe integration contracts, not new native issue-dependency edges. Follow [live blocker handling](README.md#execution-order-and-dependencies) before execution; this plan does not override an owner hold or create one for unrelated work.
-
 ## Validation and evidence
 
-Apply the [initiative validation requirements](README.md#validation-and-evidence) and the current repository guidance. Test repeated vendors, unknown names, date splits, source/track conflicts and no-encoder controls through every reachable producer and public rebuilding.
-
-No new implementation or corpus run is claimed by this plan record. The linked discussions contain the prior source/witness evidence and its limits.
+[Shared validation requirements](README.md#validation-and-evidence). Test repeated vendors, unknown names, date splits, source/track conflicts and no-encoder controls through every reachable producer and public rebuilding.
 
 ## Implementation and outcome history
-
-Not implemented by this documentation change. Re-read the linked issues and live dependencies before starting.
 
 2026-11-02: migrated the approved consolidation grouping; preserved closing ownership and current issue decisions.

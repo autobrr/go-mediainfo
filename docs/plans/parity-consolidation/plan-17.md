@@ -4,11 +4,9 @@
 
 ## Goal and scope
 
-Consolidate AC-3/E-AC-3 semantic facts and display across all existing producers: dual mono bit alignment, explicit latest surround mode, mix levels, dynrng/statistics, JSON visibility and actual JOC evidence.
+Project parsed AC-3/E-AC-3 facts consistently through every existing producer. Preserve dual-mono bit alignment, explicit latest surround metadata, mix levels and measured dynrng/statistics. Apply the required JSON/display policy and report JOC only from actual evidence.
 
 ## Issue ownership and canonical decisions
-
-This plan is the closing owner for the targets below once their complete accepted requirements pass. Linked issue bodies and discussions are authoritative; titles alone can describe an older proposal.
 
 | Issue | Accepted work area | Canonical scope and decisions |
 | --- | --- | --- |
@@ -27,8 +25,7 @@ This plan is the closing owner for the targets below once their complete accepte
 - [ ] Route all reachable AC-3 producers through one presence-aware private family owner, retaining explicit zero and real independent/dependent/JOC syntax.
 - [ ] Keep accepted-observation statistics, first/current metadata ownership and latest explicit surround policy distinct; remove unsupported fitted populations.
 - [ ] Preserve finite/muted gain semantics, ordinary versus DVD aggregate visibility, valid timing/size and deliberate factual corrections.
-
-The issue-specific acceptance and exclusions linked above remain required; a shared helper alone is not completion. Record full versus partial delivery for each target using the [scoped workflow](README.md#scoped-workflow).
+- [ ] Record the evidence-backed M5/M8 measured-fact corrections in `AGENTS.md` as required by [#199](https://github.com/autobrr/go-mediainfo/issues/199#issuecomment-6523304989); do not claim baseline-compatible zero-sign formatting as a new deliberate difference.
 
 ## Dependencies and non-goals
 
@@ -36,16 +33,10 @@ The issue-specific acceptance and exclusions linked above remain required; a sha
 
 **Coordination and exclusions:** [Plan 20](plan-20.md) owns format-settings summary bindings. Containers retain duration/size ownership; no generic HEVC framework is required.
 
-These describe integration contracts, not new native issue-dependency edges. Follow [live blocker handling](README.md#execution-order-and-dependencies) before execution; this plan does not override an owner hold or create one for unrelated work.
-
 ## Validation and evidence
 
-Apply the [initiative validation requirements](README.md#validation-and-evidence) and the current repository guidance. Require changing/dual-mono metadata, independently checked statistics populations and actual dependent/JOC controls across reachable containers. Retain the established TS/BDAV comparison and non-JOC/zero/absent/public lifecycle tests.
-
-No new implementation or corpus run is claimed by this plan record. The linked discussions contain the prior source/witness evidence and its limits.
+[Shared validation requirements](README.md#validation-and-evidence). Require changing/dual-mono metadata, independently checked statistics populations and actual dependent/JOC controls across reachable containers. Retain the established TS/BDAV comparison and non-JOC/zero/absent/public lifecycle tests.
 
 ## Implementation and outcome history
-
-Not implemented by this documentation change. Re-read the linked issues and live dependencies before starting.
 
 2026-11-02: migrated the approved consolidation grouping; preserved closing ownership and current issue decisions.

@@ -8,8 +8,6 @@ Use structural bounded ES descriptors and validated sample-entry geometry for MP
 
 ## Issue ownership and canonical decisions
 
-This plan is the closing owner for the targets below once their complete accepted requirements pass. Linked issue bodies and discussions are authoritative; titles alone can describe an older proposal.
-
 | Issue | Accepted work area | Canonical scope and decisions |
 | --- | --- | --- |
 | [#92](https://github.com/autobrr/go-mediainfo/issues/92) | read H.263 sample entries as video | [Discussion 1](https://github.com/autobrr/go-mediainfo/issues/92#issuecomment-6252614626), [Discussion 2](https://github.com/autobrr/go-mediainfo/issues/92#issuecomment-6522146503) |
@@ -25,24 +23,16 @@ This plan is the closing owner for the targets below once their complete accepte
 - [ ] Correct shared Visual syntax/VBV and supported colour/library facts before exposing MPEG-4 Visual.
 - [ ] Preserve SBR/PS, PCM and bitrate tolerance semantics; #113 requires Plan 16's low-rate Layer II framing correction.
 
-The issue-specific acceptance and exclusions linked above remain required; a shared helper alone is not completion. Record full versus partial delivery for each target using the [scoped workflow](README.md#scoped-workflow).
-
 ## Dependencies and non-goals
 
 **Required contracts:** [Plan 05](plan-05.md), [Plan 06](plan-06.md) and [Plan 16](plan-16.md)'s corrected shared MPEG audio framing.
 
 **Coordination and exclusions:** [Plan 21](plan-21.md) owns brands and General-only image containers. Do not absorb those into codec sample entries.
 
-These describe integration contracts, not new native issue-dependency edges. Follow [live blocker handling](README.md#execution-order-and-dependencies) before execution; this plan does not override an owner hold or create one for unrelated work.
-
 ## Validation and evidence
 
-Apply the [initiative validation requirements](README.md#validation-and-evidence) and the current repository guidance. Test malformed/nested descriptors and new parsers with fuzzing, H.263/Visual, MPEG/Ogg dispatch, PCM and explicit AAC SBR/PS; retain other codec-entry and co64 controls.
-
-No new implementation or corpus run is claimed by this plan record. The linked discussions contain the prior source/witness evidence and its limits.
+[Shared validation requirements](README.md#validation-and-evidence). Test malformed/nested descriptors and new parsers with fuzzing, H.263/Visual, MPEG/Ogg dispatch, PCM and explicit AAC SBR/PS; retain other codec-entry and co64 controls.
 
 ## Implementation and outcome history
-
-Not implemented by this documentation change. Re-read the linked issues and live dependencies before starting.
 
 2026-11-02: migrated the approved consolidation grouping; preserved closing ownership and current issue decisions.

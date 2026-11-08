@@ -8,8 +8,6 @@ Implement bounded caption discovery and parent association across PS/DVD and MP4
 
 ## Issue ownership and canonical decisions
 
-This plan is the closing owner for the targets below once their complete accepted requirements pass. Linked issue bodies and discussions are authoritative; titles alone can describe an older proposal.
-
 | Issue | Accepted work area | Canonical scope and decisions |
 | --- | --- | --- |
 | [#179](https://github.com/autobrr/go-mediainfo/issues/179) | use the video Delay for the caption Delay | [Discussion](https://github.com/autobrr/go-mediainfo/issues/179#issuecomment-6519039086) |
@@ -24,25 +22,18 @@ This plan is the closing owner for the targets below once their complete accepte
 - [ ] Discover captions with bounded parsing/window extension and actual parent/service association; do not use display order as identity.
 - [ ] Implement MP4 ctts/edit timing, supported sample addressing and stateful 708 validation beyond the generic 32-sample probe.
 - [ ] Emit supported Start-time commands and CC1/CC3 identity while preserving timing facts and omitting unsupported service labels.
-
-The issue-specific acceptance and exclusions linked above remain required; a shared helper alone is not completion. Record full versus partial delivery for each target using the [scoped workflow](README.md#scoped-workflow).
+- [ ] Add the explicit measured-fact entry in `AGENTS.md` required by [#215](https://github.com/autobrr/go-mediainfo/issues/215#issuecomment-6523225413), citing the verified caption-service witness and PR #41.
 
 ## Dependencies and non-goals
 
-**Required contracts:** [Plan 01](plan-01.md), [Plan 08](plan-08.md), [Plan 10](plan-10.md), [Plan 19](plan-19.md)'s contracts; supplies discovery integration to Plan 11.
+**Required contracts:** [Plan 01](plan-01.md), [Plan 08](plan-08.md), [Plan 10](plan-10.md), [Plan 19](plan-19.md)'s contracts.
 
-**Coordination and exclusions:** [Plan 12](plan-12.md) owns DVD identity mapping. Share bounded MP4 time addressing with Plan 14 without embedding caption decoding in that helper.
-
-These describe integration contracts, not new native issue-dependency edges. Follow [live blocker handling](README.md#execution-order-and-dependencies) before execution; this plan does not override an owner hold or create one for unrelated work.
+**Coordination and exclusions:** Coordinate shared MPEG-PS probe changes with [Plan 11](plan-11.md) without blocking its independent timing/count work. [Plan 12](plan-12.md) owns DVD identity mapping. Share bounded MP4 time addressing with Plan 14 without embedding caption decoding in that helper.
 
 ## Validation and evidence
 
-Apply the [initiative validation requirements](README.md#validation-and-evidence) and the current repository guidance. Require actual caption evidence with composition/edit timing, service transitions, malformed SEI/708, independent parent association and bounded window extension; fuzz newly exposed parsers.
-
-No new implementation or corpus run is claimed by this plan record. The linked discussions contain the prior source/witness evidence and its limits.
+[Shared validation requirements](README.md#validation-and-evidence). Require actual caption evidence with composition/edit timing, service transitions, malformed SEI/708, independent parent association and bounded window extension; fuzz newly exposed parsers.
 
 ## Implementation and outcome history
-
-Not implemented by this documentation change. Re-read the linked issues and live dependencies before starting.
 
 2026-11-02: migrated the approved consolidation grouping; preserved closing ownership and current issue decisions.

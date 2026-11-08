@@ -4,11 +4,11 @@
 
 ## Goal and scope
 
-One versioned report-field registry, canonical identities, aliases, ordering, visibility and scalar formatting across friendly/raw/JSON output. Include each listed leaf’s actual binding: Menu names/order, delay visibility, statistics deduplication, format/CodecID labels, audio/FPS rows, byte grouping and source-ID display. #50 closes with #107, not a separate FLAC patch. This includes the small producer corrections explicitly required by those tickets, such as present BDAV General ID zero; changing Format display names must first stop count/rate logic from relying on those names.
+Use one versioned registry to identify, alias, order, show and format report fields. Apply it to friendly/raw text and JSON. Cover every listed issue's binding: Menu names/order, delay visibility, statistics deduplication, format/CodecID descriptions, audio/FPS rows, byte grouping and source-ID display.
+
+Close #50 with #107 rather than a separate FLAC patch. Include the small producer corrections required by these issues, such as present BDAV General ID zero. Before changing Format display names, stop count/rate logic from depending on those names.
 
 ## Issue ownership and canonical decisions
-
-This plan is the closing owner for the targets below once their complete accepted requirements pass. Linked issue bodies and discussions are authoritative; titles alone can describe an older proposal.
 
 | Issue | Accepted work area | Canonical scope and decisions |
 | --- | --- | --- |
@@ -44,19 +44,15 @@ This plan is the closing owner for the targets below once their complete accepte
 - [x] Use selected version/kind tables for identity, aliases, order and visibility. Keep producer tag/fill order and allowed duplicate multiplicity.
 - [x] Preserve public Report rebuilding, mutation, round-trip and idempotent behavior. #58 serial/formatting is a partial contribution only.
 
-The issue-specific acceptance and exclusions linked above remain required; a shared helper alone is not completion. Record full versus partial delivery for each target using the [scoped workflow](README.md#scoped-workflow).
-
 ## Dependencies and non-goals
 
 **Required contracts:** Foundation; no earlier plan contract is required.
 
 **Coordination and exclusions:** Later parser plans consume the table interfaces; their producer eligibility work is separate.
 
-These describe integration contracts, not new native issue-dependency edges. Follow [live blocker handling](README.md#execution-order-and-dependencies) before execution; this plan does not override an owner hold or create one for unrelated work.
-
 ## Validation and evidence
 
-Apply the [initiative validation requirements](README.md#validation-and-evidence) and the current repository guidance. Retain ordering/duplicates/numeric-type and public mutation/rebuild regressions. Revalidate affected issue witnesses and shared projection controls after review changes; distinguish each tested tree and subset.
+[Shared validation requirements](README.md#validation-and-evidence). Retain ordering/duplicates/numeric-type and public mutation/rebuild regressions. Revalidate affected issue witnesses and shared projection controls after review changes; distinguish each tested tree and subset.
 
 [PR #256](https://github.com/autobrr/go-mediainfo/pull/256) records the acceptance and validation limits. The [maintainer response](https://github.com/autobrr/go-mediainfo/pull/256#issuecomment-6572958573) covers the 84-witness sweep on its identified earlier tree; the [final follow-up](https://github.com/autobrr/go-mediainfo/pull/256#discussion_r4440686214) covers 32 affected witnesses and shared controls in 12 configurations, all 384 before/after profiles byte-identical. [Exact-head CI](https://github.com/autobrr/go-mediainfo/actions/runs/41419735655) passed. These are separate tested revisions, not a final-head full-corpus run. Retain disclosed WAV/Go-Other/exact-TS-JOC real-witness limits, synthetic-only equal-sampling trigger and existing output-dialect/producer gaps. Raw captures and private mappings are not repository artifacts.
 

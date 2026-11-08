@@ -8,8 +8,6 @@ Consolidate existing HEVC facts and projections alongside validated SPS profile/
 
 ## Issue ownership and canonical decisions
 
-This plan is the closing owner for the targets below once their complete accepted requirements pass. Linked issue bodies and discussions are authoritative; titles alone can describe an older proposal.
-
 | Issue | Accepted work area | Canonical scope and decisions |
 | --- | --- | --- |
 | [#52](https://github.com/autobrr/go-mediainfo/issues/52) | Consolidate HEVC facts/projection with source presence and precedence | [Discussion](https://github.com/autobrr/go-mediainfo/issues/52#issuecomment-6522526231) |
@@ -28,24 +26,16 @@ This plan is the closing owner for the targets below once their complete accepte
 - [ ] Keep profile/level/tier, colour/HDR and encoder source selection separate from container geometry/timing; support required legacy configuration and separated fields.
 - [ ] Implement settled #244 NAL-then-VCL projection, preserving equal duplicates and visibility; do not guess #253's deferred SPS-selection rule.
 
-The issue-specific acceptance and exclusions linked above remain required; a shared helper alone is not completion. Record full versus partial delivery for each target using the [scoped workflow](README.md#scoped-workflow).
-
 ## Dependencies and non-goals
 
 **Required contracts:** [Plan 01](plan-01.md), [Plan 05](plan-05.md), [Plan 06](plan-06.md) and the encoder interface agreed with [Plan 04](plan-04.md).
 
 **Coordination and exclusions:** [#253](https://github.com/autobrr/go-mediainfo/issues/253) owns changing-SPS Matroska HRD selection and is not a blocker for retained #244 projection. [Plan 22](plan-22.md) owns picture/GOP analysis.
 
-These describe integration contracts, not new native issue-dependency edges. Follow [live blocker handling](README.md#execution-order-and-dependencies) before execution; this plan does not override an owner hold or create one for unrelated work.
-
 ## Validation and evidence
 
-Apply the [initiative validation requirements](README.md#validation-and-evidence) and the current repository guidance. Use conflicting hvcC/SPS, legacy configuration, malformed/later NAL, configuration/in-band SEI and separated-field controls; test canonical/direct/Analyze/rebuild routes and dual/absent HRD visibility.
-
-No new implementation or corpus run is claimed by this plan record. The linked discussions contain the prior source/witness evidence and its limits.
+[Shared validation requirements](README.md#validation-and-evidence). Use conflicting hvcC/SPS, legacy configuration, malformed/later NAL, configuration/in-band SEI and separated-field controls; test canonical/direct/Analyze/rebuild routes and dual/absent HRD visibility.
 
 ## Implementation and outcome history
-
-Not implemented by this documentation change. Re-read the linked issues and live dependencies before starting.
 
 2026-11-02: migrated the approved consolidation grouping; preserved closing ownership and current issue decisions.

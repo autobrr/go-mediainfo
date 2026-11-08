@@ -6,6 +6,18 @@ The files own grouping, execution order and acceptance mapping. GitHub issues an
 
 The approved grouping has 170 distinct closing targets, allocated once across 24 stable plan IDs. Cross-plan contributions use ordinary references until the closing owner's full requirements pass. The target was 23 new implementation PRs plus existing #252; this documentation PR and the separate final review-and-cleanup PR sit outside that implementation count. Change a grouping only for a documented scope/dependency/review reason.
 
+## Reading a plan and shared rules
+
+A plan is the **closing owner** of its listed issues: it is responsible for their full accepted requirements before using closing references. Other plans can contribute without closing that issue. Linked issue bodies and current discussions are authoritative; a title may describe a superseded proposal.
+
+Every plan's issue-specific acceptance and exclusions remain required. A shared helper alone does not complete an issue. Follow the [scoped workflow](#scoped-workflow) to record full or partial delivery.
+
+**Required contracts** name interfaces or established behavior that an implementation needs. **Coordination** identifies related work that does not block it. Neither category creates native issue-dependency edges. An **owner hold** is an explicit instruction to pause a particular scope; plans do not remove it. Recheck live dependencies and holds before execution.
+
+An **issue witness** is an original corpus file identified by an issue as evidence of its behavior. The **witness union** is the distinct set of those files across a plan's issues. Shared-behavior **controls** exercise neighboring behavior affected by the change. Original inventory IDs start with C; supplementary sample IDs start with S. Derivatives and synthetic fixtures remain separate evidence categories.
+
+A plan record and its linked historical evidence do not claim a new implementation or corpus run. Unimplemented groups record scope only; re-read current discussions before starting. Each plan links the shared validation requirements and adds its specific checks.
+
 ## Plan index
 
 Issue links provide live state. Plan files record bounded scope, decisions, dependencies, acceptance, validation and outcomes. Implementation links are evidence, not claims that open work has merged.
@@ -35,7 +47,7 @@ Issue links provide live state. Plan files record bounded scope, decisions, depe
 | [21 — MP4 brands and conformance](plan-21.md) | [#163](https://github.com/autobrr/go-mediainfo/issues/163), [#167](https://github.com/autobrr/go-mediainfo/issues/167), [#232](https://github.com/autobrr/go-mediainfo/issues/232) | — |
 | [22 — AVC picture analysis](plan-22.md) | [#158](https://github.com/autobrr/go-mediainfo/issues/158), [#236](https://github.com/autobrr/go-mediainfo/issues/236) | — |
 | [23 — AVI Type-1 DV demultiplexing](plan-23.md) | [#211](https://github.com/autobrr/go-mediainfo/issues/211) | — |
-| [24 — Existing PR252](plan-24.md) | [#250](https://github.com/autobrr/go-mediainfo/issues/250) | [PR #252](https://github.com/autobrr/go-mediainfo/pull/252) |
+| [24 — DVD IFO final file-size presentation](plan-24.md) | [#250](https://github.com/autobrr/go-mediainfo/issues/250) | [PR #252](https://github.com/autobrr/go-mediainfo/pull/252) |
 
 After all 24 groups are implemented, the [final follow-up review and repository cleanup](final-review-and-cleanup.md) is a separate PR with its own full-corpus gate. It is not another numbered implementation plan.
 
@@ -45,7 +57,7 @@ Implement one plan at a time. A shared contract can be established before a cons
 
 The working sequence preserves the approved contract order:
 
-1. Reuse Plan 24's existing #252 result; establish Plan 01's field/alias/visibility contract. #252 is now merged. #256's delivered scope is still unmerged; see the plan's evidence and current PR state.
+1. Reuse [Plan 24's existing #252 result](plan-24.md); establish [Plan 01's field/alias/visibility contract and follow #256](plan-01.md). The linked PRs provide current state.
 2. Work through the foundational families sequentially: [02 metadata](plan-02.md), [03 language](plan-03.md), [04 encoder](plan-04.md), [05 geometry](plan-05.md), [06 colour/HDR](plan-06.md), [18 FLAC](plan-18.md), [21 brands/conformance](plan-21.md).
 3. Establish [10 source/rate/timing](plan-10.md) before [09 Matroska timing](plan-09.md). Complete [08 MPEG state](plan-08.md) and [07 AVC/HEVC facts](plan-07.md) after their geometry/colour/encoder contracts, then [17 AC-3](plan-17.md) and [20 format settings](plan-20.md).
 4. Build [19 relative delay](plan-19.md), [12 DVD identity](plan-12.md), [16 AVI/MPEG audio](plan-16.md) and [22 AVC picture analysis](plan-22.md) on those contracts. Then integrate [13 captions](plan-13.md), [14 Other/timecode/chapters](plan-14.md) and [15 codec sample entries](plan-15.md) using the required timing, addressing and framing interfaces.
@@ -66,13 +78,13 @@ For this initiative's PRs and task briefs:
 4. Update the affected plan alongside implementation where practical. Record new evidence, justified scope/dependency revisions and the canonical issue decision that supports each consequential change. Raise ambiguous criteria as a decision rather than quietly changing them.
 5. After verified merge, add a concise outcome and implementation link to that plan. Keep completed records until the separate final follow-up PR completes its review, fresh full-corpus gate and cleanup. Keep this index mostly navigation; issue/PR state is not maintained as a second detailed ledger.
 
-Use stable filenames and IDs. Update the existing file and its concise history rather than accumulating V2/V7 copies. Git history preserves revisions. If an issue moves between groups, update both plans and the index together, retaining one closing owner and an explanation. Evidence-only contributions to another plan use ordinary links.
+Use stable filenames and IDs. Update the existing file and its concise history rather than accumulating separate numbered revision files. Git history preserves revisions. If an issue moves between groups, update both plans and the index together, retaining one closing owner and an explanation. Evidence-only contributions to another plan use ordinary links.
 
 ## Validation and evidence
 
-Follow the current repository guidance and the accepted issue-specific criteria. Ordinary reporting uses verified official v23.04; all DVD output uses verified official v26.10 under ADR 0002. Correct measured facts, output compatibility, safety and the existing documented differences remain protected. Explain any AGENTS/ADR change or why the active diff needs none.
+Follow the current [AGENTS guidance](../../../AGENTS.md#parity-harness), [ADR 0001](../../adr/0001-parity-baseline-and-output-scope.md), [ADR 0002](../../adr/0002-dvd-parity-reference.md) and accepted issue-specific criteria. These own reference selection, correct measured facts, compatible output and protected differences. Explain any AGENTS/ADR change or why the active diff needs none.
 
-For implementation and review-driven behavior changes, use the actual October issue-witness union plus controls for shared behavior affected by the final diff. Run builds and real-file comparisons on the authorized desktop. Preserve original source metadata, exact source/tree/executable and reference identities, the options and normalization policy, and frozen official results; save fresh results separately. Recheck the affected subset after substantive review fixes. Full-corpus runs are not automatic for every implementation plan. The separate final follow-up PR requires a completely fresh run on all original media files; selected subsets, cached captures and earlier successful sweeps cannot satisfy that final gate.
+For implementation and review-driven behavior changes, use the actual October issue-witness union plus controls for shared behavior affected by the final diff. This initiative uses its owner's authorized desktop for builds and real-file comparisons. Other contributors can use the repository's supported verified-local-reference or media-host workflow. Preserve original source metadata, exact source/tree/executable and reference identities, the options and normalization policy, and frozen official results; save fresh results separately. Recheck the affected subset after substantive review fixes. Full-corpus runs are not automatic for every implementation plan. The separate final follow-up PR requires a completely fresh run on all original media files; selected subsets, cached captures and earlier successful sweeps cannot satisfy that final gate.
 
 The 12-configuration comparison used by Plan 01 covers TEXT, JSON, XML, OLDXML, HTML and CSV in normal/raw modes with `--ParseSpeed=0.5 --File_TestContinuousFileNames=0`. That is evidence about its tested revisions, not a new repository-wide CLI gate. Identify actual argv and applicable reference dialects for later runs; format names alone do not prove equivalence.
 
@@ -92,16 +104,12 @@ Assess substantive automated and maintainer feedback against source, policy and 
 
 ## Final cleanup acceptance
 
-Cleanup belongs to the separate [final follow-up review-and-cleanup PR](final-review-and-cleanup.md), after all 24 existing implementation groups are complete. Preserve completed plan records until that stage.
-
-- [ ] Verify the agreed plan outcomes and outstanding partial/research dispositions; do not treat deferred research as silently delivered.
-- [ ] Complete the cumulative review and fresh full-inventory corpus gate in the separate follow-up PR, with missing, unreadable or unexecuted files explicitly blocking an all-files pass.
-- [ ] Remove this temporary plan directory in that follow-up PR while preserving durable repository guidance, necessary tests and evidence links.
-- [ ] Check incoming repository, issue and PR links. Replace/update active references with durable issue/PR evidence or commit-pinned historical plan links so removal leaves no broken references. Preserve other authors' content and immutable history; use a scoped clarification where an old external reference cannot be edited.
-- [ ] Record the full-corpus results, regression dispositions, cleanup and verified merge outcome in the follow-up PR. Git history and issue/PR evidence retain the plan history; no permanent plan tree or released-state claim is required.
+The separate final follow-up PR owns cleanup after all 24 implementation groups. Keep completed records until then. Its [cleanup acceptance checklist](final-review-and-cleanup.md#cleanup-acceptance) is the single checklist for this stage.
 
 ## Revision history
 
 2026-11-02: moved the approved 24-group consolidation into stable repository files, reconciled against main `f8152b167c7112617c109d48038939a03844d90d`, current issue discussions, #252's merge and #256's delivered-but-unmerged state. Added the scoped maintenance workflow and final cleanup requirement. No parser, renderer, global contribution policy or deliberate-difference policy changes are part of this documentation work.
 
 2026-11-02: refined the lifecycle to require a separate final follow-up PR for cumulative review, a completely fresh all-original-files corpus run and repository cleanup. The 24 plan IDs and closing ownership remain unchanged.
+
+2026-11-08: clarified initiative setup and terms, centralized shared rules and cleanup acceptance, and made the issue-required deliberate-difference records explicit. Validation-policy questions remain pending their separate resolution.

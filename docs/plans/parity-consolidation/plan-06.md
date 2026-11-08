@@ -8,8 +8,6 @@ Unify colour namespaces, explicit presence, HDR component alignment, luminance p
 
 ## Issue ownership and canonical decisions
 
-This plan is the closing owner for the targets below once their complete accepted requirements pass. Linked issue bodies and discussions are authoritative; titles alone can describe an older proposal.
-
 | Issue | Accepted work area | Canonical scope and decisions |
 | --- | --- | --- |
 | [#93](https://github.com/autobrr/go-mediainfo/issues/93) | show the colour and HDR lines that JSON already has | [Discussion](https://github.com/autobrr/go-mediainfo/issues/93#issuecomment-6522117007) |
@@ -26,24 +24,16 @@ This plan is the closing owner for the targets below once their complete accepte
 - [ ] Remove Dolby Vision/profile or BT.2020 guesses; preserve unknown codes without invented names.
 - [ ] Use supported luminance precision and preserve adopted HDR conventions; keep first-sequence MPEG selection in Plan 08.
 
-The issue-specific acceptance and exclusions linked above remain required; a shared helper alone is not completion. Record full versus partial delivery for each target using the [scoped workflow](README.md#scoped-workflow).
-
 ## Dependencies and non-goals
 
 **Required contracts:** [Plan 01](plan-01.md)'s display contract; supplies colour/HDR policy to Plan 07.
 
 **Coordination and exclusions:** [Plan 08](plan-08.md) owns MPEG colour snapshot selection (#95).
 
-These describe integration contracts, not new native issue-dependency edges. Follow [live blocker handling](README.md#execution-order-and-dependencies) before execution; this plan does not override an owner hold or create one for unrelated work.
-
 ## Validation and evidence
 
-Apply the [initiative validation requirements](README.md#validation-and-evidence) and the current repository guidance. Require actual Dolby Vision and generic-HDR controls, absent/unspecified fields, partial combined components and fractional luminance; distinguish generated controls from original witnesses.
-
-No new implementation or corpus run is claimed by this plan record. The linked discussions contain the prior source/witness evidence and its limits.
+[Shared validation requirements](README.md#validation-and-evidence). Require actual Dolby Vision and generic-HDR controls, absent/unspecified fields, partial combined components and fractional luminance; distinguish generated controls from original witnesses.
 
 ## Implementation and outcome history
-
-Not implemented by this documentation change. Re-read the linked issues and live dependencies before starting.
 
 2026-11-02: migrated the approved consolidation grouping; preserved closing ownership and current issue decisions.

@@ -1,4 +1,4 @@
-# Plan 24: Existing PR252
+# Plan 24: DVD IFO final file-size presentation
 
 [Initiative index](README.md) · Stable plan ID 24
 
@@ -7,8 +7,6 @@
 Preserve the final-report-size fix delivered by merged PR #252 for #250. Do not create a replacement or expand this completed group into the whole rendering bundle.
 
 ## Issue ownership and canonical decisions
-
-This plan is the closing owner for the targets below once their complete accepted requirements pass. Linked issue bodies and discussions are authoritative; titles alone can describe an older proposal.
 
 | Issue | Accepted work area | Canonical scope and decisions |
 | --- | --- | --- |
@@ -20,19 +18,15 @@ This plan is the closing owner for the targets below once their complete accepte
 - [x] Keep raw width/normalization and all assertions; share the renderer's friendly padding helper.
 - [x] Pin the official Windows x64 v26.10 artifact/runtime and retain the bounded three-witness comparison evidence.
 
-The issue-specific acceptance and exclusions linked above remain required; a shared helper alone is not completion. Record full versus partial delivery for each target using the [scoped workflow](README.md#scoped-workflow).
-
 ## Dependencies and non-goals
 
 **Required contracts:** Existing implementation; preserve its verified merged result.
 
 **Coordination and exclusions:** No replacement PR or enlargement into Plan 01. Merge is a verified outcome, not a release claim.
 
-These describe integration contracts, not new native issue-dependency edges. Follow [live blocker handling](README.md#execution-order-and-dependencies) before execution; this plan does not override an owner hold or create one for unrelated work.
-
 ## Validation and evidence
 
-Apply the [initiative validation requirements](README.md#validation-and-evidence) and the current repository guidance. The retained three actual DVD witnesses C000013/C000027/C000122 were compared in normal text, raw text, JSON, XML, HTML and CSV (18 fresh captures). Output matched the prior fixed candidate. This evidence is bounded, not complete DVD parity.
+[Shared validation requirements](README.md#validation-and-evidence). The retained three actual DVD witnesses C000013/C000027/C000122 were compared in normal text, raw text, JSON, XML, HTML and CSV (18 fresh captures). Output matched the prior fixed candidate. This evidence is bounded, not complete DVD parity.
 
 [PR #252](https://github.com/autobrr/go-mediainfo/pull/252) contains the verified reference identity and bounded validation. Preserve known language/ID differences. The [review](https://github.com/autobrr/go-mediainfo/pull/252#pullrequestreview-5718506358) and [padding finding](https://github.com/autobrr/go-mediainfo/pull/252#discussion_r4428363352) explain the final test/body follow-up.
 
