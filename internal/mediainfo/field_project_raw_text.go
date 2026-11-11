@@ -106,7 +106,8 @@ func projectRawTextReport(report Report) rawTextReportProjection {
 			totalFileSize, _ = strconv.ParseInt(structured["FileSize"], 10, 64)
 		}
 		fields := make([]rawTextFieldProjection, 0, len(stream.Fields))
-		seen := make(map[string]bool, len(stream.Fields))
+		seen := make(map[string]struct{}, len(stream.Fields))
+		tagLabels := make(map[string]bool)
 		for _, entry := range stream.Fields {
 			if !entry.Options.ShowText {
 				continue
@@ -140,7 +141,10 @@ func projectRawTextReport(report Report) rawTextReportProjection {
 				Label: rule.Label, Value: value,
 				Sequence: entry.Sequence, Extension: !known,
 			})
-			seen[rule.Label] = entry.MatroskaTag
+			seen[rule.Label] = struct{}{}
+			if entry.MatroskaTag {
+				tagLabels[rule.Label] = true
+			}
 		}
 		// Derived rows follow the store-wide canonical encounter sequences.
 		sequence := store.nextSequence
@@ -154,7 +158,7 @@ func projectRawTextReport(report Report) rawTextReportProjection {
 			fields = append(fields, rawTextFieldProjection{
 				Label: label, Value: value, Sequence: sequence,
 			})
-			seen[label] = false
+			seen[label] = struct{}{}
 			sequence++
 		}
 		codec := storedCodecDescription(generalFormat, stream, structured)
@@ -175,7 +179,7 @@ func projectRawTextReport(report Report) rawTextReportProjection {
 							Label: derived.Label, Value: derived.Value,
 							Sequence: sequence,
 						})
-						seen[derived.Label] = false
+						seen[derived.Label] = struct{}{}
 						sequence++
 					}
 					continue
@@ -189,7 +193,7 @@ func projectRawTextReport(report Report) rawTextReportProjection {
 							Label: derived.Label, Value: derived.Value,
 							Sequence: sequence,
 						})
-						seen[derived.Label] = false
+						seen[derived.Label] = struct{}{}
 						sequence++
 					}
 					continue
@@ -211,7 +215,7 @@ func projectRawTextReport(report Report) rawTextReportProjection {
 				position := len(fields)
 				for _, next := range extra.Object[memberIndex+1:] {
 					nextLabel := rawFieldLabel(next.Key)
-					if tag, exists := seen[nextLabel]; !exists || tag {
+					if _, exists := seen[nextLabel]; !exists || tagLabels[nextLabel] {
 						continue
 					}
 					if index := slices.IndexFunc(fields, func(existing rawTextFieldProjection) bool {
@@ -223,7 +227,7 @@ func projectRawTextReport(report Report) rawTextReportProjection {
 					}
 				}
 				fields = slices.Insert(fields, position, field)
-				seen[label] = false
+				seen[label] = struct{}{}
 				sequence++
 			}
 		}
@@ -615,7 +619,8 @@ func rawTextStructuredDerivations(version reportTableVersion, kind StreamKind, s
 	}
 	appendField("MuxingMode", structured["MuxingMode"])
 	appendField("Format_Version", formatRawTextFormatVersion(structured["Format_Version"]))
-	appendField("Format/Info", rawTextFormatInfo(version, kind, structured))
+	_, formatInfo := reportFormatPresentation(version, kind, structured)
+	appendField("Format/Info", formatInfo)
 	appendField("Format_Commercial_IfAny", structured["Format_Commercial_IfAny"])
 	appendField("Format_Profile", formatRawTextProfile(kind, structured, structured["Format_Profile"]))
 	appendField("Format_Settings", formatRawTextSettings(structured))
@@ -1149,7 +1154,7 @@ func rawTextValue(version reportTableVersion, kind StreamKind, label, display st
 		name, _ := reportFormatPresentation(version, kind, structured)
 		return name
 	case "Format/Info":
-		if value := rawTextFormatInfo(version, kind, structured); value != "" {
+		if _, value := reportFormatPresentation(version, kind, structured); value != "" {
 			return value
 		}
 	case "HDR_Format/String":
@@ -1629,13 +1634,6 @@ func rawTextOggStream(structured map[string]string) bool {
 	default:
 		return false
 	}
-}
-
-// rawTextFormatInfo composes the selected reference's description from
-// canonical format facts.
-func rawTextFormatInfo(version reportTableVersion, kind StreamKind, structured map[string]string) string {
-	_, info := reportFormatPresentation(version, kind, structured)
-	return info
 }
 
 // renderRawText serializes raw-language projections with MediaInfo's 33-column labels.

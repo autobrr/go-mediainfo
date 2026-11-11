@@ -257,10 +257,10 @@ func TestRawTextAVISettingsAndFormatInfo(t *testing.T) {
 	}); got != "Custom Matrix" {
 		t.Fatalf("MPEG-4 Visual settings without BVOP = %q", got)
 	}
-	if got := rawTextFormatInfo(reportTables23, StreamAudio, map[string]string{"Format": "AC-3"}); got != "Audio Coding 3" {
+	if _, got := reportFormatPresentation(reportTables23, StreamAudio, map[string]string{"Format": "AC-3"}); got != "Audio Coding 3" {
 		t.Fatalf("AC-3 format info = %q", got)
 	}
-	if got := rawTextFormatInfo(reportTables23, StreamAudio, map[string]string{"Format": "AAC", "Format_AdditionalFeatures": "LC"}); got != "Advanced Audio Codec Low Complexity" {
+	if _, got := reportFormatPresentation(reportTables23, StreamAudio, map[string]string{"Format": "AAC", "Format_AdditionalFeatures": "LC"}); got != "Advanced Audio Codec Low Complexity" {
 		t.Fatalf("AAC LC format info = %q", got)
 	}
 }
@@ -307,8 +307,8 @@ func TestRawTextBDAVStructuredFormatting(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if got := rawTextFormatInfo(reportTables23, test.kind, test.structured); got != test.wantInfo {
-				t.Fatalf("rawTextFormatInfo = %q, want %q", got, test.wantInfo)
+			if _, got := reportFormatPresentation(reportTables23, test.kind, test.structured); got != test.wantInfo {
+				t.Fatalf("Format/Info = %q, want %q", got, test.wantInfo)
 			}
 			if got := formatRawTextSettings(test.structured); got != test.wantSet {
 				t.Fatalf("formatRawTextSettings = %q, want %q", got, test.wantSet)
