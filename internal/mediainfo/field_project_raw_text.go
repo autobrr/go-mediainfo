@@ -1244,8 +1244,7 @@ func rawTextValue(version reportTableVersion, kind StreamKind, label, display st
 		if value, present := structured[strings.TrimSuffix(label, "/String")]; present {
 			return formatRawTextCount(value, "pixel")
 		}
-		value := strings.TrimSuffix(strings.TrimSuffix(display, " pixels"), " pixel")
-		return strings.ReplaceAll(value, " ", "") + " pixel"
+		return ""
 	case "FrameRate_Mode/String":
 		return formatRawTextMode(firstNonEmpty(structured["FrameRate_Mode"], display), "CFR", "VFR")
 	case "BitRate_Mode/String", "OverallBitRate_Mode/String":

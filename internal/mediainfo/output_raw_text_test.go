@@ -624,3 +624,26 @@ func BenchmarkRenderTextProjection(b *testing.B) {
 		}
 	})
 }
+
+// TestRawWidthHeightFromLegacyFriendlyFields checks that a caller-built report
+// with only friendly "1 920 pixels" text gets its raw size from the structured
+// value that legacy ingestion parses, not from the renderer.
+func TestRawWidthHeightFromLegacyFriendlyFields(t *testing.T) {
+	report := Report{
+		General: Stream{Kind: StreamGeneral, Fields: []Field{{Name: "Format", Value: "Matroska"}}},
+		Streams: []Stream{{Kind: StreamVideo, Fields: []Field{
+			{Name: "Format", Value: "AVC"},
+			{Name: "Width", Value: "1 920 pixels"},
+			{Name: "Height", Value: "1 080 pixels"},
+		}}},
+	}
+	raw := normalizeText(RenderTextWithOptions([]Report{report}, TextRenderOptions{Language: "raw"}))
+	for _, want := range []string{
+		padRawTextLabel("Width/String", 33) + ": 1920 pixel\n",
+		padRawTextLabel("Height/String", 33) + ": 1080 pixel\n",
+	} {
+		if !strings.Contains(raw, want) {
+			t.Errorf("raw output lacks %q:\n%s", want, raw)
+		}
+	}
+}
