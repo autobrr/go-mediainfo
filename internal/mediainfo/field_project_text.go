@@ -33,7 +33,7 @@ func projectTextStore(store *fieldStore, fallbackRef string) textReportProjectio
 	totalSize := int64(0)
 	for i := range store.streams {
 		if store.streams[i].Kind == StreamGeneral {
-			totalSize, _ = strconv.ParseInt(rawTextStructuredValues(&store.streams[i])["FileSize"], 10, 64)
+			totalSize, _ = strconv.ParseInt(storedScalarValues(&store.streams[i])["FileSize"], 10, 64)
 		}
 	}
 	container := rawTextGeneralFormat(store)
@@ -47,7 +47,7 @@ func projectTextStore(store *fieldStore, fallbackRef string) textReportProjectio
 	})
 	for _, streamIndex := range streamIndexes {
 		stream := &store.streams[streamIndex]
-		values := rawTextStructuredValues(stream)
+		values := storedScalarValues(stream)
 		entries := make([]fieldEntry, 0, len(stream.Fields))
 		seen := make(map[string]bool)
 		for _, entry := range stream.Fields {

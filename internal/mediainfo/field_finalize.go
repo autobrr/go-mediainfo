@@ -49,7 +49,7 @@ func clearAudioSampleFrequencyFrameRate(store *fieldStore, ref streamRef) {
 	if stream == nil || stream.Kind != StreamAudio {
 		return
 	}
-	values := rawTextStructuredValues(stream)
+	values := storedScalarValues(stream)
 	rateText := values["FrameRate"]
 	if rateText == "" {
 		// Lazy XML compatibility entries may be the only remaining copy.

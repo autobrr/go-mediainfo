@@ -1,6 +1,7 @@
 package mediainfo
 
 import (
+	"cmp"
 	"embed"
 	"strings"
 )
@@ -180,25 +181,8 @@ func reportFieldIdentity(version reportTableVersion, kind StreamKind, name, labe
 		}
 	}
 	for _, candidate := range []string{name, label} {
-		switch candidate {
-		case "Chroma subsampling position":
-			return "ChromaSubsampling_Position"
-		case "Format settings, Picture structure":
-			return "Format_Settings_PictureStructure"
-		case "Delay relative to video":
-			return "Video_Delay"
-		case "Original delay":
-			return "Delay_Original"
-		case "Original source medium ID", "ID in the original source medium":
-			return "OriginalSourceMedium_ID"
-		case "Statistics Tags Issue", "Statistics_Tags_Issue":
-			return "Statistics_Tags_Issue"
-		case "Service name":
-			return "ServiceName"
-		case "Service provider":
-			return "ServiceProvider"
-		case "Service type":
-			return "ServiceType"
+		if compat, ok := compatibilityLabels[candidate]; ok {
+			return compat.identity
 		}
 		if _, ok := reportTables[version].Labels[candidate]; ok {
 			return candidate
@@ -267,4 +251,141 @@ func rawReportFieldName(name string) string {
 		return alias
 	}
 	return name
+}
+
+// compatibilityLabel names a producer label that the pinned tables do not list.
+// identity is the canonical field; raw is MediaInfo's raw name, or empty when
+// raw text keeps the friendly label.
+type compatibilityLabel struct{ identity, raw string }
+
+var compatibilityLabels = map[string]compatibilityLabel{
+	"Chroma subsampling position":        {identity: "ChromaSubsampling_Position"},
+	"Format settings, Picture structure": {identity: "Format_Settings_PictureStructure", raw: "Format_Settings_PictureStructure"},
+	"Delay relative to video":            {identity: "Video_Delay", raw: "Video_Delay/String"},
+	"Original delay":                     {identity: "Delay_Original", raw: "Delay_Original/String"},
+	"Original source medium ID":          {identity: "OriginalSourceMedium_ID", raw: "OriginalSourceMedium_ID/String"},
+	"ID in the original source medium":   {identity: "OriginalSourceMedium_ID", raw: "OriginalSourceMedium_ID/String"},
+	"Statistics Tags Issue":              {identity: "Statistics_Tags_Issue", raw: "Statistics Tags Issue"},
+	"Statistics_Tags_Issue":              {identity: "Statistics_Tags_Issue", raw: "Statistics Tags Issue"},
+	"Service name":                       {identity: "ServiceName", raw: "ServiceName"},
+	"Service provider":                   {identity: "ServiceProvider", raw: "ServiceProvider"},
+	"Service type":                       {identity: "ServiceType", raw: "ServiceType"},
+}
+
+// rawFieldLabelAlias returns MediaInfo's raw name for a friendly label, or an
+// empty string when the label has no alias.
+func rawFieldLabelAlias(friendly string) string {
+	if label := rawFieldLabelAliases[friendly]; label != "" {
+		return label
+	}
+	return compatibilityLabels[friendly].raw
+}
+
+// rawFieldLabel resolves a friendly label to MediaInfo's raw name. A label
+// without an alias stays as it is.
+func rawFieldLabel(friendly string) string {
+	return cmp.Or(rawFieldLabelAlias(friendly), friendly)
+}
+
+// rawFieldLabelAliases maps compatibility/display labels to MediaInfo raw names.
+// Labels that also need a canonical identity live in compatibilityLabels.
+var rawFieldLabelAliases = map[string]string{
+	"ID":                                 "ID/String",
+	"Menu ID":                            "MenuID/String",
+	"Unique ID":                          "UniqueID/String",
+	"Complete name":                      "CompleteName",
+	"Format":                             "Format/String",
+	"Format version":                     "Format_Version",
+	"Format profile":                     "Format_Profile",
+	"Format settings":                    "Format_Settings",
+	"Commercial name":                    "Format_Commercial_IfAny",
+	"Muxing mode":                        "MuxingMode",
+	"Muxing mode, more info":             "MuxingMode_MoreInfo",
+	"HDR format":                         "HDR_Format/String",
+	"Format settings, CABAC":             "Format_Settings_CABAC/String",
+	"Format settings, Reference frames":  "Format_Settings_RefFrames/String",
+	"Format settings, BVOP":              "Format_Settings_BVOP/String",
+	"Format settings, QPel":              "Format_Settings_QPel/String",
+	"Format settings, GMC":               "Format_Settings_GMC/String",
+	"Format settings, Matrix":            "Format_Settings_Matrix/String",
+	"Format settings, GOP":               "Format_Settings_GOP",
+	"Format compression":                 "Format_Compression",
+	"Codec ID":                           "CodecID",
+	"Codec configuration box":            "CodecConfigurationBox",
+	"Codec ID/Info":                      "CodecID/Info",
+	"Duration":                           "Duration/String",
+	"Source duration":                    "Source_Duration/String",
+	"Overall bit rate mode":              "OverallBitRate_Mode/String",
+	"Overall bit rate":                   "OverallBitRate/String",
+	"Bit rate mode":                      "BitRate_Mode/String",
+	"Bit rate":                           "BitRate/String",
+	"Nominal bit rate":                   "BitRate_Nominal/String",
+	"Maximum bit rate":                   "BitRate_Maximum/String",
+	"File size":                          "FileSize/String",
+	"Stream size":                        "StreamSize/String",
+	"Source stream size":                 "Source_StreamSize/String",
+	"Width":                              "Width/String",
+	"Height":                             "Height/String",
+	"Display aspect ratio":               "DisplayAspectRatio/String",
+	"Original display aspect ratio":      "DisplayAspectRatio_Original/Stri",
+	"Frame rate mode":                    "FrameRate_Mode/String",
+	"Frame rate":                         "FrameRate/String",
+	"Color space":                        "ColorSpace",
+	"Chroma subsampling":                 "ChromaSubsampling/String",
+	"Bit depth":                          "BitDepth/String",
+	"Bit depth, detected":                "BitDepth_Detected/String",
+	"Scan type":                          "ScanType/String",
+	"Scan order":                         "ScanOrder/String",
+	"Scan type, store method":            "ScanType_StoreMethod/String",
+	"Active format description":          "ActiveFormatDescription/String",
+	"Compression mode":                   "Compression_Mode/String",
+	"Bits/(Pixel*Frame)":                 "Bits-(Pixel*Frame)",
+	"Time code of first frame":           "TimeCode_FirstFrame",
+	"Time code source":                   "TimeCode_Source",
+	"GOP, Open/Closed":                   "Gop_OpenClosed/String",
+	"GOP, Open/Closed of first frame":    "Gop_OpenClosed_FirstFrame/String",
+	"Channel(s)":                         "Channel(s)/String",
+	"Channel layout":                     "ChannelLayout",
+	"Sampling rate":                      "SamplingRate/String",
+	"Count of elements":                  "ElementCount",
+	"Language":                           "Language/String",
+	"Language, more info":                "Language_More",
+	"Service kind":                       "ServiceKind/String",
+	"Writing application":                "Encoded_Application/String",
+	"Writing library":                    "Encoded_Library/String",
+	flacUnencodedMD5Label:                "MD5_Unencoded",
+	"Encoding settings":                  "Encoded_Library_Settings",
+	"Encoded date":                       "Encoded_Date",
+	"Tagged date":                        "Tagged_Date",
+	"Default":                            "Default/String",
+	"Forced":                             "Forced/String",
+	"Alternate group":                    "AlternateGroup/String",
+	"Color range":                        "colour_range",
+	"Color primaries":                    "colour_primaries",
+	"Transfer characteristics":           "transfer_characteristics",
+	"Matrix coefficients":                "matrix_coefficients",
+	"Mastering display color primaries":  "MasteringDisplay_ColorPrimaries",
+	"Mastering display luminance":        "MasteringDisplay_Luminance",
+	"Maximum Content Light Level":        "MaxCLL/String",
+	"Maximum Frame-Average Light Level":  "MaxFALL/String",
+	"Original source medium":             "OriginalSourceMedium",
+	"Complexity index":                   "ComplexityIndex",
+	"Number of dynamic objects":          "NumberOfDynamicObjects",
+	"Bed channel count":                  "BedChannelCount",
+	"Bed channel configuration":          "BedChannelConfiguration",
+	"Dialog Normalization":               "dialnorm",
+	"Law rating":                         "LawRating",
+	"Recorded location":                  "Recorded/Location",
+	"Recorded_Location":                  "Recorded/Location",
+	"Terms of use":                       "TermsOfUse",
+	"List":                               "List/String",
+	"Duration of the visible content":    "Duration_Start2End/String",
+	"Start time":                         "Duration_Start/String",
+	"End time":                           "Duration_End/String",
+	"Count of frames before first event": "FirstDisplay_Delay_Frames",
+	"Type of the first event":            "FirstDisplay_Type",
+	"ACTOR_CHARACTER":                    "ACTOR/CHARACTER",
+	"Encoded_Application_Url":            "Encoded_Application/Url",
+	"Writing_Library":                    "Writing Library",
+	"Format settings, picture structure": "Format_Settings_PictureStructure",
 }

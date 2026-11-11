@@ -30,7 +30,7 @@ func TestRawMissingExtraRowsKeepOrderedSiblingPosition(t *testing.T) {
 			attachCanonicalStore(&report)
 			before := RenderJSON([]Report{report})
 			raw := RenderTextWithOptions([]Report{report}, TextRenderOptions{Language: "raw"})
-			first := rawTextLabel(tc.first)
+			first := rawFieldLabel(tc.first)
 			assertRowOrder(t, raw, first, tc.second)
 			if strings.Count(raw, first) != 1 || !strings.Contains(raw, padRawTextLabel(first, 33)+": canonical") {
 				t.Fatal("missing-extra projection lost canonical value or duplicate policy")

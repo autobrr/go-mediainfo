@@ -377,7 +377,7 @@ func TestRawTextBDAVStructuredDerivations(t *testing.T) {
 }
 
 func TestRawTextSliceCountKeepsNumericExtensionSeparate(t *testing.T) {
-	if got := rawTextLabel("Format settings, Slice count"); got != "Format settings, Slice count" {
+	if got := rawFieldLabel("Format settings, Slice count"); got != "Format settings, Slice count" {
 		t.Fatalf("numeric slice-count label = %q, want retained extension label", got)
 	}
 

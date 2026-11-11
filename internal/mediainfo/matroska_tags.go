@@ -444,12 +444,12 @@ func applyMatroskaTrackTags(info *MatroskaInfo) {
 				for _, member := range extra.Object {
 					_, tag := tagNames[member.Key]
 					if !tag && !provenance[member.Key] && !isKnownStructuredField(stream.Kind, member.Key) {
-						codecLabels[rawTextLabel(member.Key)] = true
+						codecLabels[rawFieldLabel(member.Key)] = true
 					}
 				}
 			}
 			for _, entry := range stream.canonicalSeed {
-				if entry.Options.ShowText && codecLabels[rawTextLabel(entry.TextLabel)] {
+				if entry.Options.ShowText && codecLabels[rawFieldLabel(entry.TextLabel)] {
 					before = append(before, entry.TextLabel)
 					break
 				}

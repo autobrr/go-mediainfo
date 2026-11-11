@@ -40,120 +40,6 @@ type rawTextDerivedField struct {
 	Value string
 }
 
-// rawTextLabelAliases maps compatibility/display labels to MediaInfo raw names.
-// Canonical entries consume the field-name keyed registry built from these
-// aliases; dynamic legacy input uses the aliases directly.
-var rawTextLabelAliases = map[string]string{
-	"ID":                                 "ID/String",
-	"Menu ID":                            "MenuID/String",
-	"Unique ID":                          "UniqueID/String",
-	"Complete name":                      "CompleteName",
-	"Format":                             "Format/String",
-	"Format version":                     "Format_Version",
-	"Format profile":                     "Format_Profile",
-	"Format settings":                    "Format_Settings",
-	"Commercial name":                    "Format_Commercial_IfAny",
-	"Muxing mode":                        "MuxingMode",
-	"Muxing mode, more info":             "MuxingMode_MoreInfo",
-	"HDR format":                         "HDR_Format/String",
-	"Format settings, CABAC":             "Format_Settings_CABAC/String",
-	"Format settings, Reference frames":  "Format_Settings_RefFrames/String",
-	"Format settings, BVOP":              "Format_Settings_BVOP/String",
-	"Format settings, QPel":              "Format_Settings_QPel/String",
-	"Format settings, GMC":               "Format_Settings_GMC/String",
-	"Format settings, Matrix":            "Format_Settings_Matrix/String",
-	"Format settings, GOP":               "Format_Settings_GOP",
-	"Format settings, Picture structure": "Format_Settings_PictureStructure",
-	"Format compression":                 "Format_Compression",
-	"Codec ID":                           "CodecID",
-	"Codec configuration box":            "CodecConfigurationBox",
-	"Codec ID/Info":                      "CodecID/Info",
-	"Duration":                           "Duration/String",
-	"Source duration":                    "Source_Duration/String",
-	"Overall bit rate mode":              "OverallBitRate_Mode/String",
-	"Overall bit rate":                   "OverallBitRate/String",
-	"Bit rate mode":                      "BitRate_Mode/String",
-	"Bit rate":                           "BitRate/String",
-	"Nominal bit rate":                   "BitRate_Nominal/String",
-	"Maximum bit rate":                   "BitRate_Maximum/String",
-	"File size":                          "FileSize/String",
-	"Stream size":                        "StreamSize/String",
-	"Source stream size":                 "Source_StreamSize/String",
-	"Width":                              "Width/String",
-	"Height":                             "Height/String",
-	"Display aspect ratio":               "DisplayAspectRatio/String",
-	"Original display aspect ratio":      "DisplayAspectRatio_Original/Stri",
-	"Frame rate mode":                    "FrameRate_Mode/String",
-	"Frame rate":                         "FrameRate/String",
-	"Color space":                        "ColorSpace",
-	"Chroma subsampling":                 "ChromaSubsampling/String",
-	"Bit depth":                          "BitDepth/String",
-	"Bit depth, detected":                "BitDepth_Detected/String",
-	"Scan type":                          "ScanType/String",
-	"Scan order":                         "ScanOrder/String",
-	"Scan type, store method":            "ScanType_StoreMethod/String",
-	"Active format description":          "ActiveFormatDescription/String",
-	"Compression mode":                   "Compression_Mode/String",
-	"Bits/(Pixel*Frame)":                 "Bits-(Pixel*Frame)",
-	"Time code of first frame":           "TimeCode_FirstFrame",
-	"Time code source":                   "TimeCode_Source",
-	"GOP, Open/Closed":                   "Gop_OpenClosed/String",
-	"GOP, Open/Closed of first frame":    "Gop_OpenClosed_FirstFrame/String",
-	"Channel(s)":                         "Channel(s)/String",
-	"Channel layout":                     "ChannelLayout",
-	"Sampling rate":                      "SamplingRate/String",
-	"Count of elements":                  "ElementCount",
-	"Language":                           "Language/String",
-	"Language, more info":                "Language_More",
-	"Service kind":                       "ServiceKind/String",
-	"Writing application":                "Encoded_Application/String",
-	"Writing library":                    "Encoded_Library/String",
-	flacUnencodedMD5Label:                "MD5_Unencoded",
-	"Encoding settings":                  "Encoded_Library_Settings",
-	"Encoded date":                       "Encoded_Date",
-	"Tagged date":                        "Tagged_Date",
-	"Default":                            "Default/String",
-	"Forced":                             "Forced/String",
-	"Alternate group":                    "AlternateGroup/String",
-	"Color range":                        "colour_range",
-	"Color primaries":                    "colour_primaries",
-	"Transfer characteristics":           "transfer_characteristics",
-	"Matrix coefficients":                "matrix_coefficients",
-	"Mastering display color primaries":  "MasteringDisplay_ColorPrimaries",
-	"Mastering display luminance":        "MasteringDisplay_Luminance",
-	"Maximum Content Light Level":        "MaxCLL/String",
-	"Maximum Frame-Average Light Level":  "MaxFALL/String",
-	"Original source medium":             "OriginalSourceMedium",
-	"Original source medium ID":          "OriginalSourceMedium_ID/String",
-	"Complexity index":                   "ComplexityIndex",
-	"Number of dynamic objects":          "NumberOfDynamicObjects",
-	"Bed channel count":                  "BedChannelCount",
-	"Bed channel configuration":          "BedChannelConfiguration",
-	"Dialog Normalization":               "dialnorm",
-	"Law rating":                         "LawRating",
-	"Recorded location":                  "Recorded/Location",
-	"Recorded_Location":                  "Recorded/Location",
-	"Terms of use":                       "TermsOfUse",
-	"List":                               "List/String",
-	"Duration of the visible content":    "Duration_Start2End/String",
-	"Start time":                         "Duration_Start/String",
-	"End time":                           "Duration_End/String",
-	"Count of frames before first event": "FirstDisplay_Delay_Frames",
-	"Type of the first event":            "FirstDisplay_Type",
-	"ACTOR_CHARACTER":                    "ACTOR/CHARACTER",
-	"Encoded_Application_Url":            "Encoded_Application/Url",
-	"Writing_Library":                    "Writing Library",
-	"Statistics_Tags_Issue":              "Statistics Tags Issue",
-	"Statistics Tags Issue":              "Statistics Tags Issue",
-	"Delay relative to video":            "Video_Delay/String",
-	"Original delay":                     "Delay_Original/String",
-	"ID in the original source medium":   "OriginalSourceMedium_ID/String",
-	"Format settings, picture structure": "Format_Settings_PictureStructure",
-	"Service name":                       "ServiceName",
-	"Service provider":                   "ServiceProvider",
-	"Service type":                       "ServiceType",
-}
-
 // rawTextFieldRule is the authoritative raw-text policy for one canonical
 // field. Container policy may replace its label, but cannot create a second
 // projection of the same canonical value.
@@ -168,7 +54,7 @@ type rawTextFieldRule struct {
 var rawTextCanonicalFieldRules = func() map[fieldName]rawTextFieldRule {
 	rules := make(map[fieldName]rawTextFieldRule, len(canonicalFieldDefinitions)*2)
 	for name, spec := range canonicalFieldDefinitions {
-		label := firstNonEmpty(rawTextLabelAliases[spec.TextLabel], spec.TextLabel, string(name))
+		label := firstNonEmpty(rawFieldLabelAlias(spec.TextLabel), spec.TextLabel, string(name))
 		rules[name] = rawTextFieldRule{Label: label, Visible: spec.Options.ShowText}
 		if spec.StringSibling != "" {
 			rules[spec.StringSibling] = rawTextFieldRule{Label: label, Visible: true}
@@ -215,7 +101,7 @@ func projectRawTextReport(report Report) rawTextReportProjection {
 	})
 	for _, streamIndex := range streamIndexes {
 		stream := &store.streams[streamIndex]
-		structured := rawTextStructuredValues(stream)
+		structured := storedScalarValues(stream)
 		if stream.Kind == StreamGeneral {
 			totalFileSize, _ = strconv.ParseInt(structured["FileSize"], 10, 64)
 		}
@@ -312,7 +198,7 @@ func projectRawTextReport(report Report) rawTextReportProjection {
 				if !rawTextExtraVisible(member.Key, value) {
 					continue
 				}
-				label := rawTextLabel(member.Key)
+				label := rawFieldLabel(member.Key)
 				if _, exists := seen[label]; exists {
 					continue
 				}
@@ -324,7 +210,7 @@ func projectRawTextReport(report Report) rawTextReportProjection {
 				// retaining the encounter order of existing text rows.
 				position := len(fields)
 				for _, next := range extra.Object[memberIndex+1:] {
-					nextLabel := rawTextLabel(next.Key)
+					nextLabel := rawFieldLabel(next.Key)
 					if tag, exists := seen[nextLabel]; !exists || tag {
 						continue
 					}
@@ -385,7 +271,7 @@ func rawTextGeneralFormat(store *fieldStore) string {
 	for index := range store.streams {
 		stream := &store.streams[index]
 		if stream.Kind == StreamGeneral {
-			return rawTextStructuredValues(stream)["Format"]
+			return storedScalarValues(stream)["Format"]
 		}
 	}
 	return ""
@@ -418,7 +304,7 @@ func rawTextDVDContext(store *fieldStore) (dvd, aggregate bool) {
 	generalFormat := ""
 	for index := range store.streams {
 		stream := &store.streams[index]
-		structured := rawTextStructuredValues(stream)
+		structured := storedScalarValues(stream)
 		if stream.Kind == StreamGeneral {
 			generalFormat = structured["Format"]
 			if generalFormat == "DVD Video" {
@@ -464,7 +350,7 @@ func normalizeDVDRawTextFields(stream *storedStream, fields []rawTextFieldProjec
 	extraAliases := make(map[string]struct{})
 	if hasExtra && stream.Kind != StreamGeneral {
 		for _, member := range extra.Object {
-			for _, label := range []string{member.Key, rawTextLabel(member.Key), rawTextDVDExtraLabel(member.Key)} {
+			for _, label := range []string{member.Key, rawFieldLabel(member.Key), rawTextDVDExtraLabel(member.Key)} {
 				if label != "" {
 					extraAliases[label] = struct{}{}
 				}
@@ -476,7 +362,7 @@ func normalizeDVDRawTextFields(stream *storedStream, fields []rawTextFieldProjec
 	}
 	if stream.Kind == StreamMenu {
 		for _, key := range []string{"List_Audio", "List_Subtitles_4_3", "List_Subtitles_Wide", "List_Subtitles_Letterbox", "List_Subtitles_PanScan"} {
-			for _, label := range append([]string{key, rawTextLabel(key), rawTextDVDExtraLabel(key)}, rawTextDVDLegacyExtraLabels(key)...) {
+			for _, label := range append([]string{key, rawFieldLabel(key), rawTextDVDExtraLabel(key)}, rawTextDVDLegacyExtraLabels(key)...) {
 				extraAliases[label] = struct{}{}
 			}
 		}
@@ -643,7 +529,7 @@ func rawTextDVDExtraLabel(key string) string {
 			return parts[0] + ":" + parts[1] + ":" + parts[2] + "." + parts[3]
 		}
 	}
-	return rawTextLabel(key)
+	return rawFieldLabel(key)
 }
 
 // rawTextDVDLegacyExtraLabels returns legacy labels that may duplicate a
@@ -695,7 +581,7 @@ func rawTextProjectionRule(version reportTableVersion, kind StreamKind, entry fi
 					label = "Channel(s)" + strings.TrimPrefix(label, "Channels")
 				}
 				label = rawReportFieldName(label)
-				if alias := rawTextLabelAliases[label]; alias != "" {
+				if alias := rawFieldLabelAlias(label); alias != "" {
 					label = alias
 				}
 				return rawTextFieldRule{Label: label, Visible: strings.HasPrefix(row.Options, "Y")}, true
@@ -715,7 +601,7 @@ func rawTextProjectionRule(version reportTableVersion, kind StreamKind, entry fi
 		}
 	}
 	friendly := firstNonEmpty(entry.TextLabel, string(entry.Name))
-	return rawTextFieldRule{Label: rawTextLabel(friendly), Visible: true}, false
+	return rawTextFieldRule{Label: rawFieldLabel(friendly), Visible: true}, false
 }
 
 // rawTextStructuredDerivations exposes structured-only canonical facts that
@@ -1226,30 +1112,6 @@ func rawTextConformanceInfoFields(node structuredNode) []rawTextDerivedField {
 	return fields
 }
 
-// rawTextStructuredValues returns one preferred scalar per canonical key.
-func rawTextStructuredValues(stream *storedStream) map[string]string {
-	values := make(map[string]string, len(stream.Fields))
-	for _, entry := range stream.Fields {
-		if !entry.Options.ShowStructured || entry.Node != nil || entry.Projected {
-			continue
-		}
-		key := firstNonEmpty(entry.StructuredKey, string(entry.Name))
-		if _, exists := values[key]; !exists {
-			values[key] = entry.Value.Text
-		}
-	}
-	for _, entry := range stream.Fields {
-		if !entry.Options.ShowStructured || entry.Node != nil || !entry.Projected {
-			continue
-		}
-		key := firstNonEmpty(entry.StructuredKey, string(entry.Name))
-		if _, exists := values[key]; !exists {
-			values[key] = entry.Value.Text
-		}
-	}
-	return values
-}
-
 // rawTextExtraNode returns the preferred ordered extra object for a stream.
 func rawTextExtraNode(stream *storedStream) (structuredNode, bool) {
 	var fallback *structuredNode
@@ -1268,14 +1130,6 @@ func rawTextExtraNode(stream *storedStream) (structuredNode, bool) {
 		return structuredNode{}, false
 	}
 	return *fallback, true
-}
-
-// rawTextLabel resolves a friendly compatibility label to MediaInfo's raw name.
-func rawTextLabel(friendly string) string {
-	if label := rawTextLabelAliases[friendly]; label != "" {
-		return label
-	}
-	return friendly
 }
 
 // rawTextValue applies raw-language presentation without changing canonical facts.

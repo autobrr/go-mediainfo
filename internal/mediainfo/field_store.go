@@ -241,3 +241,28 @@ func (s *fieldStore) appendEntry(stream *storedStream, entry fieldEntry) {
 	s.nextSequence++
 	stream.Fields = append(stream.Fields, entry)
 }
+
+// storedScalarValues returns one preferred scalar per canonical key. Parser
+// facts win over projected values.
+func storedScalarValues(stream *storedStream) map[string]string {
+	values := make(map[string]string, len(stream.Fields))
+	for _, entry := range stream.Fields {
+		if !entry.Options.ShowStructured || entry.Node != nil || entry.Projected {
+			continue
+		}
+		key := firstNonEmpty(entry.StructuredKey, string(entry.Name))
+		if _, exists := values[key]; !exists {
+			values[key] = entry.Value.Text
+		}
+	}
+	for _, entry := range stream.Fields {
+		if !entry.Options.ShowStructured || entry.Node != nil || !entry.Projected {
+			continue
+		}
+		key := firstNonEmpty(entry.StructuredKey, string(entry.Name))
+		if _, exists := values[key]; !exists {
+			values[key] = entry.Value.Text
+		}
+	}
+	return values
+}
