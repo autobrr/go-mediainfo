@@ -908,6 +908,7 @@ func analyzeFileWithOptions(ctx context.Context, path string, opts AnalyzeOption
 					}
 					builder.OverrideStructuredNode("extra", *extraNode)
 				}
+				builder.CodecTableKey("Mpeg4")
 				streams = append(streams, builder.Snapshot(canonicalStreamPolicy{}))
 			}
 			if len(parsed.Chapters) > 0 {

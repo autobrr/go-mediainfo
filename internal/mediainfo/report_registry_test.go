@@ -915,3 +915,32 @@ func TestScanPresentationUsesExactReferenceTranslations(t *testing.T) {
 		}
 	}
 }
+
+// TestParsedCodecTableNamespace checks that the AVI and MP4 parsers record
+// their codec-table namespace, so description lookups do not depend on the
+// General format that the renderer sees.
+func TestParsedCodecTableNamespace(t *testing.T) {
+	for _, tc := range []struct{ sample, namespace string }{
+		{"sample.avi", "Riff"},
+		{"sample.mp4", "Mpeg4"},
+	} {
+		report, err := AnalyzeFile(filepath.Join("samples", tc.sample))
+		if err != nil {
+			t.Fatal(err)
+		}
+		checked := 0
+		for _, stream := range report.Streams {
+			codecID := stream.JSON["CodecID"]
+			if codecID == "" {
+				continue
+			}
+			checked++
+			if got := stream.codecIdentity; got.Namespace != tc.namespace || got.ID != codecID {
+				t.Errorf("%s %s codec identity = %+v, want {%s %s}", tc.sample, stream.Kind, got, tc.namespace, codecID)
+			}
+		}
+		if checked == 0 {
+			t.Errorf("%s has no stream with a CodecID", tc.sample)
+		}
+	}
+}

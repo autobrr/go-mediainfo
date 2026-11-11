@@ -78,6 +78,17 @@ func (b *canonicalStreamBuilder) Fill(name fieldName, raw, label, display string
 	}
 }
 
+// CodecTableKey records the codec-table namespace for the stream's stored
+// CodecID, so description lookups use the parser's container namespace.
+func (b *canonicalStreamBuilder) CodecTableKey(namespace string) {
+	if b == nil || b.store == nil {
+		return
+	}
+	if id, _ := b.store.Get(b.ref, "CodecID"); id != "" {
+		b.store.streams[b.ref].CodecIdentity = codecTableIdentity{Namespace: namespace, ID: id}
+	}
+}
+
 // ImportCanonicalSeed copies a nested parser's canonical entries into this
 // stream while discarding nested report-order metadata.
 func (b *canonicalStreamBuilder) ImportCanonicalSeed(seed []fieldEntry) {

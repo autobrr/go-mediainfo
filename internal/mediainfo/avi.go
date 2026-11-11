@@ -591,6 +591,7 @@ func canonicalAVIVideoStream(st *aviStream, main aviMainHeader, size int64) Stre
 		structuredFacts.SetSame("BufferSize", strconv.FormatInt(st.bufferSize, 10))
 	}
 	structuredFacts.Apply(builder)
+	builder.CodecTableKey("Riff")
 	return builder.Snapshot(canonicalStreamPolicy{})
 }
 
@@ -845,6 +846,7 @@ func canonicalAVIAudioStream(st *aviStream, streams []*aviStream, size int64, vi
 		structuredFacts.SetSame("Encoded_Library_Settings", lame.settings)
 	}
 	structuredFacts.Apply(builder)
+	builder.CodecTableKey("Riff")
 	return builder.Snapshot(canonicalStreamPolicy{SkipComputed: true})
 }
 
