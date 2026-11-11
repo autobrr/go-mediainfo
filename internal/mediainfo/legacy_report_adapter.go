@@ -251,15 +251,7 @@ func reportToFieldStore(report Report, useCanonicalSeeds bool) *fieldStore {
 			appendLegacyTextFields(store, ref, stream.Fields)
 			// Retain parser-owned ordering for surviving tag labels when
 			// callers edit the public compatibility snapshot.
-			tags := make(map[string]bool)
-			for label := range stream.canonicalPolicy.LegacyTagIdentities {
-				tags[label] = true
-			}
-			for _, entry := range stream.canonicalSeed {
-				if entry.MatroskaTag {
-					tags[reportFieldIdentity(reportTables23, stream.Kind, string(entry.Name), entry.TextLabel)] = true
-				}
-			}
+			tags := matroskaTagIdentities(stream)
 			for index := range stored.Fields {
 				stored.Fields[index].MatroskaTag = tags[reportFieldIdentity(reportTables23, stream.Kind, string(stored.Fields[index].Name), stored.Fields[index].TextLabel)]
 			}
@@ -651,10 +643,10 @@ func captureLegacyStreamState(stream Stream, clone bool) legacyStreamState {
 	return state
 }
 
-// cloneLegacyStream copies mutable legacy state while detaching canonical-store internals.
-func cloneLegacyStream(stream Stream) Stream {
-	stream.reportStore = nil
-	stream.reportSnapshot = nil
+// matroskaTagIdentities returns the field identities of a stream's Matroska tag
+// rows: the identities kept from an earlier legacy copy plus the tag entries of
+// its canonical seed. It returns nil when the stream has no tag rows.
+func matroskaTagIdentities(stream Stream) map[string]bool {
 	tags := maps.Clone(stream.canonicalPolicy.LegacyTagIdentities)
 	for _, entry := range stream.canonicalSeed {
 		if entry.MatroskaTag {
@@ -664,6 +656,14 @@ func cloneLegacyStream(stream Stream) Stream {
 			tags[reportFieldIdentity(reportTables23, stream.Kind, string(entry.Name), entry.TextLabel)] = true
 		}
 	}
+	return tags
+}
+
+// cloneLegacyStream copies mutable legacy state while detaching canonical-store internals.
+func cloneLegacyStream(stream Stream) Stream {
+	stream.reportStore = nil
+	stream.reportSnapshot = nil
+	tags := matroskaTagIdentities(stream)
 	stream.canonicalSeed = nil
 	stream.canonicalPolicy = canonicalStreamPolicy{LegacyTagIdentities: tags}
 	stream.Fields = append([]Field(nil), stream.Fields...)
