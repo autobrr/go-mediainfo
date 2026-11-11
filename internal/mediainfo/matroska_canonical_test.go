@@ -2627,13 +2627,12 @@ func TestMatroskaAACCanonicalSeedShowsExplicitSBRInText(t *testing.T) {
 	}
 	report := Report{General: Stream{Kind: StreamGeneral}, Streams: []Stream{{Kind: StreamAudio, canonicalSeed: seed}}}
 	attachCanonicalStore(&report)
-	output := RenderText([]Report{report})
+	output := normalizeText(RenderText([]Report{report}))
 	for label, want := range wantText {
-		if !strings.Contains(output, padRight(label, textLabelWidth)+": "+want) {
+		if !strings.Contains(output, padRight(label, textLabelWidth)+": "+want+"\n") {
 			t.Fatalf("missing SBR row %s=%s: %s", label, want, output)
 		}
 	}
-
 }
 
 func TestMatroskaDTSCanonicalProbeShowsESXChInText(t *testing.T) {
