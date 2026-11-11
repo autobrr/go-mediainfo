@@ -66,50 +66,6 @@ func mapMatroskaCodecID(codecID string, trackType uint64) (StreamKind, string) {
 }
 
 func mapMatroskaFormatInfo(format string) string {
-	switch format {
-	case "AV1":
-		return "AOMedia Video 1"
-	case "AVC":
-		return "Advanced Video Codec"
-	case "HEVC":
-		return "High Efficiency Video Coding"
-	case "VC-1":
-		return "SMPTE VC-1"
-	case "VP9":
-		return "Google VP9"
-	case "VP8":
-		return "Google VP8"
-	case "AAC":
-		return "Advanced Audio Codec"
-	case "AC-3":
-		return "Audio Coding 3"
-	case "E-AC-3":
-		return "Enhanced AC-3"
-	case "E-AC-3 JOC":
-		return "Enhanced AC-3 with Joint Object Coding"
-	case "Opus":
-		return "Opus"
-	case "FLAC":
-		return "Free Lossless Audio Codec"
-	case "MPEG Audio":
-		return "MPEG Audio"
-	case "DTS":
-		return "Digital Theater Systems"
-	case "DTS XLL":
-		return "Digital Theater Systems"
-	case "DTS XBR":
-		return "Digital Theater Systems"
-	case "DTS ES":
-		return "Digital Theater Systems"
-	case "TrueHD":
-		return "Dolby TrueHD"
-	case "PCM":
-		return "PCM"
-	case "Vorbis":
-		return "Vorbis"
-	case "MPEG Video":
-		return "MPEG Video"
-	default:
-		return ""
-	}
+	_, info := reportFormatPresentation(reportTables23, StreamAudio, map[string]string{"Format": format})
+	return info
 }

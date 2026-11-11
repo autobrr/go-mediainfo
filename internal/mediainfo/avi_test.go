@@ -7,6 +7,20 @@ import (
 	"testing"
 )
 
+func TestAVIContainerDescriptionUsesPinnedTable(t *testing.T) {
+	formats := reportTables[reportTables23].Formats
+	original := formats["AVI"]
+	formats["AVI"] = "Pinned AVI description"
+	t.Cleanup(func() { formats["AVI"] = original })
+	report, err := AnalyzeFile("samples/sample.avi")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := findField(report.General.Fields, "Format/Info"); got != formats["AVI"] {
+		t.Fatalf("public General description = %q, want pinned table value", got)
+	}
+}
+
 func TestParseAVIRejectsShortListChunk(t *testing.T) {
 	data := []byte("RIFF0000AVI LIST\x00\x00\x00\x00hdrl")
 	if _, _, _, ok := ParseAVI(bytes.NewReader(data), int64(len(data))); ok {

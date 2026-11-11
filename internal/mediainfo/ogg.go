@@ -379,7 +379,7 @@ func canonicalOggVideoStream(stream *oggLogicalStream, duration float64, frameCo
 	store := &fieldStore{}
 	ref := store.Prepare(StreamVideo)
 	store.streams[ref].SkipStreamOrder = true
-	store.Fill(ref, "ID", strconv.FormatUint(uint64(stream.serial), 10), fillReplace)
+	(&canonicalStreamBuilder{store: store, ref: ref}).Fill("ID", strconv.FormatUint(uint64(stream.serial), 10), "ID", formatID(uint64(stream.serial)))
 	store.Fill(ref, "Format", "Theora", fillReplace)
 	if duration > 0 {
 		store.Fill(ref, "Duration", strconv.FormatInt(int64(math.Round(duration*1000)), 10), fillReplace)
@@ -403,20 +403,30 @@ func canonicalOggVideoStream(stream *oggLogicalStream, duration float64, frameCo
 		pixelAspect = float64(stream.pixelAspectNum) / float64(stream.pixelAspectDen)
 	}
 	if pixelAspect > 0 {
-		store.Fill(ref, "PixelAspectRatio", formatJSONFloat(pixelAspect), fillReplace)
+		fillGeneratedStructured(store, ref, "PixelAspectRatio", formatJSONFloat(pixelAspect))
 		if stream.width > 0 && stream.height > 0 {
 			displayAspect := float64(stream.width) * pixelAspect / float64(stream.height)
 			store.Fill(ref, "DisplayAspectRatio", formatJSONFloat(displayAspect), fillReplace)
 		}
 	}
 	if stream.frameRateNum > 0 && stream.frameRateDen > 0 {
+		// Official MediaInfo fills only the decimal Theora rate and derives
+		// num/den from it, so 2997/100 reports 29970/1000.
 		frameRate := float64(stream.frameRateNum) / float64(stream.frameRateDen)
-		store.Fill(ref, "FrameRate", formatJSONFloat(frameRate), fillReplace)
-		store.Fill(ref, "FrameRate_Num", strconv.FormatUint(uint64(stream.frameRateNum), 10), fillReplace)
-		store.Fill(ref, "FrameRate_Den", strconv.FormatUint(uint64(stream.frameRateDen), 10), fillReplace)
+		num, den := matroskaFrameRateRatio(frameRate)
+		display := formatFrameRate(frameRate)
+		if num > 0 && den > 0 {
+			display = formatFrameRateRatio(uint32(num), uint32(den))
+		}
+		builder := &canonicalStreamBuilder{store: store, ref: ref}
+		builder.Fill("FrameRate", formatJSONFloat(frameRate), "Frame rate", display)
+		if num > 0 && den > 0 {
+			builder.Structured("FrameRate_Num", strconv.Itoa(num))
+			builder.Structured("FrameRate_Den", strconv.Itoa(den))
+		}
 	}
 	if frameCount > 0 {
-		store.Fill(ref, "FrameCount", strconv.FormatUint(frameCount, 10), fillReplace)
+		fillGeneratedStructured(store, ref, "FrameCount", strconv.FormatUint(frameCount, 10))
 	}
 	store.Fill(ref, "Compression_Mode", "Lossy", fillReplace)
 	if stream.payloadBytes > 0 {
@@ -430,7 +440,7 @@ func canonicalOggAudioStream(stream *oggLogicalStream, duration float64, multipl
 	store := &fieldStore{}
 	ref := store.Prepare(StreamAudio)
 	store.streams[ref].SkipStreamOrder = true
-	store.Fill(ref, "ID", strconv.FormatUint(uint64(stream.serial), 10), fillReplace)
+	(&canonicalStreamBuilder{store: store, ref: ref}).Fill("ID", strconv.FormatUint(uint64(stream.serial), 10), "ID", formatID(uint64(stream.serial)))
 	store.Fill(ref, "Format", stream.format, fillReplace)
 	if stream.format == "Vorbis" {
 		store.Fill(ref, "Format_Settings_Floor", "1", fillReplace)

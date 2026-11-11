@@ -1,0 +1,1367 @@
+Matroska	Audio	A_MPEG/L1	MPEG Audio	MP1	
+Matroska	Audio	A_MPEG/L2	MPEG Audio	MP2	
+Matroska	Audio	A_MPEG/L3	MPEG Audio	MP3	
+Matroska	Audio	A_PCM/INT/BIG	PCM		
+Matroska	Audio	A_PCM/INT/LIT	PCM		
+Matroska	Audio	A_PCM/FLOAT/IEEE	PCM		
+Matroska	Audio	A_AC3	AC-3		
+Matroska	Audio	A_AC3/BSID9	AC-3		
+Matroska	Audio	A_AC3/BSID10	AC-3		
+Matroska	Audio	A_DTS	DTS		
+Matroska	Audio	A_EAC3	E-AC-3		
+Matroska	Audio	A_FLAC	Flac		
+Matroska	Audio	A_OPUS	Opus		
+Matroska	Audio	A_TTA1	TTA		The True Audio Lossless Codec
+Matroska	Audio	A_VORBIS	Vorbis		
+Matroska	Audio	A_WAVPACK4	WavPack		
+Matroska	Audio	A_REAL/14_4	VSELP		Real Audio 1 (14.4)
+Matroska	Audio	A_REAL/28_8	G.728		Real Audio 2 (28.8)
+Matroska	Audio	A_REAL/COOK	Cooker		Real Audio Cook Codec (codename: Gecko)
+Matroska	Audio	A_REAL/SIPR	G.729		Real & Sipro Voice Codec
+Matroska	Audio	A_REAL/RALF	RealAudio Lossless		Real Audio Lossless Format
+Matroska	Audio	A_REAL/ATRC	Atrac		Real & Sony Atrac3 Codec
+Matroska	Audio	A_TRUEHD	TrueHD		
+Matroska	Audio	A_MLP	MLP		Meridian Lossless Packing
+Matroska	Audio	A_AAC	AAC		
+Matroska	Audio	A_AAC/MPEG2/MAIN	AAC		
+Matroska	Audio	A_AAC/MPEG2/LC	AAC		
+Matroska	Audio	A_AAC/MPEG2/LC/SBR	AAC		
+Matroska	Audio	A_AAC/MPEG2/SSR	AAC		
+Matroska	Audio	A_AAC/MPEG4/MAIN	AAC		
+Matroska	Audio	A_AAC/MPEG4/LC	AAC		
+Matroska	Audio	A_AAC/MPEG4/LC/SBR	AAC		
+Matroska	Audio	A_AAC/MPEG4/LC/SBR/PS	AAC		
+Matroska	Audio	A_AAC/MPEG4/SSR	AAC		
+Matroska	Audio	A_AAC/MPEG4/LTP	AAC		
+Matroska	Audio	A_ALAC	ALAC		Apple Lossless Audio Codec
+Matroska	Video	V_UNCOMPRESSED	RGB		Raw uncompressed video frames
+Matroska	Video	V_AV1	AV1		
+Matroska	Video	V_DIRAC	Dirac		
+Matroska	Video	V_FFV1	FFV1		
+Matroska	Video	V_MPEG4/IS0/SP	MPEG-4 Visual		There is a zero instead of a O, may be a problem
+Matroska	Video	V_MPEG4/IS0/ASP	MPEG-4 Visual		There is a zero instead of a O, may be a problem
+Matroska	Video	V_MPEG4/IS0/AP	MPEG-4 Visual		There is a zero instead of a O, may be a problem
+Matroska	Video	V_MPEG4/IS0/AVC	AVC		There is a zero instead of a O, may be a problem
+Matroska	Video	V_MPEG4/ISO/SP	MPEG-4 Visual		Simple Profile
+Matroska	Video	V_MPEG4/ISO/ASP	MPEG-4 Visual		Advanced Simple Profile
+Matroska	Video	V_MPEG4/ISO/AP	MPEG-4 Visual		Advanced Profile
+Matroska	Video	V_MPEG4/ISO/AVC	AVC		
+Matroska	Video	V_MPEGH/ISO/HEVC	HEVC		
+Matroska	Video	V_MPEG4/MS/V2	MPEG-4 Visual	MS MPEG-4 v2	MS MPEG-4 v2
+Matroska	Video	V_MPEG4/MS/V3	MPEG-4 Visual	MS MPEG-4 v3	MS MPEG-4 v3
+Matroska	Video	V_MPEG1	MPEG Video		MPEG 1 or 2 Video
+Matroska	Video	V_MPEG2	MPEG Video		MPEG 1 or 2 Video
+Matroska	Video	V_PRORES	ProRes		
+Matroska	Video	V_REAL/RV10	RealVideo 1		RealVideo 1.0 aka RealVideo 5
+Matroska	Video	V_REAL/RV20	RealVideo 2		RealVideo 2.0 aka G2 and RealVideo G2+SVT
+Matroska	Video	V_REAL/RV30	RealVideo 3		RealVideo 3.0 aka RealVideo 8
+Matroska	Video	V_REAL/RV40	RealVideo 4		RealVideo 4.0 aka RealVideo 9
+Matroska	Video	V_THEORA	Theora		
+Matroska	Video	V_VP8	VP8		
+Matroska	Video	V_VP9	VP9		
+Matroska	Text	S_ASS	ASS		Advanced Sub Station Alpha
+Matroska	Text	S_DVBSUB	DVB Subtitle		Picture based subtitle format used on DVBs
+Matroska	Text	S_KATE	KATE		Karaoke And Text Encapsulation
+Matroska	Text	S_IMAGE/BMP	Bitmap		Basic image based subtitle format
+Matroska	Text	S_SSA	SSA		Sub Station Alpha
+Matroska	Text	S_TEXT/ASS	ASS		Advanced Sub Station Alpha
+Matroska	Text	S_TEXT/SSA	SSA		Sub Station Alpha
+Matroska	Text	S_TEXT/USF	USF		Universal Subtitle Format
+Matroska	Text	S_TEXT/UTF8	UTF-8		UTF-8 Plain Text
+Matroska	Text	S_USF	USF		Universal Subtitle Format
+Matroska	Text	S_UTF8	UTF-8		UTF-8 Plain Text
+Matroska	Text	S_VOBSUB	VobSub		Picture based subtitle format used on DVDs
+Matroska	Text	S_HDMV/PGS	PGS		Picture based subtitle format used on BDs/HD-DVDs
+Matroska	Text	S_HDMV/TEXTST	TEXTST		Text based subtitle format used on BDs
+Riff	Audio	0			
+Riff	Audio	1	PCM		
+Riff	Audio	2	ADPCM		
+Riff	Audio	3	PCM	IEEE 	
+Riff	Audio	4	VSELP	Compaq	
+Riff	Audio	5	CVSD	IBM	
+Riff	Audio	6	ADPCM	CCITT	
+Riff	Audio	7	ADPCM	CCITT	
+Riff	Audio	8	DTS		Digital Theater Systems
+Riff	Audio	9	DRM	Microsoft	
+Riff	Audio	A	WMA		Windows Media Audio
+Riff	Audio	C	MPEG Audio		
+Riff	Audio	10	ADPCM	OKI	
+Riff	Audio	11	ADPCM	Intel	
+Riff	Audio	12	ADPCM	Mediaspace	
+Riff	Audio	13	ADPCM	Sierra	
+Riff	Audio	14	ADPCM	Antex	G.723
+Riff	Audio	15	STD	DSP solutions	
+Riff	Audio	16	FIX	DSP solutions	
+Riff	Audio	17	ADPCM	Dialogic-OKI	
+Riff	Audio	18	ADPCM		
+Riff	Audio	19	CU	HP	
+Riff	Audio	1A	Dynamic Voice	HP	
+Riff	Audio	20	ADPCM	Yamaha	
+Riff	Audio	21	SONARC	Speech Compression	
+Riff	Audio	22	Truespeech	DSP Group	
+Riff	Audio	23	SC1	Echo Speech	
+Riff	Audio	24	AudioFile 36	Virtual Music 	
+Riff	Audio	25	APTX		Audio Processing Technology X
+Riff	Audio	26	AudioFile 10	Virtual Music	
+Riff	Audio	27	Prosody 1612	Aculab plc	
+Riff	Audio	28	LRC	Merging Technologies	
+Riff	Audio	30	AC-2	Dolby Laboratories	
+Riff	Audio	31	GSM 6.10	Microsoft	
+Riff	Audio	32	Microsoft Audio		
+Riff	Audio	33	ADPCM	Antex	
+Riff	Audio	34	VQLPC	Control Resources	
+Riff	Audio	35	REAL	DSP Solutions	
+Riff	Audio	36	ADPCM	DSP Solutions	
+Riff	Audio	37	CR10		Control Resources 10
+Riff	Audio	38	ADPCM	Natural MicroSystems VBX	
+Riff	Audio	39	ADPCM	Crystal Semiconductor IMA	
+Riff	Audio	3A	SC3	Echo Speech	
+Riff	Audio	3B	ADPCM	Rockwell	
+Riff	Audio	3C	DigiTalk	Rockwell DigiTalk	
+Riff	Audio	3D	Xebec		Xebec Multimedia Solutions
+Riff	Audio	40	ADPCM	Antex Electronics	G.721
+Riff	Audio	41	CELP	Antex Electronics	G.728
+Riff	Audio	42	G.723.1	Microsoft	
+Riff	Audio	42	ADPCM		IBM
+Riff	Audio	42	G.729	Microsoft	
+Riff	Audio	45	ADPCM	Microsoft	G.726
+Riff	Audio	50	MPEG Audio		
+Riff	Audio	51	MPEG Audio		
+Riff	Audio	52	RT24	InSoft, Inc.	
+Riff	Audio	53	PAC	InSoft, Inc.	
+Riff	Audio	55	MPEG Audio	MP3	
+Riff	Audio	59	G.723	Lucent	G.723
+Riff	Audio	60	Cirrus		Cirrus Logic
+Riff	Audio	61	PCM	ESS Technology	
+Riff	Audio	62	Voxware		
+Riff	Audio	63	Atrac	Canopus	
+Riff	Audio	64	ADPCM	APICOM	G.726
+Riff	Audio	65	ADPCM	APICOM	G.722
+Riff	Audio	66	DSAT	Microsoft	
+Riff	Audio	67	DSAT Display	Microsoft	
+Riff	Audio	69	BYTE_ALIGNED	Voxware	
+Riff	Audio	70	AC8	Voxware	
+Riff	Audio	71	AC10	Voxware	
+Riff	Audio	72	AC16	Voxware	
+Riff	Audio	73	AC20	Voxware	
+Riff	Audio	74	RT24	Voxware	MetaVoice
+Riff	Audio	75	RT29	Voxware	MetaSound
+Riff	Audio	76	RT29HW	Voxware	
+Riff	Audio	77	VR12	Voxware	
+Riff	Audio	78	VR18	Voxware	
+Riff	Audio	79	TQ40	Voxware	
+Riff	Audio	7A	SC3	Voxware	
+Riff	Audio	7B	SC3	Voxware	
+Riff	Audio	80	Softsound		
+Riff	Audio	81	TQ60	Voxware	
+Riff	Audio	82	MSRT24	Microsoft	
+Riff	Audio	83	G.729a	AT&T	
+Riff	Audio	84	MVI_MVI2	Motion Pixels	
+Riff	Audio	85	ADPCM	DataFusion Systems	G.726
+Riff	Audio	86	GSM 6.10	DataFusion Systems	
+Riff	Audio	88	ISI AUDIO		Iterated Systems AUDIO
+Riff	Audio	89	Onlive		OnLive! Technologies
+Riff	Audio	8A	SX20	Multitude	
+Riff	Audio	8B	ADPCM	Infocom ITS A/S	
+Riff	Audio	8C	G.729	Convedia Corporation	
+Riff	Audio	91	SBC24		Siemens Business Communications Sys 24
+Riff	Audio	92	AC-3	Sonic Foundry	
+Riff	Audio	93	G.723	MediaSonic	
+Riff	Audio	94	Prosody 8KBPS	Aculab plc	
+Riff	Audio	97	ADPCM	ZyXEL Communications	
+Riff	Audio	98	LPCBB	Philips Speech Processing	
+Riff	Audio	99	Packed		Studer Professional Audio AG Packed
+Riff	Audio	A0	PHONYTALK	Malden Electronics	
+Riff	Audio	A1	GSM	Racal Recorders	
+Riff	Audio	A2	G.720a	Racal Recorders	
+Riff	Audio	A3	G.723.1	Racal Recorders	
+Riff	Audio	A4	ACELP	Racal Recorders	
+Riff	Audio	B0	AAC	NEC Corporation	
+Riff	Audio	FF	AAC		
+Riff	Audio	100	ADPCM		
+Riff	Audio	101	IRAT	BeCubed	
+Riff	Audio	102	ADPCM	IBM	
+Riff	Audio	103	ADPCM	IBM AVC	
+Riff	Audio	111	G.723	Vivo	
+Riff	Audio	112	SIREN	Vivo	
+Riff	Audio	120	CELP	Philips Speech Processing	
+Riff	Audio	121	Grundig	Philips Speech Processing	
+Riff	Audio	123	G.723	Digital Equipment Corporation	
+Riff	Audio	125	ADPCM		
+Riff	Audio	130	ACELP	Sipro	
+Riff	Audio	131	ACELP	Sipro	
+Riff	Audio	132	ACELP	Sipro	
+Riff	Audio	133	G.729	Sipro	
+Riff	Audio	134	G.729a	Sipro	
+Riff	Audio	135	KELVIN	Sipro	
+Riff	Audio	135	AMR	VoiceAge Corporation	
+Riff	Audio	140	ADPCM	Dictaphone Corporation	G.726
+Riff	Audio	140	CELP68	Dictaphone Corporation	
+Riff	Audio	140	CELP54	Dictaphone Corporation	
+Riff	Audio	150	PureVoice	Qualcomm	
+Riff	Audio	151	HalfRate	Qualcomm	
+Riff	Audio	155	TUBGSM	Ring Zero Systems	
+Riff	Audio	160	WMA		Windows Media Audio
+Riff	Audio	161	WMA		Windows Media Audio
+Riff	Audio	162	WMA		Windows Media Audio
+Riff	Audio	163	WMA		Windows Media Audio
+Riff	Audio	170	ADPCM	Unisys Nap	
+Riff	Audio	171	ADPCM	Unisys Nap	
+Riff	Audio	172	ADPCM	Unisys Nap	
+Riff	Audio	173	16K	Unisys Nap	
+Riff	Audio	174	G.700	SyCom Technologies	
+Riff	Audio	175	ADPCM	SyCom Technologies	
+Riff	Audio	176	CELP54	SyCom Technologies	
+Riff	Audio	177	CELP68	SyCom Technologies	
+Riff	Audio	178	ADPCM	Knowledge Adventure, Inc.	
+Riff	Audio	180	AAC	Fraunhofer IIS	
+Riff	Audio	190	DTS		Digital Theater Systems
+Riff	Audio	19D	FLAC		
+Riff	Audio	200	ADPCM	Creative Labs	
+Riff	Audio	202	Fast Speech 8	Creative Labs	
+Riff	Audio	203	Fast Speech 10	Creative Labs	
+Riff	Audio	210	ADPCM	UHER informatic GmbH	
+Riff	Audio	215	ACM	Ulead	
+Riff	Audio	216	ACM	Ulead	
+Riff	Audio	220	QuaterDeck		
+Riff	Audio	230	VC		I-link VC
+Riff	Audio	240	RAW_SPORT		Aureal
+Riff	Audio	241	AC-3	ESST	
+Riff	Audio	250	HSX	Interactive Products, Inc.	
+Riff	Audio	251	RPELP	Interactive Products, Inc.	
+Riff	Audio	260	CS2	Consistent Software	
+Riff	Audio	270	Atrac3	Sony	
+Riff	Audio	271	SCY	Sony	
+Riff	Audio	272	Atrac3	Sony	
+Riff	Audio	273	SPC	Sony	
+Riff	Audio	280	Telum		
+Riff	Audio	281	TelumIA		
+Riff	Audio	285	ADPCM	Norcom Voice Systems	
+Riff	Audio	300	FM_TOWNS_SND	Fujitsu	
+Riff	Audio	350	Dev	Micronas Semiconductors, Inc.	
+Riff	Audio	351	CELP833	Micronas Semiconductors, Inc.	
+Riff	Audio	400	DIGITAL	Brooktree	
+Riff	Audio	401	Music Coder	Intel	
+Riff	Audio	402	IAC2	Ligos	
+Riff	Audio	450	Qdesign		QDesign Music
+Riff	Audio	500	VP7		On2
+Riff	Audio	501	VP6		On2
+Riff	Audio	680	VM		AT&T VME_VMPCM
+Riff	Audio	681	TPC		AT&T TPC
+Riff	Audio	700	YMPEG		YMPEG Alpha
+Riff	Audio	8AE	LiteWave		ClearJump LiteWave
+Riff	Audio	AAC	AAC		
+Riff	Audio	1000	GSM	Ing C. Olivetti & C., S.p.A.	
+Riff	Audio	1001	ADPCM	Ing C. Olivetti & C., S.p.A.	
+Riff	Audio	1002	CELP	Ing C. Olivetti & C., S.p.A.	
+Riff	Audio	1003	SBC	Ing C. Olivetti & C., S.p.A.	
+Riff	Audio	1004	OPR	Ing C. Olivetti & C., S.p.A.	
+Riff	Audio	1100	LH_CODEC	Lernout & Hauspie	 Codec
+Riff	Audio	1101	CELP	Lernout & Hauspie	
+Riff	Audio	1102	SBC	Lernout & Hauspie	
+Riff	Audio	1103	SBC	Lernout & Hauspie	
+Riff	Audio	1104	SBC	Lernout & Hauspie	
+Riff	Audio	1400	Norris		Norris Communications, Inc.
+Riff	Audio	1401	ISIAudio		
+Riff	Audio	1500	MUSICOMPRESS		Soundspace Music Compression
+Riff	Audio	181C	RT24	VoxWare	
+Riff	Audio	181E	AX24000P	Lucent elemedia	
+Riff	Audio	1971	SonicFoundry		Lossless
+Riff	Audio	1C03	ADPCM	Lucent	G.723
+Riff	Audio	1C07	SX8300P	Lucent	
+Riff	Audio	1C0C	ADPCM	Lucent	G.723
+Riff	Audio	1F03	DigiTalk		CUseeMe (ex-Rocwell)
+Riff	Audio	1FC4	ALF2CD	NCT Soft	
+Riff	Audio	2000	AC-3		
+Riff	Audio	2001	DTS		Digital Theater Systems
+Riff	Audio	2002	VSELP		RealAudio 1/2 14.4
+Riff	Audio	2003	VSELP		RealAudio 1/2 28.8
+Riff	Audio	2004	Cooker		RealAudio G2/8 Cook (low bitrate)
+Riff	Audio	2005	DNET		RealAudio 3/4/5 Music (DNET)
+Riff	Audio	2006	AAC		RealAudio 10 AAC (RAAC)
+Riff	Audio	2007	AAC		RealAudio 10 AAC+ (RACP)
+Riff	Audio	2048	Sonic		
+Riff	Audio	3313	AviSynth		makeAVIS (fake AVI sound from AviSynth scripts)
+Riff	Audio	4143	AAC		Divio MPEG-4 AAC audio
+Riff	Audio	4201	Nokia		
+Riff	Audio	4243	ADPCM		G.726
+Riff	Audio	43AC	Speex		
+Riff	Audio	564C	Vorbis		
+Riff	Audio	566F	Vorbis		
+Riff	Audio	5756	WavPack		
+Riff	Audio	674F	Vorbis		
+Riff	Audio	6750	Vorbis		
+Riff	Audio	6751	Vorbis		
+Riff	Audio	676F	Vorbis		
+Riff	Audio	6770	Vorbis		
+Riff	Audio	6771	Vorbis		
+Riff	Audio	8180	AAC		
+Riff	Audio	7A21	AMR		GSM-AMR (CBR, no SID)
+Riff	Audio	7A22	AMR		GSM-AMR (VBR, including SID)
+Riff	Audio	A100	G.723.1		
+Riff	Audio	A101	AVQSBC		
+Riff	Audio	A102	ODSBC		
+Riff	Audio	A103	G729A		
+Riff	Audio	A104	AMR		
+Riff	Audio	A105	ADPCM		G.726
+Riff	Audio	A106	AAC		
+Riff	Audio	A107	ADPCM		G.726
+Riff	Audio	A109	Speex		
+Riff	Audio	DFAC	FrameServer		DebugMode SonicFoundry Vegas FrameServer ACM Codec
+Riff	Audio	F1AC	FLAC		Free Lossless Audio Codec
+Riff	Audio	FFFE	Extensible		
+Riff	Audio	FFFF	In Development		
+Riff	Audio	E923AABF-CB58-4471-A119-FFFA01E4CE62	Atrac3		
+Riff	Audio	47E142D2-36BA-4D8D-88FC-61654F8C836C	Atrac9		
+Riff	Audio	AD98D184-AAC3-11D0-A41C-00A0C9223196	VC		
+Riff	Audio	05589F81-C356-11CE-BF01-00AA0055595A	WaveFormatEx		
+Riff	Audio	518590A2-A184-11D0-8522-00C04FD9BAF3	DSound		
+Riff	Video	0x00000000	RGB		Basic Windows bitmap format. 1, 4 and 8 bpp versions are palettised. 16, 24 and 32bpp contain raw RGB samples
+Riff	Video	0x01000000	RLE		Run length encoded 8bpp RGB image
+Riff	Video	0x02000010	MPEG Video		
+Riff	Video	0x02000000	RLE		Run length encoded 4bpp RGB image
+Riff	Video	0x03000000	RGB		Raw RGB with arbitrary sample packing within a pixel. Packing and precision of R, G and B components is determined by bit masks for each
+Riff	Video	1978	RGB	A.M.Paredes predictor	
+Riff	Video	 BIT	RGB		
+Riff	Video	 JPG	JPEG		
+Riff	Video	 PNG	PNG		
+Riff	Video	 RAW	RGB		
+Riff	Video	 raw	RGB		
+Riff	Video	 RGB	RGB		
+Riff	Video	 RL4	RLE		
+Riff	Video	 RL8	RLE		
+Riff	Video	2VUY	YUV	Optibase VideoPump	
+Riff	Video	3IV0	MPEG-4 Visual	3ivX	3ivX pre-1.0
+Riff	Video	3IV1	MPEG-4 Visual	3ivX	3ivX 1.0-3.5
+Riff	Video	3IV2	MPEG-4 Visual	3ivX	3ivX 4.0
+Riff	Video	3IVD	MPEG-4 Visual	3ivX	
+Riff	Video	3IVX	MPEG-4 Visual	3ivX	
+Riff	Video	3VID	MPEG-4 Visual	3ivX	
+Riff	Video	8BPS	RGB	Apple	
+Riff	Video	AAS4	RLE	Autodesk	
+Riff	Video	AASC	RLE	Autodesk	
+Riff	Video	ABYR	Kensigton low	Kensington	Low resolution, low frame rate (6fps) for digital cameras
+Riff	Video	ACTL	ACT-L2	Streambox	
+Riff	Video	ADV1	WaveCodec	Loronix	
+Riff	Video	ADVJ	JPEG	Avid	
+Riff	Video	AEIK	Indeo 3.2		Vector Quantization
+Riff	Video	AEMI	MPEG Video	VideoONE	MPEG-1-I Capture
+Riff	Video	AFLC	FLC	Autodesk	
+Riff	Video	AFLI	FLI	Autodesk	
+Riff	Video	AHDV	CineForm	CineForm HD	
+Riff	Video	AJPG	JPEG		22fps for digital cameras
+Riff	Video	ALPH	Ziracom		Ziracom Digital Communications Inc.
+Riff	Video	AMM2	AMV2 MT	AMV2 MT Video Codec Version 2	
+Riff	Video	AMPG	MPEG-1	VideoONE	
+Riff	Video	AMR 	AMR		Speech codec
+Riff	Video	AMV3	AMV3	AMV3 Video Codec Version 3	
+Riff	Video	ANIM	RDX	Intel	
+Riff	Video	AP41	MPEG-4 Visual	AngelPotion	Hack of MS MPEG-4 v3
+Riff	Video	AP42	MPEG-4 Visual	AngelPotion	Hack of MS MPEG-4 v3
+Riff	Video	apch	ProRes		
+Riff	Video	apcn	ProRes		
+Riff	Video	apcs	ProRes		
+Riff	Video	apco	ProRes		
+Riff	Video	ap4c	ProRes		
+Riff	Video	ap4h	ProRes		
+Riff	Video	ASLC	AlparySoft Lossless		
+Riff	Video	ASV1	Asus 1		
+Riff	Video	ASV2	Asus 2		
+Riff	Video	ASVX	Asus X		
+Riff	Video	ATM4	MPEG-4 Visual	Nero	
+Riff	Video	AUR2	YUV		Auravision Aura 2
+Riff	Video	AURA	YUV		Auravision Aura 1
+Riff	Video	AUVX	AUVX		USH GmbH
+Riff	Video	AV01	AV1		
+Riff	Video	AV1X	Avid 1:1		
+Riff	Video	AVC1	AVC		
+Riff	Video	avc1	AVC		
+Riff	Video	AVD1	DV	Avid	
+Riff	Video	AVDJ	JPEG	Avid	
+Riff	Video	AVDN	Avid HD		
+Riff	Video	AVDV	DV	Avid	
+Riff	Video	AVI1	JPEG	MainConcept	
+Riff	Video	AVI2	JPEG	MainConcept	
+Riff	Video	AVID	JPEG	Avid	
+Riff	Video	AVIS	AviSynth		Wrapper for AviSynth (Dummy)
+Riff	Video	AVMP	Avid IMX		
+Riff	Video	AVR 	JPEG	Avid NuVista	Avid ABVB/NuVista JPEG with Alpha-channel
+Riff	Video	AVRn	JPEG	Avid JPEG	
+Riff	Video	AVRN	JPEG	Avid JPEG	
+Riff	Video	AVUI	Avid		Avid Meridien Uncompressed with Alpha-channel
+Riff	Video	AVUP	Avid		Avid 10bit Packed (Quick Time)
+Riff	Video	AYUV	YUV	YUV	
+Riff	Video	AZPR	QuickTime		
+Riff	Video	AZRP	QuickTime		
+Riff	Video	BGR 	RGB	RGB	
+Riff	Video	BHIV	BeHere iVideo		
+Riff	Video	BINK	Bink		
+Riff	Video	BIT 	RGB	RGB	
+Riff	Video	BITM	H.261	Microsoft	
+Riff	Video	BLOX	MPEG Video	Blox	
+Riff	Video	BLZ0	MPEG-4 Visual	DivX	DivX for Blizzard Decoder Filter
+Riff	Video	BT20	MediaStream		Conexant ProSummer MediaStream
+Riff	Video	BTCV	Composite		Conexant Composite Video
+Riff	Video	BTVC	Composite		Conexant Composite Video
+Riff	Video	BW00	Wavelet	BergWave	
+Riff	Video	BW10	MPEG-1	Broadway	Data Translation Broadway MPEG Capture/Compression
+Riff	Video	BXBG	RGB	Boxx	
+Riff	Video	BXRG	RGB	Boxx	
+Riff	Video	BXY2	YUV	Boxx	10-bit
+Riff	Video	BXYV	YUV	Boxx	
+Riff	Video	CC12	YUV	Intel	
+Riff	Video	CDV5	DV	Canopus	Canopus SD50/DVHD
+Riff	Video	CDVC	DV	Canopus	Canopus DV (DV)
+Riff	Video	CDVH	DV	Canopus	Canopus SD50/DVHD
+Riff	Video	CFCC	JPEG	DPS Perception	Dummy format - only AVI header
+Riff	Video	CFHD	CineForm		CineForm 10-bit Visually Perfect HD (Wavelet)
+Riff	Video	CGDI	Camcorder		Camcorder Video (MS Office 97)
+Riff	Video	CHAM	Champagne		Winnov Caviara Champagne
+Riff	Video	CHQX	Canopus HQX		
+Riff	Video	CJPG	JPEG	Creative	Creative Video Blaster Webcam Go JPEG
+Riff	Video	CLJR	YUV	Cirrus Logic	Less than 8 bits per Y, U and V sample.
+Riff	Video	CLLC	Canopus Lossless		
+Riff	Video	CLPL	YUV		Format similar to YV12 but including a level of indirection.
+Riff	Video	CM10	MediaShow		CyberLink Corporation
+Riff	Video	CMYK	CMYK		Common Data Format in Printing
+Riff	Video	COL0	MPEG-4 Visual		Hacked MS MPEG-4 v3
+Riff	Video	COL1	MPEG-4 Visual		Hacked MS MPEG-4 v3
+Riff	Video	CPLA	YUV	Weitek	
+Riff	Video	CRAM	MS Video		Microsoft Video 1
+Riff	Video	CSCD	CamStudio		RenderSoft CamStudio lossless (LZO & GZIP compression)
+Riff	Video	CT10	TalkingShow		CyberLink Corporation
+Riff	Video	CTRX	Citrix		Citrix Scalable Video
+Riff	Video	CUVC	Canopus HQ		
+Riff	Video	CVID	Cinepak		
+Riff	Video	cvid	Cinepak		
+Riff	Video	CWLT	WLT		Microsoft Color WLT DIB
+Riff	Video	CYUV	YUV	Creative Labs	
+Riff	Video	cyuv	YUV		
+Riff	Video	CYUY	YUV	ATI	
+Riff	Video	D261	H.261	DEC	
+Riff	Video	D263	H.263	DEC	
+Riff	Video	DAVC	AVC	Dicas	
+Riff	Video	DC25	DV	MainConcept	
+Riff	Video	DCAP	DV	Pinnacle	
+Riff	Video	DCL1	Data Connextion		Conferencing
+Riff	Video	DCT0	WniWni		
+Riff	Video	DFSC	VFW		DebugMode FrameServer VFW
+Riff	Video	DIB 	RGB		
+Riff	Video	DIV1	MPEG-4 Visual	FFMpeg	Hacked MS MPEG-4 V1
+Riff	Video	DIV2	MPEG-4 Visual	MS MPEG-4 1/2	
+Riff	Video	DIV3	MPEG-4 Visual	DivX 3 Low	
+Riff	Video	DIV4	MPEG-4 Visual	DivX 3 Fast	
+Riff	Video	DIV5	MPEG-4 Visual	DivX 5	
+Riff	Video	DIV6	MPEG-4 Visual	MS MPEG-4 v3	
+Riff	Video	DIVX	MPEG-4 Visual	DivX 4	Project Mayo
+Riff	Video	divx	MPEG-4 Visual	DivX	Mainly used by Google
+Riff	Video	DJPG	JPEG	Broadway 101	Data Translation, Inc.
+Riff	Video	DM4V	MPEG-4 Visual	Dicas	
+Riff	Video	DMB1	JPEG	Rainbow	Matrox Rainbow Runner hardware compression
+Riff	Video	DMB2	JPEG	Paradigm	
+Riff	Video	DMK2	V36 PDA		ViewSonic V36 PDA Video
+Riff	Video	DP02	MPEG-4 Visual	DynaPel	
+Riff	Video	DP16	YUV	Matsushita	With DPCM 6-bit compression
+Riff	Video	DP18	YUV	Matsushita	With DPCM 8-bit compression
+Riff	Video	DP26	YUV	Matsushita	With DPCM 6-bit compression
+Riff	Video	DP28	YUV	Matsushita	With DPCM 8-bit compression
+Riff	Video	DP96	YUV	Matsushita	With DPCM 6-bit compression
+Riff	Video	DP98	YUV	Matsushita	With DPCM 8-bit compression
+Riff	Video	DP9L	YUV	Matsushita	With DPCM 6-bit compression
+Riff	Video	DPS0	JPEG	DPS Reality	Dummy format - only AVI header
+Riff	Video	DPSC	JPEG	DPS PAR	Dummy format - only AVI header
+Riff	Video	DRWX	DV	Pinnacle	
+Riff	Video	DSVD	DV	Microsoft	
+Riff	Video	DTMT	Media-100		
+Riff	Video	DTNT	Media-100		
+Riff	Video	DUCK	TrueMotion S	Duck Corporation	
+Riff	Video	DV10	RGB	BlueFish	BlueFish444 (lossless RGBA, YUV 10-bit)
+Riff	Video	DV25	DV	DVCPro	
+Riff	Video	dv25	DV	DVCPro	
+Riff	Video	DV50	DV	DVCPro5	
+Riff	Video	dv50	DV	DVCPro5	
+Riff	Video	DVAN	DV	Pinnacle DV300	
+Riff	Video	DVC 	DV	Apple	
+Riff	Video	DVCP	DV	Apple	
+Riff	Video	DVCS	DV	MainConcept	
+Riff	Video	DVE2	DV	Insoft DVE-2	InSoft DVE-2 Videoconferencing
+Riff	Video	DVH1	DV	Pinnacle	
+Riff	Video	dvhd	DV	HD	
+Riff	Video	DVIS	DV	DualMoon	
+Riff	Video	DVL 	DV	Radius	
+Riff	Video	DVLP	DV	Radius	
+Riff	Video	DVMA	DV	Darim	
+Riff	Video	DVNM	DVNM		Matsushita Electric Industrial Co., Ltd.
+Riff	Video	DVOR	RGB	BlueFish	BlueFish444 (lossless RGBA, YUV 10-bit)
+Riff	Video	DVPN	DV	Apple	
+Riff	Video	DVPP	DV	Apple	
+Riff	Video	DVR 	MPEG Video	ASF	
+Riff	Video	DVR1	Targa2000		
+Riff	Video	DVRS	DV	DualMoon	
+Riff	Video	dvsd	DV	Sony	
+Riff	Video	dvsl	DV	Sony	
+Riff	Video	DVSL	DV		
+Riff	Video	DVX1	DVX 1 SP		Lucent DVX1000SP Video Decoder
+Riff	Video	DVX2	DVX 2 S		Lucent DVX2000S Video Decoder
+Riff	Video	DVX3	DVX 3 S		Lucent DVX3000S Video Decoder
+Riff	Video	DX50	MPEG-4 Visual	DivX 5	
+Riff	Video	DXGM	EA GameVideo		
+Riff	Video	DXT1	DirectX TC		DirectX Compressed Texture (1bit alpha channel)
+Riff	Video	DXT2	DirectX TC		DirectX Compressed Texture
+Riff	Video	DXT3	DirectX TC		DirectX Compressed Texture (4bit alpha channel)
+Riff	Video	DXT4	DirectX TC		DirectX Compressed Texture
+Riff	Video	DXT5	DirectX TC		DirectX Compressed Texture (3bit alpha channel with interpolation)
+Riff	Video	DXTC	DirectX TC		DirectX Texture Compression
+Riff	Video	DXTn	DirectX TC		Microsoft Compressed Texture
+Riff	Video	DXTN	DirectX TC		Microsoft DirectX Compressed Texture (DXTn)
+Riff	Video	EKQ0	Elsa KQ		Elsa graphics card quick
+Riff	Video	ELK0	Elsa LK		Elsa graphics card
+Riff	Video	EM2V	Elymonyx MPEG-2		Etymonix MPEG-2 I-frame
+Riff	Video	EQK0	Elsa		Elsa graphics card quick
+Riff	Video	ESCP	Escape		Eidos Escape
+Riff	Video	ETV1	eTreppid 1		eTreppid Video 1
+Riff	Video	ETV2	eTreppid 2		eTreppid Video 2
+Riff	Video	ETVC	eTreppid C		eTreppid Video C
+Riff	Video	FFDS	FFDS		
+Riff	Video	FFV1	FFV1		
+Riff	Video	FFV2	FFV2		
+Riff	Video	FFVH	HuffYUV		
+Riff	Video	FLIC	FLI/FLC	Autodesk	
+Riff	Video	FLJP	DField JPEG		D-Vision Field Encoded JPEG with LSI (or Targa emulation)
+Riff	Video	FLV1	Sorenson Spark		
+Riff	Video	FLV4	VP6	On2	
+Riff	Video	FMJP	JPEG	D-Vision	
+Riff	Video	FMP4	MPEG-4 Visual		
+Riff	Video	FPS1	Fraps		
+Riff	Video	FRLE	JPEG	SoftLab-Nsk	SoftLab-NSK Y16 + Alpha RLE
+Riff	Video	FRWA	JPEG	SoftLab-Nsk	SoftLab-NSK Vision Forward JPEG with Alpha-channel
+Riff	Video	FRWD	JPEG	SoftLab-Nsk	SoftLab-NSK Vision Forward JPEG
+Riff	Video	FRWT	JPEG	SoftLab-Nsk	SoftLab-NSK Vision Forward JPEG with Alpha-channel
+Riff	Video	FRWU	JPEG	SoftLab-Nsk	SoftLab-NSK Vision Forward Uncompressed
+Riff	Video	FVF1	Itered Fractal		
+Riff	Video	FVFW	FVFW		
+Riff	Video	FXT1	3DFX		
+Riff	Video	G2M2	GoToMeeting2		Citrix Systems, Inc.
+Riff	Video	G2M3	GoToMeeting3		Citrix Systems, Inc.
+Riff	Video	GEPJ	JPEG	White Pine	
+Riff	Video	GJPG	Grand Tech GT891x		
+Riff	Video	GLCC	GigaLink		
+Riff	Video	GLZW	LZW	Gabest	
+Riff	Video	GMP4	GeoVision Advanced MPEG-4		
+Riff	Video	GM40	GeoVision Advanced MPEG-4		
+Riff	Video	GPEG	JPEG	Gabest	
+Riff	Video	GPJM	JPEG	Pinnacle	
+Riff	Video	GREY	YUV		Simple grayscale video
+Riff	Video	GWLT	MS GWLT		Microsoft Greyscale WLT DIB
+Riff	Video	GXVE	ViVD V2	SoftMedia	
+Riff	Video	H260	H.260		
+Riff	Video	H261	H.261		
+Riff	Video	H262	MPEG Video		
+Riff	Video	H263	H.263		
+Riff	Video	h263	H.263		
+Riff	Video	H264	AVC		
+Riff	Video	h264	AVC		
+Riff	Video	H265	H.265		
+Riff	Video	H266	H.266		
+Riff	Video	H267	H.267		
+Riff	Video	H268	H.268		
+Riff	Video	H269	H.263		
+Riff	Video	HD10	RGB	BlueFish	BlueFish444 (lossless RGBA, YUV 10-bit)
+Riff	Video	HDX4	Jomigo HDX4		
+Riff	Video	HFYU	HuffYUV		
+Riff	Video	HMCR	Rendition		Rendition Motion Compensation Format
+Riff	Video	HMRR	Rendition		Rendition Motion Compensation Format
+Riff	Video	i263	H.263		
+Riff	Video	I420	YUV		8 bit Y plane followed by 8 bit 2x2 subsampled U and V planes.
+Riff	Video	IAN 	Indeo 4		
+Riff	Video	ICLB	CellB		InSoft CellB Videoconferencing
+Riff	Video	IDM0	Wavelets 2		IDM Motion Wavelets 2.0
+Riff	Video	IF09	H.261	Microsoft	
+Riff	Video	IFO9	YUV	Intel	
+Riff	Video	IGOR	PowerDVD		
+Riff	Video	IJPG	JPEG	Intergraph	
+Riff	Video	ILVC	Layered Video	Intel	
+Riff	Video	ILVR	H.263+		
+Riff	Video	IMAC	MotionComp		Intel hardware motion compensation.
+Riff	Video	IMC1	YUV		As YV12, except the U and V planes each have the same stride as the Y plane
+Riff	Video	IMC2	YUV		Similar to IMC1, except that the U and V lines are interleaved at half stride boundaries
+Riff	Video	IMC3	YUV		As IMC1, except that U and V are swapped
+Riff	Video	IMC4	YUV		As IMC2, except that U and V are swapped
+Riff	Video	IMG 	YUV		
+Riff	Video	IMJG	Accom JPEG		Accom SphereOUS JPEG with Alpha-channel
+Riff	Video	IPDV	I-O DV		I-O Data Device Giga AVI DV
+Riff	Video	IPJ2	JPEG 2000		Image Power JPEG 2000
+Riff	Video	IR21	Indeo 2.1		
+Riff	Video	IRAW	YUV		
+Riff	Video	ISME	ISME		Intel
+Riff	Video	IUYV	YUV		Lead 16bpp. Interlaced version of UYVY (line order 0, 2, 4,....,1, 3, 5....)
+Riff	Video	IV30	Indeo 3		Intel Indeo Video 3
+Riff	Video	IV31	Indeo 3		Intel Indeo Video 3.1
+Riff	Video	IV32	Indeo 3		Intel Indeo Video 3.2
+Riff	Video	IV33	Indeo 3		Intel Indeo Video 3.3
+Riff	Video	IV34	Indeo 3		Intel Indeo Video 3.4
+Riff	Video	IV35	Indeo 3		Intel Indeo Video 3.5
+Riff	Video	IV36	Indeo 3		Intel Indeo Video 3.6
+Riff	Video	IV37	Indeo 3		Intel Indeo Video 3.7
+Riff	Video	IV38	Indeo 3		Intel Indeo Video 3.8
+Riff	Video	IV39	Indeo 3		Intel Indeo Video 3.9
+Riff	Video	IV40	Indeo 4		Intel Indeo Video 4.0
+Riff	Video	IV41	Indeo 4		Intel Indeo Video 4.1
+Riff	Video	IV42	Indeo 4		Intel Indeo Video 4.2
+Riff	Video	IV43	Indeo 4		Intel Indeo Video 4.3
+Riff	Video	IV44	Indeo 4		Intel Indeo Video 4.4
+Riff	Video	IV45	Indeo 4		Intel Indeo Video 4.5
+Riff	Video	IV46	Indeo 4		Intel Indeo Video 4.6
+Riff	Video	IV47	Indeo 4		Intel Indeo Video 4.7
+Riff	Video	IV48	Indeo 4		Intel Indeo Video 4.8
+Riff	Video	IV49	Indeo 4		Intel Indeo Video 4.9
+Riff	Video	IV50	Indeo 4		Intel Indeo Video 5.0 Wavelet
+Riff	Video	IY41	YUV		Lead 16bpp. Interlaced version of Y41P (line order 0, 2, 4,....,1, 3, 5....)
+Riff	Video	IYU1	YUV		IEEE1394 12bpp. 12 bit format used in mode 2 of the IEEE 1394 Digital Camera 1.04 spec
+Riff	Video	IYU2	YUV		IEEE1394 24bpp. 24 bit format used in mode 2 of the IEEE 1394 Digital Camera 1.04 spec
+Riff	Video	IYUV	YUV		Intel Indeo iYUV 4:2:0
+Riff	Video	JBYR	Kensington		Kensington Video
+Riff	Video	JFIF	JPEG		
+Riff	Video	JPEG	JPEG		
+Riff	Video	JPG	JPEG		
+Riff	Video	JPGL	JPEG	Pegasus	DIVIO JPEG Light for WebCams (Pegasus Lossless JPEG)
+Riff	Video	KMVC	Karl		Karl Morton's Video (presumably)
+Riff	Video	kpcd	Photo CD		Kodak Photo CD
+Riff	Video	L261	H.261	Lead Technologies	
+Riff	Video	L263	H.263+	Lead Technologies	
+Riff	Video	LAGS	Lagarith		
+Riff	Video	LBYR	Creative WebCam		
+Riff	Video	LCMW	Lead CMW		Lead Technologies Motion CMW
+Riff	Video	LCW2	Lead MCMW		LEADTools MCMW 9Motion Wavelet
+Riff	Video	LEAD	Lead Video		
+Riff	Video	LGRY	Lead GrayScale		
+Riff	Video	LIA1	Liafail		Liafail, Inc.
+Riff	Video	LJ2K	JPEG 2000	Lead	
+Riff	Video	LJPG	JPEG	Lead	
+Riff	Video	Ljpg	JPEG	Lead	
+Riff	Video	LMP2	MPEG-PS	Lead	
+Riff	Video	LOCO	LOCO		Lossless
+Riff	Video	LSCR	Lead Screen capture		
+Riff	Video	LSV0	LSV0		Infinop Inc.
+Riff	Video	LSVC	Vmail		Vianet Lighting Strike Vmail (Streaming)
+Riff	Video	LSVM	Vmail		Vianet Lighting Strike Vmail (Streaming)
+Riff	Video	LSVW	Infinop		Infinop Lightning Strike multiple bit rate video codec.
+Riff	Video	LSVX	Vmail		Vianet Lightning Strike Video Codec
+Riff	Video	LZO1	LZO		LZO compressed (lossless)
+Riff	Video	M101	YUV	Matrox	
+Riff	Video	M261	H.261	Microsoft	
+Riff	Video	M263	H.263	Microsoft	
+Riff	Video	M4CC	MPEG-4 Visual	ESS Divo	
+Riff	Video	M4S2	MPEG-4 Visual	Microsoft	
+Riff	Video	MC12	ATI Motion		ATI Motion Compensation Format
+Riff	Video	MC24	JPEG	MainConcept	
+Riff	Video	MCAM	ATI Motion		ATI Motion Compensation Format
+Riff	Video	MCZM	RGB		Theory MicroCosm Lossless 64bit RGB with Alpha-channel
+Riff	Video	MDVD	MicroDVD		Alex MicroDVD Video (hacked MS MPEG-4)
+Riff	Video	MDVF	DV	Pinnacle	Pinnacle DV/DV50/DVHD100
+Riff	Video	MHFY	YUV		A.M.Paredes mhuffyYUV (LossLess)
+Riff	Video	MJ2C	JPEG 2000		Morgan Multimedia JPEG 2000 Compression
+Riff	Video	MJPA	JPEG	Pinacle	Pinnacle ReelTime MJPG hardware
+Riff	Video	mjp2	JPEG 2000		
+Riff	Video	MJPB	JPEG	Pinacle B	
+Riff	Video	MJPG	JPEG		
+Riff	Video	mJPG	JPEG	IBM	Including Huffman Tables
+Riff	Video	MJPX	JPEG	Pegasus	Pegasus PICVideo JPEG
+Riff	Video	ML20	Webcam		Mimic MSN Messenger Webcam
+Riff	Video	MLCY	MLC		MLC Lossless Codec
+Riff	Video	MMES	MPEG Video	Matrox	I-frame
+Riff	Video	MMIF	MPEG Video	Matrox	I-frame
+Riff	Video	MNVD	MindVid		MindBend MindVid LossLess
+Riff	Video	MP2V	MPEG Video		Media Excel MPEG-2 Video
+Riff	Video	MP2v	MPEG Video		MPEG-2 Video
+Riff	Video	MP41	MPEG-4 Visual	Microsoft	Microsoft MPEG-4 v1 (pre-standard)
+Riff	Video	MP42	MPEG-4 Visual	Microsoft	Microsoft MPEG-4 v2 (pre-standard)
+Riff	Video	MP43	MPEG-4 Visual	Microsoft	Microsoft MPEG-4 v3 (pre-standard)
+Riff	Video	MP4S	MPEG-4 Visual	MS MPEG-4 v3	Microsoft MPEG-4 (Windows Media 7.0)
+Riff	Video	MP4V	MPEG-4 Visual		Apple QuickTime MPEG-4 native
+Riff	Video	MPEG	MPEG Video		Chromatic MPEG 1 Video I Frame
+Riff	Video	mpeg	MPEG Video		MPEG-1 Video
+Riff	Video	MPG1	MPEG Video	Ffmpeg	(MPEG-1/2) FFmpeg
+Riff	Video	mpg1	MPEG Video	Ffmpeg	(MPEG-1/2) FFmpeg
+Riff	Video	MPG2	MPEG Video	Ffmpeg	(MPEG-1/2) FFmpeg
+Riff	Video	mpg2	MPEG Video	Ffmpeg	(MPEG-1/2) FFmpeg
+Riff	Video	MPG3	MPEG-4 Visual	FFmpeg DivX 3	(MPEG-4) MS MPEG-4 v3
+Riff	Video	MPG4	MPEG-4 Visual	MS MPEG-4 v1	Microsoft MPEG-4 v1
+Riff	Video	MPGI	MPEG Video	Sigma	Sigma Design MPEG-1 I-frame
+Riff	Video	MPNG	PNG		Motion PNG
+Riff	Video	MRCA	Mrcodec		FAST Multimedia
+Riff	Video	MRLE	RLE		Microsoft RLE
+Riff	Video	MSS1	Screen Video	Windows	Windows Screen Video
+Riff	Video	MSS2	Windows Media		Windows Media 9
+Riff	Video	MSUC	MSU		MSU LossLess
+Riff	Video	MSUD	MSU		MSU LossLess
+Riff	Video	MSV1	Microsoft Video 1		Microsoft Video 1
+Riff	Video	MSVC	Microsoft Video 1		Microsoft Video 1
+Riff	Video	MSZH	AVImszh		Lossless (ZIP compression)
+Riff	Video	MTGA	TGA		Motion TGA images (24, 32 bpp)
+Riff	Video	MTX1	JPEG	Matrox	
+Riff	Video	MTX2	JPEG	Matrox	
+Riff	Video	MTX3	JPEG	Matrox	
+Riff	Video	MTX4	JPEG	Matrox	
+Riff	Video	MTX5	JPEG	Matrox	
+Riff	Video	MTX6	JPEG	Matrox	
+Riff	Video	MTX7	JPEG	Matrox	
+Riff	Video	MTX8	JPEG	Matrox	
+Riff	Video	MTX9	JPEG	Matrox	
+Riff	Video	MV10	Nokia		Nokia Mobile Phones
+Riff	Video	MV11	Nokia		Nokia Mobile Phones
+Riff	Video	MV12	MVI		Motion Pixels (old)
+Riff	Video	MV99	Nokia		Nokia Mobile Phones
+Riff	Video	MVC1	Nokia		Nokia Mobile Phones
+Riff	Video	MVC2	Nokia		Nokia Mobile Phones
+Riff	Video	MVC9	Nokia		Nokia Mobile Phones
+Riff	Video	MVI1	MVI		Motion Pixels MVI
+Riff	Video	MVI2	MVI		Motion Pixels MVI
+Riff	Video	MWV1	Aware Motion Wavelets		Aware Motion Wavelets
+Riff	Video	MYUV	RGB		Media-100 844/X Uncompressed
+Riff	Video	NAVI	MPEG-4 Visual		nAVI video (hacked MS MPEG-4)
+Riff	Video	NDIG	MPEG-4 Visual	Ahead	Ahead Nero Digital MPEG-4
+Riff	Video	NHVU	Nvidia Texture		Nvidia Texture Format (GEForce 3)
+Riff	Video	NO16	RGB		Theory None16 64bit uncompressed Uncompressed
+Riff	Video	NT00	YUV	LightWave	NewTek LightWave HDTV YUV with Alpha-channel
+Riff	Video	NTN1	NogaTech Video 1		Nogatech Video Compression 1
+Riff	Video	NTN2	NogaTech Video 2		Nogatech Video Compression 2 (GrabBee hardware coder)
+Riff	Video	NUV1	Nuppel		NuppelVideo
+Riff	Video	NV12	YUV		8-bit Y plane followed by an interleaved U/V plane with 2x2 subsampling
+Riff	Video	NV21	YUV		As NV12 with U and V reversed in the interleaved plane
+Riff	Video	NVDS	Nvidia Texture		Nvidia Texture Format
+Riff	Video	NVHS	Nvidia Texture		Nvidia Texture Format (GeForce 3)
+Riff	Video	NVHU	Nvidia Texture		Nvidia Texture Format
+Riff	Video	NVS0	Nvidia Texture		Nvidia Texture Compression Format
+Riff	Video	NVS1	Nvidia Texture		Nvidia Texture Compression Format
+Riff	Video	NVS2	Nvidia Texture		Nvidia Texture Compression Format
+Riff	Video	NVS3	Nvidia Texture		Nvidia Texture Compression Format
+Riff	Video	NVS4	Nvidia Texture		Nvidia Texture Compression Format
+Riff	Video	NVS5	Nvidia Texture		Nvidia Texture Compression Format
+Riff	Video	NVS6	Nvidia Texture		Nvidia Texture Compression Format
+Riff	Video	NVS7	Nvidia Texture		Nvidia Texture Compression Format
+Riff	Video	NVS8	Nvidia Texture		Nvidia Texture Compression Format
+Riff	Video	NVS9	Nvidia Texture		Nvidia Texture Compression Format
+Riff	Video	NVT0	Nvidia Texture		Nvidia Texture Compression Format
+Riff	Video	NVT1	Nvidia Texture		Nvidia Texture Compression Format
+Riff	Video	NVT2	Nvidia Texture		Nvidia Texture Compression Format
+Riff	Video	NVT3	Nvidia Texture		Nvidia Texture Compression Format
+Riff	Video	NVT4	Nvidia Texture		Nvidia Texture Compression Format
+Riff	Video	NVT5	Nvidia Texture		Nvidia Texture Compression Format
+Riff	Video	NVT6	Nvidia Texture		Nvidia Texture Compression Format
+Riff	Video	NVT7	Nvidia Texture		Nvidia Texture Compression Format
+Riff	Video	NVT8	Nvidia Texture		Nvidia Texture Compression Format
+Riff	Video	NVT9	Nvidia Texture		Nvidia Texture Compression Format
+Riff	Video	NY12	YUV	Nogatech	
+Riff	Video	NYUV	YUV	Nogatech	
+Riff	Video	ONYX	VP7	On2	
+Riff	Video	PCLE	Studio400	Pinnacle	
+Riff	Video	PDVC	DV	Panasonic	
+Riff	Video	PGVV	Radius Video Vision		
+Riff	Video	PHMO	Photomotion	IBM	
+Riff	Video	PIM1	JPEG	Pegasus	Pinnacle DC1000 hardware (MPEG compression)
+Riff	Video	PIM2	JPEG	Pegasus	Pegasus Imaging
+Riff	Video	PIMJ	JPEG	Pegasus	Pegasus Imaging PICvideo Lossless JPEG
+Riff	Video	PIXL	JPEG	Miro	MiroVideo XL (JPEG)
+Riff	Video	PNG	PNG		
+Riff	Video	PNG1	PNG		Corecodec.org CorePNG
+Riff	Video	PVEZ	PowerEZ		Horizons Technology PowerEZ
+Riff	Video	PVMM	MPEG-4 Visual	Pegasus	PacketVideo Corporation MPEG-4
+Riff	Video	PVW2	Wavelet	Pegasus	Pegasus Imaging Wavelet 2000
+Riff	Video	PVWV	Wavelet	Pegasus	Pegasus Imaging Wavelet 2000
+Riff	Video	PXLT	Pixlet		Apple Pixlet (Wavelet)
+Riff	Video	Q1.0	QPEG 1.0		Q-Team QPEG 1.0
+Riff	Video	Q1.1	QPEG 1.1		Q-Team QPEG 1.1
+Riff	Video	QDGX	Apple GX		Apple QuickDUncompressed GX
+Riff	Video	QDRW	Palettized Video		Apple
+Riff	Video	QPEG	QPEG 1.1		Q-Team QPEG 1.1
+Riff	Video	QPEQ	QPEG 1.1		Q-Team QPEG 1.1
+Riff	Video	R210	YUV		BlackMagic YUV (Quick Time)
+Riff	Video	R411	DV	Radius	Radius DV NTSC YUV
+Riff	Video	R420	DV	Radius	Radius DV PAL YUV
+Riff	Video	RAV_	MPEG-1	GroupTron	GroupTRON ReferenceAVI (dummy for MPEG compressor)
+Riff	Video	RAVI	MPEG-1	GroupTron	GroupTRON ReferenceAVI (dummy for MPEG compressor)
+Riff	Video	RAW 	RGB		Full Frames (Uncompressed)
+Riff	Video	raw 	RGB		Full Frames (Uncompressed)
+Riff	Video	RGB 	RGB		
+Riff	Video	RGB1	RGB		
+Riff	Video	RGB2	RGB		
+Riff	Video	RGBA	RGB		
+Riff	Video	RGBO	RGB		Little Endian
+Riff	Video	RGBP	RGB		Little Endian
+Riff	Video	RGBQ	RGB		Big Endian
+Riff	Video	RGBR	RGB		Big Endian
+Riff	Video	RGBT	RGBA		
+Riff	Video	RIVA	Swizzled texture		Nvidia
+Riff	Video	RL4	RLE		RLE 4bpp RGB
+Riff	Video	RL8	RLE		RLE 8bpp RGB
+Riff	Video	RLE 	RLE		RLE RGB with arbitrary sample packing within a pixel
+Riff	Video	RLE4	RLE		RLE 4bpp RGB
+Riff	Video	RLE8	RLE		RLE 8bpp RGB
+Riff	Video	RLND	Roland		Roland Corporation
+Riff	Video	RMP4	MPEG-4 Visual	RealMagic	REALmagic MPEG-4 Video (Sigma Design, built on XviD)
+Riff	Video	ROQV	Id RoQ		Id RoQ File Video Decoder
+Riff	Video	RT21	Intel Video 2.1		Intel Real Time Video 2.1
+Riff	Video	RTV0	NewTek VideoToaster		NewTek VideoToaster (dummy format - only AVI header)
+Riff	Video	RUD0	Rududu		Rududu video
+Riff	Video	RV10	RealVideo 1		H263, RealVideo 5
+Riff	Video	RV13	RealVideo 1		H263, RealVideo 5
+Riff	Video	RV20	RealVideo 2		H263, RealVideo 6
+Riff	Video	RV30	RealVideo 3		Between H263 and H264, RealVideo 8
+Riff	Video	RV40	RealVideo 4		H264, RealVideo 9
+Riff	Video	RVX 	RDX		Intel RDX
+Riff	Video	S263	H.263		
+Riff	Video	S422	YUV	VideoCap C210	VideoCap C210
+Riff	Video	SAN3	MPEG-4 Visual		Direct copy of DivX 3.11
+Riff	Video	SANM	Smush v2		LucasArts
+Riff	Video	SCCD	SoftCam		
+Riff	Video	SDCC	DV	Sun	Sun Digital Camera
+Riff	Video	SEDG	MPEG-4 Visual	Samsung	Samsung MPEG-4
+Riff	Video	SEG4	Cinepak		
+Riff	Video	SEGA	Cinepak		
+Riff	Video	SFMC	CrystalNet		CrystalNet Surface Fitting Method
+Riff	Video	SHR0	BitJazz SheerVideo		BitJazz SheerVideo (realtime lossless)
+Riff	Video	SHR1	BitJazz SheerVideo		BitJazz SheerVideo (realtime lossless)
+Riff	Video	SHR2	BitJazz SheerVideo		BitJazz SheerVideo (realtime lossless)
+Riff	Video	SHR3	BitJazz SheerVideo		BitJazz SheerVideo (realtime lossless)
+Riff	Video	SHR4	BitJazz SheerVideo		BitJazz SheerVideo (realtime lossless)
+Riff	Video	SHR5	BitJazz SheerVideo		BitJazz SheerVideo (realtime lossless)
+Riff	Video	SHR6	BitJazz SheerVideo		BitJazz SheerVideo (realtime lossless)
+Riff	Video	SHR7	BitJazz SheerVideo		BitJazz SheerVideo (realtime lossless)
+Riff	Video	SIF1	SIF1		
+Riff	Video	SJPG	JPEG	CuSeeMe	CuSeeMe
+Riff	Video	SL25	DV	SoftLab DVCPro	SoftLab-NSK DVCPRO
+Riff	Video	SL50	DV	SoftLab DVCPro5	SoftLab-NSK 
+Riff	Video	SLDV	DV	SoftLab	SoftLab-NSK Forward DV Draw
+Riff	Video	SLIF	MPEG Video	SoftLab	SoftLab-NSK MPEG-2 I-frames
+Riff	Video	SLMJ	JPEG	SoftLab	SoftLab-NSK Forward JPEG
+Riff	Video	smc 	SMC		Apple Graphics (SMC)
+Riff	Video	SMSC	Radius		
+Riff	Video	SMSD	Radius		
+Riff	Video	SMSV	Wavelet Video		WorldConnect Wavelet Streaming Video
+Riff	Video	SNOW	Snow		
+Riff	Video	SP40	YUV	SunPlus	SunPlus YUV
+Riff	Video	SP44	MegaCam		SunPlus Aiptek MegaCam
+Riff	Video	SP53	MegaCam		SunPlus Aiptek MegaCam
+Riff	Video	SP54	MegaCam		SunPlus Aiptek MegaCam
+Riff	Video	SP55	MegaCam		SunPlus Aiptek MegaCam
+Riff	Video	SP56	MegaCam		SunPlus Aiptek MegaCam
+Riff	Video	SP57	MegaCam		SunPlus Aiptek MegaCam
+Riff	Video	SP58	MegaCam		SunPlus Aiptek MegaCam
+Riff	Video	SP61	MegaCam		SunPlus Aiptek MegaCam
+Riff	Video	SPIG	Spigot		Radius Spigot
+Riff	Video	SPLC	ACM audio		Splash Studios ACM Audio
+Riff	Video	SPRK	Spark		
+Riff	Video	SQZ2	VXTreme 2		Microsoft VXTreme Video V2
+Riff	Video	STVA	ST Imager		ST Microelectronics CMOS Imager Data (Bayer)
+Riff	Video	STVB	ST Imager		ST Microelectronics CMOS Imager Data (Nudged Bayer)
+Riff	Video	STVC	ST Imager		ST Microelectronics CMOS Imager Data (Bunched)
+Riff	Video	STVX	ST Imager		ST Microelectronics CMOS Imager Data (Extended Data Format)
+Riff	Video	STVY	ST Imager		ST Microelectronics CMOS Imager Data (Extended Data Format with Correction Data)
+Riff	Video	SV10	Sorenson		Sorenson Media Video R1
+Riff	Video	SVQ1	AVC	Sorenson 1	Sorenson Media Video 1 (Apple QuickTime 3)
+Riff	Video	SVQ2	AVC	Sorenson 2	Sorenson Media Video 2 (Apple QuickTime 4)
+Riff	Video	SVQ3	AVC	Sorenson 3	Sorenson Media Video 3 (Apple QuickTime 5)
+Riff	Video	SWC1	JPEG	MainConcept	MainConcept JPEG
+Riff	Video	T420	YUV	Toshiba	Toshiba YUV 4:2:0
+Riff	Video	TGA 	TGA	Apple	Apple TGA (with Alpha-channel)
+Riff	Video	THEO	Theora		FFVFW Supported
+Riff	Video	TIFF	Apple TIFF		Apple TIFF (with Alpha-channel)
+Riff	Video	TIM2	Pinnacle DVI		Pinnacle RAL DVI
+Riff	Video	TLMS	TeraLogic		TeraLogic Motion Intraframe
+Riff	Video	TLST	TeraLogic		TeraLogic Motion Intraframe
+Riff	Video	TM10	Duck		Duck TrueMotion
+Riff	Video	TM20	Duck 2		Duck TrueMotion 2.0
+Riff	Video	TM2A	Duck Archiver 2		Duck TrueMotion Archiver 2.0
+Riff	Video	TM2X	Duck 2		Duck TrueMotion 2X
+Riff	Video	TMIC	TeraLogic		TeraLogic Motion Intraframe
+Riff	Video	TMOT	Horizons TM S		Horizons Technology TrueMotion Video
+Riff	Video	TR20	Duck TM RT2		Duck TrueMotion RT 2.0
+Riff	Video	TRLE	Akula		Akula Alpha Pro Custom AVI (LossLess)
+Riff	Video	TSCC	TechSmith		TechSmith Screen Capture
+Riff	Video	tscc	TechSmith		TechSmith Screen Capture
+Riff	Video	TV10	Tecomac		Tecomac Low-Bit Rate
+Riff	Video	TVJP	Pinnacle/Truevision		TrueVision Field Encoded JPEG (Targa emulation)
+Riff	Video	TVMJ	Pinnacle/Truevision		Truevision TARGA JPEG Hardware (or Targa emulation)
+Riff	Video	TY0N	Trident		Trident Decompression Driver
+Riff	Video	TY2C	Trident		Trident Decompression Driver
+Riff	Video	TY2N	Trident		Trident Decompression Driver
+Riff	Video	U<Y 	YUV	Discreet	Discreet UC YUV 4:2:2:4 10 bit
+Riff	Video	U<YA	YUV	Discreet	Discreet UC YUV 4:2:2:4 10 bit (with Alpha-channel)
+Riff	Video	U263	H.263	UB	UB Video H.263/H.263+/H.263++ Decoder
+Riff	Video	UCOD	ClearVideo		ClearVideo (fractal compression-based)
+Riff	Video	ULH0	YUV	Ut Video	Ut Video Lossless Codec
+Riff	Video	ULH2	YUV	Ut Video	Ut Video Lossless Codec
+Riff	Video	ULRA	RGBA	Ut Video	Ut Video Lossless Codec
+Riff	Video	ULRG	RGB	Ut Video	Ut Video Lossless Codec
+Riff	Video	ULTI	Ultimotion		IBM Ultimotion
+Riff	Video	ULY0	YUV	Ut Video	Ut Video Lossless Codec
+Riff	Video	ULY2	YUV	Ut Video	Ut Video Lossless Codec
+Riff	Video	UMP4	MPEG-4 Visual	UB	UB Video MPEG 4
+Riff	Video	UYNV	YUV		Nvidia 16bpp. A direct copy of UYVY registered by Nvidia to work around problems in some olds which did not like hardware which offered more than 2 UYVY surfaces.
+Riff	Video	UYVP	YUV		Evans & Sutherland 24bpp. YUV 4:2:2 extended precision 10-bits per component in U0Y0V0Y1 order
+Riff	Video	UYVU	YUV	SoftLab	SoftLab-NSK Forward YUV
+Riff	Video	UYVY	YUV		Uncompressed 16bpp. YUV 4:2:2 (Y sample at every pixel, U and V sampled at every second pixel horizontally on each line). A macropixel contains 2 pixels in 1 u_int32.
+Riff	Video	V210	YUV		Optibase VideoPump 10-bit 4:2:2 Component YUV
+Riff	Video	v210	YUV	AJA Video Systems Xena	
+Riff	Video	V261	VX3000S		Lucent VX3000S
+Riff	Video	V422	YUV	Vitec	
+Riff	Video	V655	YUV	Vitec	Vitec Multimedia 16 bit YUV 4:2:2 (6:5:5) format
+Riff	Video	VBLE	MarcFD VBLE		MarcFD VBLE Lossless
+Riff	Video	VCR1	ATI Video 1		ATI VCR 1.0
+Riff	Video	VCR2	ATI Video 2		ATI VCR 2.0 (MPEG YV12)
+Riff	Video	VCR3	ATI Video 3		ATI VCR 3.0
+Riff	Video	VCR4	ATI Video 4		ATI VCR 4.0
+Riff	Video	VCR5	ATI Video 5		ATI VCR 5.0
+Riff	Video	VCR6	ATI Video 6		ATI VCR 6.0
+Riff	Video	VCR7	ATI Video 7		ATI VCR 7.0
+Riff	Video	VCR8	ATI Video 8		ATI VCR 8.0
+Riff	Video	VCR9	ATI Video 9		ATI VCR 9.0
+Riff	Video	VCWV	Wavelet		VideoCon
+Riff	Video	VDCT	RGB	VideoMaker	Video Maker Pro DIB
+Riff	Video	VDOM	VDOWave		VDONet Wave
+Riff	Video	VDOW	VDOLive		VDONet Live (H,263)
+Riff	Video	VDST	VirtualDub		VirtualDub remote frameclient ICM driver
+Riff	Video	VDTZ	YUV		VideoTizer / Darim Vision YUV
+Riff	Video	VGPX	VGP		Alaris VideoGramPixel
+Riff	Video	VIDM	MPEG-4 Visual	DivX 5 Pro	DivX 5.0 Pro Supported
+Riff	Video	VIDS	Vitec		Vitec Multimedia YUV 4:2:2
+Riff	Video	VIFP	VFAPI		Virtual Frame API (VFAPI dummy format)
+Riff	Video	VIV1	H.263	Vivo	
+Riff	Video	VIV2	H.263	Vivo	
+Riff	Video	VIVO	H.263	Vivo	
+Riff	Video	VIXL	JPEG	Miro XL	Miro Video XL
+Riff	Video	VJPG	JPEG		
+Riff	Video	VLV1	Videologic		
+Riff	Video	VMNC	Vmware		
+Riff	Video	VP30	VP3	On2	
+Riff	Video	VP31	VP3	On2	
+Riff	Video	VP32	VP3	On2	
+Riff	Video	VP40	VP4	On2	
+Riff	Video	VP50	VP5	On2	
+Riff	Video	VP60	VP6	On2	
+Riff	Video	VP61	VP6	On2	
+Riff	Video	VP62	VP6	On2	
+Riff	Video	VP6A	VP6	On2	
+Riff	Video	VP6F	VP6	On2	
+Riff	Video	VP70	VP7	On2	
+Riff	Video	VP71	VP7	On2	
+Riff	Video	VP72	VP7	On2	
+Riff	Video	VP80	VP8		
+Riff	Video	VQC1	Vector 1		Vector-quantised 1 (high compression) http://eprints.ecs.soton.ac.uk/archive/00001310/01/VTC97-js.pdf
+Riff	Video	VQC2	Vector 2		Vector-quantised 2 (high robustness against channel errors) http://eprints.ecs.soton.ac.uk/archive/00001310/01/VTC97-js.pdf
+Riff	Video	VQJP	VQ630		Dual-mode digital camera
+Riff	Video	VQS4	VQ110		DV camera
+Riff	Video	VR21	YUV	BlckMagic	BlackMagic YUV (Quick Time)
+Riff	Video	VSSH	AVC	Vanguard VSS	
+Riff	Video	VSSV	Vanguard Video	Vanguard VSS	
+Riff	Video	VSSW	AVC	Vanguard VSS	
+Riff	Video	VTLP	GGP		Alaris VideoGramPixel
+Riff	Video	VX1K	DVX 1 S		Lucent VX1000S Video
+Riff	Video	VX2K	DVX 2 S		Lucent VX2000S Video
+Riff	Video	VXSP	DVX 1 SP		Lucent VX1000SP Video
+Riff	Video	VYU9	YUV	ATI	
+Riff	Video	VYUY	YUV	ATI	
+Riff	Video	WBVC	W9960		Winbond Electronics W9960
+Riff	Video	WHAM	Microsoft Video 1		
+Riff	Video	WINX	Winnov		
+Riff	Video	WJPG	JPEG	Winbond 	Winbond JPEG (AverMedia USB devices)
+Riff	Video	WMV1	WMV1		Windows Media Video 7
+Riff	Video	WMV2	WMV2		Windows Media Video 8
+Riff	Video	WMV3	VC-1	WMV3	Windows Media Video 9
+Riff	Video	WMVA	VC-1	WMV	Windows Media Video
+Riff	Video	WMVP	WMV3		Windows Media Video V9
+Riff	Video	WNIX	WniWni		WniWni
+Riff	Video	WNV1	WinNov		WinNov Videum Hardware Compression
+Riff	Video	WNVA	WinNov		WinNov Videum Hardware Compression
+Riff	Video	WRLE	RGB	Apple	Apple QuickTime BMP
+Riff	Video	WRPR	AVideoTools		VideoTools VideoServer Client (wrapper for AviSynth)
+Riff	Video	WV1F			
+Riff	Video	WVC1	VC-1	Microsoft	
+Riff	Video	WVLT	IllusionHope Wavelet 9/7		IllusionHope Wavelet 9/7
+Riff	Video	WVP2			
+Riff	Video	WZCD	iScan		CORE Co. Ltd.
+Riff	Video	WZDC	iSnap		CORE Co. Ltd.
+Riff	Video	X263	H.263	Xirlink	
+Riff	Video	X264	AVC		XiWave GNU GPL x264 MPEG-4
+Riff	Video	XJPG	JPEG	Xirlink	
+Riff	Video	XLV0	NetXL Video		NetXL Inc. XL Video Decoder
+Riff	Video	XMPG	MPEG Video	Xing	XING MPEG (I frame only)
+Riff	Video	XVID	MPEG-4 Visual	XviD	
+Riff	Video	XVIX	MPEG-4 Visual	XviD	Based on XviD MPEG-4
+Riff	Video	XWV0	XiWave Video		
+Riff	Video	XWV1	XiWave Video		
+Riff	Video	XWV2	XiWave Video		
+Riff	Video	XWV3	XiWave Video		
+Riff	Video	XWV4	XiWave Video		
+Riff	Video	XWV5	XiWave Video		
+Riff	Video	XWV6	XiWave Video		
+Riff	Video	XWV7	XiWave Video		
+Riff	Video	XWV8	XiWave Video		
+Riff	Video	XWV9	XiWave Video		
+Riff	Video	XXAN	Origin VideoGame		Used in Wing Commander 3 and 4
+Riff	Video	XYZP	YUV		Extended PAL format XYZ palette
+Riff	Video	Y211	YUV		Packed YUV format with Y sampled at every second pixel across each line and U and V sampled at every fourth pixel
+Riff	Video	Y216	YUV	Targa	Pinnacle TARGA CineWave YUV (Quick Time)
+Riff	Video	Y411	YUV		YUV 4:1:1 Packed
+Riff	Video	Y41B	YUV		YUV 4:1:1 Planar
+Riff	Video	Y41P	YUV		Conexant (ex Brooktree) YUV 4:1:1 Raw
+Riff	Video	Y41T	YUV		Format as for Y41P, but the lsb of each Y component is used to signal pixel transparency
+Riff	Video	Y422	YUV		Direct copy of UYVY as used by ADS Technologies Pyro WebCam firewire camera
+Riff	Video	Y42B	YUV		YUV 4:2:2 Planar
+Riff	Video	Y42T	YUV		Format as for UYVY, but the lsb of each Y component is used to signal pixel transparency
+Riff	Video	Y444	YUV		IYU2 (iRez Stealth Fire camera)
+Riff	Video	Y8  	GrayScale		Simple grayscale video
+Riff	Video	Y800	GrayScale		Simple grayscale video
+Riff	Video	YC12	YUV		Intel YUV12
+Riff	Video	YCCK	YUV		
+Riff	Video	YMPG	MPEG-PS		YMPEG Alpha (dummy for MPEG-2 compressor)
+Riff	Video	YU12	YUV		ATI YV12 4:2:0 Planar
+Riff	Video	YU92	YUV		Intel - YUV
+Riff	Video	YUNV	YUV		A direct copy of YUY2 registered by Nvidia to work around problems in some olds which did not like hardware that offered more than 2 YUY2 surfaces
+Riff	Video	YUV2	YUV		Apple Component Video (YUV 4:2:2)
+Riff	Video	YUV8	YUV		Winnov Caviar YUV8 
+Riff	Video	YUV9	YUV		Intel YUV9
+Riff	Video	YUVP	YUV		YUV 4:2:2 extended precision 10-bits per component in Y0U0Y1V0 order
+Riff	Video	YUY2	YUV		YUV 4:2:2 as for UYVY but with different component ordering within the u_int32 macropixel
+Riff	Video	YUYP	YUV		Evans & Sutherland
+Riff	Video	YUYV	YUV		Canopus YUV format
+Riff	Video	YV12	YUV		ATI YVU12 4:2:0 Planar
+Riff	Video	YV16	YUV		Elecard YUV 4:2:2 Planar
+Riff	Video	YV92	YUV		Intel Smart Video Recorder YVU9
+Riff	Video	YVU9	YUV		Brooktree YVU9 Raw (YVU9 Planar)
+Riff	Video	YVYU	YUV		YUV 4:2:2 as for UYVY but with different component ordering within the u_int32 macropixel
+Riff	Video	ZLIB	AVIzlib		Lossless (ZIP compression)
+Riff	Video	ZMBV	Zip		Zip Motion Blocks Video
+Riff	Video	ZPEG	Video Zipper		Metheus Video Zipper
+Riff	Video	ZYGO	ZyGo		ZyGo Video
+Riff	Text	DXSB	DivX Subtitle		Subtitle in AVI from DivX networks
+Mpeg4	General	M4V 	MPEG-4		
+Mpeg4	General	isom	MPEG-4		
+Mpeg4	General	iso2	MPEG-4		
+Mpeg4	General	iso4	MPEG-4		
+Mpeg4	General	iso5	MPEG-4		
+Mpeg4	General	mp41	MPEG-4		
+Mpeg4	General	mp42	MPEG-4		
+Mpeg4	General	avc1	MPEG-4		
+Mpeg4	General	3gp1	MPEG-4		
+Mpeg4	General	3gp2	MPEG-4		
+Mpeg4	General	3gp3	MPEG-4		
+Mpeg4	General	3gp4	MPEG-4		
+Mpeg4	General	3gp5	MPEG-4		
+Mpeg4	General	3gp6	MPEG-4		
+Mpeg4	General	3gp6	MPEG-4		
+Mpeg4	General	3gp6	MPEG-4		
+Mpeg4	General	3gp7	MPEG-4		
+Mpeg4	General	3g2a	MPEG-4		
+Mpeg4	General	3ge6	MPEG-4		
+Mpeg4	General	3ge7	MPEG-4		
+Mpeg4	General	3gg6	MPEG-4		
+Mpeg4	General	3gp8	MPEG-4		
+Mpeg4	General	3gp9	MPEG-4		
+Mpeg4	General	CAQV	MPEG-4		
+Mpeg4	General	dby1	MPEG-4	Dolby Extensions	
+Mpeg4	General	FACE	MPEG-4		
+Mpeg4	General	isml	MPEG-4	IIS Smooth Streaming file format	
+Mpeg4	General	JP20	MPEG-4		
+Mpeg4	General	JPM 	MPEG-4		
+Mpeg4	General	JPX 	MPEG-4		
+Mpeg4	General	KDDI	MPEG-4		
+Mpeg4	General	mif1	HEIF		
+Mpeg4	General	msf1	MPEG-4		
+Mpeg4	General	MJ2S	MPEG-4		
+Mpeg4	General	MJP2	MPEG-4		
+Mpeg4	General	MQT 	MPEG-4		
+Mpeg4	General	MSNV	MPEG-4		
+Mpeg4	General	ndas	MPEG-4		
+Mpeg4	General	ndsc	MPEG-4		
+Mpeg4	General	ndsh	MPEG-4		
+Mpeg4	General	ndsm	MPEG-4		
+Mpeg4	General	ndsp	MPEG-4		
+Mpeg4	General	ndss	MPEG-4		
+Mpeg4	General	ndxc	MPEG-4		
+Mpeg4	General	ndxh	MPEG-4		
+Mpeg4	General	ndxm	MPEG-4		
+Mpeg4	General	ndxp	MPEG-4		
+Mpeg4	General	ndxs	MPEG-4		
+Mpeg4	General	mmp4	MPEG-4		
+Mpeg4	General	mp71	MPEG-4		
+Mpeg4	General	mp7b	MPEG-4		
+Mpeg4	General	piff	MPEG-4	Protected Interoperable File Format	
+Mpeg4	General	qt  	MPEG-4		
+Mpeg4	General	SDV 	MPEG-4		
+Mpeg4	General	M4A 	MPEG-4		
+Mpeg4	General	M4B 	MPEG-4		
+Mpeg4	General	M4P 	MPEG-4		
+Mpeg4	General	M4VP	MPEG-4		
+Mpeg4	General	iphE	MPEG-4		
+Mpeg4	General	M4VH	MPEG-4		
+Mpeg4	General	QTCA	MPEG-4		
+Mpeg4	General	CAQV	MPEG-4		
+Mpeg4	General	QTI 	MPEG-4		
+Mpeg4	General	f4v 	MPEG-4		
+Mpeg4	Audio	.mp3	MPEG Audio		
+Mpeg4	Audio	A104	AMR		
+Mpeg4	Audio	aac 	AAC		
+Mpeg4	Audio	ac-3	AC-3		
+Mpeg4	Audio	alac	ALAC		Apple Lossless Audio Codec
+Mpeg4	Audio	alaw	ADPCM		
+Mpeg4	Audio	dtsc	DTS		Digital Theater Systems
+Mpeg4	Audio	dtsh	DTS	HRA	Digital Theater Systems High Res
+Mpeg4	Audio	dtsl	DTS	MA	Digital Theater Systems Master Audio
+Mpeg4	Audio	dtse	DTS	Express	
+Mpeg4	Audio	dvca	PCM		
+Mpeg4	Audio	ec-3	E-AC-3		
+Mpeg4	Audio	enca	(Encrypted)		
+Mpeg4	Audio	fl32	PCM		
+Mpeg4	Audio	fl64	PCM		
+Mpeg4	Audio	fLaC	FLAC		
+Mpeg4	Audio	ima4	ADPCM		
+Mpeg4	Audio	in24	PCM		
+Mpeg4	Audio	in32	PCM		
+Mpeg4	Audio	lpcm	PCM		
+Mpeg4	Audio	MAC3	MACE 3		
+Mpeg4	Audio	MAC6	MACE 6		
+Mpeg4	Audio	mha1	MPEG-H 3D Audio		
+Mpeg4	Audio	mha2	MPEG-H 3D Audio		
+Mpeg4	Audio	mhm1	MPEG-H 3D Audio		
+Mpeg4	Audio	mhm2	MPEG-H 3D Audio		
+Mpeg4	Audio	mlpa	TrueHD		
+Mpeg4	Audio	nmos	Nellymoser		
+Mpeg4	Audio	NONE	PCM		
+Mpeg4	Audio	owma	WMA Pro		Smooth Streaming Media Audio
+Mpeg4	Audio	Qclp	QCELP		Qualcomm PureVoice
+Mpeg4	Audio	QDM1	QDesign 1		QDesign Music 1
+Mpeg4	Audio	QDM2	Qdesign 2		QDesign Music 2
+Mpeg4	Audio	QDMC	Qdesign 2	(Old)	QDesign Music 2 (old version, rare)
+Mpeg4	Audio	raw 	PCM		
+Mpeg4	Audio	sac3	AC-3		Made by Nero
+Mpeg4	Audio	samr	AMR		
+Mpeg4	Audio	sawb	AMR		
+Mpeg4	Audio	sevc	EVRC		
+Mpeg4	Audio	sowt	PCM		
+Mpeg4	Audio	twos	PCM		
+Mpeg4	Audio	ulaw	ADPCM		
+Mpeg4	Audio	vdva	PCM		
+Mpeg4	Audio	WMA2	WMA		Windows Media Audio
+Mpeg4	Video	2vuy	YUV		
+Mpeg4	Video	2Vuy	YUV		
+Mpeg4	Video	8BPS	RGB		
+Mpeg4	Video	ac16	YUV		
+Mpeg4	Video	ac32	YUV		
+Mpeg4	Video	acBG	YUV		
+Mpeg4	Video	apch	ProRes		
+Mpeg4	Video	apcn	ProRes		
+Mpeg4	Video	apcs	ProRes		
+Mpeg4	Video	apco	ProRes		
+Mpeg4	Video	ap4c	ProRes		
+Mpeg4	Video	ap4h	ProRes		
+Mpeg4	Video	ap4x	ProRes		
+Mpeg4	Video	aprh	ProRes		
+Mpeg4	Video	aprn	ProRes		
+Mpeg4	Video	apro	ProRes		
+Mpeg4	Video	aprs	ProRes		
+Mpeg4	Video	aprx	ProRes		
+Mpeg4	Video	ai12	AVC		Advanced Video Coding
+Mpeg4	Video	ai13	AVC		Advanced Video Coding
+Mpeg4	Video	ai15	AVC		Advanced Video Coding
+Mpeg4	Video	ai16	AVC		Advanced Video Coding
+Mpeg4	Video	ai1p	AVC		Advanced Video Coding
+Mpeg4	Video	ai1q	AVC		Advanced Video Coding
+Mpeg4	Video	ai22	AVC		Advanced Video Coding
+Mpeg4	Video	ai23	AVC		Advanced Video Coding
+Mpeg4	Video	ai25	AVC		Advanced Video Coding
+Mpeg4	Video	ai26	AVC		Advanced Video Coding
+Mpeg4	Video	ai2p	AVC		Advanced Video Coding
+Mpeg4	Video	ai2q	AVC		Advanced Video Coding
+Mpeg4	Video	ai52	AVC		Advanced Video Coding
+Mpeg4	Video	ai53	AVC		Advanced Video Coding
+Mpeg4	Video	ai55	AVC		Advanced Video Coding
+Mpeg4	Video	ai56	AVC		Advanced Video Coding
+Mpeg4	Video	ai5p	AVC		Advanced Video Coding
+Mpeg4	Video	ai5q	AVC		Advanced Video Coding
+Mpeg4	Video	AV01	AV1		
+Mpeg4	Video	AV1x	YUV		
+Mpeg4	Video	avc1	AVC		Advanced Video Coding
+Mpeg4	Video	avc2	AVC		Advanced Video Coding
+Mpeg4	Video	avc3	AVC		Advanced Video Coding
+Mpeg4	Video	avc4	AVC		Advanced Video Coding
+Mpeg4	Video	avcp	AVC		Advanced Video Coding Parameters
+Mpeg4	Video	AVDJ	JPEG		Avid
+Mpeg4	Video	AVdv	DV		Avid
+Mpeg4	Video	AVd1	DV		Avid
+Mpeg4	Video	AVdh	VC-3		Avid DNxHR
+Mpeg4	Video	AVdn	VC-3		Avid DNxHD
+Mpeg4	Video	AVin	AVC		Advanced Video Coding
+Mpeg4	Video	AVJI	Avid Meridien Compressed		
+Mpeg4	Video	AVmp	MPEG Video	Avid IMX	
+Mpeg4	Video	AVUI	Avid Meridien Uncompressed		
+Mpeg4	Video	avr 	JPEG		
+Mpeg4	Video	AVrp	RGB	Avid	
+Mpeg4	Video	b16g	Gray		
+Mpeg4	Video	b32a	Gray/Alpha		
+Mpeg4	Video	b48r	RGB		
+Mpeg4	Video	b64a	RGBA		
+Mpeg4	Video	base	RGBA		
+Mpeg4	Video	blit	RGBA		
+Mpeg4	Video	blnd	Alpha Compositor		
+Mpeg4	Video	blur	Blur		
+Mpeg4	Video	brlt	Blackmagic RAW		
+Mpeg4	Video	brxq	Blackmagic RAW		
+Mpeg4	Video	CFHD	CineForm		CineForm High-Definition (HD) wavelet codec
+Mpeg4	Video	CHQX	Canopus HQX		
+Mpeg4	Video	CLLC	Canopus Lossless		
+Mpeg4	Video	CUVC	Canopus HQ		
+Mpeg4	Video	cmyk	CMYK		
+Mpeg4	Video	cvid	Cinepak		
+Mpeg4	Video	drac	Dirac		Dirac Video Coder
+Mpeg4	Video	dslv	Cross Fade		
+Mpeg4	Video	DV10	Digital Voodoo		Digital Voodoo 10 bit Uncompressed 4:2:2 codec
+Mpeg4	Video	dv5n	DV		
+Mpeg4	Video	dv5p	DV		
+Mpeg4	Video	dvav	AVC		Advanced Video Coding with Dolby Vision
+Mpeg4	Video	dva1	AVC		Advanced Video Coding with Dolby Vision
+Mpeg4	Video	dvc 	DV		
+Mpeg4	Video	dvcp	DV		
+Mpeg4	Video	dvhe	AVC		High Efficiency Video Coding with Dolby Vision
+Mpeg4	Video	dvh1	DV		
+Mpeg4	Video	dvh2	DV		
+Mpeg4	Video	dvh3	DV		
+Mpeg4	Video	dvh4	DV		
+Mpeg4	Video	dvh5	DV		
+Mpeg4	Video	dvh6	DV		
+Mpeg4	Video	dvhp	DV		
+Mpeg4	Video	dvhq	DV		
+Mpeg4	Video	DVOO	Digital Voodoo		Digital Voodoo 8 bit Uncompressed 4:2:2 codec
+Mpeg4	Video	DVOR	Digital Voodoo		Digital Voodoo intermediate raw
+Mpeg4	Video	dvpp	DV	DVCPRO	
+Mpeg4	Video	DVTV	Digital Voodoo		Digital Voodoo intermediate 2vuy
+Mpeg4	Video	DVVT	Digital Voodoo		Digital Voodoo intermediate v210
+Mpeg4	Video	DXD3	DXV		Resolume
+Mpeg4	Video	encv	(Encrypted)		
+Mpeg4	Video	FFV1	FFV1		
+Mpeg4	Video	gif 	M-GIF		
+Mpeg4	Video	Hap1	Hap		Hap Video Codec
+Mpeg4	Video	Hap5	Hap Alpha		Hap Video Codec
+Mpeg4	Video	HapY	Hap Q		Hap Video Codec
+Mpeg4	Video	h261	H.261		
+Mpeg4	Video	h263	H.263		
+Mpeg4	Video	H263	H.263		
+Mpeg4	Video	h264	H.264		
+Mpeg4	Video	hcpa	ProRes		
+Mpeg4	Video	HD10	Digital Voodoo		Digital Voodoo 10 bit Uncompressed 4:2:2 HD codec
+Mpeg4	Video	hdv1	MPEG Video		
+Mpeg4	Video	hdv2	MPEG Video		
+Mpeg4	Video	hdv3	MPEG Video		
+Mpeg4	Video	hdv4	MPEG Video		
+Mpeg4	Video	hdv5	MPEG Video		
+Mpeg4	Video	hdv6	MPEG Video		
+Mpeg4	Video	hdv7	MPEG Video		
+Mpeg4	Video	hdv8	MPEG Video		
+Mpeg4	Video	hdv9	MPEG Video		
+Mpeg4	Video	hdva	MPEG Video		
+Mpeg4	Video	hdvb	MPEG Video		
+Mpeg4	Video	hdvc	MPEG Video		
+Mpeg4	Video	hdvd	MPEG Video		
+Mpeg4	Video	hdve	MPEG Video		
+Mpeg4	Video	hdvf	MPEG Video		
+Mpeg4	Video	hvc1	HEVC		High Efficiency Video Coding
+Mpeg4	Video	hev1	HEVC		High Efficiency Video Coding
+Mpeg4	Video	icod	AIC		Apple Intermediate Codec
+Mpeg4	Video	j420	YUV		
+Mpeg4	Video	jpeg	JPEG		
+Mpeg4	Video	kpcd	Photo CD		
+Mpeg4	Video	LMP2	MPEG Video		
+Mpeg4	Video	M105	Matrox		
+Mpeg4	Video	m1v 	MPEG Video		
+Mpeg4	Video	m2v1	MPEG Video		
+Mpeg4	Video	MMES	MPEG Video		
+Mpeg4	Video	mmes	MPEG Video		
+Mpeg4	Video	mjp2	JPEG 2000		
+Mpeg4	Video	mjpa	JPEG		
+Mpeg4	Video	mjpb	JPEG		
+Mpeg4	Video	mp4v	MPEG-4 Visual		
+Mpeg4	Video	mpeg	MPEG Video		
+Mpeg4	Video	mx3n	MPEG Video		
+Mpeg4	Video	mx3p	MPEG Video		
+Mpeg4	Video	mx4n	MPEG Video		
+Mpeg4	Video	mx4p	MPEG Video		
+Mpeg4	Video	mx5n	MPEG Video		
+Mpeg4	Video	mx5p	MPEG Video		
+Mpeg4	Video	myuv	YUV		
+Mpeg4	Video	ncpa	ProRes		
+Mpeg4	Video	ovc1	VC-1		Smooth Streaming Media Video
+Mpeg4	Video	png 	PNG		
+Mpeg4	Video	PIM1	MPEG Video		
+Mpeg4	Video	PIM2	MPEG Video		
+Mpeg4	Video	PNTG	MacPaint		Apple MacPaint image format
+Mpeg4	Video	r210	RGB	Blackmagic Design	
+Mpeg4	Video	R210	RGB	Blackmagic Design	
+Mpeg4	Video	raw 	RGB		
+Mpeg4	Video	rle 	RLE		
+Mpeg4	Video	rpza	Road Pizza		
+Mpeg4	Video	s263	H.263		
+Mpeg4	Video	Shr0	SheerVideo		Generic SheerVideo codec
+Mpeg4	Video	Shr1	SheerVideo		SheerVideo RGB
+Mpeg4	Video	Shr2	SheerVideo		SheerVideo Y'CbCr[A] 4:4:4
+Mpeg4	Video	Shr3	SheerVideo		SheerVideo Y'CbCr 4:2:2
+Mpeg4	Video	Shr4	SheerVideo		SheerVideo Y'CbCr 4:2:2
+Mpeg4	Video	SJDS	SoftImage DS Compressed		
+Mpeg4	Video	SUDS	SoftImage DS Uncompressed		
+Mpeg4	Video	SV10	Sorenson		Sorenson Media Video R1
+Mpeg4	Video	SVQ1	Sorenson 1		Sorenson Media Video 1 (Apple QuickTime 3)
+Mpeg4	Video	SVQ2	Sorenson 2		Sorenson Media Video 2 (Apple QuickTime 4)
+Mpeg4	Video	SVQ3	Sorenson 3		Sorenson Media Video 3 (Apple QuickTime 5)
+Mpeg4	Video	v210	YUV	AJA Video Systems Xena	
+Mpeg4	Video	V210	YUV	AJA Video Systems Xena	
+Mpeg4	Video	vc-1	VC-1		SMPTE VC-1
+Mpeg4	Video	WMV3	VC-1	WMV3	Windows Media Video 9
+Mpeg4	Video	WRLE	Bitmap		Windows BMP image format
+Mpeg4	Video	xd50	MPEG Video		
+Mpeg4	Video	xd51	MPEG Video		
+Mpeg4	Video	xd52	MPEG Video		
+Mpeg4	Video	xd53	MPEG Video		
+Mpeg4	Video	xd54	MPEG Video		
+Mpeg4	Video	xd55	MPEG Video		
+Mpeg4	Video	xd56	MPEG Video		
+Mpeg4	Video	xd57	MPEG Video		
+Mpeg4	Video	xd58	MPEG Video		
+Mpeg4	Video	xd59	MPEG Video		
+Mpeg4	Video	xd5a	MPEG Video		
+Mpeg4	Video	xd5b	MPEG Video		
+Mpeg4	Video	xd5c	MPEG Video		
+Mpeg4	Video	xd5d	MPEG Video		
+Mpeg4	Video	xd5e	MPEG Video		
+Mpeg4	Video	xd5f	MPEG Video		
+Mpeg4	Video	xdhd	MPEG Video		
+Mpeg4	Video	xdh2	MPEG Video		
+Mpeg4	Video	xdv0	MPEG Video		
+Mpeg4	Video	xdv1	MPEG Video		
+Mpeg4	Video	xdv2	MPEG Video		
+Mpeg4	Video	xdv3	MPEG Video		
+Mpeg4	Video	xdv4	MPEG Video		
+Mpeg4	Video	xdv5	MPEG Video		
+Mpeg4	Video	xdv6	MPEG Video		
+Mpeg4	Video	xdv7	MPEG Video		
+Mpeg4	Video	xdv8	MPEG Video		
+Mpeg4	Video	xdv9	MPEG Video		
+Mpeg4	Video	xdva	MPEG Video		
+Mpeg4	Video	xdvb	MPEG Video		
+Mpeg4	Video	xdvc	MPEG Video		
+Mpeg4	Video	xdvd	MPEG Video		
+Mpeg4	Video	xdve	MPEG Video		
+Mpeg4	Video	xdvf	MPEG Video		
+Mpeg4	Video	yuv2	YUV		
+Mpeg4	Video	yuvs	YUV		
+Mpeg4	Video	yuvu	YUV		
+Mpeg4	Video	yuvx	YUV		
+Mpeg4	Text	c608	EIA-608		
+Mpeg4	Text	c708	EIA-708		
+Mpeg4	Text	subp	VobSub		The same subtitle format used on DVDs
+Mpeg4	Text	text	Apple text		
+Mpeg4	Text	sbtl	Apple text	(iPhone)	
+Mpeg4	Text	dfxp	TTML		
+Mpeg4	Text	tx3g	Timed text		
+Mpeg4	Text	enct	(Encrypted)		
+Mpeg4	Other	rtp 	RTP		
+Mpeg4	Other	Ovbi	Omneon VBI		

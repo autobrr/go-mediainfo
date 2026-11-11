@@ -13,34 +13,44 @@ import (
 
 // TestAnalyzeAVINormalizesCopiedGeneralFrameRate covers the header ratio and its General copy.
 func TestAnalyzeAVINormalizesCopiedGeneralFrameRate(t *testing.T) {
-	data, err := os.ReadFile(filepath.Join("samples", "sample.avi"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	offset := bytes.Index(data, []byte("strh")) + 8
-	if offset < 8 || offset+56 > len(data) || string(data[offset:offset+4]) != "vids" {
-		t.Fatal("fixture has no video stream header")
-	}
-	binary.LittleEndian.PutUint32(data[offset+20:], 1000)
-	binary.LittleEndian.PutUint32(data[offset+24:], 25010)
-	path := filepath.Join(t.TempDir(), "copied-rate.avi")
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	report, err := AnalyzeFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, stream := range []Stream{report.General, report.Streams[0]} {
-		if got := findField(stream.Fields, "Frame rate"); got != "25.000 FPS" {
-			t.Errorf("%s text rate = %q, want 25.000 FPS", stream.Kind, got)
-		}
-		if got := stream.JSON["FrameRate"]; got != "25.000" {
-			t.Errorf("%s JSON rate = %q, want 25.000", stream.Kind, got)
-		}
-	}
-	if video := report.Streams[0]; video.JSON["FrameRate_Num"] != "25" || video.JSON["FrameRate_Den"] != "1" {
-		t.Errorf("normalized video ratio = %s/%s, want 25/1", video.JSON["FrameRate_Num"], video.JSON["FrameRate_Den"])
+	for _, tc := range []struct {
+		scale, rate               uint32
+		display, value, numerator string
+	}{
+		{1000, 25010, "25.000 FPS", "25.000", "25"},
+		{1, 1200, "1 200.000 FPS", "1200.000", "1200"},
+	} {
+		t.Run(tc.value, func(t *testing.T) {
+			data, err := os.ReadFile(filepath.Join("samples", "sample.avi"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			offset := bytes.Index(data, []byte("strh")) + 8
+			if offset < 8 || offset+56 > len(data) || string(data[offset:offset+4]) != "vids" {
+				t.Fatal("fixture has no video stream header")
+			}
+			binary.LittleEndian.PutUint32(data[offset+20:], tc.scale)
+			binary.LittleEndian.PutUint32(data[offset+24:], tc.rate)
+			path := filepath.Join(t.TempDir(), "copied-rate.avi")
+			if err := os.WriteFile(path, data, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			report, err := AnalyzeFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, stream := range []Stream{report.General, report.Streams[0]} {
+				if got := findField(stream.Fields, "Frame rate"); got != tc.display {
+					t.Errorf("%s text rate = %q, want %q", stream.Kind, got, tc.display)
+				}
+				if got := stream.JSON["FrameRate"]; got != tc.value {
+					t.Errorf("%s JSON rate = %q, want %q", stream.Kind, got, tc.value)
+				}
+			}
+			if video := report.Streams[0]; video.JSON["FrameRate_Num"] != tc.numerator || video.JSON["FrameRate_Den"] != "1" {
+				t.Errorf("normalized video ratio = %s/%s, want %s/1", video.JSON["FrameRate_Num"], video.JSON["FrameRate_Den"], tc.numerator)
+			}
+		})
 	}
 }
 
@@ -491,6 +501,70 @@ func TestNormalizeVideoFrameRatesRecomputesPixelDensity(t *testing.T) {
 		}
 		if got := findField(streams[0].Fields, "Bits/(Pixel*Frame)"); got != "0.506" {
 			t.Errorf("density display for bit rate %q = %q", bitRate, got)
+		}
+	}
+}
+
+// TestAnalyzeTheoraFrameRateDisplay pins the Theora frame-rate rows to official
+// MediaInfo v23.04. Official fills only the decimal rate for Theora and derives
+// num/den from it, so 2997/100 shows as 29970/1000 and a rate with no exact
+// ratio has no num/den. Real libtheora files confirm the 24000/1001, 30000/1001,
+// 2997/100 and integer rows.
+func TestAnalyzeTheoraFrameRateDisplay(t *testing.T) {
+	for _, tc := range []struct {
+		num, den         uint32
+		text, raw        string
+		wantNum, wantDen string
+	}{
+		{30000, 1001, "29.970 (30000/1001) FPS", "29.970 (30000/1001) fps", "30000", "1001"},
+		{24000, 1001, "23.976 (24000/1001) FPS", "23.976 (24000/1001) fps", "24000", "1001"},
+		{2997, 100, "29.970 (29970/1000) FPS", "29.970 (29970/1000) fps", "29970", "1000"},
+		{25010, 1000, "25.000 FPS", "25.000 fps", "25", "1"},
+		{24, 1, "24.000 FPS", "24.000 fps", "24", "1"},
+		{1200, 1, "1 200.000 FPS", "1200.000 fps", "1200", "1"},
+		{25, 2, "12.500 FPS", "12.500 fps", "", ""},
+	} {
+		packet := make([]byte, 42)
+		packet[0] = 0x80
+		copy(packet[1:7], "theora")
+		packet[16], packet[19] = 64, 64
+		binary.BigEndian.PutUint32(packet[22:26], tc.num)
+		binary.BigEndian.PutUint32(packet[26:30], tc.den)
+		data := buildOggPageForTest(1, 0x02, 0, packet)
+		data = append(data, buildOggPageForTest(1, 0x04, 16, []byte{0})...)
+		path := filepath.Join(t.TempDir(), "rate.ogv")
+		if err := os.WriteFile(path, data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		report, err := AnalyzeFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		text := normalizeText(RenderText([]Report{report}))
+		_, video, found := strings.Cut(text, "\nVideo\n")
+		if !found {
+			t.Fatalf("%d/%d: no Video section:\n%s", tc.num, tc.den, text)
+		}
+		if want := padRight("Frame rate", textLabelWidth) + ": " + tc.text + "\n"; !strings.Contains(video, want) {
+			t.Errorf("%d/%d: Video section lacks %q:\n%s", tc.num, tc.den, want, video)
+		}
+		if strings.Count(video, padRight("Frame rate", textLabelWidth)+": ") != 1 {
+			t.Errorf("%d/%d: want exactly one Video frame-rate row:\n%s", tc.num, tc.den, video)
+		}
+		if strings.Contains(video, "\nFrameRate_") {
+			t.Errorf("%d/%d: friendly text exposes a structured frame-rate field:\n%s", tc.num, tc.den, video)
+		}
+		raw := normalizeText(RenderTextWithOptions([]Report{report}, TextRenderOptions{Language: "raw"}))
+		_, rawVideo, found := strings.Cut(raw, "\nVideo\n")
+		if !found {
+			t.Fatalf("%d/%d: no raw Video section:\n%s", tc.num, tc.den, raw)
+		}
+		if want := padRawTextLabel("FrameRate/String", 33) + ": " + tc.raw + "\n"; !strings.Contains(rawVideo, want) {
+			t.Errorf("%d/%d: raw Video section lacks %q:\n%s", tc.num, tc.den, want, rawVideo)
+		}
+		video0 := report.Streams[0]
+		if video0.JSON["FrameRate_Num"] != tc.wantNum || video0.JSON["FrameRate_Den"] != tc.wantDen {
+			t.Errorf("%d/%d: JSON ratio = %q/%q, want %q/%q", tc.num, tc.den, video0.JSON["FrameRate_Num"], video0.JSON["FrameRate_Den"], tc.wantNum, tc.wantDen)
 		}
 	}
 }

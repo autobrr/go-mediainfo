@@ -1456,9 +1456,9 @@ func applyMatroskaTagStats(info *MatroskaInfo, tagStats map[uint64]matroskaTagSt
 			for _, kv := range tag.extras {
 				switch {
 				case kv.Key == "Statistics_Tags_Issue":
-					replaceCanonicalSeedText(stream, "Statistics Tags Issue", kv.Val)
+					insertCanonicalSeedTextBefore(stream, "Statistics Tags Issue", kv.Val, flacUnencodedMD5Label)
 				case strings.HasPrefix(kv.Key, "FromStats_"):
-					replaceCanonicalSeedText(stream, kv.Key, kv.Val)
+					insertCanonicalSeedTextBefore(stream, kv.Key, kv.Val, flacUnencodedMD5Label)
 				}
 			}
 		}
@@ -1466,7 +1466,7 @@ func applyMatroskaTagStats(info *MatroskaInfo, tagStats map[uint64]matroskaTagSt
 			replaceCanonicalSeedFill(stream, "Encoded_Date", tag.encodedDate, "Encoded date", tag.encodedDate)
 		}
 		if tag.hasSource && tag.source != "" {
-			replaceCanonicalSeedText(stream, "Source", tag.source)
+			insertCanonicalSeedTextBefore(stream, "Source", tag.source, flacUnencodedMD5Label)
 			insertCanonicalSeedObjectMembersBefore(stream, "extra", "MD5_Unencoded", []structuredMember{{Key: "Source", Value: structuredNode{Kind: structuredString, Text: tag.source}}})
 		}
 		if tag.hasSourceID && tag.sourceID > 0 {
@@ -1532,8 +1532,9 @@ func applyMatroskaTagStats(info *MatroskaInfo, tagStats map[uint64]matroskaTagSt
 		if !matroskaTagStatsAreAuthoritative(info, tag) {
 			continue
 		}
-		format := matroskaStreamDisplay(*stream, "Format")
-		if (format == "TrueHD" || strings.HasPrefix(format, "AAC") || strings.HasPrefix(format, "DTS") || format == "Opus" || format == "MPEG Audio" || format == "PCM") && tag.hasFrameCount && tag.frameCount > 0 {
+		format := matroskaStreamScalar(*stream, "Format")
+		codecID := matroskaStreamScalar(*stream, "CodecID")
+		if (codecID == "A_TRUEHD" || format == "TrueHD" || strings.HasPrefix(format, "AAC") || strings.HasPrefix(format, "DTS") || format == "Opus" || format == "MPEG Audio" || format == "PCM") && tag.hasFrameCount && tag.frameCount > 0 {
 			// Preserve the muxer's exact access-unit count; rounded duration can
 			// otherwise produce a one-frame derivation error.
 			raw := strconv.FormatInt(tag.frameCount, 10)
@@ -1667,8 +1668,8 @@ func applyMatroskaTagStats(info *MatroskaInfo, tagStats map[uint64]matroskaTagSt
 				replaceCanonicalSeedText(stream, "Bits/(Pixel*Frame)", bits)
 			}
 		case StreamAudio:
-			format := matroskaStreamDisplay(*stream, "Format")
-			if format == "TrueHD" || strings.HasPrefix(format, "MLP FBA") {
+			format := matroskaStreamScalar(*stream, "Format")
+			if matroskaStreamScalar(*stream, "CodecID") == "A_TRUEHD" || format == "TrueHD" || strings.HasPrefix(format, "MLP FBA") {
 				raw := strconv.FormatInt(tag.bitRate, 10)
 				replaceCanonicalSeedFill(stream, "BitRate", raw, "Bit rate", formatBitrate(float64(tag.bitRate)))
 				continue

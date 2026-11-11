@@ -1,0 +1,53 @@
+General
+CompleteName                     : samples/sample.vob
+Format/String                    : MPEG-PS
+FileSize/String                  : 1.17 MiB
+Duration/String                  : 4s 8ms
+OverallBitRate_Mode/String       : VBR
+OverallBitRate/String            : 2453 Kbps
+FrameRate/String                 : 29.970 fps
+
+Video
+ID/String                        : 224 (0xE0)
+Format/String                    : MPEG Video
+Format_Version                   : Version 2
+Format_Profile                   : Main@Main
+Format_Settings                  : BVOPNo
+Format_Settings_BVOP/String      : No
+Format_Settings_Matrix/String    : Default
+Format_Settings_GOP              : N=15
+Duration/String                  : 3s 971ms
+BitRate_Mode/String              : VBR
+BitRate/String                   : 2212 Kbps
+BitRate_Maximum/String           : 8000 Kbps
+Width/String                     : 720 pixel
+Height/String                    : 480 pixel
+DisplayAspectRatio/String        : 3:2
+FrameRate/String                 : 29.970 (30000/1001) fps
+Standard                         : NTSC
+ColorSpace                       : YUV
+ChromaSubsampling/String         : 4:2:0
+BitDepth/String                  : 8 bit
+ScanType/String                  : Progressive
+Compression_Mode/String          : Lossy
+Bits-(Pixel*Frame)               : 0.214
+TimeCode_FirstFrame              : 00:00:00:00
+TimeCode_Source                  : Group of pictures header
+Gop_OpenClosed/String            : Open
+Gop_OpenClosed_FirstFrame/String : Closed
+StreamSize/String                : 1.05 MiB (89%)
+
+Audio
+ID/String                        : 192 (0xC0)
+Format/String                    : MPEG Audio
+Format_Version                   : Version 1
+Format_Profile                   : Layer 2
+Duration/String                  : 4s 8ms
+BitRate_Mode/String              : CBR
+BitRate/String                   : 192 Kbps
+Channel(s)/String                : 1 channel
+SamplingRate/String              : 48.0 KHz
+FrameRate/String                 : 41.667 fps (1152 SPF)
+Compression_Mode/String          : Lossy
+Video_Delay/String               : -10ms
+StreamSize/String                : 93.9 KiB (8%)

@@ -1,0 +1,23 @@
+General
+CompleteName                     : samples/sample.flac
+Format/String                    : FLAC
+Format/Info                      : Free Lossless Audio Codec
+FileSize/String                  : 59.6 KiB
+Duration/String                  : 4s 0ms
+OverallBitRate_Mode/String       : VBR
+OverallBitRate/String            : 122 Kbps
+
+Audio
+Format/String                    : FLAC
+Format/Info                      : Free Lossless Audio Codec
+Duration/String                  : 4s 0ms
+BitRate_Mode/String              : VBR
+BitRate/String                   : 105 Kbps
+Channel(s)/String                : 1 channel
+ChannelLayout                    : M
+SamplingRate/String              : 48.0 KHz
+BitDepth/String                  : 16 bit
+Compression_Mode/String          : Lossless
+StreamSize/String                : 51.5 KiB (86%)
+Encoded_Library/String           : Lavf62.3.100
+MD5_Unencoded                    : 97EED3BC2F094D9221F0E9772AC7B3E7

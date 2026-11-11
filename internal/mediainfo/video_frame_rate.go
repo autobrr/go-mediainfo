@@ -28,7 +28,7 @@ func normalizeVideoFrameRates(general *Stream, streams []Stream) {
 			clearCanonicalSeedField(stream, "FrameRate_Nominal", "Nominal frame rate")
 			display, _ := canonicalSeedTextValue(*stream, "Frame rate")
 			if display != "" {
-				display = nominal + " FPS"
+				display = groupDecimal(nominal) + " FPS"
 			}
 			replaceCanonicalSeedFill(stream, "FrameRate", nominal, "Frame rate", display)
 		}
@@ -54,7 +54,7 @@ func normalizeVideoFrameRates(general *Stream, streams []Stream) {
 				value = fmt.Sprintf("%.3f", rounded)
 				display, _ := canonicalSeedTextValue(*stream, field.label)
 				if display != "" {
-					display = value + " FPS"
+					display = groupDecimal(value) + " FPS"
 				}
 				replaceCanonicalSeedFill(stream, field.name, value, field.label, display)
 				changed = true
@@ -78,7 +78,7 @@ func normalizeVideoFrameRates(general *Stream, streams []Stream) {
 			if display, _ := canonicalSeedTextValue(*stream, "Frame rate"); display != "" {
 				display = formatFrameRate(fps)
 				if den > 1 {
-					display = fmt.Sprintf("%s (%d/%d) FPS", rate, num, den)
+					display = fmt.Sprintf("%s (%d/%d) FPS", groupDecimal(rate), num, den)
 				}
 				replaceCanonicalSeedText(stream, "Frame rate", display)
 			}
@@ -117,7 +117,7 @@ func normalizeVideoFrameRates(general *Stream, streams []Stream) {
 	}
 	general.Fields = fields
 	if rate != "" {
-		display := rate + " FPS"
+		display := groupDecimal(rate) + " FPS"
 		replaceCanonicalSeedFill(general, "FrameRate", rate, "Frame rate", display)
 		general.Fields = append(general.Fields, Field{Name: "Frame rate", Value: display})
 	}

@@ -31,13 +31,13 @@
 <ChannelLayout>M</ChannelLayout>
 <SamplingRate>48000</SamplingRate>
 <SamplingCount>192000</SamplingCount>
+<BitDepth>16</BitDepth>
 <Compression_Mode>Lossless</Compression_Mode>
-<Encoded_Library>Lavf62.3.100</Encoded_Library>
 <StreamSize>52747</StreamSize>
+<Encoded_Library>Lavf62.3.100</Encoded_Library>
 <extra>
 <MD5_Unencoded>97EED3BC2F094D9221F0E9772AC7B3E7</MD5_Unencoded>
 </extra>
-<BitDepth>16</BitDepth>
 </track>
 </media>
 </MediaInfo>

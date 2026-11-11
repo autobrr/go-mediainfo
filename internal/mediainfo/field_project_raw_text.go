@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"runtime"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -39,112 +40,6 @@ type rawTextDerivedField struct {
 	Value string
 }
 
-// rawTextLabelAliases maps compatibility/display labels to MediaInfo raw names.
-// Canonical entries consume the field-name keyed registry built from these
-// aliases; dynamic legacy input uses the aliases directly.
-var rawTextLabelAliases = map[string]string{
-	"ID":                                 "ID/String",
-	"Menu ID":                            "MenuID/String",
-	"Unique ID":                          "UniqueID/String",
-	"Complete name":                      "CompleteName",
-	"Format":                             "Format/String",
-	"Format version":                     "Format_Version",
-	"Format profile":                     "Format_Profile",
-	"Format settings":                    "Format_Settings",
-	"Commercial name":                    "Format_Commercial_IfAny",
-	"Muxing mode":                        "MuxingMode",
-	"Muxing mode, more info":             "MuxingMode_MoreInfo",
-	"HDR format":                         "HDR_Format/String",
-	"Format settings, CABAC":             "Format_Settings_CABAC/String",
-	"Format settings, Reference frames":  "Format_Settings_RefFrames/String",
-	"Format settings, BVOP":              "Format_Settings_BVOP/String",
-	"Format settings, QPel":              "Format_Settings_QPel/String",
-	"Format settings, GMC":               "Format_Settings_GMC/String",
-	"Format settings, Matrix":            "Format_Settings_Matrix/String",
-	"Format settings, GOP":               "Format_Settings_GOP",
-	"Format settings, Picture structure": "Format_Settings_PictureStructure",
-	"Format compression":                 "Format_Compression",
-	"Codec ID":                           "CodecID",
-	"Codec configuration box":            "CodecConfigurationBox",
-	"Codec ID/Info":                      "CodecID/Info",
-	"Duration":                           "Duration/String",
-	"Source duration":                    "Source_Duration/String",
-	"Overall bit rate mode":              "OverallBitRate_Mode/String",
-	"Overall bit rate":                   "OverallBitRate/String",
-	"Bit rate mode":                      "BitRate_Mode/String",
-	"Bit rate":                           "BitRate/String",
-	"Nominal bit rate":                   "BitRate_Nominal/String",
-	"Maximum bit rate":                   "BitRate_Maximum/String",
-	"File size":                          "FileSize/String",
-	"Stream size":                        "StreamSize/String",
-	"Source stream size":                 "Source_StreamSize/String",
-	"Width":                              "Width/String",
-	"Height":                             "Height/String",
-	"Display aspect ratio":               "DisplayAspectRatio/String",
-	"Original display aspect ratio":      "DisplayAspectRatio_Original/Stri",
-	"Frame rate mode":                    "FrameRate_Mode/String",
-	"Frame rate":                         "FrameRate/String",
-	"Color space":                        "ColorSpace",
-	"Chroma subsampling":                 "ChromaSubsampling/String",
-	"Bit depth":                          "BitDepth/String",
-	"Bit depth, detected":                "BitDepth_Detected/String",
-	"Scan type":                          "ScanType/String",
-	"Scan order":                         "ScanOrder/String",
-	"Scan type, store method":            "ScanType_StoreMethod/String",
-	"Active format description":          "ActiveFormatDescription/String",
-	"Compression mode":                   "Compression_Mode/String",
-	"Bits/(Pixel*Frame)":                 "Bits-(Pixel*Frame)",
-	"Time code of first frame":           "TimeCode_FirstFrame",
-	"Time code source":                   "TimeCode_Source",
-	"GOP, Open/Closed":                   "Gop_OpenClosed/String",
-	"GOP, Open/Closed of first frame":    "Gop_OpenClosed_FirstFrame/String",
-	"Channel(s)":                         "Channel(s)/String",
-	"Channel layout":                     "ChannelLayout",
-	"Sampling rate":                      "SamplingRate/String",
-	"Count of elements":                  "ElementCount",
-	"Language":                           "Language/String",
-	"Language, more info":                "Language_More",
-	"Service kind":                       "ServiceKind/String",
-	"Writing application":                "Encoded_Application/String",
-	"Writing library":                    "Encoded_Library/String",
-	flacUnencodedMD5Label:                "MD5_Unencoded",
-	"Encoding settings":                  "Encoded_Library_Settings",
-	"Encoded date":                       "Encoded_Date",
-	"Tagged date":                        "Tagged_Date",
-	"Default":                            "Default/String",
-	"Forced":                             "Forced/String",
-	"Alternate group":                    "AlternateGroup/String",
-	"Color range":                        "colour_range",
-	"Color primaries":                    "colour_primaries",
-	"Transfer characteristics":           "transfer_characteristics",
-	"Matrix coefficients":                "matrix_coefficients",
-	"Mastering display color primaries":  "MasteringDisplay_ColorPrimaries",
-	"Mastering display luminance":        "MasteringDisplay_Luminance",
-	"Maximum Content Light Level":        "MaxCLL/String",
-	"Maximum Frame-Average Light Level":  "MaxFALL/String",
-	"Original source medium":             "OriginalSourceMedium",
-	"Original source medium ID":          "OriginalSourceMedium_ID/String",
-	"Complexity index":                   "ComplexityIndex",
-	"Number of dynamic objects":          "NumberOfDynamicObjects",
-	"Bed channel count":                  "BedChannelCount",
-	"Bed channel configuration":          "BedChannelConfiguration",
-	"Dialog Normalization":               "dialnorm",
-	"Law rating":                         "LawRating",
-	"Recorded location":                  "Recorded/Location",
-	"Recorded_Location":                  "Recorded/Location",
-	"Terms of use":                       "TermsOfUse",
-	"List":                               "List/String",
-	"Duration of the visible content":    "Duration_Start2End/String",
-	"Start time":                         "Duration_Start/String",
-	"End time":                           "Duration_End/String",
-	"Count of frames before first event": "FirstDisplay_Delay_Frames",
-	"Type of the first event":            "FirstDisplay_Type",
-	"ACTOR_CHARACTER":                    "ACTOR/CHARACTER",
-	"Encoded_Application_Url":            "Encoded_Application/Url",
-	"Writing_Library":                    "Writing Library",
-	"Statistics_Tags_Issue":              "  Issue",
-}
-
 // rawTextFieldRule is the authoritative raw-text policy for one canonical
 // field. Container policy may replace its label, but cannot create a second
 // projection of the same canonical value.
@@ -159,7 +54,7 @@ type rawTextFieldRule struct {
 var rawTextCanonicalFieldRules = func() map[fieldName]rawTextFieldRule {
 	rules := make(map[fieldName]rawTextFieldRule, len(canonicalFieldDefinitions)*2)
 	for name, spec := range canonicalFieldDefinitions {
-		label := firstNonEmpty(rawTextLabelAliases[spec.TextLabel], spec.TextLabel, string(name))
+		label := firstNonEmpty(rawFieldLabelAlias(spec.TextLabel), spec.TextLabel, string(name))
 		rules[name] = rawTextFieldRule{Label: label, Visible: spec.Options.ShowText}
 		if spec.StringSibling != "" {
 			rules[spec.StringSibling] = rawTextFieldRule{Label: label, Visible: true}
@@ -195,6 +90,7 @@ func projectRawTextReport(report Report) rawTextReportProjection {
 	projected := rawTextReportProjection{Ref: store.ref, Streams: make([]rawTextStreamProjection, 0, len(store.streams))}
 	dvd, dvdAggregate := rawTextDVDContext(store)
 	generalFormat := rawTextGeneralFormat(store)
+	version := reportVersion(store)
 	totalFileSize := int64(0)
 	streamIndexes := make([]int, len(store.streams))
 	for index := range store.streams {
@@ -205,37 +101,53 @@ func projectRawTextReport(report Report) rawTextReportProjection {
 	})
 	for _, streamIndex := range streamIndexes {
 		stream := &store.streams[streamIndex]
-		structured := rawTextStructuredValues(stream)
+		structured := storedScalarValues(stream)
 		if stream.Kind == StreamGeneral {
 			totalFileSize, _ = strconv.ParseInt(structured["FileSize"], 10, 64)
 		}
 		fields := make([]rawTextFieldProjection, 0, len(stream.Fields))
 		seen := make(map[string]struct{}, len(stream.Fields))
+		tagLabels := make(map[string]bool)
 		for _, entry := range stream.Fields {
 			if !entry.Options.ShowText {
 				continue
 			}
-			rule, known := rawTextProjectionRule(stream.Kind, entry)
+			identity := reportFieldIdentity(version, stream.Kind, string(entry.Name), entry.TextLabel)
+			if identity == "Statistics_Tags_Issue" && stream.Kind != StreamMenu {
+				if extra, exists := rawTextExtraNode(stream); exists && slices.ContainsFunc(extra.Object, func(member structuredMember) bool {
+					return member.Key == identity
+				}) {
+					continue
+				}
+			}
+			if !reportTextVisible(version, stream.Kind, identity) {
+				continue
+			}
+			rule, known := rawTextProjectionRule(version, stream.Kind, entry)
 			if !rule.Visible {
 				continue
 			}
 			if !rawTextContainerFieldVisible(generalFormat, entry, rule) {
 				continue
 			}
-			if stream.Kind == StreamVideo && structured["Format"] == "Theora" && rule.Label == "FrameCount" {
-				continue
-			}
 			if _, exists := seen[rule.Label]; exists {
 				continue
 			}
-			value := rawTextValue(stream.Kind, rule.Label, entry.Value.Text, structured, totalFileSize)
+			value := rawTextValue(version, stream.Kind, rule.Label, entry.Value.Text, structured, totalFileSize)
+			if known && value == "" {
+				continue
+			}
 			fields = append(fields, rawTextFieldProjection{
-				Label: rule.Label, Value: value, Order: rawTextFieldOrder(stream.Kind, rule.Label),
+				Label: rule.Label, Value: value,
 				Sequence: entry.Sequence, Extension: !known,
 			})
 			seen[rule.Label] = struct{}{}
+			if entry.MatroskaTag {
+				tagLabels[rule.Label] = true
+			}
 		}
-		sequence := uint32(len(stream.Fields))
+		// Derived rows follow the store-wide canonical encounter sequences.
+		sequence := store.nextSequence
 		appendDerived := func(label, value string) {
 			if value == "" {
 				return
@@ -244,18 +156,20 @@ func projectRawTextReport(report Report) rawTextReportProjection {
 				return
 			}
 			fields = append(fields, rawTextFieldProjection{
-				Label: label, Value: value, Order: rawTextFieldOrder(stream.Kind, label), Sequence: sequence,
+				Label: label, Value: value, Sequence: sequence,
 			})
 			seen[label] = struct{}{}
 			sequence++
 		}
-		appendDerived("CodecID/Info", rawTextCodecIDInfo(structured["CodecID"]))
+		codec := storedCodecDescription(generalFormat, stream, structured)
+		appendDerived("CodecID/Info", codec.Info)
+		appendDerived("CodecID/Hint", codec.Hint)
 		appendDerived("ServiceKind/String", formatRawTextServiceKind(structured["ServiceKind"]))
-		for _, derived := range rawTextStructuredDerivations(stream.Kind, structured, totalFileSize) {
+		for _, derived := range rawTextStructuredDerivations(version, stream.Kind, structured, totalFileSize) {
 			appendDerived(derived.Label, derived.Value)
 		}
 		if extra, ok := rawTextExtraNode(stream); ok && stream.Kind != StreamMenu {
-			for _, member := range extra.Object {
+			for memberIndex, member := range extra.Object {
 				if member.Key == "ConformanceErrors" {
 					for _, derived := range rawTextConformanceFields(member.Value) {
 						if _, exists := seen[derived.Label]; exists {
@@ -263,7 +177,7 @@ func projectRawTextReport(report Report) rawTextReportProjection {
 						}
 						fields = append(fields, rawTextFieldProjection{
 							Label: derived.Label, Value: derived.Value,
-							Order: rawTextFieldOrder(stream.Kind, derived.Label), Sequence: sequence,
+							Sequence: sequence,
 						})
 						seen[derived.Label] = struct{}{}
 						sequence++
@@ -277,7 +191,7 @@ func projectRawTextReport(report Report) rawTextReportProjection {
 						}
 						fields = append(fields, rawTextFieldProjection{
 							Label: derived.Label, Value: derived.Value,
-							Order: rawTextFieldOrder(stream.Kind, derived.Label), Sequence: sequence,
+							Sequence: sequence,
 						})
 						seen[derived.Label] = struct{}{}
 						sequence++
@@ -288,37 +202,59 @@ func projectRawTextReport(report Report) rawTextReportProjection {
 				if !rawTextExtraVisible(member.Key, value) {
 					continue
 				}
-				label := rawTextLabel(member.Key)
+				label := rawFieldLabel(member.Key)
 				if _, exists := seen[label]; exists {
 					continue
 				}
-				fields = append(fields, rawTextFieldProjection{
+				field := rawTextFieldProjection{
 					Label: label, Value: rawTextExtraValue(member.Key, value),
-					Order: rawTextFieldOrder(stream.Kind, label), Sequence: sequence,
-				})
+					Sequence: sequence,
+				}
+				// Fill a missing extra at its ordered sibling position while
+				// retaining the encounter order of existing text rows.
+				position := len(fields)
+				for _, next := range extra.Object[memberIndex+1:] {
+					nextLabel := rawFieldLabel(next.Key)
+					if _, exists := seen[nextLabel]; !exists || tagLabels[nextLabel] {
+						continue
+					}
+					if index := slices.IndexFunc(fields, func(existing rawTextFieldProjection) bool {
+						return existing.Label == nextLabel
+					}); index >= 0 {
+						position = index
+						field.Sequence = fields[index].Sequence
+						break
+					}
+				}
+				fields = slices.Insert(fields, position, field)
 				seen[label] = struct{}{}
 				sequence++
-			}
-		}
-		if _, exists := seen["dialnorm_Maximum"]; !exists {
-			for _, field := range fields {
-				if field.Label == "dialnorm" {
-					appendDerived("dialnorm_Maximum", field.Value)
-					break
-				}
-			}
-		}
-		if _, exists := seen["dialnorm_Maximum"]; !exists {
-			for _, field := range fields {
-				if field.Label == "dialnorm_Minimum" {
-					appendDerived("dialnorm_Maximum", field.Value)
-					break
-				}
 			}
 		}
 		if dvd {
 			fields = normalizeDVDRawTextFields(stream, fields, structured, dvdAggregate)
 		}
+		filtered := fields[:0]
+		for _, field := range fields {
+			identity := reportFieldIdentity(version, stream.Kind, field.Label, field.Label)
+			if !reportTextVisible(version, stream.Kind, identity) {
+				continue
+			}
+			// Profile components stay in the existing summary and structured
+			// facts rather than appearing again as standalone raw rows.
+			if stream.Kind == StreamVideo && (identity == "Format_Tier" || identity == "Format_Level") {
+				continue
+			}
+			if field.Label == "Format/Info" {
+				_, field.Value = reportFormatPresentation(version, stream.Kind, structured)
+				if field.Value == "" {
+					continue
+				}
+			}
+			field.Order = reportFieldRank(version, stream.Kind, canonicalTableName(field.Label))
+			filtered = append(filtered, field)
+		}
+		fields = filtered
 		sort.SliceStable(fields, func(left, right int) bool {
 			if fields[left].Order != fields[right].Order {
 				return fields[left].Order < fields[right].Order
@@ -339,7 +275,7 @@ func rawTextGeneralFormat(store *fieldStore) string {
 	for index := range store.streams {
 		stream := &store.streams[index]
 		if stream.Kind == StreamGeneral {
-			return rawTextStructuredValues(stream)["Format"]
+			return storedScalarValues(stream)["Format"]
 		}
 	}
 	return ""
@@ -369,21 +305,14 @@ func rawTextDVDContext(store *fieldStore) (dvd, aggregate bool) {
 	if store == nil {
 		return false, false
 	}
+	dvd = storeUsesDVDReference(store)
 	generalFormat := ""
 	for index := range store.streams {
-		stream := &store.streams[index]
-		structured := rawTextStructuredValues(stream)
-		if stream.Kind == StreamGeneral {
-			generalFormat = structured["Format"]
-			if generalFormat == "DVD Video" {
-				dvd = true
-			}
-		}
-		if stream.Kind == StreamMenu && structured["Format"] == "DVD-Video" {
-			dvd = true
+		if stream := &store.streams[index]; stream.Kind == StreamGeneral {
+			generalFormat = storedScalarValues(stream)["Format"]
 		}
 	}
-	if generalFormat != "DVD Video" {
+	if !dvdReferenceFormat(StreamGeneral, generalFormat) {
 		return dvd, false
 	}
 	for index := range store.streams {
@@ -418,7 +347,7 @@ func normalizeDVDRawTextFields(stream *storedStream, fields []rawTextFieldProjec
 	extraAliases := make(map[string]struct{})
 	if hasExtra && stream.Kind != StreamGeneral {
 		for _, member := range extra.Object {
-			for _, label := range []string{member.Key, rawTextLabel(member.Key), rawTextDVDExtraLabel(member.Key)} {
+			for _, label := range []string{member.Key, rawFieldLabel(member.Key), rawTextDVDExtraLabel(member.Key)} {
 				if label != "" {
 					extraAliases[label] = struct{}{}
 				}
@@ -430,7 +359,7 @@ func normalizeDVDRawTextFields(stream *storedStream, fields []rawTextFieldProjec
 	}
 	if stream.Kind == StreamMenu {
 		for _, key := range []string{"List_Audio", "List_Subtitles_4_3", "List_Subtitles_Wide", "List_Subtitles_Letterbox", "List_Subtitles_PanScan"} {
-			for _, label := range append([]string{key, rawTextLabel(key), rawTextDVDExtraLabel(key)}, rawTextDVDLegacyExtraLabels(key)...) {
+			for _, label := range append([]string{key, rawFieldLabel(key), rawTextDVDExtraLabel(key)}, rawTextDVDLegacyExtraLabels(key)...) {
 				extraAliases[label] = struct{}{}
 			}
 		}
@@ -438,6 +367,9 @@ func normalizeDVDRawTextFields(stream *storedStream, fields []rawTextFieldProjec
 
 	normalized := make([]rawTextFieldProjection, 0, len(fields)+len(extra.Object))
 	seen := make(map[string]struct{}, len(fields)+len(extra.Object))
+	// Menu lists follow projected siblings; preserve the existing placement
+	// of the other DVD extra families, including Audio statistics.
+	sequence := uint32(len(stream.Fields))
 	for _, field := range fields {
 		if _, fromExtra := extraAliases[field.Label]; fromExtra {
 			continue
@@ -459,7 +391,7 @@ func normalizeDVDRawTextFields(stream *storedStream, fields []rawTextFieldProjec
 		switch field.Label {
 		case "FileSize/String":
 			if size, err := strconv.ParseInt(structured["FileSize"], 10, 64); err == nil {
-				field.Value = formatRawTextByteUnits(stream.Kind, formatBytes(size), structured["ElementCount"])
+				field.Value = formatRawTextByteUnits(stream.Kind, formatByteQuantity(size, false), structured["ElementCount"])
 			}
 		case "OverallBitRate/String":
 			if value := formatDVDRawTextBitRate(structured["OverallBitRate"]); value != "" {
@@ -473,15 +405,8 @@ func normalizeDVDRawTextFields(stream *storedStream, fields []rawTextFieldProjec
 		case "Bits-(Pixel*Frame)":
 			if value := structured["Bits-(Pixel*Frame)"]; value != "" {
 				field.Value = value
-			} else if bitRate, err := strconv.ParseFloat(structured["BitRate"], 64); err == nil && bitRate >= 10_000_000_000 {
-				width, _ := strconv.ParseFloat(structured["Width"], 64)
-				height, _ := strconv.ParseFloat(structured["Height"], 64)
-				frameRate, _ := strconv.ParseFloat(structured["FrameRate"], 64)
-				if width > 0 && height > 0 && frameRate > 0 {
-					value := bitRate / (width * height * frameRate)
-					field.Value = fmt.Sprintf("%.3f", math.Ceil(value*1000)/1000)
-				}
 			}
+
 		case "ScanOrder/String":
 			if value := structured["ScanOrder"]; value != "" {
 				field.Value = value
@@ -492,18 +417,19 @@ func normalizeDVDRawTextFields(stream *storedStream, fields []rawTextFieldProjec
 		if _, exists := seen[field.Label]; exists {
 			continue
 		}
-		field.Order = rawTextDVDFieldOrder(stream.Kind, field.Label)
 		normalized = append(normalized, field)
 		seen[field.Label] = struct{}{}
+		if stream.Kind == StreamMenu {
+			sequence = max(sequence, field.Sequence+1)
+		}
 	}
 
-	sequence := uint32(len(stream.Fields))
 	if stream.Kind == StreamAudio || stream.Kind == StreamText {
 		if value := formatRawTextDelay(structured["Video_Delay"]); value != "" {
 			label := "Video_Delay/String"
 			if _, exists := seen[label]; !exists {
 				normalized = append(normalized, rawTextFieldProjection{
-					Label: label, Value: value, Order: rawTextDVDFieldOrder(stream.Kind, label), Sequence: sequence,
+					Label: label, Value: value, Sequence: sequence,
 				})
 				seen[label] = struct{}{}
 				sequence++
@@ -525,7 +451,7 @@ func normalizeDVDRawTextFields(stream *storedStream, fields []rawTextFieldProjec
 				value = rawTextExtraValue(member.Key, value)
 			}
 			normalized = append(normalized, rawTextFieldProjection{
-				Label: label, Value: value, Order: rawTextDVDFieldOrder(stream.Kind, label), Sequence: sequence,
+				Label: label, Value: value, Sequence: sequence,
 			})
 			sequence++
 		}
@@ -600,7 +526,7 @@ func rawTextDVDExtraLabel(key string) string {
 			return parts[0] + ":" + parts[1] + ":" + parts[2] + "." + parts[3]
 		}
 	}
-	return rawTextLabel(key)
+	return rawFieldLabel(key)
 }
 
 // rawTextDVDLegacyExtraLabels returns legacy labels that may duplicate a
@@ -637,69 +563,29 @@ func formatDVDRawTextBitRate(value string) string {
 	return formatRawTextDerivedBitRate(value)
 }
 
-// rawTextDVDFieldOrder returns a DVD raw-text field's order, placing unknown
-// labels after all registered labels.
-func rawTextDVDFieldOrder(kind StreamKind, label string) int {
-	if order, ok := rawTextDVDFieldOrderPolicy(kind)[label]; ok {
-		return order
-	}
-	return unregisteredFieldOrder
-}
-
-// DVD raw-text field-order registries mirror MediaInfo's per-kind projection.
-var (
-	rawTextDVDVideoFieldOrder = makeStructuredFieldOrder(
-		"ID/String", "MenuID/String", "UniqueID/String", "Format/String", "Format/Info", "Format_Commercial_IfAny", "Format_Version", "Format_Profile",
-		"Format_Settings", "Format_Settings_BVOP/String", "Format_Settings_QPel/String", "Format_Settings_GMC/String", "Format_Settings_Matrix/String",
-		"Format_Settings_CABAC/String", "Format_Settings_RefFrames/String", "Format_Settings_GOP", "Format_Settings_PictureStructure", "MuxingMode", "CodecID", "CodecID/Info",
-		"Duration/String", "BitRate_Mode/String", "BitRate/String", "BitRate_Nominal/String", "BitRate_Maximum/String", "Width/String", "Height/String",
-		"DisplayAspectRatio/String", "FrameRate_Mode/String", "FrameRate/String", "Standard", "ColorSpace", "ChromaSubsampling", "ChromaSubsampling/String",
-		"BitDepth/String", "ScanType/String", "ScanOrder/String", "Compression_Mode/String", "Bits-(Pixel*Frame)", "TimeCode_FirstFrame", "TimeCode_Source",
-		"Gop_OpenClosed/String", "Gop_OpenClosed_FirstFrame/String", "StreamSize/String", "colour_range", "colour_primaries", "transfer_characteristics", "matrix_coefficients",
-		"Language/String", "ServiceKind/String",
-	)
-	rawTextDVDAudioFieldOrder = makeStructuredFieldOrder(
-		"ID/String", "MenuID/String", "UniqueID/String", "Format/String", "Format/Info", "Format_Commercial_IfAny", "Format_Version", "Format_Profile",
-		"Format_Settings", "Format_Settings_Endianness", "Format_Settings_Sign", "MuxingMode", "CodecID", "CodecID/Info", "Duration/String", "Source_Duration/String",
-		"BitRate_Mode/String", "BitRate/String", "BitRate_Nominal/String", "BitRate_Maximum/String", "Channel(s)/String", "ChannelLayout", "SamplingRate/String",
-		"FrameRate/String", "BitDepth/String", "Compression_Mode/String", "Video_Delay/String", "StreamSize/String", "Language/String", "Language_More", "ServiceKind/String",
-	)
-	rawTextDVDTextFieldOrder = makeStructuredFieldOrder(
-		"ID/String", "MenuID/String", "UniqueID/String", "Format/String", "Format/Info", "MuxingMode", "MuxingMode_MoreInfo", "CodecID", "CodecID/Info",
-		"Duration/String", "Duration_Start2End/String", "Duration_Start/String", "Duration_End/String", "BitRate_Mode/String", "BitRate/String", "FrameRate/String",
-		"ElementCount", "Width/String", "Height/String", "BitDepth/String", "Compression_Mode/String", "Video_Delay/String", "StreamSize/String", "FirstDisplay_Delay_Frames", "FirstDisplay_Type",
-		"Language/String", "Language_More", "ServiceKind/String", "Default/String", "Forced/String",
-	)
-	rawTextDVDMenuFieldOrder = makeStructuredFieldOrder(
-		"ID/String", "MenuID/String", "UniqueID/String", "Format/String", "Format/Info", "MuxingMode", "Duration/String",
-	)
-	rawTextDVDGeneralFieldOrder = makeStructuredFieldOrder(
-		"ID/String", "UniqueID/String", "CompleteName", "CompleteName_Last", "Format/String", "Format/Info", "Format_Version", "Format_Profile",
-		"Format_Settings", "CodecID", "CodecID/String", "FileSize/String", "Duration/String", "OverallBitRate_Mode/String", "OverallBitRate/String",
-		"OverallBitRate_Maximum/String", "FrameRate/String", "Title", "Movie", "Encoded_Date", "Tagged_Date", "Encoded_Application/String", "Encoded_Library/String",
-	)
-)
-
-// rawTextDVDFieldOrderPolicy returns the DVD raw-text ordering registry for a stream kind.
-func rawTextDVDFieldOrderPolicy(kind StreamKind) map[string]int {
-	switch kind {
-	case StreamVideo, StreamImage:
-		return rawTextDVDVideoFieldOrder
-	case StreamAudio:
-		return rawTextDVDAudioFieldOrder
-	case StreamText:
-		return rawTextDVDTextFieldOrder
-	case StreamMenu:
-		return rawTextDVDMenuFieldOrder
-	case StreamGeneral:
-		return rawTextDVDGeneralFieldOrder
-	}
-	return rawTextDVDGeneralFieldOrder
-}
-
 // rawTextProjectionRule resolves one canonical or imported text entry to its
-// single raw-text policy. Unknown labels remain visible Go extensions.
-func rawTextProjectionRule(kind StreamKind, entry fieldEntry) (rawTextFieldRule, bool) {
+// raw-text policy for the selected reference version. Unknown labels remain visible Go extensions.
+func rawTextProjectionRule(version reportTableVersion, kind StreamKind, entry fieldEntry) (rawTextFieldRule, bool) {
+	identity := reportFieldIdentity(version, kind, string(entry.Name), entry.TextLabel)
+	if table := reportKindPolicy(version, kind); table != nil {
+		for _, name := range []string{identity + "/String", identity} {
+			if row, ok := table.Fields[name]; ok {
+				label := name
+				if label == "CodecID/String" && kind != StreamGeneral {
+					label = "CodecID"
+				}
+				if strings.HasPrefix(label, "Channels") {
+					label = "Channel(s)" + strings.TrimPrefix(label, "Channels")
+				}
+				label = rawReportFieldName(label)
+				if alias := rawFieldLabelAlias(label); alias != "" {
+					label = alias
+				}
+				return rawTextFieldRule{Label: label, Visible: strings.HasPrefix(row.Options, "Y")}, true
+			}
+		}
+	}
+
 	if rule, ok := rawTextCanonicalFieldRules[entry.Name]; ok {
 		if kind == StreamGeneral && entry.TextLabel == "Codec ID" {
 			rule.Label = "CodecID/String"
@@ -712,12 +598,12 @@ func rawTextProjectionRule(kind StreamKind, entry fieldEntry) (rawTextFieldRule,
 		}
 	}
 	friendly := firstNonEmpty(entry.TextLabel, string(entry.Name))
-	return rawTextFieldRule{Label: rawTextLabel(friendly), Visible: true}, false
+	return rawTextFieldRule{Label: rawFieldLabel(friendly), Visible: true}, false
 }
 
 // rawTextStructuredDerivations exposes structured-only canonical facts that
 // MediaInfo includes in raw text but the friendly renderer intentionally omits.
-func rawTextStructuredDerivations(kind StreamKind, structured map[string]string, totalFileSize int64) []rawTextDerivedField {
+func rawTextStructuredDerivations(version reportTableVersion, kind StreamKind, structured map[string]string, totalFileSize int64) []rawTextDerivedField {
 	fields := make([]rawTextDerivedField, 0, 24)
 	appendField := func(label, value string) {
 		if value != "" {
@@ -726,7 +612,8 @@ func rawTextStructuredDerivations(kind StreamKind, structured map[string]string,
 	}
 	appendField("MuxingMode", structured["MuxingMode"])
 	appendField("Format_Version", formatRawTextFormatVersion(structured["Format_Version"]))
-	appendField("Format/Info", rawTextFormatInfo(kind, structured))
+	_, formatInfo := reportFormatPresentation(version, kind, structured)
+	appendField("Format/Info", formatInfo)
 	appendField("Format_Commercial_IfAny", structured["Format_Commercial_IfAny"])
 	appendField("Format_Profile", formatRawTextProfile(kind, structured, structured["Format_Profile"]))
 	appendField("Format_Settings", formatRawTextSettings(structured))
@@ -752,18 +639,18 @@ func rawTextStructuredDerivations(kind StreamKind, structured map[string]string,
 	}
 	if kind == StreamVideo || kind == StreamImage {
 		if width := structured["Width"]; width != "" {
-			appendField("Width/String", width+" pixel")
+			appendField("Width/String", formatRawTextCount(width, "pixel"))
 		}
 		if height := structured["Height"]; height != "" {
-			appendField("Height/String", height+" pixel")
+			appendField("Height/String", formatRawTextCount(height, "pixel"))
 		}
 	}
 	if kind == StreamImage {
 		appendField("ChromaSubsampling", structured["ChromaSubsampling"])
 	}
-	if kind == StreamAudio && structured["FrameRate"] != "" && structured["SamplesPerFrame"] != "" {
-		if frameRate, err := strconv.ParseFloat(structured["FrameRate"], 64); err == nil {
-			appendField("FrameRate/String", fmt.Sprintf("%.3f fps (%s SPF)", frameRate, structured["SamplesPerFrame"]))
+	for _, key := range []string{"FrameRate", "FrameRate_Minimum", "FrameRate_Maximum"} {
+		if structured[key] != "" {
+			appendField(key+"/String", rawTextValue(version, kind, key+"/String", "", structured, totalFileSize))
 		}
 	}
 	if frameRate := structured["FrameRate_Original"]; frameRate != "" {
@@ -780,22 +667,24 @@ func rawTextStructuredDerivations(kind StreamKind, structured map[string]string,
 		appendField("DisplayAspectRatio_Original/Stri", formatRawTextAspectRatio(ratio))
 	}
 	appendField("ColorSpace", structured["ColorSpace"])
-	appendField("Channel(s)/String", formatRawTextChannels(structured["Channels"]))
+	appendField("Channel(s)/String", formatRawTextCount(structured["Channels"], "channel"))
 	appendField("ChannelLayout", structured["ChannelLayout"])
 	if channels := structured["Channels_Original"]; channels != "" {
-		appendField("Channel(s)_Original/String", channels+" channel")
+		appendField("Channel(s)_Original/String", formatRawTextCount(channels, "channel"))
 	}
 	appendField("ChannelLayout_Original", structured["ChannelLayout_Original"])
 	if bitDepth := structured["BitDepth"]; bitDepth != "" {
-		appendField("BitDepth/String", bitDepth+" bit")
+		appendField("BitDepth/String", formatRawTextCount(bitDepth, "bit"))
 	}
 	if bitDepth := structured["BitDepth_Detected"]; bitDepth != "" && bitDepth != structured["BitDepth"] {
-		appendField("BitDepth_Detected/String", bitDepth+" bit")
+		appendField("BitDepth_Detected/String", formatRawTextCount(bitDepth, "bit"))
 	}
 	appendField("Compression_Mode/String", structured["Compression_Mode"])
 	appendField("Format_Compression", structured["Format_Compression"])
-	appendField("ScanOrder/String", structured["ScanOrder"])
-	appendField("ScanType_StoreMethod/String", rawTextScanStoreMethod(structured))
+	for _, key := range []string{"ScanOrder", "ScanOrder_Original", "ScanOrder_Stored"} {
+		appendField(key+"/String", structured[key])
+	}
+	appendField("ScanType_StoreMethod/String", structured["ScanType_StoreMethod"])
 	appendField("ActiveFormatDescription/String", formatRawTextActiveFormatDescription(structured["ActiveFormatDescription"]))
 	appendField("Standard", structured["Standard"])
 	appendField("MultiView_Count", structured["MultiView_Count"])
@@ -813,7 +702,7 @@ func rawTextStructuredDerivations(kind StreamKind, structured map[string]string,
 		appendField("Video_Delay/String", delay)
 	}
 	if size, err := strconv.ParseInt(structured["StreamSize"], 10, 64); err == nil && kind != StreamGeneral {
-		appendField("StreamSize/String", formatRawTextByteUnits(kind, formatStreamSize(size, totalFileSize), structured["ElementCount"]))
+		appendField("StreamSize/String", rawStreamSizeValue(kind, size, totalFileSize, structured["ElementCount"]))
 	}
 	appendField("Encoded_Library_Settings", structured["Encoded_Library_Settings"])
 	appendField("Encoded_Library/String", formatRawTextEncodedLibraryForStream(structured["Encoded_Library"], structured))
@@ -852,7 +741,7 @@ func rawTextStructuredDerivations(kind StreamKind, structured map[string]string,
 			appendField("Interleave_Preload/String", fmt.Sprintf("%.0f ms", seconds*1000))
 		}
 	}
-	appendField("CodecID/Hint", rawTextCodecIDHint(structured))
+
 	appendField("Type/String", structured["Type"])
 	if language := structured["Language"]; language != "" {
 		appendField("Language/String", formatRawTextLanguage(language, formatLanguage(language)))
@@ -873,30 +762,30 @@ func rawTextStructuredDerivations(kind StreamKind, structured map[string]string,
 	return fields
 }
 
-// formatRawTextAspectRatio maps common canonical decimal ratios to their raw
-// display names.
-func formatRawTextAspectRatio(value string) string {
-	ratio, err := strconv.ParseFloat(value, 64)
-	if err != nil {
-		return value
-	}
-	switch {
-	case math.Abs(ratio-4.0/3.0) < 0.01:
-		return "4:3"
-	case math.Abs(ratio-16.0/9.0) < 0.01:
-		return "16:9"
-	default:
-		return value
-	}
-}
-
-// formatRawTextChannels adds the singular raw unit to a canonical channel
-// count.
-func formatRawTextChannels(value string) string {
+// formatRawTextCount adds a raw unit to positive canonical counts, including lists.
+func formatRawTextCount(value, unit string) string {
 	if value == "" {
 		return ""
 	}
-	return value + " channel"
+	for _, part := range strings.Split(value, " / ") {
+		if count, err := strconv.ParseUint(part, 10, 64); err != nil || count == 0 {
+			return ""
+		}
+	}
+	return value + " " + unit
+}
+
+// formatRawTextSamplingRate formats canonical hertz without reading display text.
+func formatRawTextSamplingRate(value string) string {
+	parts := strings.Split(value, " / ")
+	for index, part := range parts {
+		rate, err := strconv.ParseFloat(part, 64)
+		if err != nil || rate <= 0 || math.IsNaN(rate) || math.IsInf(rate, 0) {
+			return ""
+		}
+		parts[index] = formatSampleRateQuantity(rate, true)
+	}
+	return strings.Join(parts, " / ")
 }
 
 // formatRawTextActiveFormatDescription expands the coded AFD value used by
@@ -908,17 +797,6 @@ func formatRawTextActiveFormatDescription(value string) string {
 	default:
 		return ""
 	}
-}
-
-// rawTextScanStoreMethod exposes only parser-derived storage terminology.
-func rawTextScanStoreMethod(structured map[string]string) string {
-	if value := structured["ScanType_StoreMethod"]; value != "" {
-		return value
-	}
-	if structured["ScanType"] == "MBAFF" {
-		return "InterleavedFields"
-	}
-	return ""
 }
 
 // formatRawTextProfile composes video profile, level, and tier tokens using
@@ -967,34 +845,6 @@ func rawTextAV1UsesFilmGrain(structured map[string]string) bool {
 	return strings.Contains(settings, "grain=") && !strings.Contains(settings, "grain=0")
 }
 
-// rawTextCodecIDHint derives MediaInfo's short raw codec hint from canonical
-// codec identity when the parser has no dedicated hint scalar.
-func rawTextCodecIDHint(structured map[string]string) string {
-	if value := structured["CodecID_Hint"]; value != "" {
-		return value
-	}
-	format := structured["Format"]
-	profile := structured["Format_Profile"]
-	library := structured["Encoded_Library"]
-	codecID := structured["CodecID"]
-	switch {
-	case strings.Contains(codecID, "WVC1"):
-		return "Microsoft"
-	case strings.Contains(codecID, "A_MPEG/L2"):
-		return "MP2"
-	case strings.Contains(codecID, "DIVX"):
-		return "DivX 4"
-	case format == "MPEG Audio" && strings.Contains(profile, "Layer 3"):
-		return "MP3"
-	case strings.HasPrefix(library, "XviD") || strings.Contains(codecID, "XVID"):
-		return "XviD"
-	case strings.HasPrefix(library, "DivX") || strings.Contains(codecID, "DX50"):
-		return "DivX 5"
-	default:
-		return ""
-	}
-}
-
 // formatRawTextSettings composes the aggregate raw settings row from the
 // format-specific canonical setting scalars.
 func formatRawTextSettings(structured map[string]string) string {
@@ -1013,9 +863,6 @@ func formatRawTextSettings(structured map[string]string) string {
 	if structured["Format"] == "AAC" {
 		if value := structured["Format_Settings_SBR"]; strings.HasPrefix(value, "Yes (") && strings.HasSuffix(value, ")") {
 			return strings.TrimSuffix(strings.TrimPrefix(value, "Yes ("), ")")
-		}
-		if structured["Format_Settings_SBR"] == "No (Explicit)" && structured["BitRate"] == "" && structured["Title"] == "" {
-			return "PNS / PNS"
 		}
 	}
 	if structured["Format_Settings_Endianness"] != "" && structured["Format_Settings_Sign"] != "" {
@@ -1110,7 +957,7 @@ func formatRawTextDelay(value string) string {
 // keeps out of raw text while allowing ordinary tags and codec detail rows.
 func rawTextExtraVisible(key, value string) bool {
 	switch key {
-	case "bsid", "acmod", "lfeon",
+	case "Source_Delay", "Source_Delay_Source", "bsid", "acmod", "lfeon",
 		"dialnorm_Count", "compr_Average", "compr_Minimum", "compr_Maximum", "compr_Count",
 		"dynrng_Average", "dynrng_Minimum", "dynrng_Maximum", "dynrng_Count",
 		"intra_dc_precision", "IsTruncated", "format_identifier",
@@ -1121,29 +968,6 @@ func rawTextExtraVisible(key, value string) bool {
 		return value != "0"
 	default:
 		return true
-	}
-}
-
-// rawTextCodecIDInfo returns MediaInfo's raw codec description for IDs whose
-// friendly projection historically omitted the description row.
-func rawTextCodecIDInfo(codecID string) string {
-	switch codecID {
-	case "S_HDMV/PGS":
-		return "Picture based subtitle format used on BDs/HD-DVDs"
-	case "S_TEXT/ASS":
-		return "Advanced Sub Station Alpha"
-	case "S_TEXT/SSA":
-		return "Sub Station Alpha"
-	case "S_VOBSUB":
-		return "Picture based subtitle format used on DVDs"
-	case "S_DVBSUB":
-		return "Picture based subtitle format used on DVBs"
-	case "V_MPEG1", "V_MPEG2":
-		return "MPEG 1 or 2 Video"
-	case "V_VP3", "V_MS/VFW/FOURCC / DIVX":
-		return "Project Mayo"
-	default:
-		return ""
 	}
 }
 
@@ -1286,30 +1110,6 @@ func rawTextConformanceInfoFields(node structuredNode) []rawTextDerivedField {
 	return fields
 }
 
-// rawTextStructuredValues returns one preferred scalar per canonical key.
-func rawTextStructuredValues(stream *storedStream) map[string]string {
-	values := make(map[string]string, len(stream.Fields))
-	for _, entry := range stream.Fields {
-		if !entry.Options.ShowStructured || entry.Node != nil || entry.Projected {
-			continue
-		}
-		key := firstNonEmpty(entry.StructuredKey, string(entry.Name))
-		if _, exists := values[key]; !exists {
-			values[key] = entry.Value.Text
-		}
-	}
-	for _, entry := range stream.Fields {
-		if !entry.Options.ShowStructured || entry.Node != nil || !entry.Projected {
-			continue
-		}
-		key := firstNonEmpty(entry.StructuredKey, string(entry.Name))
-		if _, exists := values[key]; !exists {
-			values[key] = entry.Value.Text
-		}
-	}
-	return values
-}
-
 // rawTextExtraNode returns the preferred ordered extra object for a stream.
 func rawTextExtraNode(stream *storedStream) (structuredNode, bool) {
 	var fallback *structuredNode
@@ -1330,47 +1130,24 @@ func rawTextExtraNode(stream *storedStream) (structuredNode, bool) {
 	return *fallback, true
 }
 
-// rawTextLabel resolves a friendly compatibility label to MediaInfo's raw name.
-func rawTextLabel(friendly string) string {
-	if label := rawTextLabelAliases[friendly]; label != "" {
-		return label
-	}
-	return friendly
-}
-
 // rawTextValue applies raw-language presentation without changing canonical facts.
-func rawTextValue(kind StreamKind, label, display string, structured map[string]string, totalFileSize int64) string {
+func rawTextValue(version reportTableVersion, kind StreamKind, label, display string, structured map[string]string, totalFileSize int64) string {
 	switch label {
 	case "ID/String":
-		if kind == StreamGeneral && structured["Format"] == "BDAV" {
-			return "0 (0x0)"
-		}
-		if rawTextOggStream(structured) {
+		if kind == StreamGeneral && structured["Format"] == "BDAV" || rawTextOggStream(structured) {
 			if id, err := strconv.ParseUint(structured["ID"], 10, 64); err == nil {
 				return fmt.Sprintf("%d (0x%X)", id, id)
 			}
 		}
-	case "Format/String":
-		if value := firstNonEmpty(structured["Format"], display); value != "" {
-			if structured["CodecID"] == "A_EAC3" {
-				value = "E-AC-3"
-				if strings.Contains(structured["Format_AdditionalFeatures"], "JOC") {
-					value += " JOC"
-				}
-				return value
-			}
-			features := structured["Format_AdditionalFeatures"]
-			if value == "AC-3 Dep" || value == "AC-3" && strings.Contains(features, "Dep") {
-				value = "E-AC-3"
-				features = strings.TrimSpace(strings.ReplaceAll(features, "Dep", ""))
-			}
-			if features != "" && !strings.Contains(value, features) {
-				value += " " + features
-			}
+	case "MuxingMode":
+		if value := structured["MuxingMode"]; value != "" {
 			return value
 		}
+	case "Format/String":
+		name, _ := reportFormatPresentation(version, kind, structured)
+		return name
 	case "Format/Info":
-		if value := rawTextFormatInfo(kind, structured); value != "" {
+		if _, value := reportFormatPresentation(version, kind, structured); value != "" {
 			return value
 		}
 	case "HDR_Format/String":
@@ -1382,13 +1159,22 @@ func rawTextValue(kind StreamKind, label, display string, structured map[string]
 				return formatRawTextDuration(milliseconds)
 			}
 		}
+	case "Video_Delay/String":
+		return formatRawTextDelay(structured["Video_Delay"])
+	case "Source_Duration_LastFrame/String":
+		if value, present := structured["Source_Duration_LastFrame"]; present {
+			// This field is stored in milliseconds; relative-delay facts use seconds.
+			milliseconds, err := strconv.ParseFloat(value, 64)
+			if err != nil || math.IsNaN(milliseconds) || math.IsInf(milliseconds, 0) {
+				return ""
+			}
+			if milliseconds == 0 {
+				return fmt.Sprintf("%.0fms", milliseconds)
+			}
+			return formatRawTextDelay(strconv.FormatFloat(milliseconds/1000, 'f', -1, 64))
+		}
 	case "OverallBitRate/String", "BitRate/String", "BitRate_Nominal/String", "BitRate_Maximum/String", "BitRate_Minimum/String":
 		key := strings.TrimSuffix(label, "/String")
-		if label == "BitRate/String" && kind == StreamVideo {
-			if target, ok := rawTextX264TargetBitRate(structured); ok {
-				return formatRawTextBitRate(strconv.FormatInt(int64(math.Round(target)), 10))
-			}
-		}
 		if label != "OverallBitRate/String" {
 			if kind == StreamAudio && structured["Format"] == "PCM" {
 				if value := formatRawTextPCMBitRate(structured[key]); value != "" {
@@ -1404,58 +1190,54 @@ func rawTextValue(kind StreamKind, label, display string, structured map[string]
 				return value
 			}
 		}
-		if value := stripRawTextDigitGrouping(strings.NewReplacer(" Mb/s", " Mbps", " kb/s", " Kbps", " b/s", " bps").Replace(display)); value != "" {
-			return value
+		return formatRawTextDerivedBitRate(structured[key])
+	case "FrameRate/String", "FrameRate_Original/String", "FrameRate_Minimum/String", "FrameRate_Maximum/String":
+		key := strings.TrimSuffix(label, "/String")
+		rate, err := strconv.ParseFloat(structured[key], 64)
+		if err != nil || rate <= 0 || math.IsNaN(rate) || math.IsInf(rate, 0) {
+			return ""
 		}
-		return formatRawTextBitRate(structured[key])
-	case "FrameRate/String", "FrameRate_Original/String":
-		if label == "FrameRate/String" && (structured["Format"] == "Ogg" || structured["Format"] == "Theora") {
-			if rate, err := strconv.ParseFloat(structured["FrameRate"], 64); err == nil {
-				return fmt.Sprintf("%.3f fps", rate)
+		if key == "FrameRate_Original" && rawTextAVIVisual(structured) {
+			return formatRawTextOriginalFrameRate(structured[key])
+		}
+		result := fmt.Sprintf("%.3f", rate)
+		if kind == StreamAudio && key == "FrameRate" {
+			result += " fps"
+			if spf := validSamplesPerFrame(structured["SamplesPerFrame"]); spf != "" {
+				result += " (" + spf + " SPF)"
+			}
+			return result
+		}
+		if key == "FrameRate" {
+			num, den := structured["FrameRate_Num"], structured["FrameRate_Den"]
+			fraction := " (" + num + "/" + den + ")"
+			// Retain a producer's display fraction only for the same canonical pair.
+			if rawTextFrameRateUsesRatio(kind, structured, num, den) || num != "" && den != "" && den != "1" && strings.Contains(display, fraction) {
+				result += fraction
 			}
 		}
-		originalRate := strings.TrimSpace(strings.TrimSuffix(strings.TrimSuffix(display, " fps"), " FPS"))
-		if label == "FrameRate_Original/String" && rawTextAVIVisual(structured) {
-			return formatRawTextOriginalFrameRate(originalRate)
+		return result + " fps"
+	case "SamplingRate/String", "SamplingRate_Original/String":
+		if value, present := structured[strings.TrimSuffix(label, "/String")]; present {
+			return formatRawTextSamplingRate(value)
 		}
-		value := strings.ReplaceAll(display, " FPS", " fps")
-		if strings.Contains(value, " SPF)") {
-			if number, tail, ok := strings.Cut(value, " "); ok {
-				if frameRate, err := strconv.ParseFloat(number, 64); err == nil {
-					return fmt.Sprintf("%.3f %s", frameRate, tail)
-				}
-			}
-		}
-		if kind != StreamAudio && label == "FrameRate/String" {
-			if numerator, denominator := structured["FrameRate_Num"], structured["FrameRate_Den"]; rawTextFrameRateUsesRatio(kind, structured, numerator, denominator) {
-				return structured["FrameRate"] + " (" + numerator + "/" + denominator + ") fps"
-			}
-			if structured["FrameRate_Den"] == "" || structured["FrameRate_Den"] == "1" {
-				if frameRate := structured["FrameRate"]; frameRate != "" {
-					return frameRate + " fps"
-				}
-			}
-		}
-		if kind == StreamAudio && label == "FrameRate/String" {
-			frameRate, frameRateErr := strconv.ParseFloat(structured["FrameRate"], 64)
-			samplingRate, samplingRateErr := strconv.ParseFloat(structured["SamplingRate"], 64)
-			if frameRateErr == nil && samplingRateErr == nil && frameRate > 0 {
-				samplesPerFrame := math.Round(samplingRate / frameRate)
-				if samplesPerFrame > 0 {
-					return fmt.Sprintf("%.3f fps (%.0f SPF)", frameRate, samplesPerFrame)
-				}
-			}
-		}
-		return value
-	case "SamplingRate/String":
-		return strings.ReplaceAll(display, " kHz", " KHz")
+		return ""
 	case "Channel(s)/String", "Channel(s)_Original/String":
-		return strings.ReplaceAll(display, " channels", " channel")
+		key := strings.ReplaceAll(strings.TrimSuffix(label, "/String"), "Channel(s)", "Channels")
+		if value, present := structured[key]; present {
+			return formatRawTextCount(value, "channel")
+		}
+		return ""
 	case "BitDepth/String", "BitDepth_Detected/String":
-		return strings.ReplaceAll(display, " bits", " bit")
+		if value, present := structured[strings.TrimSuffix(label, "/String")]; present {
+			return formatRawTextCount(value, "bit")
+		}
+		return ""
 	case "Width/String", "Height/String":
-		value := strings.TrimSuffix(strings.TrimSuffix(display, " pixels"), " pixel")
-		return strings.ReplaceAll(value, " ", "") + " pixel"
+		if value, present := structured[strings.TrimSuffix(label, "/String")]; present {
+			return formatRawTextCount(value, "pixel")
+		}
+		return ""
 	case "FrameRate_Mode/String":
 		return formatRawTextMode(firstNonEmpty(structured["FrameRate_Mode"], display), "CFR", "VFR")
 	case "BitRate_Mode/String", "OverallBitRate_Mode/String":
@@ -1484,10 +1266,17 @@ func rawTextValue(kind StreamKind, label, display string, structured map[string]
 			if kind == StreamText && size == 0 {
 				return "0.00 Byte (0%)"
 			}
-			return formatRawTextByteUnits(kind, formatStreamSize(size, totalFileSize), structured["ElementCount"])
+			return rawStreamSizeValue(kind, size, totalFileSize, structured["ElementCount"])
 		}
 		return formatRawTextByteUnits(kind, display, structured["ElementCount"])
 	case "FileSize/String", "Source_StreamSize/String":
+		if size, err := strconv.ParseInt(structured[strings.TrimSuffix(label, "/String")], 10, 64); err == nil {
+			value := formatByteQuantity(size, false)
+			if label == "Source_StreamSize/String" && size > 0 && totalFileSize > 0 {
+				value = formatStreamSizeQuantity(size, totalFileSize, false)
+			}
+			return formatRawTextByteUnits(kind, value, structured["ElementCount"])
+		}
 		return formatRawTextByteUnits(kind, display, structured["ElementCount"])
 	case "BedChannelCount":
 		if value := structured["BedChannelCount"]; value != "" {
@@ -1507,20 +1296,7 @@ func rawTextValue(kind StreamKind, label, display string, structured map[string]
 	case "UniqueID/String":
 		return trimRawTextHexPadding(display)
 	case "OriginalSourceMedium_ID/String":
-		if parts := strings.Split(structured["OriginalSourceMedium_ID"], "-"); len(parts) > 1 {
-			formatted := make([]string, 0, len(parts))
-			for _, part := range parts {
-				value, err := strconv.ParseUint(part, 10, 64)
-				if err != nil {
-					return display
-				}
-				formatted = append(formatted, fmt.Sprintf("%d (0x%X)", value, value))
-			}
-			return strings.Join(formatted, "")
-		}
-		if value, err := strconv.ParseUint(structured["OriginalSourceMedium_ID"], 10, 64); err == nil {
-			return fmt.Sprintf("%d (0x%X)", value, value)
-		}
+		return formatOriginalSourceID(structured["OriginalSourceMedium_ID"], display)
 	case "Format_Settings_BVOP/String":
 		if value := structured["Format_Settings_BVOP"]; value != "" {
 			return value
@@ -1546,9 +1322,6 @@ func rawTextValue(kind StreamKind, label, display string, structured map[string]
 	case "Bits-(Pixel*Frame)":
 		if kind == StreamVideo {
 			bitRate, _ := strconv.ParseFloat(firstNonEmpty(structured["BitRate"], structured["BitRate_Nominal"]), 64)
-			if target, ok := rawTextX264TargetBitRate(structured); ok {
-				bitRate = target
-			}
 			width, _ := strconv.ParseUint(structured["Width"], 10, 64)
 			height, _ := strconv.ParseUint(structured["Height"], 10, 64)
 			frameRate, _ := strconv.ParseFloat(structured["FrameRate"], 64)
@@ -1557,7 +1330,10 @@ func rawTextValue(kind StreamKind, label, display string, structured map[string]
 			}
 		}
 	case "Format_Settings_RefFrames/String":
-		return strings.ReplaceAll(display, " frames", " frame")
+		if value, present := structured["Format_Settings_RefFrames"]; present {
+			return formatRawTextCount(value, "frame")
+		}
+		return ""
 	case "Format_Profile":
 		return formatRawTextProfile(kind, structured, display)
 	case "DisplayAspectRatio/String":
@@ -1571,6 +1347,10 @@ func rawTextValue(kind StreamKind, label, display string, structured map[string]
 			if formatted := formatRawTextAspectRatio(value); formatted != value {
 				return formatted
 			}
+		}
+	case "ScanOrder/String", "ScanOrder_Original/String", "ScanOrder_Stored/String", "ScanType_StoreMethod/String":
+		if value := structured[strings.TrimSuffix(label, "/String")]; value != "" {
+			return value
 		}
 	case "ScanType/String":
 		if value := structured["ScanType"]; value != "" {
@@ -1596,22 +1376,6 @@ func rawTextValue(kind StreamKind, label, display string, structured map[string]
 		}
 	}
 	return display
-}
-
-func rawTextX264TargetBitRate(structured map[string]string) (float64, bool) {
-	codecID := strings.ToLower(structured["CodecID"])
-	if structured["Format"] != "AVC" || (!strings.HasPrefix(codecID, "avc1") && !strings.HasPrefix(codecID, "avc3")) {
-		return 0, false
-	}
-	target, ok := findX264Bitrate(structured["Encoded_Library_Settings"])
-	if !ok || target <= 0 {
-		return 0, false
-	}
-	measured, err := strconv.ParseFloat(structured["BitRate"], 64)
-	if err != nil || measured <= 0 || math.Abs(measured-target)/target >= 0.05 {
-		return 0, false
-	}
-	return target, true
 }
 
 // formatRawTextOriginalFrameRate preserves MediaInfo's decimal-ratio form for
@@ -1732,51 +1496,6 @@ func rawTextDolbyVisionCommercialProfile(value string) string {
 
 // formatRawTextBitRate renders ungrouped raw rates using MediaInfo's bps/Kbps
 // boundary and precision.
-func formatRawTextBitRate(value string) string {
-	parsed, err := strconv.ParseFloat(value, 32)
-	bitRate := float32(parsed)
-	if err != nil || bitRate <= 0 {
-		return ""
-	}
-	if bitRate <= 10_000 {
-		return fmt.Sprintf("%.0f bps", bitRate)
-	}
-	if bitRate <= 100_000 {
-		return fmt.Sprintf("%.1f Kbps", bitRate/1_000)
-	}
-	return fmt.Sprintf("%.0f Kbps", bitRate/1_000)
-}
-
-// formatRawTextPCMBitRate preserves the fractional decimal-kilobit precision
-// MediaInfo uses for common AVI PCM rates.
-func formatRawTextPCMBitRate(value string) string {
-	bitRate, err := strconv.ParseFloat(value, 64)
-	if err != nil || bitRate <= 0 {
-		return ""
-	}
-	if math.Mod(bitRate, 1000) != 0 {
-		return fmt.Sprintf("%.1f Kbps", bitRate/1000)
-	}
-	return formatRawTextBitRate(value)
-}
-
-// stripRawTextDigitGrouping removes friendly thousands separators from a raw
-// numeric prefix without changing ordinary spaces in the value.
-func stripRawTextDigitGrouping(value string) string {
-	for {
-		updated := value
-		for digit := byte('0'); digit <= '9'; digit++ {
-			for next := byte('0'); next <= '9'; next++ {
-				updated = strings.ReplaceAll(updated, string([]byte{digit, ' ', next}), string([]byte{digit, next}))
-			}
-		}
-		if updated == value {
-			return value
-		}
-		value = updated
-	}
-}
-
 // formatRawTextLanguage emits raw registry language codes and formats a single
 // region or script subtag as MediaInfo's parenthesized suffix.
 func formatRawTextLanguage(code, display string) string {
@@ -1906,127 +1625,6 @@ func rawTextOggStream(structured map[string]string) bool {
 	}
 }
 
-// rawTextFormatInfo returns the few compound audio descriptions whose raw
-// value must be composed from canonical format facts.
-func rawTextFormatInfo(kind StreamKind, structured map[string]string) string {
-	if kind == StreamGeneral && structured["Format"] == "BDAV" {
-		return "Blu-ray Video"
-	}
-	if kind == StreamImage && structured["Format"] == "PNG" {
-		return "Portable Network Graphic"
-	}
-	if kind != StreamAudio {
-		return ""
-	}
-	format := structured["Format"]
-	features := structured["Format_AdditionalFeatures"]
-	switch {
-	case format == "AAC" && strings.Contains(features, "LC SBR"):
-		return "Advanced Audio Codec Low Complexity with Spectral Band Replication"
-	case format == "AAC" && strings.Contains(features, "LC"):
-		return "Advanced Audio Codec Low Complexity"
-	case structured["CodecID"] == "A_EAC3" && strings.Contains(features, "JOC"):
-		return "Enhanced AC-3 with Joint Object Coding"
-	case structured["CodecID"] == "A_EAC3", format == "E-AC-3" || format == "AC-3 Dep" ||
-		format == "AC-3" && strings.Contains(features, "Dep"):
-		return "Enhanced AC-3"
-	case format == "AC-3":
-		return "Audio Coding 3"
-	case format == "MLP FBA" || format == "TrueHD":
-		if strings.Contains(features, "16-ch") {
-			return "Meridian Lossless Packing FBA with 16-channel presentation"
-		}
-		return "Meridian Lossless Packing FBA"
-	default:
-		return ""
-	}
-}
-
-// formatRawTextDuration renders the two most significant raw duration units.
-func formatRawTextDuration(milliseconds float64) string {
-	total := int64(math.Round(milliseconds))
-	total = max(total, 0)
-	hours := total / 3_600_000
-	minutes := total / 60_000 % 60
-	seconds := total / 1_000 % 60
-	millis := total % 1_000
-	switch {
-	case hours > 0:
-		return fmt.Sprintf("%dh %dmn", hours, minutes)
-	case minutes > 0:
-		return fmt.Sprintf("%dmn %ds", minutes, seconds)
-	default:
-		return fmt.Sprintf("%ds %dms", seconds, millis)
-	}
-}
-
-// rawTextFieldOrder returns the raw registry order, then stable encounter order.
-func rawTextFieldOrder(kind StreamKind, label string) int {
-	if order, ok := rawTextFieldOrderPolicy(kind)[label]; ok {
-		return order
-	}
-	return unregisteredFieldOrder
-}
-
-// Raw text field order registries are immutable after package initialization.
-var (
-	rawTextGeneralFieldOrder = makeStructuredFieldOrder(
-		"ID/String", "UniqueID/String", "CompleteName", "Format/String", "Format/Info", "Format_Version", "Format_Profile",
-		"Format_Settings", "CodecID", "CodecID/String", "FileSize/String", "Duration/String", "OverallBitRate_Mode/String", "OverallBitRate/String", "OverallBitRate_Maximum/String", "FrameRate/String",
-		"Title", "Movie", "Album", "Performer", "EncodedBy", "Genre", "ContentType", "Synopsis", "Description", "Released_Date", "Recorded_Date", "Encoded_Date", "Tagged_Date",
-		"Encoded_Application/String", "Encoded_Library/String", "Copyright", "OriginalSourceForm", "Cover", "Cover_Description", "Cover_Type", "Cover_Mime",
-		"Comment", "ErrorDetectionType", "Attachments", "Episode_ID", "Season", "SeasonNumber", "Show", "EPISODE_ID", "EPISODE_NUMBER", "SEASON_NUMBER", "SHOW",
-	)
-	rawTextImageFieldOrder = makeStructuredFieldOrder(
-		"Type/String", "Title", "Format/String", "Format/Info", "Format_Compression", "MuxingMode", "Width/String", "Height/String", "DisplayAspectRatio/String",
-		"ColorSpace", "ChromaSubsampling", "ChromaSubsampling/String", "BitDepth/String", "Compression_Mode/String", "StreamSize/String",
-		"colour_range", "colour_primaries", "transfer_characteristics", "matrix_coefficients", "Gamma", "ColorSpace_ICC", "colour_primaries_ICC_Description",
-	)
-	rawTextTextFieldOrder = makeStructuredFieldOrder(
-		"ID/String", "MenuID/String", "UniqueID/String", "OriginalSourceMedium_ID/String", "Format/String", "Format/Info", "MuxingMode",
-		"MuxingMode_MoreInfo", "CodecID", "CodecID/Info", "CodecID/Hint", "Duration/String", "Duration_Start2End/String", "Duration_Start/String", "Duration_End/String", "Duration_FirstFrame/String", "Duration_LastFrame/String", "BitRate_Mode/String", "BitRate/String", "FrameRate/String",
-		"ElementCount", "Compression_Mode/String", "Video_Delay/String", "StreamSize/String", "Title", "Encoded_Application/String",
-		"FirstDisplay_Delay_Frames", "FirstDisplay_Type", "Encoded_Library/String", "Encoded_Library_Settings", "Language/String", "ServiceKind/String", "Default/String", "Forced/String", "AlternateGroup/String", "Encoded_Date", "Tagged_Date", "Events_Total",
-		"  Issue", "FromStats_BitRate", "FromStats_Duration", "FromStats_FrameCount", "FromStats_StreamSize", "Source", "Source_ID", "MD5_Unencoded",
-	)
-	rawTextStreamFieldOrder = makeStructuredFieldOrder(
-		"ID/String", "MenuID/String", "UniqueID/String", "OriginalSourceMedium_ID/String", "Format/String", "Format/Info",
-		"Format_Commercial_IfAny", "Format_Version", "Format_Profile", "MultiView_Count", "MultiView_Layout", "HDR_Format/String", "Format_Settings", "Format_Settings_Floor",
-		"Format_Settings_BVOP/String", "Format_Settings_QPel/String", "Format_Settings_GMC/String", "Format_Settings_Matrix/String",
-		"Format_Settings_CABAC/String", "Format_Settings_RefFrames/String", "Format_Settings_GOP", "Format_Settings_PictureStructure", "Format_Settings_SliceCount/Strin", "MuxingMode", "CodecID", "CodecID/Info", "CodecID/Hint",
-		"Duration/String", "Source_Duration/String", "Duration_FirstFrame/String", "Duration_LastFrame/String", "BitRate_Mode/String", "BitRate/String", "BitRate_Minimum/String", "BitRate_Nominal/String", "BitRate_Maximum/String",
-		"Width/String", "Height/String", "DisplayAspectRatio/String", "DisplayAspectRatio_Original/Stri", "ActiveFormatDescription/String", "Channel(s)/String", "ChannelLayout", "Channel(s)_Original/String", "ChannelLayout_Original", "SamplingRate/String",
-		"FrameRate_Mode/String", "FrameRate/String", "FrameRate_Minimum/String", "FrameRate_Maximum/String", "FrameRate_Original/String", "Standard", "ColorSpace", "ChromaSubsampling", "ChromaSubsampling/String", "BitDepth/String",
-		"BitDepth_Detected/String", "ScanType/String", "ScanType_StoreMethod/String", "ScanOrder/String", "Compression_Mode/String", "Bits-(Pixel*Frame)", "TimeCode_FirstFrame", "TimeCode_Source", "Gop_OpenClosed/String", "Gop_OpenClosed_FirstFrame/String", "ElementCount", "Video_Delay/String", "StreamSize/String", "Source_StreamSize/String", "Alignment/String", "Interleave_Duration/String", "Interleave_Preload/String",
-		"List/String", "Title", "Encoded_Application/String", "Encoded_Library/String", "Encoded_Library_Settings", "Language/String", "LawRating", "ServiceKind/String",
-		"Default/String", "Forced/String", "AlternateGroup/String", "Encoded_Date", "Tagged_Date",
-		"colour_range", "colour_primaries", "colour_primaries_Original", "transfer_characteristics", "transfer_characteristics_Origina", "matrix_coefficients", "matrix_coefficients_Original",
-		"MasteringDisplay_ColorPrimaries", "MasteringDisplay_Luminance", "MaxCLL/String", "MaxFALL/String", "mdhd_Duration", "Menus", "CodecConfigurationBox", "Events_Total",
-		"OriginalSourceMedium", "  Issue", "FromStats_BitRate", "FromStats_Duration", "FromStats_FrameCount", "FromStats_StreamSize",
-		"Comment", "COMMENT", "Source", "Source_ID", "SOURCE", "SOURCE_ID", "MD5_Unencoded", "EncodedBy",
-		"ComplexityIndex", "NumberOfDynamicObjects", "BedChannelCount", "BedChannelConfiguration",
-		"dialnorm", "compr", "dynrng", "dsurmod", "cmixlev", "surmixlev", "mixlevel", "roomtyp", "dmixmod",
-		"ltrtcmixlev", "ltrtsurmixlev", "lorocmixlev", "lorosurmixlev", "adconvtyp",
-		"dialnorm_Average", "dialnorm_Minimum", "dialnorm_Maximum",
-	)
-)
-
-// rawTextFieldOrderPolicy returns initial MediaInfo raw order per stream kind.
-func rawTextFieldOrderPolicy(kind StreamKind) map[string]int {
-	switch kind {
-	case StreamGeneral:
-		return rawTextGeneralFieldOrder
-	case StreamImage:
-		return rawTextImageFieldOrder
-	case StreamText:
-		return rawTextTextFieldOrder
-	case StreamVideo, StreamAudio, StreamMenu:
-		return rawTextStreamFieldOrder
-	default:
-		return rawTextStreamFieldOrder
-	}
-}
-
 // renderRawText serializes raw-language projections with MediaInfo's 33-column labels.
 func renderRawText(reports []Report, informVersion bool) string {
 	const labelWidth = 33
@@ -2089,4 +1687,13 @@ func padRawTextLabel(value string, width int) string {
 		return value
 	}
 	return value + strings.Repeat(" ", width-length)
+}
+
+// rawStreamSizeValue formats raw StreamSize/String. Without a known file size,
+// official MediaInfo prints the size with no percentage.
+func rawStreamSizeValue(kind StreamKind, size, totalFileSize int64, elementCount string) string {
+	if size > 0 && totalFileSize <= 0 {
+		return formatRawTextByteUnits(kind, formatByteQuantity(size, false), elementCount)
+	}
+	return formatRawTextByteUnits(kind, formatStreamSizeQuantity(size, totalFileSize, false), elementCount)
 }

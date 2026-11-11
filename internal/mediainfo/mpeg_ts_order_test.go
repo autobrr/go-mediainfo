@@ -52,7 +52,7 @@ func TestStructuredBDAVFieldOrder(t *testing.T) {
 		{kind: StreamGeneral, before: "OverallBitRate_Maximum", after: "FrameRate"},
 		{kind: StreamVideo, before: "Format_Settings_SliceCount", after: "CodecID"},
 		{kind: StreamAudio, before: "Format_Settings_Mode", after: "Format_Settings_Endianness"},
-		{kind: StreamAudio, before: "BitRate_Encoded", after: "BitRate_Maximum"},
+		{kind: StreamAudio, before: "BitRate_Maximum", after: "BitRate_Encoded"},
 		{kind: StreamAudio, before: "StreamSize", after: "StreamSize_Encoded"},
 		{kind: StreamText, before: "MenuID", after: "Format"},
 	}

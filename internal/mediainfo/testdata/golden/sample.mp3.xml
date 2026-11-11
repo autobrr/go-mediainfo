@@ -35,8 +35,8 @@
 <FrameRate>41.667</FrameRate>
 <FrameCount>168</FrameCount>
 <Compression_Mode>Lossy</Compression_Mode>
-<Encoded_Library>LAME3.100</Encoded_Library>
 <StreamSize>64512</StreamSize>
+<Encoded_Library>LAME3.100</Encoded_Library>
 </track>
 </media>
 </MediaInfo>

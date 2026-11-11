@@ -127,9 +127,6 @@ func newMatroskaVideoCanonicalBuilder(facts matroskaVideoCanonicalFacts) *canoni
 	if facts.codecID != "" {
 		builder.Fill("CodecID", facts.codecID, "Codec ID", facts.codecID)
 	}
-	if info := mapMatroskaFormatInfo(facts.format); info != "" {
-		builder.Text("Format/Info", info)
-	}
 	return builder
 }
 
@@ -216,7 +213,7 @@ func applyMatroskaAVCCanonicalCodec(builder *canonicalStreamBuilder, facts matro
 	applyMatroskaH264CanonicalScan(builder, facts.sps)
 	if facts.sps.RefFrames > 0 {
 		value := strconv.Itoa(facts.sps.RefFrames)
-		builder.Fill("Format_Settings_RefFrames", value, "Format settings, Reference frames", value+" frames")
+		builder.Fill("Format_Settings_RefFrames", value, "Format settings, Reference frames", formatReferenceFrames(facts.sps.RefFrames))
 	}
 	if facts.avc.cabac != nil {
 		cabac := "No"

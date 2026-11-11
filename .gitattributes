@@ -1,0 +1,2 @@
+# Empty final columns are significant in the generated reference tables.
+internal/mediainfo/report_tables/*.tsv text eol=lf whitespace=-blank-at-eol

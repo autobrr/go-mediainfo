@@ -3,6 +3,7 @@ package mediainfo
 import (
 	"encoding/binary"
 	"math"
+	"strings"
 	"testing"
 )
 
@@ -93,6 +94,13 @@ func TestMatroskaTrueHDTrackUIDThreeKeepsOwnFacts(t *testing.T) {
 		if !found || got != want {
 			t.Fatalf("%s = %q, %v; want %q from this track", key, got, found, want)
 		}
+	}
+	report := Report{General: Stream{Kind: StreamGeneral, Fields: []Field{{Name: "Format", Value: "Matroska"}}}, Streams: streams}
+	if text := RenderText([]Report{report}); !strings.Contains(text, padRight("Format", textLabelWidth)+": TrueHD\n") {
+		t.Fatalf("unprobed TrueHD format was reinterpreted: %s", text)
+	}
+	if json := RenderJSON([]Report{report}); !strings.Contains(json, `"Format":"TrueHD"`) {
+		t.Fatalf("unprobed TrueHD canonical format changed: %s", json)
 	}
 }
 
@@ -327,8 +335,8 @@ func TestApplyMatroskaAudioProbes_TrueHDNonAtmosKeepsMatroskaLayout(t *testing.T
 	if got := findField(stream.Fields, "Maximum bit rate"); got != "8 199 kb/s" {
 		t.Fatalf("Maximum bit rate=%q want 8 199 kb/s", got)
 	}
-	if got := findField(stream.Fields, "Frame rate"); got != "1102.500 FPS (40 SPF)" {
-		t.Fatalf("Frame rate=%q want 1102.500 FPS (40 SPF)", got)
+	if got := findField(stream.Fields, "Frame rate"); got != "1 102.500 FPS (40 SPF)" {
+		t.Fatalf("Frame rate=%q want 1 102.500 FPS (40 SPF)", got)
 	}
 	if got := stream.JSON["FrameRate"]; got != "1102.500" {
 		t.Fatalf("FrameRate=%q want 1102.500", got)

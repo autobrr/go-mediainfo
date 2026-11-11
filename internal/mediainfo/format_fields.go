@@ -23,11 +23,20 @@ func formatChannels(value uint64) string {
 }
 
 func formatSampleRate(rate float64) string {
+	return formatSampleRateQuantity(rate, false)
+}
+
+// formatSampleRateQuantity formats canonical hertz using the selected unit dialect.
+func formatSampleRateQuantity(rate float64, raw bool) string {
 	if rate <= 0 {
 		return ""
 	}
 	if rate >= 1000 {
-		return fmt.Sprintf("%.1f kHz", rate/1000)
+		unit := "kHz"
+		if raw {
+			unit = "KHz"
+		}
+		return fmt.Sprintf("%.1f %s", rate/1000, unit)
 	}
 	return fmt.Sprintf("%.0f Hz", rate)
 }
@@ -88,9 +97,13 @@ func formatBitsPerPixelFrame(bitrate float64, width, height uint64, fps float64)
 }
 
 func formatStreamSize(bytes int64, total int64) string {
+	return formatStreamSizeQuantity(bytes, total, true)
+}
+
+func formatStreamSizeQuantity(bytes int64, total int64, group bool) string {
 	if bytes <= 0 || total <= 0 {
 		return ""
 	}
 	percent := int(math.Round(float64(bytes) * 100 / float64(total)))
-	return fmt.Sprintf("%s (%d%%)", formatBytes(bytes), percent)
+	return fmt.Sprintf("%s (%d%%)", formatByteQuantity(bytes, group), percent)
 }

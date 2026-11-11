@@ -20,13 +20,15 @@ type streamRef int
 
 // fieldEntry is one ordered canonical value plus its projection metadata.
 type fieldEntry struct {
-	Name          fieldName
-	Value         fieldValue
-	Dynamic       bool
-	Options       fieldOptions
-	Path          []string
-	Sequence      uint32
-	TextLabel     string
+	Name      fieldName
+	Value     fieldValue
+	Dynamic   bool
+	Options   fieldOptions
+	Path      []string
+	Sequence  uint32
+	TextLabel string
+	// MatroskaTag keeps producer-owned tag rows ahead of raw-only codec extras.
+	MatroskaTag   bool
 	StructuredKey string
 	Node          *structuredNode
 	// StructuredOverride retains an exact serializer representation without
@@ -41,9 +43,11 @@ type fieldEntry struct {
 
 // canonicalStreamPolicy retains legacy rendering exceptions for canonical snapshots.
 type canonicalStreamPolicy struct {
-	SkipStreamOrder bool
-	SkipComputed    bool
-	DVDOrder        bool
+	// LegacyTagIdentities retains tag ordering when legacy ingestion discards seeds.
+	LegacyTagIdentities map[string]bool
+	SkipStreamOrder     bool
+	SkipComputed        bool
+	DVDOrder            bool
 	// HideTypeOrderXML retains generated JSON type order while omitting the
 	// redundant XML child used only by direct canonical streams.
 	HideTypeOrderXML bool
@@ -83,9 +87,12 @@ func canonicalStreamSnapshot(store *fieldStore, ref streamRef, policy canonicalS
 	store.streams[ref].SkipStreamOrder = policy.SkipStreamOrder
 	store.streams[ref].SkipComputed = policy.SkipComputed
 	store.streams[ref].HideTypeOrderXML = policy.HideTypeOrderXML
+	if policy.DVDOrder {
+		store.tableVersion = reportTables26
+	}
 	finalizeFieldStore(store)
 	projection := projectTextStore(store, "")
-	stream := Stream{Kind: store.streams[ref].Kind, canonicalPolicy: policy}
+	stream := Stream{Kind: store.streams[ref].Kind, canonicalPolicy: policy, codecIdentity: store.streams[ref].CodecIdentity}
 	for _, projected := range projection.Streams {
 		if projected.Kind == stream.Kind {
 			stream.Fields = append([]Field(nil), projected.Fields...)
@@ -106,19 +113,17 @@ func canonicalStreamSnapshot(store *fieldStore, ref streamRef, policy canonicalS
 
 // storedStream owns one stream's canonical entries and projection ordering metadata.
 type storedStream struct {
-	Kind                     StreamKind
-	TextKind                 StreamKind
-	Fields                   []fieldEntry
-	TextSequence             int
-	StructuredSequence       int
-	TypeOrder                int
-	StructuredAlreadyOrdered bool
-	StructuredOrder          map[string]int
-	TextAlreadyOrdered       bool
-	SkipStreamOrder          bool
-	SkipComputed             bool
-	HideTypeOrderXML         bool
-	DirectCanonical          bool
+	Kind               StreamKind
+	TextKind           StreamKind
+	Fields             []fieldEntry
+	TextSequence       int
+	StructuredSequence int
+	TypeOrder          int
+	SkipStreamOrder    bool
+	SkipComputed       bool
+	HideTypeOrderXML   bool
+	DirectCanonical    bool
+	CodecIdentity      codecTableIdentity
 }
 
 // fieldStore is an ordered, per-report canonical field store.
@@ -127,6 +132,7 @@ type storedStream struct {
 // initialized at most once before XML projection acquires the read lock.
 type fieldStore struct {
 	ref            string
+	tableVersion   reportTableVersion
 	streams        []storedStream
 	nextSequence   uint32
 	legacyGeneral  *Stream
@@ -234,4 +240,29 @@ func (s *fieldStore) appendEntry(stream *storedStream, entry fieldEntry) {
 	entry.Sequence = s.nextSequence
 	s.nextSequence++
 	stream.Fields = append(stream.Fields, entry)
+}
+
+// storedScalarValues returns one preferred scalar per canonical key. Parser
+// facts win over projected values.
+func storedScalarValues(stream *storedStream) map[string]string {
+	values := make(map[string]string, len(stream.Fields))
+	for _, entry := range stream.Fields {
+		if !entry.Options.ShowStructured || entry.Node != nil || entry.Projected {
+			continue
+		}
+		key := firstNonEmpty(entry.StructuredKey, string(entry.Name))
+		if _, exists := values[key]; !exists {
+			values[key] = entry.Value.Text
+		}
+	}
+	for _, entry := range stream.Fields {
+		if !entry.Options.ShowStructured || entry.Node != nil || !entry.Projected {
+			continue
+		}
+		key := firstNonEmpty(entry.StructuredKey, string(entry.Name))
+		if _, exists := values[key]; !exists {
+			values[key] = entry.Value.Text
+		}
+	}
+	return values
 }

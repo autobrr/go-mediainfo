@@ -1,0 +1,56 @@
+General
+CompleteName                     : samples/sample.avi
+Format/String                    : AVI
+Format/Info                      : Audio Video Interleave
+Format_Settings                  : BitmapInfoHeader / WaveFormatEx
+FileSize/String                  : 989 KiB
+Duration/String                  : 4s 32ms
+OverallBitRate/String            : 2010 Kbps
+FrameRate/String                 : 29.970 fps
+Encoded_Application/String       : Lavf62.3.100
+
+Video
+ID/String                        : 0
+Format/String                    : MPEG-4 Visual
+Format_Profile                   : Simple@L1
+Format_Settings                  : BVOPNo
+Format_Settings_BVOP/String      : No
+Format_Settings_QPel/String      : No
+Format_Settings_GMC/String       : 0 warppoint
+Format_Settings_Matrix/String    : Default (H.263)
+CodecID                          : XVID
+CodecID/Hint                     : XviD
+Duration/String                  : 4s 4ms
+BitRate/String                   : 1861 Kbps
+Width/String                     : 640 pixel
+Height/String                    : 360 pixel
+DisplayAspectRatio/String        : 16:9
+FrameRate/String                 : 29.970 (30000/1001) fps
+ColorSpace                       : YUV
+ChromaSubsampling/String         : 4:2:0
+BitDepth/String                  : 8 bit
+ScanType/String                  : Progressive
+Compression_Mode/String          : Lossy
+Bits-(Pixel*Frame)               : 0.269
+StreamSize/String                : 910 KiB (92%)
+Encoded_Library/String           : Lavc62.11.100
+
+Audio
+ID/String                        : 1
+Format/String                    : MPEG Audio
+Format_Version                   : Version 1
+Format_Profile                   : Layer 3
+CodecID                          : 55
+CodecID/Hint                     : MP3
+Duration/String                  : 4s 32ms
+BitRate_Mode/String              : CBR
+BitRate/String                   : 128 Kbps
+Channel(s)/String                : 1 channel
+SamplingRate/String              : 48.0 KHz
+FrameRate/String                 : 41.667 fps (1152 SPF)
+Compression_Mode/String          : Lossy
+StreamSize/String                : 63.0 KiB (6%)
+Alignment/String                 : Alignment_Aligned
+Interleave_Duration/String       : 24 ms (0.71 video frames)
+Interleave_Preload/String        : 24 ms
+Encoded_Library/String           : LAME3.100

@@ -1892,14 +1892,12 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 				// MPEG-TS: LATM AAC (stream_type 0x11).
 				fields = append(fields, Field{Name: "Muxing mode", Value: "LATM"})
 			} else if st.audioProfile == "LC" {
-				fields = append(fields, Field{Name: "Format/Info", Value: "Advanced Audio Codec Low Complexity"})
 				fields = append(fields, Field{Name: "Format version", Value: formatAACVersion(st.audioMPEGVersion)})
 				fields = append(fields, Field{Name: "Muxing mode", Value: "ADTS"})
 			} else if info := mapMatroskaFormatInfo(st.format); info != "" {
 				fields = append(fields, Field{Name: "Format/Info", Value: info})
 			}
 			if st.format == "E-AC-3" && ac3HasJOCInfo(st.ac3Info) {
-				fields = setFieldValue(fields, "Format/Info", "Enhanced AC-3 with Joint Object Coding")
 				fields = append(fields, Field{Name: "Commercial name", Value: "Dolby Digital Plus with Dolby Atmos"})
 				if isBDAV {
 					fields = append(fields, Field{Name: "Format profile", Value: "Blu-ray Disc"})

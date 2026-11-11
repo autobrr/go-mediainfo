@@ -25,6 +25,7 @@
 <track type="Audio">
 <Format>PCM</Format>
 <Format_Settings_Endianness>Little</Format_Settings_Endianness>
+<Format_Settings_Sign>Signed</Format_Settings_Sign>
 <CodecID>1</CodecID>
 <Duration>4.000</Duration>
 <BitRate_Mode>CBR</BitRate_Mode>
@@ -32,9 +33,8 @@
 <Channels>1</Channels>
 <SamplingRate>48000</SamplingRate>
 <SamplingCount>192000</SamplingCount>
-<StreamSize>384000</StreamSize>
 <BitDepth>16</BitDepth>
-<Format_Settings_Sign>Signed</Format_Settings_Sign>
+<StreamSize>384000</StreamSize>
 </track>
 </media>
 </MediaInfo>

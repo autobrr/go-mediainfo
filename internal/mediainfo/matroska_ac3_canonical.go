@@ -45,9 +45,6 @@ func matroskaAC3CanonicalSeed(facts matroskaAC3CanonicalFacts) []fieldEntry {
 	if facts.codecID != "" {
 		builder.Fill("CodecID", facts.codecID, "Codec ID", facts.codecID)
 	}
-	if info := mapMatroskaFormatInfo(facts.format); info != "" {
-		builder.Text("Format/Info", info)
-	}
 	commercial := "Dolby Digital"
 	if facts.format == "E-AC-3" {
 		commercial = "Dolby Digital Plus"
@@ -137,7 +134,6 @@ func applyMatroskaAC3CanonicalProbe(stream *Stream, probe *matroskaAudioProbe, a
 		}
 		additional := "Dep" + suffix
 		replaceCanonicalSeedFill(stream, "Format", "AC-3", "Format", "E-AC-3"+suffix)
-		replaceCanonicalSeedText(stream, "Format/Info", mapMatroskaFormatInfo("E-AC-3"+suffix))
 		replaceCanonicalSeedFill(stream, "Format_Profile", "Blu-ray Disc", "Format profile", "Blu-ray Disc")
 		replaceCanonicalSeedFill(stream, "Format_AdditionalFeatures", additional, "", "")
 		if hasJOC {
@@ -145,7 +141,6 @@ func applyMatroskaAC3CanonicalProbe(stream *Stream, probe *matroskaAudioProbe, a
 		}
 	} else if probe.format == "E-AC-3" && hasJOC {
 		replaceCanonicalSeedFill(stream, "Format", "E-AC-3", "Format", "E-AC-3 JOC")
-		replaceCanonicalSeedText(stream, "Format/Info", "Enhanced AC-3 with Joint Object Coding")
 		replaceCanonicalSeedFill(stream, "Format_Commercial_IfAny", "Dolby Digital Plus with Dolby Atmos", "Commercial name", "Dolby Digital Plus with Dolby Atmos")
 		replaceCanonicalSeedFill(stream, "Format_AdditionalFeatures", "JOC", "", "")
 	}
