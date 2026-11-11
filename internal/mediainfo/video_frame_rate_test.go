@@ -541,7 +541,10 @@ func TestAnalyzeTheoraFrameRateDisplay(t *testing.T) {
 			t.Fatal(err)
 		}
 		text := normalizeText(RenderText([]Report{report}))
-		video := text[strings.Index(text, "\nVideo\n"):]
+		_, video, found := strings.Cut(text, "\nVideo\n")
+		if !found {
+			t.Fatalf("%d/%d: no Video section:\n%s", tc.num, tc.den, text)
+		}
 		if want := padRight("Frame rate", textLabelWidth) + ": " + tc.text + "\n"; !strings.Contains(video, want) {
 			t.Errorf("%d/%d: Video section lacks %q:\n%s", tc.num, tc.den, want, video)
 		}
@@ -552,7 +555,10 @@ func TestAnalyzeTheoraFrameRateDisplay(t *testing.T) {
 			t.Errorf("%d/%d: friendly text exposes a structured frame-rate field:\n%s", tc.num, tc.den, video)
 		}
 		raw := normalizeText(RenderTextWithOptions([]Report{report}, TextRenderOptions{Language: "raw"}))
-		rawVideo := raw[strings.Index(raw, "\nVideo\n"):]
+		_, rawVideo, found := strings.Cut(raw, "\nVideo\n")
+		if !found {
+			t.Fatalf("%d/%d: no raw Video section:\n%s", tc.num, tc.den, raw)
+		}
 		if want := padRawTextLabel("FrameRate/String", 33) + ": " + tc.raw + "\n"; !strings.Contains(rawVideo, want) {
 			t.Errorf("%d/%d: raw Video section lacks %q:\n%s", tc.num, tc.den, want, rawVideo)
 		}

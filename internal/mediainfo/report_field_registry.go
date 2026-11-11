@@ -161,13 +161,7 @@ func reportVersion(store *fieldStore) reportTableVersion {
 // dvdReferenceFormat reports whether a General or Menu format selects the
 // DVD v26.10 reference (ADR 0002).
 func dvdReferenceFormat(kind StreamKind, format string) bool {
-	switch kind {
-	case StreamGeneral:
-		return format == "DVD Video"
-	case StreamMenu:
-		return format == "DVD-Video"
-	}
-	return false
+	return kind == StreamGeneral && format == "DVD Video" || kind == StreamMenu && format == "DVD-Video"
 }
 
 // storeUsesDVDReference reports whether any General or Menu stream of a store
