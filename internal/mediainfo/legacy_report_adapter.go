@@ -3,7 +3,6 @@ package mediainfo
 import (
 	"maps"
 	"reflect"
-	"slices"
 	"sort"
 	"strconv"
 )
@@ -160,9 +159,13 @@ func publicReportMutationDelta(report Report, snapshot legacyReportState) Report
 	return report
 }
 
-// parserFormatFactKeys are the structured facts that reportFormatPresentation
-// reads to name a format and look up its description.
-var parserFormatFactKeys = []string{"Format", "Format_AdditionalFeatures", "Format_Profile"}
+// parserFormatFactRows maps each structured fact that reportFormatPresentation
+// reads to the friendly row that displays it.
+var parserFormatFactRows = map[string]string{
+	"Format":                    "Format",
+	"Format_AdditionalFeatures": "Format",
+	"Format_Profile":            "Format profile",
+}
 
 // stripUnchangedSnapshotMaps keeps explicit compatibility-map changes and
 // invalidates parser lookup identity when the caller changes its codec ID.
@@ -187,12 +190,11 @@ func stripUnchangedSnapshotMaps(stream *Stream, snapshot legacyStreamState) {
 			stream.legacyJSONRawDeleted[key] = struct{}{}
 		}
 	}
-	// The friendly Format row ("DTS XLL") cannot be parsed back into the
-	// parser's format facts, so keep them unless the caller edited that row.
-	formatRowKept := findField(stream.Fields, "Format") == findField(snapshot.Fields, "Format")
+	// A friendly row such as "DTS XLL" cannot be parsed back into the parser's
+	// format facts, so keep each fact unless the caller edited its row.
 	for key, value := range stream.JSON {
 		if snapshot.JSON[key] == value {
-			if formatRowKept && slices.Contains(parserFormatFactKeys, key) {
+			if row, ok := parserFormatFactRows[key]; ok && findField(stream.Fields, row) == findField(snapshot.Fields, row) {
 				continue
 			}
 			delete(stream.JSON, key)

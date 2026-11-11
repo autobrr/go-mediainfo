@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -1000,6 +1001,52 @@ func TestFormatInfoSurvivesUnrelatedPublicEdit(t *testing.T) {
 		}
 		if text := normalizeText(RenderText([]Report{edited})); !strings.Contains(text, padRight("Format", textLabelWidth)+": Caller format\n") {
 			t.Errorf("%s: an edited Format row lost the caller value:\n%s", tc.name, text)
+		}
+	}
+}
+
+// TestFormatProfileEditSurvivesLegacyRebuild checks that keeping the parser's
+// format facts after an unrelated edit does not override a caller's edit or
+// deletion of the Format profile row.
+func TestFormatProfileEditSurvivesLegacyRebuild(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		edit    func([]Field) []Field
+		want    string
+		present bool
+	}{
+		{"edited", func(fields []Field) []Field {
+			for i := range fields {
+				if fields[i].Name == "Format profile" {
+					fields[i].Value = "Main@L3"
+				}
+			}
+			return fields
+		}, "Main", true},
+		{"deleted", func(fields []Field) []Field {
+			return slices.DeleteFunc(fields, func(field Field) bool { return field.Name == "Format profile" })
+		}, "", false},
+	} {
+		report, err := AnalyzeFile(filepath.Join("samples", "sample.mkv"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		video := -1
+		for i, stream := range report.Streams {
+			if stream.Kind == StreamVideo {
+				video = i
+			}
+		}
+		if video < 0 || findField(report.Streams[video].Fields, "Format profile") != "High@L3" {
+			t.Fatalf("fixture lost its High video profile")
+		}
+		report.Streams[video].Fields = tc.edit(append([]Field(nil), report.Streams[video].Fields...))
+		json := RenderJSON([]Report{report})
+		if got := strings.Contains(json, `"Format_Profile":"High"`); got {
+			t.Errorf("%s: JSON keeps the stale profile: %s", tc.name, json)
+		}
+		if tc.present && !strings.Contains(json, `"Format_Profile":"`+tc.want+`"`) {
+			t.Errorf("%s: JSON lacks the caller profile %q: %s", tc.name, tc.want, json)
 		}
 	}
 }
