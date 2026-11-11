@@ -944,3 +944,62 @@ func TestParsedCodecTableNamespace(t *testing.T) {
 		}
 	}
 }
+
+// TestFormatInfoSurvivesUnrelatedPublicEdit checks that an edit to an unrelated
+// public field keeps the parser's format facts, so compound formats such as
+// "DTS XLL" and "AAC LC SBR" keep their table description. An edit to the
+// Format row itself still wins.
+func TestFormatInfoSurvivesUnrelatedPublicEdit(t *testing.T) {
+	dts := Stream{Kind: StreamAudio, canonicalSeed: matroskaDTSCanonicalSeed(matroskaDTSCanonicalFacts{audioChannels: 6, audioSampleRate: 48_000})}
+	applyMatroskaDTSCanonicalProbe(&dts, dtsInfo{channels: 6, sampleRate: 48_000, samplesPerFrame: 512, hd: true, hdXLL: true, hdBitDepth: 24, hdChannels: 6, hdSampleRate: 48_000}, false)
+	aac := Stream{Kind: StreamAudio, canonicalSeed: matroskaAACCanonicalSeed(matroskaAACCanonicalFacts{
+		profile: "LC", codecID: "A_AAC-2", trackNumber: 1, audioChannels: 2, audioSampleRate: 48_000, audioBaseRate: 24_000, sbrMode: "Yes (Explicit)",
+	})}
+	for _, tc := range []struct {
+		name         string
+		stream       Stream
+		format, info string
+	}{
+		{"DTS XLL", dts, "DTS XLL", "Digital Theater Systems"},
+		{"AAC SBR", aac, "AAC LC SBR", "Advanced Audio Codec Low Complexity with Spectral Band Replication"},
+	} {
+		build := func() Report {
+			stream := tc.stream
+			stream.canonicalSeed = append([]fieldEntry(nil), tc.stream.canonicalSeed...)
+			refreshCanonicalCompatibilitySnapshot(&stream)
+			report := Report{
+				General: Stream{Kind: StreamGeneral, Fields: []Field{{Name: "Format", Value: "Matroska"}}, JSON: map[string]string{"Format": "Matroska"}},
+				Streams: []Stream{stream},
+			}
+			attachCanonicalStore(&report)
+			return report
+		}
+		report := build()
+		report.General.Fields = append(report.General.Fields, Field{Name: "Title", Value: "edited"})
+		text := normalizeText(RenderText([]Report{report}))
+		for _, want := range []string{
+			padRight("Format", textLabelWidth) + ": " + tc.format + "\n",
+			padRight("Format/Info", textLabelWidth) + ": " + tc.info + "\n",
+		} {
+			if !strings.Contains(text, want) {
+				t.Errorf("%s: text after an unrelated edit lacks %q:\n%s", tc.name, want, text)
+			}
+		}
+		if html := RenderHTML([]Report{report}); !strings.Contains(html, "<td>"+tc.info+"</td>") {
+			t.Errorf("%s: HTML after an unrelated edit lacks %q", tc.name, tc.info)
+		}
+		if csv := RenderCSV([]Report{report}); !strings.Contains(csv, "Format/Info,"+tc.info) {
+			t.Errorf("%s: CSV after an unrelated edit lacks %q", tc.name, tc.info)
+		}
+
+		edited := build()
+		for i := range edited.Streams[0].Fields {
+			if edited.Streams[0].Fields[i].Name == "Format" {
+				edited.Streams[0].Fields[i].Value = "Caller format"
+			}
+		}
+		if text := normalizeText(RenderText([]Report{edited})); !strings.Contains(text, padRight("Format", textLabelWidth)+": Caller format\n") {
+			t.Errorf("%s: an edited Format row lost the caller value:\n%s", tc.name, text)
+		}
+	}
+}
