@@ -26,7 +26,7 @@ func structuredDVDFieldOrderPolicy(kind StreamKind) map[string]int {
 }
 
 func structuredFieldOrderForContainer(kind StreamKind, containerFormat string) map[string]int {
-	if containerFormat == "DVD Video" {
+	if dvdReferenceFormat(StreamGeneral, containerFormat) {
 		return structuredDVDFieldOrderPolicy(kind)
 	}
 	return structuredFieldOrderPolicy(kind)

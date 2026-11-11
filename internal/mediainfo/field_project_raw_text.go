@@ -305,21 +305,14 @@ func rawTextDVDContext(store *fieldStore) (dvd, aggregate bool) {
 	if store == nil {
 		return false, false
 	}
+	dvd = storeUsesDVDReference(store)
 	generalFormat := ""
 	for index := range store.streams {
-		stream := &store.streams[index]
-		structured := storedScalarValues(stream)
-		if stream.Kind == StreamGeneral {
-			generalFormat = structured["Format"]
-			if generalFormat == "DVD Video" {
-				dvd = true
-			}
-		}
-		if stream.Kind == StreamMenu && structured["Format"] == "DVD-Video" {
-			dvd = true
+		if stream := &store.streams[index]; stream.Kind == StreamGeneral {
+			generalFormat = storedScalarValues(stream)["Format"]
 		}
 	}
-	if generalFormat != "DVD Video" {
+	if !dvdReferenceFormat(StreamGeneral, generalFormat) {
 		return dvd, false
 	}
 	for index := range store.streams {

@@ -152,11 +152,40 @@ func reportVersion(store *fieldStore) reportTableVersion {
 	if store != nil && store.tableVersion != "" {
 		return store.tableVersion
 	}
-	dvd, _ := rawTextDVDContext(store)
-	if dvd {
+	if storeUsesDVDReference(store) {
 		return reportTables26
 	}
 	return reportTables23
+}
+
+// dvdReferenceFormat reports whether a General or Menu format selects the
+// DVD v26.10 reference (ADR 0002).
+func dvdReferenceFormat(kind StreamKind, format string) bool {
+	switch kind {
+	case StreamGeneral:
+		return format == "DVD Video"
+	case StreamMenu:
+		return format == "DVD-Video"
+	}
+	return false
+}
+
+// storeUsesDVDReference reports whether any General or Menu stream of a store
+// that the parser did not mark selects the DVD reference.
+func storeUsesDVDReference(store *fieldStore) bool {
+	if store == nil {
+		return false
+	}
+	for index := range store.streams {
+		stream := &store.streams[index]
+		if stream.Kind != StreamGeneral && stream.Kind != StreamMenu {
+			continue
+		}
+		if dvdReferenceFormat(stream.Kind, storedScalarValues(stream)["Format"]) {
+			return true
+		}
+	}
+	return false
 }
 
 // reportFieldIdentity unifies spellings using the selected reference's aliases.
