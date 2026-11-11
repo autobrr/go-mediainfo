@@ -647,3 +647,21 @@ func TestRawWidthHeightFromLegacyFriendlyFields(t *testing.T) {
 		}
 	}
 }
+
+// TestRawStreamSizeWithoutFileSize checks that raw text keeps a stream size
+// with no percentage when the General file size is unknown, as official
+// MediaInfo v23.04 does for stdin input. Both the text-row path and the
+// structured-only path give the same row.
+func TestRawStreamSizeWithoutFileSize(t *testing.T) {
+	general := Stream{Kind: StreamGeneral, Fields: []Field{{Name: "Format", Value: "MPEG Audio"}}, JSON: map[string]string{"Format": "MPEG Audio"}}
+	want := padRawTextLabel("StreamSize/String", 33) + ": 63.0 KiB\n"
+	for name, stream := range map[string]Stream{
+		"text row":        {Kind: StreamAudio, Fields: []Field{{Name: "Format", Value: "MPEG Audio"}, {Name: "Stream size", Value: "63.0 KiB"}}, JSON: map[string]string{"Format": "MPEG Audio", "StreamSize": "64512"}},
+		"structured only": {Kind: StreamAudio, Fields: []Field{{Name: "Format", Value: "MPEG Audio"}}, JSON: map[string]string{"Format": "MPEG Audio", "StreamSize": "64512"}},
+	} {
+		raw := normalizeText(RenderTextWithOptions([]Report{{General: general, Streams: []Stream{stream}}}, TextRenderOptions{Language: "raw"}))
+		if !strings.Contains(raw, want) {
+			t.Errorf("%s: raw output lacks %q:\n%s", name, want, raw)
+		}
+	}
+}

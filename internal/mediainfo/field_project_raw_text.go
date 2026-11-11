@@ -702,7 +702,7 @@ func rawTextStructuredDerivations(version reportTableVersion, kind StreamKind, s
 		appendField("Video_Delay/String", delay)
 	}
 	if size, err := strconv.ParseInt(structured["StreamSize"], 10, 64); err == nil && kind != StreamGeneral {
-		appendField("StreamSize/String", formatRawTextByteUnits(kind, formatStreamSizeQuantity(size, totalFileSize, false), structured["ElementCount"]))
+		appendField("StreamSize/String", rawStreamSizeValue(kind, size, totalFileSize, structured["ElementCount"]))
 	}
 	appendField("Encoded_Library_Settings", structured["Encoded_Library_Settings"])
 	appendField("Encoded_Library/String", formatRawTextEncodedLibraryForStream(structured["Encoded_Library"], structured))
@@ -1266,10 +1266,7 @@ func rawTextValue(version reportTableVersion, kind StreamKind, label, display st
 			if kind == StreamText && size == 0 {
 				return "0.00 Byte (0%)"
 			}
-			if size > 0 && totalFileSize <= 0 {
-				return formatRawTextByteUnits(kind, formatByteQuantity(size, false), structured["ElementCount"])
-			}
-			return formatRawTextByteUnits(kind, formatStreamSizeQuantity(size, totalFileSize, false), structured["ElementCount"])
+			return rawStreamSizeValue(kind, size, totalFileSize, structured["ElementCount"])
 		}
 		return formatRawTextByteUnits(kind, display, structured["ElementCount"])
 	case "FileSize/String", "Source_StreamSize/String":
@@ -1690,4 +1687,13 @@ func padRawTextLabel(value string, width int) string {
 		return value
 	}
 	return value + strings.Repeat(" ", width-length)
+}
+
+// rawStreamSizeValue formats raw StreamSize/String. Without a known file size,
+// official MediaInfo prints the size with no percentage.
+func rawStreamSizeValue(kind StreamKind, size, totalFileSize int64, elementCount string) string {
+	if size > 0 && totalFileSize <= 0 {
+		return formatRawTextByteUnits(kind, formatByteQuantity(size, false), elementCount)
+	}
+	return formatRawTextByteUnits(kind, formatStreamSizeQuantity(size, totalFileSize, false), elementCount)
 }
