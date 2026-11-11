@@ -766,7 +766,6 @@ func canonicalAVIAudioStream(st *aviStream, streams []*aviStream, size int64, vi
 		spf := mpegAudioSamplesPerFrame(mp3Header.versionID, mp3Header.layerID)
 		if spf > 0 && mp3Header.sampleRate > 0 {
 			structuredFacts.SetSame("SamplesPerFrame", strconv.Itoa(spf))
-			structuredFacts.SetSame("FrameRate", fmt.Sprintf("%.3f", float64(mp3Header.sampleRate)/float64(spf)))
 		}
 		if lame.tagged {
 			if lame.frameCount > 0 {
