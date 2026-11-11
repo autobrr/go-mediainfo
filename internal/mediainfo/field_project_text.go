@@ -81,7 +81,7 @@ func projectTextStore(store *fieldStore, fallbackRef string) textReportProjectio
 			if values[identity] == "" {
 				continue
 			}
-			if identity == "FrameRate" && stream.Kind != StreamAudio && values["Format"] != "Theora" {
+			if identity == "FrameRate" && stream.Kind != StreamAudio {
 				continue
 			}
 			appendDisplay(identity, friendlyReportValue(stream.Kind, identity, values[identity], values, totalSize, version))

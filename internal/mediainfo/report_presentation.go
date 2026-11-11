@@ -30,7 +30,7 @@ func friendlyReportValue(kind StreamKind, identity, display string, values map[s
 			}
 			return result
 		}
-		if identity != "FrameRate" || values["Format"] == "Theora" {
+		if identity != "FrameRate" {
 			return formatFrameRate(rate)
 		}
 		return display

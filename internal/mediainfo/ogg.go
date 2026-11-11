@@ -410,10 +410,20 @@ func canonicalOggVideoStream(stream *oggLogicalStream, duration float64, frameCo
 		}
 	}
 	if stream.frameRateNum > 0 && stream.frameRateDen > 0 {
+		// Official MediaInfo fills only the decimal Theora rate and derives
+		// num/den from it, so 2997/100 reports 29970/1000.
 		frameRate := float64(stream.frameRateNum) / float64(stream.frameRateDen)
-		store.Fill(ref, "FrameRate", formatJSONFloat(frameRate), fillReplace)
-		store.Fill(ref, "FrameRate_Num", strconv.FormatUint(uint64(stream.frameRateNum), 10), fillReplace)
-		store.Fill(ref, "FrameRate_Den", strconv.FormatUint(uint64(stream.frameRateDen), 10), fillReplace)
+		num, den := matroskaFrameRateRatio(frameRate)
+		display := formatFrameRate(frameRate)
+		if num > 0 && den > 0 {
+			display = formatFrameRateRatio(uint32(num), uint32(den))
+		}
+		builder := &canonicalStreamBuilder{store: store, ref: ref}
+		builder.Fill("FrameRate", formatJSONFloat(frameRate), "Frame rate", display)
+		if num > 0 && den > 0 {
+			builder.Structured("FrameRate_Num", strconv.Itoa(num))
+			builder.Structured("FrameRate_Den", strconv.Itoa(den))
+		}
 	}
 	if frameCount > 0 {
 		fillGeneratedStructured(store, ref, "FrameCount", strconv.FormatUint(frameCount, 10))
