@@ -193,7 +193,7 @@ func parseMP3(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, *canonic
 		}
 	}
 	if id3.Text != nil {
-		applyID3TextToGeneralFacts(generalFacts, &generalExtras, id3.Text)
+		applyID3TextToGeneralFacts(generalFacts, &generalExtras, id3.Text, id3.TextOrder)
 	}
 
 	// MediaInfo appears to omit General OverallBitRate_Mode when a cover is present.
@@ -653,7 +653,7 @@ func findLAMELibrary(buf []byte) string {
 
 // applyID3TextToGeneralFacts maps ID3 text frames to canonical General facts
 // and retains unmapped user fields as ordered extra members.
-func applyID3TextToGeneralFacts(facts *canonicalStructuredFacts, extras *[]jsonKV, text map[string]string) {
+func applyID3TextToGeneralFacts(facts *canonicalStructuredFacts, extras *[]jsonKV, text map[string]string, textOrder []string) {
 	set := func(k, v string) {
 		name := fieldName(k)
 		if v != "" && facts.Projection(name) == "" {
@@ -744,26 +744,33 @@ func applyID3TextToGeneralFacts(facts *canonicalStructuredFacts, extras *[]jsonK
 	if v := text["TXXX:ISRC"]; v != "" {
 		set("ISRC", v)
 	}
-	for k, v := range text {
-		if !strings.HasPrefix(k, "WXXX:") {
-			continue
-		}
-		name := strings.TrimPrefix(k, "WXXX:")
-		if name == "" || v == "" {
-			continue
-		}
-		if strings.EqualFold(name, "URL") {
-			*extras = append(*extras, jsonKV{Key: "URL", Val: v})
+	// Preserve the existing WXXX-before-TXXX precedence for colliding URL
+	// members: text takes the first value and JSON consumers take the last.
+	var urlText string
+	for _, key := range textOrder {
+		if strings.HasPrefix(key, "WXXX:") && strings.EqualFold(strings.TrimPrefix(key, "WXXX:"), "URL") && text[key] != "" {
+			urlText = text["TXXX:URL"]
+			break
 		}
 	}
-	for k, v := range text {
-		if !strings.HasPrefix(k, "TXXX:") {
+	for _, key := range textOrder {
+		value := text[key]
+		if value == "" {
 			continue
 		}
-		name := strings.TrimPrefix(k, "TXXX:")
-		if name == "" || v == "" || name == "ISRC" {
-			continue
+		switch {
+		case strings.HasPrefix(key, "WXXX:"):
+			if strings.EqualFold(strings.TrimPrefix(key, "WXXX:"), "URL") {
+				*extras = append(*extras, jsonKV{Key: "URL", Val: value})
+			}
+		case strings.HasPrefix(key, "TXXX:"):
+			name := strings.TrimPrefix(key, "TXXX:")
+			if name != "" && name != "ISRC" && !(name == "URL" && urlText != "") {
+				*extras = append(*extras, jsonKV{Key: name, Val: value})
+			}
 		}
-		*extras = append(*extras, jsonKV{Key: name, Val: v})
+	}
+	if urlText != "" {
+		*extras = append(*extras, jsonKV{Key: "URL", Val: urlText})
 	}
 }

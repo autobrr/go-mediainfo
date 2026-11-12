@@ -17,9 +17,10 @@ type id3Picture struct {
 }
 
 type id3v2Data struct {
-	Offset   int64
-	Text     map[string]string
-	Pictures []id3Picture
+	Offset    int64
+	Text      map[string]string
+	TextOrder []string // First occurrence order; Text retains the last accepted value.
+	Pictures  []id3Picture
 }
 
 func parseID3v2(file io.ReadSeeker, fileSize int64, assetBudget *embeddedAssetBudget) (id3v2Data, bool) {
@@ -83,6 +84,13 @@ func parseID3v2WithAllocator(file io.ReadSeeker, fileSize int64, assetBudget *em
 	_ = flags
 
 	text := map[string]string{}
+	var textOrder []string
+	setText := func(key, value string) {
+		if _, exists := text[key]; !exists {
+			textOrder = append(textOrder, key)
+		}
+		text[key] = normalizeID3Multi(value)
+	}
 	var pics []id3Picture
 	rd := payload
 
@@ -124,35 +132,35 @@ func parseID3v2WithAllocator(file io.ReadSeeker, fileSize int64, assetBudget *em
 				break
 			}
 			if v := decodeID3Text(data); v != "" {
-				text[id] = normalizeID3Multi(v)
+				setText(id, v)
 			}
 		case "TXXX":
 			if assetBudget.reserveString(uint64(len(data)), embeddedAssetMaxStringBytes) != embeddedAssetAccepted {
 				break
 			}
 			if desc, value, ok := parseID3TXXX(data); ok && desc != "" && value != "" {
-				text["TXXX:"+desc] = normalizeID3Multi(value)
+				setText("TXXX:"+desc, value)
 			}
 		case "WXXX":
 			if assetBudget.reserveString(uint64(len(data)), embeddedAssetMaxStringBytes) != embeddedAssetAccepted {
 				break
 			}
 			if desc, url, ok := parseID3WXXX(data); ok && desc != "" && url != "" {
-				text["WXXX:"+desc] = normalizeID3Multi(url)
+				setText("WXXX:"+desc, url)
 			}
 		case "COMM":
 			if assetBudget.reserveString(uint64(len(data)), embeddedAssetMaxStringBytes) != embeddedAssetAccepted {
 				break
 			}
 			if comment, ok := parseID3COMM(data); ok && comment != "" {
-				text["COMM"] = normalizeID3Multi(comment)
+				setText("COMM", comment)
 			}
 		case "USLT":
 			if assetBudget.reserveString(uint64(len(data)), embeddedAssetMaxStringBytes) != embeddedAssetAccepted {
 				break
 			}
 			if lyrics, ok := parseID3USLT(data); ok && lyrics != "" {
-				text["USLT"] = normalizeID3Multi(lyrics)
+				setText("USLT", lyrics)
 			}
 		case "APIC":
 			if assetBudget.reserveItem() != embeddedAssetAccepted {
@@ -166,7 +174,7 @@ func parseID3v2WithAllocator(file io.ReadSeeker, fileSize int64, assetBudget *em
 	}
 
 	_, _ = file.Seek(offset, io.SeekStart)
-	return id3v2Data{Offset: offset, Text: text, Pictures: pics}, true
+	return id3v2Data{Offset: offset, Text: text, TextOrder: textOrder, Pictures: pics}, true
 }
 
 func synchsafe32(b []byte) uint32 {
