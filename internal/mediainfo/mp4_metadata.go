@@ -262,7 +262,7 @@ func mp4RecordedLocation(value string) string {
 		return padded
 	}
 	slash := strings.IndexByte(value, '/')
-	if slash < 2 || len(value) < 2 || (value[0] != '+' && value[0] != '-') {
+	if slash < 2 || slash != len(value)-1 || len(value) < 2 || (value[0] != '+' && value[0] != '-') {
 		return value
 	}
 	lon := strings.IndexAny(value[1:slash], "+-")
@@ -280,7 +280,7 @@ func mp4RecordedLocation(value string) string {
 	}
 	latValue, lonValue := value[1:lon], value[lon+1:end]
 	valid := func(s string) bool {
-		if s == "" {
+		if s == "" || s[0] == '.' || s[len(s)-1] == '.' {
 			return false
 		}
 		dots := 0
@@ -294,6 +294,11 @@ func mp4RecordedLocation(value string) string {
 		return dots <= 1 && s != "."
 	}
 	if !valid(latValue) || !valid(lonValue) {
+		return value
+	}
+	latitude, latErr := strconv.ParseFloat(latValue, 64)
+	longitude, lonErr := strconv.ParseFloat(lonValue, 64)
+	if latErr != nil || lonErr != nil || latitude > 90 || longitude > 180 {
 		return value
 	}
 	trim := func(s string) string {

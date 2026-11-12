@@ -361,3 +361,14 @@ func TestMP4MetadataExactCodecCollision(t *testing.T) {
 		t.Fatalf("raw lost collision value: %s", raw)
 	}
 }
+
+func TestMP4MetadataMalformedLocationRemainsRaw(t *testing.T) {
+	for _, value := range []string{"+999+999/", "+90.1+000/", "+12.5+180.1/", "+12.5+034.0/junk", "+12.5+034.0//", "+12.5+034.0+abc/", "+.5+034/", "+12.+034/"} {
+		if got := mp4RecordedLocation(value); got != value {
+			t.Errorf("%q became %q", value, got)
+		}
+	}
+	if got := mp4RecordedLocation("-90+180/"); got != "90°S 180°E" {
+		t.Errorf("valid boundary became %q", got)
+	}
+}
