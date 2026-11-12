@@ -25,9 +25,9 @@ Unify typed metadata ingestion, scope/target routing, title selection and Genera
 
 ## Acceptance criteria
 
-- [ ] Route typed tags to the correct General/track target; preserve ordered values and unknown metadata.
-- [ ] Keep parse-time handler eligibility separate from final fill-if-empty Movie/Track selection.
-- [ ] Implement the settled bounded BMP exception, mapped FLAC disc fields and Matroska display mappings without per-chapter scoping/output.
+- [x] Route typed tags to the correct General/track target; preserve ordered values and unknown metadata.
+- [x] Keep parse-time handler eligibility separate from final fill-if-empty Movie/Track selection.
+- [x] Implement the settled bounded BMP exception, mapped FLAC disc fields and Matroska display mappings without per-chapter scoping/output.
 
 ## Dependencies and non-goals
 
@@ -42,3 +42,7 @@ Unify typed metadata ingestion, scope/target routing, title selection and Genera
 ## Implementation and outcome history
 
 2026-11-02: migrated the approved consolidation grouping; preserved closing ownership and current issue decisions.
+
+2026-11-12: [PR #263](https://github.com/autobrr/go-mediainfo/pull/263) implements the complete accepted scope at `a9f27b1ec54642a7757c368438bb7fb476ad8871`, based on merged Plan 01 at `283023f3b755da7adb2632c655f01f2f4d63d1c2`. Checked acceptance records the proposed implementation, not a merge or release. Scoped mdta, final title selection, handler eligibility, BMP bounds, disc fields and Matroska mappings have regressions; exact-name and generated-suffix collisions preserve codec facts and all metadata values.
+
+Validation spans preserved candidate snapshots: 2,638 October originals plus 403 music originals on the broad earlier sweep, 515 recovered October paths on a later snapshot, and the remaining four access-restored originals in subsequent controls. This accounts for 3,157 of 3,173 October entries; 16 remain missing. Seven restored files lack historical hashes and have changed mtimes. Twenty-four music XML failures are baseline-existing. The final source was rerun on 277 originals (41 October controls and 236 music digest witnesses) in text, raw text, JSON and XML, with byte-identical output to the retained prior captures. Two generated playable controls also remained unchanged. Full tests/vet, uncached collision regressions and 71,395 affected-parser fuzz executions passed; independent cumulative review found no remaining material finding. The PR records exact source/executable identities, argv, reference selection and earlier corrective subsets. This is not a full final-head sweep, HTML/CSV recapture or complete native-parity claim. AGENTS records the three accepted deliberate differences; ADR 0001/0002 remain unchanged.
