@@ -2,6 +2,8 @@ package mediainfo
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -269,5 +271,184 @@ func assertMatroskaTextRow(t *testing.T, output, label, value string) {
 	}
 	if count != 1 {
 		t.Errorf("%s row count %d, want 1: %s", label, count, output)
+	}
+}
+
+func TestMatroskaDynamicTagPreservesParserTextRow(t *testing.T) {
+	for _, tt := range []struct {
+		kind                    StreamKind
+		name, label, value, key string
+	}{
+		{StreamVideo, "UniqueID", "Unique ID", "42", "Unique_ID"},
+		{StreamGeneral, "Encoded_Application", "Writing application", "parser-app", "Writing_application"},
+		{StreamGeneral, "Encoded_Application", "Writing application", "tag-value", "Writing_application"},
+	} {
+		stream := Stream{Kind: tt.kind}
+		replaceCanonicalSeedFill(&stream, fieldName(tt.name), tt.value, tt.label, tt.value)
+		var set matroskaTagSet
+		set.set(matroskaTagField{rawName: tt.label, name: tt.label, value: "tag-value"})
+		if tt.kind == StreamGeneral {
+			applyMatroskaGeneralTags(&stream, set)
+		} else {
+			info := MatroskaInfo{Tracks: []Stream{stream}, scopedTags: matroskaScopedTags{tracks: map[uint64]*matroskaTagSet{42: &set}}}
+			applyMatroskaTrackTags(&info)
+			stream = info.Tracks[0]
+		}
+		if got, _ := canonicalSeedValue(stream, fieldName(tt.name)); got != tt.value {
+			t.Errorf("%s parser fact=%q want %q", tt.name, got, tt.value)
+		}
+		var found bool
+		for _, entry := range stream.canonicalSeed {
+			if entry.Options.ShowText && entry.TextLabel == tt.label && !entry.MatroskaTag && entry.Value.Text == tt.value {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("%s parser-owned text row overwritten or relabelled", tt.name)
+		}
+		extra := canonicalSeedStructuredNode(&stream, "extra")
+		if extra == nil || !strings.Contains(structuredNodeText(*extra), `"`+tt.key+`":"tag-value"`) {
+			t.Errorf("%s tag value lost", tt.name)
+		}
+		if tt.kind == StreamGeneral {
+			refreshCanonicalCompatibilitySnapshot(&stream)
+			r := Report{General: stream}
+			attachCanonicalStore(&r)
+			for _, mutated := range []bool{false, true} {
+				if mutated {
+					r.General.Fields = append(r.General.Fields, Field{Name: "Caller field", Value: "changed"})
+					r.General.JSONRaw["extra"] = `{"Writing_application":"tag-value","CALLER":"changed"}`
+				}
+				text, html, csv := RenderText([]Report{r}), RenderHTML([]Report{r}), RenderCSV([]Report{r})
+				for _, output := range []string{text, html, csv} {
+					if strings.Count(output, "Writing application") != 2 {
+						t.Errorf("mutated=%v expected two distinct same-label rows: %s", mutated, output)
+					}
+				}
+				textValues := map[string]int{}
+				for _, line := range strings.Split(text, "\n") {
+					label, value, ok := strings.Cut(strings.TrimSuffix(line, "\r"), ": ")
+					if ok && strings.TrimSpace(label) == "Writing application" {
+						textValues[value]++
+					}
+				}
+				wantValues := map[string]int{}
+				wantValues[tt.value]++
+				wantValues["tag-value"]++
+				for value, count := range wantValues {
+					if textValues[value] != count {
+						t.Errorf("mutated=%v text value %q count=%d, want %d", mutated, value, textValues[value], count)
+					}
+				}
+				for _, value := range []string{tt.value, "tag-value"} {
+					if !strings.Contains(html, "<td>Writing application</td><td>"+value+"</td>") || !strings.Contains(csv, "Writing application,"+value+"\n") {
+						t.Errorf("mutated=%v missing independent value %s", mutated, value)
+					}
+				}
+				raw := RenderTextWithOptions([]Report{r}, TextRenderOptions{Language: "raw"})
+				assertMatroskaTextRow(t, raw, "Encoded_Application/String", tt.value)
+				assertMatroskaTextRow(t, raw, "Writing application", "tag-value")
+				if strings.Contains(raw, "MatroskaTag/") {
+					t.Fatal("internal identity leaked")
+				}
+				jsonOutput := RenderJSON([]Report{r})
+				for _, pair := range []string{`"Encoded_Application":"` + tt.value + `"`, `"Writing_application":"tag-value"`} {
+					if strings.Count(jsonOutput, pair) != 1 {
+						t.Errorf("mutated=%v structured identity lost: %s", mutated, jsonOutput)
+					}
+				}
+			}
+		}
+	}
+}
+
+func TestMatroskaEqualUIDTagSurvivesPublicEdit(t *testing.T) {
+	stream := Stream{Kind: StreamVideo, canonicalSeed: matroskaAVCCanonicalSeed(matroskaVideoCanonicalFacts{format: "AVC", trackUID: 42})}
+	var set matroskaTagSet
+	set.set(matroskaTagField{rawName: "Unique ID", name: "Unique ID", value: "42"})
+	info := MatroskaInfo{Tracks: []Stream{stream}, scopedTags: matroskaScopedTags{tracks: map[uint64]*matroskaTagSet{42: &set}}}
+	applyMatroskaTrackTags(&info)
+	refreshCanonicalCompatibilitySnapshot(&info.Tracks[0])
+	report := Report{General: Stream{Kind: StreamGeneral, Fields: []Field{{Name: "Format", Value: "Matroska"}}}, Streams: info.Tracks}
+	attachCanonicalStore(&report)
+	for _, mutated := range []bool{false, true} {
+		if mutated {
+			report.General.Fields = append(report.General.Fields, Field{Name: "Caller field", Value: "changed"})
+			report.Streams[0].JSONRaw["extra"] = `{"Unique_ID":"42","CALLER":"changed"}`
+		}
+		assertMatroskaTextRow(t, RenderText([]Report{report}), "Unique ID", "42")
+		raw := RenderTextWithOptions([]Report{report}, TextRenderOptions{Language: "raw"})
+		assertMatroskaTextRow(t, raw, "Unique ID", "42")
+		if strings.Contains(raw, "UniqueID/String") || strings.Contains(raw, "Unique_ID") {
+			t.Errorf("mutated=%v UID projection gained extra row: %s", mutated, raw)
+		}
+		output := RenderJSON([]Report{report})
+		if strings.Count(output, `"Unique_ID":"42"`) != 1 {
+			t.Errorf("mutated=%v lost dynamic UID tag identity: %s", mutated, output)
+		}
+		// Unrelated public edits currently drop structured-only parser facts in
+		// the legacy adapter, independently of tags. Keep that separate from
+		// this collision contract: tags must not overwrite or duplicate facts.
+		if !mutated && strings.Count(output, `"UniqueID":"42"`) != 1 {
+			t.Errorf("parser UID missing before public edit: %s", output)
+		}
+		if strings.Count(output, `"UniqueID":`) > 1 ||
+			(strings.Contains(output, `"UniqueID":`) && !strings.Contains(output, `"UniqueID":"42"`)) {
+			t.Errorf("mutated=%v tag overwrote or duplicated parser UID: %s", mutated, output)
+		}
+	}
+}
+
+func TestMatroskaAnalyzeApplicationTagCollision(t *testing.T) {
+	for _, tc := range []struct {
+		label, key string
+		element    uint64
+	}{
+		{"Writing application", "Encoded_Application", mkvIDWritingApp},
+		{"Writing library", "Encoded_Library", mkvIDMuxingApp},
+	} {
+		t.Run(tc.label, func(t *testing.T) {
+			payload := append(buildMatroskaElement(mkvIDDuration, []byte{0x41, 0x20, 0, 0}), buildMatroskaElement(tc.element, []byte("Lavf63.1.102"))...)
+			info := buildMatroskaElement(mkvIDInfo, payload)
+			segment := append(info, buildMatroskaVideoTrackWithUID(42)...)
+			tag := append(buildMatroskaElement(mkvIDTagTargets, nil), buildMatroskaSimpleTag(tc.label, "tag-value")...)
+			segment = append(segment, buildMatroskaElement(mkvIDTags, buildMatroskaElement(mkvIDTag, tag))...)
+			data := append(buildMatroskaElement(mkvIDEBML, nil), buildMatroskaElement(mkvIDSegment, segment)...)
+			path := filepath.Join(t.TempDir(), "collision.mkv")
+			if err := os.WriteFile(path, data, 0600); err != nil {
+				t.Fatal(err)
+			}
+			report, err := AnalyzeFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			reports := []Report{report}
+			for _, output := range []string{RenderText(reports), RenderHTML(reports), RenderCSV(reports)} {
+				if strings.Count(output, tc.label) != 2 || !strings.Contains(output, "Lavf63.1.102") || !strings.Contains(output, "tag-value") {
+					t.Errorf("lost independent parser/tag display: %s", output)
+				}
+			}
+			values := map[string]int{}
+			for _, line := range strings.Split(RenderText(reports), "\n") {
+				label, value, ok := strings.Cut(strings.TrimSuffix(line, "\r"), ": ")
+				if ok && strings.TrimSpace(label) == tc.label {
+					values[value]++
+				}
+			}
+			for _, value := range []string{"Lavf63.1.102", "tag-value"} {
+				if values[value] != 1 || strings.Count(RenderHTML(reports), "<td>"+tc.label+"</td><td>"+value+"</td>") != 1 || strings.Count(RenderCSV(reports), tc.label+","+value+"\n") != 1 {
+					t.Errorf("incorrect exact display count for %s=%s", tc.label, value)
+				}
+			}
+			raw := RenderTextWithOptions(reports, TextRenderOptions{Language: "raw"})
+			assertMatroskaTextRow(t, raw, tc.key+"/String", "Lavf63.1.102")
+			assertMatroskaTextRow(t, raw, tc.label, "tag-value")
+			output := RenderJSON(reports)
+			for _, pair := range []string{`"` + tc.key + `":"Lavf63.1.102"`, `"` + strings.ReplaceAll(tc.label, " ", "_") + `":"tag-value"`} {
+				if strings.Count(output, pair) != 1 {
+					t.Errorf("lost distinct structured identity: %s", output)
+				}
+			}
+		})
 	}
 }

@@ -224,7 +224,13 @@ func reportToFieldStore(report Report, useCanonicalSeeds bool) *fieldStore {
 	}
 	var legacyMedia jsonMediaOut
 	if needsLegacyInput {
-		legacyMedia = buildJSONMedia(report)
+		structured := report
+		structured.General = legacyStructuredTagNames(report.General)
+		structured.Streams = append([]Stream(nil), report.Streams...)
+		for index := range structured.Streams {
+			structured.Streams[index] = legacyStructuredTagNames(structured.Streams[index])
+		}
+		legacyMedia = buildJSONMedia(structured)
 	}
 	store := &fieldStore{ref: report.Ref}
 	generalRef := store.Prepare(StreamGeneral)
@@ -655,31 +661,72 @@ func captureLegacyStreamState(stream Stream, clone bool) legacyStreamState {
 	return state
 }
 
-// matroskaTagIdentities returns the field identities of a stream's Matroska tag
-// rows and their normalized extra keys, retained from a legacy copy or from
-// its canonical seed. It returns nil when the stream has no tag rows.
-func matroskaTagIdentities(stream Stream) map[string]string {
+// matroskaTagIdentities retains original keys only for unchanged display rows.
+// Caller changes to a row's label or value do not authorize guessing its old identity.
+func matroskaTagIdentities(stream Stream) map[legacyTagRow]legacyTagIdentity {
 	tags := maps.Clone(stream.canonicalPolicy.LegacyTagIdentities)
+	occurrences := make(map[Field]int)
 	for _, entry := range stream.canonicalSeed {
+		if !entry.Options.ShowText {
+			continue
+		}
+		identity := reportFieldIdentity(reportTables23, stream.Kind, string(entry.Name), entry.TextLabel)
+		if entry.MatroskaTag && entry.StructuredKey != "" {
+			identity = entry.StructuredKey
+		}
+		label := reportFieldLabel(reportTables23, identity, entry.TextLabel)
+		field := Field{Name: label, Value: entry.Value.Text}
+		row := legacyTagRow{Label: label, Value: entry.Value.Text, Occurrence: occurrences[field]}
+		occurrences[field]++
 		if entry.MatroskaTag {
 			if tags == nil {
-				tags = make(map[string]string)
+				tags = make(map[legacyTagRow]legacyTagIdentity)
 			}
-			tags[reportFieldIdentity(reportTables23, stream.Kind, string(entry.Name), entry.TextLabel)] = entry.StructuredKey
+			tags[row] = legacyTagIdentity{Key: entry.StructuredKey, Label: entry.TextLabel}
 		}
 	}
 	return tags
 }
 
-// restoreMatroskaTagIdentities preserves producer-owned tag metadata on surviving caller-visible rows.
+// legacyStructuredTagNames supplies producer-owned extra keys to the legacy
+// structured adapter, so translated display labels cannot become parser facts.
+func legacyStructuredTagNames(stream Stream) Stream {
+	tags := matroskaTagIdentities(stream)
+	if len(tags) == 0 {
+		return stream
+	}
+	stream.Fields = append([]Field(nil), stream.Fields...)
+	occurrences := make(map[Field]int)
+	for index, field := range stream.Fields {
+		row := legacyTagRow{Label: field.Name, Value: field.Value, Occurrence: occurrences[field]}
+		occurrences[field]++
+		if tag, exists := tags[row]; exists && tag.Key != "" {
+			stream.Fields[index].Name = tag.Key
+		}
+	}
+	return stream
+}
+
+// restoreMatroskaTagIdentities restores metadata only on unchanged original rows.
 func restoreMatroskaTagIdentities(stored *storedStream, stream Stream) {
 	tags := matroskaTagIdentities(stream)
+	occurrences := make(map[Field]int)
 	for index := range stored.Fields {
 		entry := &stored.Fields[index]
-		identity := reportFieldIdentity(reportTables23, stream.Kind, string(entry.Name), entry.TextLabel)
-		if key, exists := tags[identity]; exists {
+		if !entry.Options.ShowText {
+			continue
+		}
+		field := Field{Name: entry.TextLabel, Value: entry.Value.Text}
+		row := legacyTagRow{Label: field.Name, Value: field.Value, Occurrence: occurrences[field]}
+		occurrences[field]++
+		if tag, exists := tags[row]; exists {
 			entry.MatroskaTag = true
-			entry.StructuredKey = key
+			entry.StructuredKey = tag.Key
+			entry.TextLabel = tag.Label
+			if tag.Key != "" {
+				entry.Name = fieldName("MatroskaTag/" + tag.Key)
+				entry.Dynamic = true
+			}
 		}
 	}
 }

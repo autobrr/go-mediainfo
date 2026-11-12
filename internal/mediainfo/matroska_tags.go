@@ -3,6 +3,7 @@ package mediainfo
 import (
 	"encoding/hex"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -463,15 +464,7 @@ func applyMatroskaTrackTags(info *MatroskaInfo) {
 			if member.Key == "" || member.Value.Kind != structuredString || member.Value.Text == "" {
 				continue
 			}
-			insertCanonicalSeedTextBefore(stream, labels[member.Key], member.Value.Text, before...)
-			for index := range stream.canonicalSeed {
-				entry := &stream.canonicalSeed[index]
-				if entry.Options.ShowText && entry.TextLabel == labels[member.Key] {
-					entry.MatroskaTag = true
-					entry.StructuredKey = member.Key
-					break
-				}
-			}
+			insertMatroskaTagTextBefore(stream, member.Key, labels[member.Key], member.Value.Text, before...)
 		}
 	}
 }
@@ -519,16 +512,36 @@ func applyMatroskaGeneralTags(general *Stream, set matroskaTagSet) {
 		if member.Key == "" || member.Value.Kind != structuredString || member.Value.Text == "" {
 			continue
 		}
-		label := labels[member.Key]
-		insertCanonicalSeedTextBefore(general, label, member.Value.Text)
-		for index := range general.canonicalSeed {
-			entry := &general.canonicalSeed[index]
-			if entry.Options.ShowText && entry.TextLabel == label {
-				entry.MatroskaTag = true
-				entry.StructuredKey = member.Key
-				break
-			}
+		insertMatroskaTagTextBefore(general, member.Key, labels[member.Key], member.Value.Text)
+	}
+}
+
+// insertMatroskaTagTextBefore keeps source metadata separate from parser rows
+// even when both have the same display label.
+func insertMatroskaTagTextBefore(stream *Stream, key, label, value string, before ...string) {
+	if stream == nil || key == "" || label == "" || value == "" {
+		return
+	}
+	for index, entry := range stream.canonicalSeed {
+		// Reuse an existing dynamic extra only when its identity and value agree.
+		sameExtra := entry.Dynamic && entry.Name == fieldName("Text/"+key) && entry.TextLabel == label && entry.Value.Text == value
+		if entry.Options.ShowText && (entry.MatroskaTag && entry.StructuredKey == key || sameExtra) {
+			stream.canonicalSeed = append(stream.canonicalSeed[:index], stream.canonicalSeed[index+1:]...)
+			break
 		}
+	}
+	position := len(stream.canonicalSeed)
+	for index, entry := range stream.canonicalSeed {
+		if entry.Options.ShowText && slices.Contains(before, entry.TextLabel) {
+			position = index
+			break
+		}
+	}
+	entry := fieldEntry{Name: fieldName("MatroskaTag/" + key), Value: fieldValue{Text: value}, Dynamic: true,
+		Options: fieldOptions{ShowText: true, ValueType: fieldValueString}, TextLabel: label, MatroskaTag: true, StructuredKey: key}
+	stream.canonicalSeed = slices.Insert(stream.canonicalSeed, position, entry)
+	for index := position; index < len(stream.canonicalSeed); index++ {
+		stream.canonicalSeed[index].Sequence = uint32(index)
 	}
 }
 

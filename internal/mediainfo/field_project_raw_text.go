@@ -19,6 +19,7 @@ type rawTextFieldProjection struct {
 	Order     int
 	Sequence  uint32
 	Extension bool
+	TagKey    string
 }
 
 // rawTextStreamProjection is one raw-language stream section.
@@ -113,6 +114,15 @@ func projectRawTextReport(report Report) rawTextReportProjection {
 			if !entry.Options.ShowText {
 				continue
 			}
+			if entry.MatroskaTag && entry.StructuredKey != "" {
+				if representedExtras[entry.StructuredKey] {
+					continue
+				}
+				fields = append(fields, rawTextFieldProjection{Label: entry.TextLabel, Value: entry.Value.Text, Sequence: entry.Sequence, Extension: true, TagKey: entry.StructuredKey})
+				representedExtras[entry.StructuredKey] = true
+				tagLabels[entry.TextLabel] = true
+				continue
+			}
 			identity := reportFieldIdentity(version, stream.Kind, string(entry.Name), entry.TextLabel)
 			if identity == "Statistics_Tags_Issue" && stream.Kind != StreamMenu {
 				if extra, exists := rawTextExtraNode(stream); exists && slices.ContainsFunc(extra.Object, func(member structuredMember) bool {
@@ -145,10 +155,6 @@ func projectRawTextReport(report Report) rawTextReportProjection {
 			seen[rule.Label] = struct{}{}
 			if entry.MatroskaTag {
 				tagLabels[rule.Label] = true
-				// Extra identities must not suppress a distinct tag with that source label.
-				if entry.StructuredKey != "" {
-					representedExtras[entry.StructuredKey] = true
-				}
 			}
 		}
 		// Derived rows follow the store-wide canonical encounter sequences.
@@ -244,6 +250,11 @@ func projectRawTextReport(report Report) rawTextReportProjection {
 		}
 		filtered := fields[:0]
 		for _, field := range fields {
+			if field.TagKey != "" {
+				field.Order = reportFieldRank(version, stream.Kind, field.TagKey)
+				filtered = append(filtered, field)
+				continue
+			}
 			identity := reportFieldIdentity(version, stream.Kind, field.Label, field.Label)
 			if !reportTextVisible(version, stream.Kind, identity) {
 				continue

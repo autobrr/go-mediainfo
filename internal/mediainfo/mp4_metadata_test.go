@@ -492,3 +492,91 @@ func TestMP4BMPCoverRenderedVisibility(t *testing.T) {
 		}
 	}
 }
+
+func TestMP4VideoMetadataPreservesCodecExtras(t *testing.T) {
+	for _, codec := range []struct {
+		sample, box, want string
+		payload           []byte
+	}{
+		{"avc1", "avcC", "avcC", []byte{1, 66, 0, 30, 255, 224, 0}},
+		{"hvc1", "hvcC", "hvcC+dvvC", make([]byte, 23)},
+	} {
+		for _, headerExtra := range []bool{false, true} {
+			for _, metadata := range []bool{false, true} {
+				var config, track, movie, file bytes.Buffer
+				writeMP4Box(&config, codec.box, codec.payload)
+				if codec.sample == "hvc1" {
+					writeMP4Box(&config, "dvvC", []byte{1, 0, 16, 13, 16})
+				}
+				track.Write(buildTrackWithStsd("vide", codec.sample, config.Bytes()))
+				if metadata {
+					writeMP4Box(&track, "meta", mp4MetaForTest("mdta", []string{"com.example.track"}, mp4MetaItemForTest(mp4MetaIndexForTest(1), 1, []byte("Preserved tag")), true))
+				}
+				writeMP4Box(&movie, "trak", track.Bytes())
+				if headerExtra {
+					var udta bytes.Buffer
+					writeMP4Box(&udta, "meta", mp4MetaForTest("mdir", nil, mp4MetaItemForTest("\xa9too", 1, []byte("GPAC-test")), true))
+					writeMP4Box(&movie, "udta", udta.Bytes())
+				}
+				writeMP4Box(&file, "ftyp", []byte("isom"))
+				writeMP4Box(&file, "moov", movie.Bytes())
+				path := filepath.Join(t.TempDir(), "codec-extra.mp4")
+				if err := os.WriteFile(path, file.Bytes(), 0600); err != nil {
+					t.Fatal(err)
+				}
+				report, err := AnalyzeFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(report.Streams) != 1 {
+					t.Fatal("missing video")
+				}
+				node := canonicalSeedStructuredNode(&report.Streams[0], "extra")
+				if node == nil {
+					t.Fatal("missing video extra")
+				}
+				wantKeys := []string{}
+				if headerExtra {
+					wantKeys = append(wantKeys, "mdhd_Duration")
+				}
+				wantKeys = append(wantKeys, "CodecConfigurationBox")
+				if metadata {
+					wantKeys = append(wantKeys, "com.example.track")
+				}
+				if len(node.Object) != len(wantKeys) {
+					t.Errorf("%s extra count=%d, want %d", codec.sample, len(node.Object), len(wantKeys))
+				} else {
+					for i, key := range wantKeys {
+						if node.Object[i].Key != key {
+							t.Errorf("%s extra[%d]=%s, want %s", codec.sample, i, node.Object[i].Key, key)
+						}
+					}
+				}
+				codecCount, tagCount := 0, 0
+				for _, member := range node.Object {
+					if member.Key == "CodecConfigurationBox" {
+						codecCount++
+						if member.Value.Text != codec.want {
+							t.Errorf("codec value=%q", member.Value.Text)
+						}
+					}
+					if member.Key == "com.example.track" {
+						tagCount++
+					}
+				}
+				if codecCount != 1 || (metadata && tagCount != 1) || (!metadata && tagCount != 0) {
+					t.Errorf("headerExtra=%v metadata=%v codec/tag counts=%d/%d", headerExtra, metadata, codecCount, tagCount)
+				}
+				reports := []Report{report}
+				for _, check := range []struct{ output, want string }{{RenderJSON(reports), `"CodecConfigurationBox":"` + codec.want + `"`}, {RenderXML(reports), "<CodecConfigurationBox>" + codec.want + "</CodecConfigurationBox>"}} {
+					if strings.Count(check.output, check.want) != 1 {
+						t.Errorf("headerExtra=%v metadata=%v missing/duplicate codec: %s", headerExtra, metadata, check.output)
+					}
+					if metadata && !strings.Contains(check.output, "Preserved tag") {
+						t.Fatal("lost metadata tag")
+					}
+				}
+			}
+		}
+	}
+}

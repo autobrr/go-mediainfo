@@ -907,15 +907,6 @@ func analyzeFileWithOptions(ctx context.Context, path string, opts AnalyzeOption
 					if len(track.chapterTrackRefs) > 0 {
 						extraFields = append(extraFields, jsonKV{Key: "Menus", Val: strconv.FormatUint(uint64(track.chapterTrackRefs[0]), 10)})
 					}
-					if len(extraFields) > 0 {
-						configuration := findField(fields, "Codec configuration box")
-						if configuration != "" {
-							if track.hasDolbyVision {
-								configuration = "hvcC+dvvC"
-							}
-							extraFields = append(extraFields, jsonKV{Key: "CodecConfigurationBox", Val: configuration})
-						}
-					}
 				}
 				if len(extraFields) > 0 {
 					node := structuredObjectFromKVs(extraFields)
@@ -937,6 +928,14 @@ func analyzeFileWithOptions(ctx context.Context, path string, opts AnalyzeOption
 					}
 					if ratio := firstNonEmpty(track.metadata.displayAspectRatio, parsed.metadata.displayAspectRatio); ratio != "" && trackFacts.Canonical("DisplayAspectRatio") == "" && !builder.HasStructured("DisplayAspectRatio") {
 						builder.Fill("DisplayAspectRatio", ratio, "Display aspect ratio", ratio)
+					}
+				}
+				if track.Kind == StreamVideo {
+					// Preserve sample and probe facts after container extras, before tags.
+					// The current builder includes Dolby Vision probe enrichment.
+					current := Stream{canonicalSeed: builder.store.stream(builder.ref).Fields}
+					if seed := canonicalSeedStructuredNode(&current, "extra"); seed != nil {
+						mergeStructuredExtraNode(&extraNode, *seed)
 					}
 				}
 				metadataExtraStart := 0
@@ -1089,7 +1088,7 @@ func analyzeFileWithOptions(ctx context.Context, path string, opts AnalyzeOption
 				replaceCanonicalSeedFill(&general, "Encoded_Date", creationTime, "", "")
 			}
 			if rawWritingApp != "" {
-				replaceCanonicalSeedFill(&general, "Encoded_Application", rawWritingApp, "", "")
+				replaceCanonicalSeedFill(&general, "Encoded_Application", rawWritingApp, "Writing application", normalizeWritingApplication(rawWritingApp))
 				if name, version, _ := splitWritingApplication(rawWritingApp); exposeWritingApplicationComponents(name, version) {
 					replaceCanonicalSeedFill(&general, "Encoded_Application_Name", name, "", "")
 					if version != "" {
@@ -1102,7 +1101,7 @@ func analyzeFileWithOptions(ctx context.Context, path string, opts AnalyzeOption
 					rawWritingLibrary += " / " + encoder
 					general.Fields = setFieldValue(general.Fields, "Writing library", rawWritingLibrary)
 				}
-				replaceCanonicalSeedFill(&general, "Encoded_Library", rawWritingLibrary, "", "")
+				replaceCanonicalSeedFill(&general, "Encoded_Library", rawWritingLibrary, "Writing library", rawWritingLibrary)
 				if name, version, _ := splitWritingApplication(rawWritingLibrary); exposeWritingApplicationComponents(name, version) {
 					replaceCanonicalSeedFill(&general, "Encoded_Library_Name", name, "", "")
 					replaceCanonicalSeedFill(&general, "Encoded_Library_Version", version, "", "")

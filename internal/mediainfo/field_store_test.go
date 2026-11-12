@@ -379,7 +379,7 @@ func TestLegacyRenderingDoesNotDeriveGeneralTitle(t *testing.T) {
 				delete(report.General.JSON, "Movie")
 				delete(report.General.JSON, "Track")
 			}
-			before := captureLegacyReportState(report, false)
+			before := captureLegacyReportState(report, true)
 			for _, output := range []string{RenderJSON([]Report{report}), RenderXML([]Report{report})} {
 				if strings.Contains(output, `"Movie":`) || strings.Contains(output, `"Track":`) || strings.Contains(output, "<Movie>") || strings.Contains(output, "<Track>") {
 					t.Fatalf("render derived a title destination: %s", output)
