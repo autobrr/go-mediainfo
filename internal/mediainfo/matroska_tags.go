@@ -325,9 +325,10 @@ func metadataDynamicJSONName(name string, used map[string]struct{}) string {
 }
 
 // matroskaTagFieldsForJSON splits schema-backed fields from ordered canonical
-// extra members while preserving arbitrary non-internal Matroska tags.
-func matroskaTagFieldsForJSON(set matroskaTagSet, kind StreamKind, skip map[string]struct{}) (map[string]string, []structuredMember) {
+// extra members and their source display labels without conflating JSON names.
+func matroskaTagFieldsForJSON(set matroskaTagSet, kind StreamKind, skip map[string]struct{}) (map[string]string, []structuredMember, map[string]string) {
 	known := map[string]string{}
+	labels := map[string]string{}
 	dynamic := make([]structuredMember, 0, len(set.values))
 	dynamicNames := make(map[string]struct{}, len(set.values))
 	for _, field := range set.sorted() {
@@ -351,9 +352,10 @@ func matroskaTagFieldsForJSON(set matroskaTagSet, kind StreamKind, skip map[stri
 			continue
 		}
 		name = metadataDynamicJSONName(fieldName, dynamicNames)
+		labels[name] = fieldName
 		dynamic = append(dynamic, structuredMember{Key: name, Value: structuredNode{Kind: structuredString, Text: field.value}})
 	}
-	return known, dynamic
+	return known, dynamic, labels
 }
 
 // isMatroskaGeneralTagJSONField reports whether a normalized Matroska tag maps
@@ -398,7 +400,7 @@ func applyMatroskaTrackTags(info *MatroskaInfo) {
 		if set == nil {
 			continue
 		}
-		known, dynamic := matroskaTagFieldsForJSON(*set, stream.Kind, nil)
+		known, dynamic, labels := matroskaTagFieldsForJSON(*set, stream.Kind, nil)
 		for name, value := range known {
 			if !streamHasCanonicalStructuredField(*stream, name) {
 				replaceCanonicalSeedFill(stream, fieldName(name), value, "", "")
@@ -410,7 +412,7 @@ func applyMatroskaTrackTags(info *MatroskaInfo) {
 		tagNames := make(map[string]struct{}, len(dynamic))
 		for _, member := range dynamic {
 			tagNames[member.Key] = struct{}{}
-			tagNames[matroskaDynamicTextLabel(member.Key)] = struct{}{}
+			tagNames[labels[member.Key]] = struct{}{}
 		}
 		before := []string{flacUnencodedMD5Label}
 		foundTag := false
@@ -461,11 +463,12 @@ func applyMatroskaTrackTags(info *MatroskaInfo) {
 			if member.Key == "" || member.Value.Kind != structuredString || member.Value.Text == "" {
 				continue
 			}
-			insertCanonicalSeedTextBefore(stream, matroskaDynamicTextLabel(member.Key), member.Value.Text, before...)
+			insertCanonicalSeedTextBefore(stream, labels[member.Key], member.Value.Text, before...)
 			for index := range stream.canonicalSeed {
 				entry := &stream.canonicalSeed[index]
-				if entry.Options.ShowText && entry.TextLabel == matroskaDynamicTextLabel(member.Key) {
+				if entry.Options.ShowText && entry.TextLabel == labels[member.Key] {
 					entry.MatroskaTag = true
+					entry.StructuredKey = member.Key
 					break
 				}
 			}
@@ -488,7 +491,7 @@ func applyMatroskaGeneralTags(general *Stream, set matroskaTagSet) {
 	if general == nil || len(set.values) == 0 {
 		return
 	}
-	known, dynamic := matroskaTagFieldsForJSON(set, StreamGeneral, nil)
+	known, dynamic, labels := matroskaTagFieldsForJSON(set, StreamGeneral, nil)
 	if tagTitle := known["Title"]; tagTitle != "" {
 		canonicalTitle, _ := canonicalSeedValue(*general, "Title")
 		title := mergeMatroskaTitle(canonicalTitle, tagTitle)
@@ -516,9 +519,15 @@ func applyMatroskaGeneralTags(general *Stream, set matroskaTagSet) {
 		if member.Key == "" || member.Value.Kind != structuredString || member.Value.Text == "" {
 			continue
 		}
-		general.Fields = appendFieldUnique(general.Fields, Field{Name: matroskaDynamicTextLabel(member.Key), Value: member.Value.Text})
-		if member.Key == "Writing_frontend" {
-			insertCanonicalSeedTextBefore(general, "Writing frontend", member.Value.Text)
+		label := labels[member.Key]
+		insertCanonicalSeedTextBefore(general, label, member.Value.Text)
+		for index := range general.canonicalSeed {
+			entry := &general.canonicalSeed[index]
+			if entry.Options.ShowText && entry.TextLabel == label {
+				entry.MatroskaTag = true
+				entry.StructuredKey = member.Key
+				break
+			}
 		}
 	}
 }
@@ -540,21 +549,14 @@ func mergeMatroskaTitle(containerTitle, tagTitle string) string {
 	}
 }
 
-// matroskaMetadataLabel exposes only the already mapped General tag fields.
-// Title selection is finalized once all reported streams are known.
+// matroskaMetadataLabel follows the pinned non-DVD General presentation policy.
 func matroskaMetadataLabel(name string) string {
-	switch name {
-	case "Performer", "EncodedBy", "Genre", "ContentType", "Synopsis", "Released_Date", "Recorded_Date", "Copyright", "Comment":
-		return reportFieldLabel(reportTables26, name, name)
+	identity := reportFieldIdentity(reportTables23, StreamGeneral, name, name)
+	table := reportKindPolicy(reportTables23, StreamGeneral)
+	if _, known := table.Fields[identity]; known && reportTextVisible(reportTables23, StreamGeneral, identity) {
+		return reportFieldLabel(reportTables23, identity, identity)
 	}
 	return ""
-}
-
-func matroskaDynamicTextLabel(name string) string {
-	if name == "Writing_frontend" {
-		return "Writing frontend"
-	}
-	return name
 }
 
 var matroskaDatePattern = regexp.MustCompile(`^(\d{4}(?:[-:]\d{2}(?:[-:]\d{2})?)?)(?:([T ]|, )(\d{2}:\d{2}:\d{2}(?:\.\d*)?)(Z|[+-]\d{2}(?::?\d{2})?)?)?$`)

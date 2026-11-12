@@ -17,7 +17,7 @@ func TestImpl001MatroskaDynamicTagKeysStayDistinct(t *testing.T) {
 	} {
 		set.set(field)
 	}
-	_, dynamic := matroskaTagFieldsForJSON(set, StreamAudio, nil)
+	_, dynamic, _ := matroskaTagFieldsForJSON(set, StreamAudio, nil)
 	if len(dynamic) != 4 {
 		t.Fatalf("dynamic member count = %d, want 4", len(dynamic))
 	}

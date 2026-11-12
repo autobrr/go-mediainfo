@@ -42,7 +42,7 @@ Do not change these back to official. Each line is a measured fact, a newer upst
 
 DVD uses the reference in `docs/adr/0002-dvd-parity-reference.md`. Keep evidence-backed corrections and safety rules even when that reference disagrees.
 
-- Safety and adopted cover recognition: bounded MP4 BMP cover headers are recognized without decoding pixels; valid BMP covers do not produce the unknown-cover fallback. JPEG/PNG handling is unchanged. Issue #24.
+- Measured fact: MP4 cover kind 27 with a validated BMP header is recognized without decoding pixels, rather than reporting an unknown cover kind. The issue #24 maintainer-approved ffmpeg fixture contains a 64×48 BMP with a 9270-byte payload; its header and successful decoding establish the format, while official v23.04 reports the unknown-kind fallback. JPEG/PNG handling is unchanged. Issue #24.
 - Newer upstream convention: MP4 Android version metadata uses the v26.10 operating-system fields, and recognized ISO 6709 locations use its hemisphere display convention. Malformed location values remain raw; capture frame rate is separate from measured timing. Issue #233.
 - Safety: hostile input gets the limits, omissions and escaping in the "Embedded metadata safety" section of `README.md`. These protect against denial of service and output injection, and `output_safety_test.go` pins them.
 - Newer upstream convention: all DVD output uses the v26.10 reference, including title-set joining and IFO reports. v26.10 preserves IFO stream languages after VOB merge. Wrong upstream facts are still corrected with evidence and tests; this is a reference decision, not a claim of completed parity. ADR 0002, issue #248.

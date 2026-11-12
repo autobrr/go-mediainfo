@@ -134,7 +134,7 @@ func newMatroskaVideoCanonicalBuilder(facts matroskaVideoCanonicalFacts) *canoni
 // color, language, service, and disposition facts after codec-specific fields.
 func applyMatroskaVideoCanonicalTail(builder *canonicalStreamBuilder, facts matroskaVideoCanonicalFacts) {
 	if facts.video.stereoMode == 13 {
-		builder.Fill("MultiView_Count", "2", "Count of views", "2")
+		builder.Fill("MultiView_Count", "2", "MultiView_Count", "2")
 		builder.Fill("MultiView_Layout", "Both Eyes laced in one block (left eye first)", "MultiView_Layout", "Both Eyes laced in one block (left eye first)")
 	}
 	if facts.trackUID > 0 {

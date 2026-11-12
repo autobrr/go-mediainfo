@@ -236,6 +236,7 @@ func reportToFieldStore(report Report, useCanonicalSeeds bool) *fieldStore {
 		appendCanonicalSeed(store, generalRef, report.General.canonicalSeed)
 	} else {
 		appendLegacyTextFields(store, generalRef, report.General.Fields)
+		restoreMatroskaTagIdentities(store.stream(generalRef), report.General)
 		if len(legacyMedia.Tracks) > 0 {
 			fields := filterDeletedLegacyJSONFields(legacyMedia.Tracks[0].Fields, report.General)
 			appendLegacyStructuredFields(store, generalRef, fields, structuredProjectionJSON)
@@ -262,12 +263,7 @@ func reportToFieldStore(report Report, useCanonicalSeeds bool) *fieldStore {
 			appendCanonicalSeed(store, ref, stream.canonicalSeed)
 		} else {
 			appendLegacyTextFields(store, ref, stream.Fields)
-			// Retain parser-owned ordering for surviving tag labels when
-			// callers edit the public compatibility snapshot.
-			tags := matroskaTagIdentities(stream)
-			for index := range stored.Fields {
-				stored.Fields[index].MatroskaTag = tags[reportFieldIdentity(reportTables23, stream.Kind, string(stored.Fields[index].Name), stored.Fields[index].TextLabel)]
-			}
+			restoreMatroskaTagIdentities(stored, stream)
 		}
 	}
 	sortedIndexes := make([]int, len(report.Streams))
@@ -302,8 +298,10 @@ func reportToFieldStore(report Report, useCanonicalSeeds bool) *fieldStore {
 			store.legacyStreams[index] = cloneLegacyStream(stream)
 		}
 	}
-	finalizeGeneralTitle(store)
 	if useCanonicalSeeds {
+		// Interpret titles only at the complete parsed-report boundary, never
+		// while adapting a caller-built or caller-edited report for rendering.
+		finalizeGeneralTitle(store)
 		finalizeFieldStore(store)
 	} else {
 		for ref := range store.streams {
@@ -658,19 +656,32 @@ func captureLegacyStreamState(stream Stream, clone bool) legacyStreamState {
 }
 
 // matroskaTagIdentities returns the field identities of a stream's Matroska tag
-// rows: the identities kept from an earlier legacy copy plus the tag entries of
+// rows and their normalized extra keys, retained from a legacy copy or from
 // its canonical seed. It returns nil when the stream has no tag rows.
-func matroskaTagIdentities(stream Stream) map[string]bool {
+func matroskaTagIdentities(stream Stream) map[string]string {
 	tags := maps.Clone(stream.canonicalPolicy.LegacyTagIdentities)
 	for _, entry := range stream.canonicalSeed {
 		if entry.MatroskaTag {
 			if tags == nil {
-				tags = make(map[string]bool)
+				tags = make(map[string]string)
 			}
-			tags[reportFieldIdentity(reportTables23, stream.Kind, string(entry.Name), entry.TextLabel)] = true
+			tags[reportFieldIdentity(reportTables23, stream.Kind, string(entry.Name), entry.TextLabel)] = entry.StructuredKey
 		}
 	}
 	return tags
+}
+
+// restoreMatroskaTagIdentities preserves producer-owned tag metadata on surviving caller-visible rows.
+func restoreMatroskaTagIdentities(stored *storedStream, stream Stream) {
+	tags := matroskaTagIdentities(stream)
+	for index := range stored.Fields {
+		entry := &stored.Fields[index]
+		identity := reportFieldIdentity(reportTables23, stream.Kind, string(entry.Name), entry.TextLabel)
+		if key, exists := tags[identity]; exists {
+			entry.MatroskaTag = true
+			entry.StructuredKey = key
+		}
+	}
 }
 
 // cloneLegacyStream copies mutable legacy state while detaching canonical-store internals.

@@ -108,6 +108,7 @@ func projectRawTextReport(report Report) rawTextReportProjection {
 		fields := make([]rawTextFieldProjection, 0, len(stream.Fields))
 		seen := make(map[string]struct{}, len(stream.Fields))
 		tagLabels := make(map[string]bool)
+		representedExtras := make(map[string]bool)
 		for _, entry := range stream.Fields {
 			if !entry.Options.ShowText {
 				continue
@@ -144,6 +145,10 @@ func projectRawTextReport(report Report) rawTextReportProjection {
 			seen[rule.Label] = struct{}{}
 			if entry.MatroskaTag {
 				tagLabels[rule.Label] = true
+				// Extra identities must not suppress a distinct tag with that source label.
+				if entry.StructuredKey != "" {
+					representedExtras[entry.StructuredKey] = true
+				}
 			}
 		}
 		// Derived rows follow the store-wide canonical encounter sequences.
@@ -170,6 +175,9 @@ func projectRawTextReport(report Report) rawTextReportProjection {
 		}
 		if extra, ok := rawTextExtraNode(stream); ok && stream.Kind != StreamMenu {
 			for memberIndex, member := range extra.Object {
+				if representedExtras[member.Key] {
+					continue
+				}
 				if member.Key == "ConformanceErrors" {
 					for _, derived := range rawTextConformanceFields(member.Value) {
 						if _, exists := seen[derived.Label]; exists {

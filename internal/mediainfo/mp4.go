@@ -19,8 +19,7 @@ type MP4Track struct {
 	// HandlerName is the optional mdia handler name.
 	HandlerName string
 	// HandlerType is the four-character mdia handler code.
-	HandlerType         string
-	handlerManufacturer uint32
+	HandlerType string
 	// LanguageCode is the normalized language code from mdhd metadata.
 	LanguageCode string
 	// CreationTime is the raw MP4 epoch creation timestamp.
@@ -121,9 +120,10 @@ type MP4Info struct {
 	// MovieModified is the raw MP4 epoch modification timestamp.
 	MovieModified uint64
 	// Chapters contains decoded chapter starts and titles.
-	Chapters     []mp4Chapter
-	generalExtra []jsonKV
-	metadata     mp4Metadata
+	Chapters            []mp4Chapter
+	generalExtra        []jsonKV
+	metadata            mp4Metadata
+	handlerManufacturer uint32
 }
 
 // mp4Chapter stores one decoded chapter start and title.
@@ -265,7 +265,7 @@ func parseMoov(buf []byte) (MP4Info, bool) {
 		}
 		if boxType == "trak" {
 			payload := sliceBox(buf, dataOffset, boxSize-headerSize)
-			if track, ok := parseTrak(payload, info.MovieTimescale, &budget, mp4GeneralHasTitle(info.General)); ok {
+			if track, ok := parseTrak(payload, info.MovieTimescale, &budget, mp4GeneralHasTitle(info.General), &info.handlerManufacturer); ok {
 				info.Tracks = append(info.Tracks, track)
 			}
 		}
@@ -325,8 +325,9 @@ func parseMvhd(payload []byte) (float64, uint32, bool) {
 }
 
 // parseTrak combines one track's header, edit-list, media, and sample-table
-// facts and reports whether the track is supported.
-func parseTrak(buf []byte, movieTimescale uint32, budget *embeddedAssetBudget, generalHasTitle bool) (MP4Track, bool) {
+// facts and reports whether the track is supported. Manufacturer consensus is
+// retained even when the media handler is unsupported.
+func parseTrak(buf []byte, movieTimescale uint32, budget *embeddedAssetBudget, generalHasTitle bool, manufacturer *uint32) (MP4Track, bool) {
 	var offset int64
 	var tkhdInfo tkhdInfo
 	var hasTkhd bool
@@ -378,7 +379,7 @@ func parseTrak(buf []byte, movieTimescale uint32, budget *embeddedAssetBudget, g
 		}
 		if boxType == "mdia" {
 			payload := sliceBox(buf, dataOffset, boxSize-headerSize)
-			if track, ok := parseMdia(payload); ok {
+			if track, ok := parseMdia(payload, manufacturer); ok {
 				mediaTrack = track
 				hasMediaTrack = true
 			}
@@ -413,11 +414,11 @@ func parseTrak(buf []byte, movieTimescale uint32, budget *embeddedAssetBudget, g
 
 // parseMdia parses one mdia box into track handler, timing, language, and
 // sample-table metadata and reports whether a supported handler was found.
-func parseMdia(buf []byte) (MP4Track, bool) {
+// Both media and data handlers contribute to movie-wide manufacturer consensus.
+func parseMdia(buf []byte, manufacturer *uint32) (MP4Track, bool) {
 	var offset int64
 	var handler string
 	var handlerName string
-	var manufacturer uint32
 	var sampleInfo SampleInfo
 	var trackDuration float64
 	var mediaDurationTicks uint64
@@ -433,9 +434,7 @@ func parseMdia(buf []byte) (MP4Track, bool) {
 			payload := sliceBox(buf, dataOffset, boxSize-headerSize)
 			handler = parseHdlr(payload)
 			handlerName = parseHdlrName(payload)
-			if len(payload) >= 16 {
-				manufacturer = binary.BigEndian.Uint32(payload[12:16])
-			}
+			mergeMP4HandlerManufacturer(manufacturer, payload)
 		}
 		if boxType == "mdhd" {
 			payload := sliceBox(buf, dataOffset, boxSize-headerSize)
@@ -448,6 +447,16 @@ func parseMdia(buf []byte) (MP4Track, bool) {
 		}
 		if boxType == "minf" {
 			payload := sliceBox(buf, dataOffset, boxSize-headerSize)
+			for off := int64(0); off+8 <= int64(len(payload)); {
+				size, typ, header := readMP4BoxHeaderFrom(payload, off)
+				if size <= 0 {
+					break
+				}
+				if typ == "hdlr" {
+					mergeMP4HandlerManufacturer(manufacturer, sliceBox(payload, off+header, size-header))
+				}
+				off += size
+			}
 			if info, ok := parseMinfSample(payload); ok {
 				sampleInfo = info
 			}
@@ -468,7 +477,6 @@ func parseMdia(buf []byte) (MP4Track, bool) {
 		Kind:                   kind,
 		Format:                 format,
 		HandlerName:            handlerName,
-		handlerManufacturer:    manufacturer,
 		HandlerType:            handler,
 		LanguageCode:           language,
 		Fields:                 sampleInfo.Fields,
@@ -870,4 +878,21 @@ func parseStsc(payload []byte) []mp4SampleToChunkEntry {
 		result = append(result, mp4SampleToChunkEntry{firstChunk: firstChunk, samplesPerChunk: samplesPerChunk})
 	}
 	return result
+}
+
+// mergeMP4HandlerManufacturer retains movie-wide consensus, including data
+// handlers and unsupported tracks. All-ones marks conflicting manufacturers.
+func mergeMP4HandlerManufacturer(manufacturer *uint32, payload []byte) {
+	if len(payload) < 24 {
+		return
+	}
+	value := binary.BigEndian.Uint32(payload[12:16])
+	if value == 0 {
+		return
+	}
+	if *manufacturer == 0 {
+		*manufacturer = value
+	} else if *manufacturer != value {
+		*manufacturer = ^uint32(0)
+	}
 }

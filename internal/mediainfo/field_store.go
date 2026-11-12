@@ -43,8 +43,8 @@ type fieldEntry struct {
 
 // canonicalStreamPolicy retains legacy rendering exceptions for canonical snapshots.
 type canonicalStreamPolicy struct {
-	// LegacyTagIdentities retains tag ordering when legacy ingestion discards seeds.
-	LegacyTagIdentities map[string]bool
+	// LegacyTagIdentities retains tag ordering and normalized keys when legacy ingestion discards seeds.
+	LegacyTagIdentities map[string]string
 	SkipStreamOrder     bool
 	SkipComputed        bool
 	DVDOrder            bool

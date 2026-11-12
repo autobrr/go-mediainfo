@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func mp4MetaForTest(handler string, keys []string, items []byte, full bool) []byte {
@@ -304,6 +305,14 @@ func TestMP4MetadataAnalysisOutput(t *testing.T) {
 		t.Fatalf("streams=%d", len(report.Streams))
 	}
 	for _, stream := range report.Streams {
+		if stream.Kind == StreamVideo {
+			if value, _ := canonicalSeedTextValue(stream, "Real frame rate"); value == "" {
+				t.Error("capture rate lacks its own text label")
+			}
+			if value, _ := canonicalSeedTextValue(stream, "Original frame rate"); value != "" {
+				t.Error("capture rate aliases original frame rate")
+			}
+		}
 		fps, _ := canonicalSeedValue(stream, "FrameRate_Real")
 		if (stream.Kind == StreamVideo && fps != "60.000") || (stream.Kind == StreamAudio && fps != "") {
 			t.Errorf("%s capture fps=%q", stream.Kind, fps)
@@ -370,5 +379,116 @@ func TestMP4MetadataMalformedLocationRemainsRaw(t *testing.T) {
 	}
 	if got := mp4RecordedLocation("-90+180/"); got != "90°S 180°E" {
 		t.Errorf("valid boundary became %q", got)
+	}
+}
+
+func TestMP4VendorIncludesAllHandlers(t *testing.T) {
+	for _, tt := range []struct{ name, mediaVendor, dataVendor, extraVendor, want string }{
+		{"data handler only", "", "appl", "", "Apple QuickTime"},
+		{"matching handlers", "appl", "appl", "", "Apple QuickTime"},
+		{"conflicting data handler", "niko", "appl", "", ""},
+		{"unsupported track conflict", "appl", "", "niko", ""},
+		{"unsupported track vendor", "", "", "niko", "Nikon"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			handler := func(kind, vendor string) []byte {
+				h := make([]byte, 24)
+				copy(h[8:], kind)
+				copy(h[12:], vendor)
+				return h
+			}
+			var movie, media, minf, track, file bytes.Buffer
+			writeMP4Box(&media, "hdlr", handler("vide", tt.mediaVendor))
+			writeMP4Box(&minf, "hdlr", handler("url ", tt.dataVendor))
+			writeMP4Box(&media, "minf", minf.Bytes())
+			writeMP4Box(&track, "mdia", media.Bytes())
+			writeMP4Box(&movie, "trak", track.Bytes())
+			if tt.extraVendor != "" {
+				media.Reset()
+				track.Reset()
+				writeMP4Box(&media, "hdlr", handler("xxxx", tt.extraVendor))
+				writeMP4Box(&track, "mdia", media.Bytes())
+				writeMP4Box(&movie, "trak", track.Bytes())
+			}
+			writeMP4Box(&file, "ftyp", []byte("qt  "))
+			writeMP4Box(&file, "moov", movie.Bytes())
+			path := filepath.Join(t.TempDir(), "vendor.mov")
+			if err := os.WriteFile(path, file.Bytes(), 0600); err != nil {
+				t.Fatal(err)
+			}
+			report, err := AnalyzeFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got, _ := canonicalSeedValue(report.General, "Encoded_Library"); got != tt.want {
+				t.Errorf("vendor=%q want %q", got, tt.want)
+			}
+			if len(report.Streams) != 1 {
+				t.Errorf("unsupported track escaped: %d streams", len(report.Streams))
+			}
+		})
+	}
+}
+
+func TestMP4BMPCoverRenderedVisibility(t *testing.T) {
+	bmp := make([]byte, 58)
+	copy(bmp, "BM")
+	binary.LittleEndian.PutUint32(bmp[2:6], 58)
+	binary.LittleEndian.PutUint32(bmp[10:14], 54)
+	binary.LittleEndian.PutUint32(bmp[14:18], 40)
+	binary.LittleEndian.PutUint32(bmp[18:22], 1)
+	binary.LittleEndian.PutUint32(bmp[22:26], 1)
+	binary.LittleEndian.PutUint16(bmp[26:28], 1)
+	binary.LittleEndian.PutUint16(bmp[28:30], 24)
+	path := filepath.Join(t.TempDir(), "cover.mp4")
+	var referenceJSON, referenceRaw string
+	for _, kind := range []uint32{13, 14, 27, 99} {
+		items := append(mp4MetaItemForTest("\xa9nam", 1, []byte("Cover title")), mp4MetaItemForTest("covr", kind, bmp)...)
+		items = append(items, mp4MetaItemForTest("\xa9alb", 1, []byte("Cover album"))...)
+		var udta, movie, file bytes.Buffer
+		writeMP4Box(&udta, "meta", mp4MetaForTest("mdir", nil, items, true))
+		writeMP4Box(&movie, "udta", udta.Bytes())
+		mvhd := make([]byte, 20)
+		binary.BigEndian.PutUint32(mvhd[12:16], 1000)
+		binary.BigEndian.PutUint32(mvhd[16:20], 1000)
+		writeMP4Box(&movie, "mvhd", mvhd)
+		writeMP4Box(&file, "ftyp", []byte("isom"))
+		writeMP4Box(&file, "moov", movie.Bytes())
+		if err := os.WriteFile(path, file.Bytes(), 0600); err != nil {
+			t.Fatal(err)
+		}
+		// Compare cover behavior, not timestamps from rewriting the same fixture.
+		stamp := time.Unix(1700000000, 0)
+		if err := os.Chtimes(path, stamp, stamp); err != nil {
+			t.Fatal(err)
+		}
+		report, err := AnalyzeFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		reports := []Report{report}
+		json := RenderJSON(reports)
+		raw := RenderTextWithOptions(reports, TextRenderOptions{Language: "raw"})
+		if len(report.Streams) != 0 {
+			t.Fatal("cover became media stream")
+		}
+		if kind == 13 {
+			referenceJSON, referenceRaw = json, raw
+		}
+		if kind != 99 && (json != referenceJSON || raw != referenceRaw) {
+			t.Errorf("kind %d changed JPEG/PNG visibility or order", kind)
+		}
+		for _, output := range []string{json, raw} {
+			if !strings.Contains(output, "Cover album") || !strings.Contains(output, "Cover title") {
+				t.Fatal("lost surrounding metadata")
+			}
+			if kind == 99 {
+				if strings.Index(output, "covr") < strings.Index(output, "Cover album") || !strings.Contains(output, "Unknown kind of value!") {
+					t.Errorf("unknown fallback/order changed: %s", output)
+				}
+			} else if strings.Contains(output, "covr") || strings.Contains(output, "Unknown kind of value!") {
+				t.Errorf("kind%d leaked cover: %s", kind, output)
+			}
+		}
 	}
 }

@@ -38,7 +38,7 @@ func TestRenderCSVNeutralizesFormulasAndPreservesMeasurements(t *testing.T) {
 	}}}
 	output := RenderCSV([]Report{report})
 	for _, want := range []string{
-		`Track name,"'=HYPERLINK(""https://invalid.example"")"`,
+		`Title,"'=HYPERLINK(""https://invalid.example"")"`,
 		`Comment,"'  @SUM(1,1)"`,
 		"Encoded by,'\uFEFF=1+1",
 		"Description,'-cmd",
@@ -58,7 +58,7 @@ func TestRenderCSVNeutralizesFormulasAndPreservesMeasurements(t *testing.T) {
 	var titleLine string
 	var sourceLine string
 	for line := range strings.SplitSeq(output, "\n") {
-		if strings.HasPrefix(line, "Track name,") {
+		if strings.HasPrefix(line, "Title,") {
 			titleLine = line
 		}
 		if strings.HasPrefix(line, "Source,") {
@@ -70,7 +70,7 @@ func TestRenderCSVNeutralizesFormulasAndPreservesMeasurements(t *testing.T) {
 	if err != nil {
 		t.Fatalf("quoted Title CSV is not parseable: %v", err)
 	}
-	if len(titleRecords) != 1 || len(titleRecords[0]) != 2 || titleRecords[0][0] != "Track name" || titleRecords[0][1] != `'=HYPERLINK("https://invalid.example")` {
+	if len(titleRecords) != 1 || len(titleRecords[0]) != 2 || titleRecords[0][0] != "Title" || titleRecords[0][1] != `'=HYPERLINK("https://invalid.example")` {
 		t.Fatalf("quoted Title did not round-trip: %#v", titleRecords)
 	}
 	reader := csv.NewReader(strings.NewReader(sourceLine))

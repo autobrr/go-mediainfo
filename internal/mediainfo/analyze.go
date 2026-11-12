@@ -270,16 +270,7 @@ func analyzeFileWithOptions(ctx context.Context, path string, opts AnalyzeOption
 				}
 				general.Fields = appendFieldUnique(general.Fields, Field{Name: "Encoded_OperatingSystem/String", Value: operatingSystem})
 			}
-			vendor := uint32(0)
-			for _, track := range parsed.Tracks {
-				if v := track.handlerManufacturer; v != 0 {
-					if vendor == 0 {
-						vendor = v
-					} else if vendor != v {
-						vendor = ^uint32(0)
-					}
-				}
-			}
+			vendor := parsed.handlerManufacturer
 			if vendor != 0 && vendor != ^uint32(0) {
 				name := mp4VendorName(vendor)
 				library := name
@@ -942,7 +933,7 @@ func analyzeFileWithOptions(ctx context.Context, path string, opts AnalyzeOption
 					}
 					if fps > 0 {
 						value := strconv.FormatFloat(fps, 'f', 3, 64)
-						builder.Fill("FrameRate_Real", value, "Original frame rate", value+" FPS")
+						builder.Fill("FrameRate_Real", value, "Real frame rate", value+" FPS")
 					}
 					if ratio := firstNonEmpty(track.metadata.displayAspectRatio, parsed.metadata.displayAspectRatio); ratio != "" && trackFacts.Canonical("DisplayAspectRatio") == "" && !builder.HasStructured("DisplayAspectRatio") {
 						builder.Fill("DisplayAspectRatio", ratio, "Display aspect ratio", ratio)
@@ -1084,6 +1075,7 @@ func analyzeFileWithOptions(ctx context.Context, path string, opts AnalyzeOption
 			if len(parsed.attachments) > 0 {
 				generalExtras = append(generalExtras, jsonKV{Key: "Attachments", Val: strings.Join(parsed.attachments, " / ")})
 				general.Fields = appendFieldUnique(general.Fields, Field{Name: "Attachments", Value: strings.Join(parsed.attachments, " / ")})
+				insertCanonicalSeedTextBefore(&general, "Attachments", strings.Join(parsed.attachments, " / "))
 			}
 			if len(generalExtras) > 0 {
 				node := structuredObjectFromKVs(generalExtras)

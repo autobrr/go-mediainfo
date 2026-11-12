@@ -364,3 +364,33 @@ func TestCanonicalProjectionPolicySuppressesStreamOrder(t *testing.T) {
 		t.Fatal("legacy StreamOrder flag was not published")
 	}
 }
+
+func TestLegacyRenderingDoesNotDeriveGeneralTitle(t *testing.T) {
+	for _, kind := range []StreamKind{StreamVideo, StreamAudio} {
+		for _, edited := range []bool{false, true} {
+			report := Report{
+				General: Stream{Kind: StreamGeneral, JSON: map[string]string{"Title": "Caller title"}},
+				Streams: []Stream{{Kind: kind}},
+			}
+			if edited {
+				report.General.JSON["Title"] = "Before edit"
+				attachCanonicalStore(&report)
+				report.General.JSON["Title"] = "Caller title"
+				delete(report.General.JSON, "Movie")
+				delete(report.General.JSON, "Track")
+			}
+			before := captureLegacyReportState(report, false)
+			for _, output := range []string{RenderJSON([]Report{report}), RenderXML([]Report{report})} {
+				if strings.Contains(output, `"Movie":`) || strings.Contains(output, `"Track":`) || strings.Contains(output, "<Movie>") || strings.Contains(output, "<Track>") {
+					t.Fatalf("render derived a title destination: %s", output)
+				}
+				if !strings.Contains(output, "Caller title") {
+					t.Fatalf("render lost caller title: %s", output)
+				}
+			}
+			if after := captureLegacyReportState(report, false); !reflect.DeepEqual(before, after) {
+				t.Fatal("render changed public report")
+			}
+		}
+	}
+}
