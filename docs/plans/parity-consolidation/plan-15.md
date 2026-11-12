@@ -31,6 +31,8 @@ Use structural bounded ES descriptors and validated sample-entry geometry for MP
 
 ## Validation and evidence
 
+- [ ] Complete the [acceptance matrix and PR evidence checklist](README.md#acceptance-matrix-and-pr-checklist) for this plan’s existing criteria and the checks below.
+
 [Shared validation requirements](README.md#validation-and-evidence). Test malformed/nested descriptors and new parsers with fuzzing, H.263/Visual, MPEG/Ogg dispatch, PCM and explicit AAC SBR/PS; retain other codec-entry and co64 controls.
 
 ## Implementation and outcome history

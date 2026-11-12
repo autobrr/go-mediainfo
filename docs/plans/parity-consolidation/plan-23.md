@@ -26,6 +26,8 @@ Implement Type-1 AVI DV demultiplexing and its audio/video reporting as a dedica
 
 ## Validation and evidence
 
+- [ ] Complete the [acceptance matrix and PR evidence checklist](README.md#acceptance-matrix-and-pr-checklist) for this plan’s existing criteria and the checks below.
+
 [Shared validation requirements](README.md#validation-and-evidence). Require actual Type-1 DV plus Type-2/non-DV controls, malformed/truncated DIF bounds, extracted audio identity and analysis-to-report checks; fuzz the new parser.
 
 ## Implementation and outcome history

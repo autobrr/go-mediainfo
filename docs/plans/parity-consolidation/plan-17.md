@@ -35,6 +35,8 @@ Project parsed AC-3/E-AC-3 facts consistently through every existing producer. P
 
 ## Validation and evidence
 
+- [ ] Complete the [acceptance matrix and PR evidence checklist](README.md#acceptance-matrix-and-pr-checklist) for this plan’s existing criteria and the checks below.
+
 [Shared validation requirements](README.md#validation-and-evidence). Require changing/dual-mono metadata, independently checked statistics populations and actual dependent/JOC controls across reachable containers. Retain the established TS/BDAV comparison and non-JOC/zero/absent/public lifecycle tests.
 
 ## Implementation and outcome history

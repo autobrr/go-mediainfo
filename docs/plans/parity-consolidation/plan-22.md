@@ -27,6 +27,8 @@ Analyze AVC pictures/access units within the existing bound. Determine maximum s
 
 ## Validation and evidence
 
+- [ ] Complete the [acceptance matrix and PR evidence checklist](README.md#acceptance-matrix-and-pr-checklist) for this plan’s existing criteria and the checks below.
+
 [Shared validation requirements](README.md#validation-and-evidence). Test field/frame ordering, POC changes, bounded/partial picture populations and supported container integrations; keep independent physical counts unchanged.
 
 ## Implementation and outcome history
