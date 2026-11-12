@@ -3715,7 +3715,8 @@ func parseMatroskaTags(buf []byte, encodedDate, writingApp string) (map[uint64]s
 					}
 				}
 			}
-			if !target.present || target.blockAddID != 0 {
+			// Selector-only tags project into General, but are not video encoder fallbacks.
+			if !target.present || target.blockAddID != 0 || target.nonTrackSelector && trackUID == 0 {
 				pos = dataEnd
 				continue
 			}
@@ -3907,9 +3908,10 @@ func matroskaEncoderScore(value string) int {
 // matroskaTagTarget identifies the stream or file scope selected by a Tags
 // element's Target metadata.
 type matroskaTagTarget struct {
-	trackUID   uint64
-	blockAddID uint64
-	present    bool
+	nonTrackSelector bool
+	trackUID         uint64
+	blockAddID       uint64
+	present          bool
 }
 
 // parseMatroskaTag decodes one Tag, returning its target, raw values,
@@ -3969,6 +3971,8 @@ func parseMatroskaTagTargets(buf []byte) matroskaTagTarget {
 			if value, ok := readUnsigned(buf[dataStart:dataEnd]); ok {
 				target.trackUID = value
 			}
+		case mkvIDTagEditionUID, mkvIDTagChapterUID, mkvIDTagAttachmentUID:
+			target.nonTrackSelector = true
 		case mkvIDTagBlockAddIDValue:
 			if value, ok := readUnsigned(buf[dataStart:dataEnd]); ok {
 				target.blockAddID = value

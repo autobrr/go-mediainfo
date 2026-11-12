@@ -33,6 +33,34 @@ func TestMatroskaNonTrackSelectorsRetainTags(t *testing.T) {
 	}
 }
 
+func TestMatroskaSelectorEncoderScope(t *testing.T) {
+	for _, selector := range []uint64{0, mkvIDTagChapterUID, mkvIDTagEditionUID, mkvIDTagAttachmentUID} {
+		for _, uid := range []uint64{0, 42} {
+			var targets []byte
+			if selector != 0 {
+				targets = buildMatroskaElement(selector, encodeMatroskaUint(9))
+			}
+			if uid != 0 {
+				targets = append(targets, buildMatroskaElement(mkvIDTagTrackUID, encodeMatroskaUint(uid))...)
+			}
+			body := buildMatroskaElement(mkvIDTagTargets, targets)
+			body = append(body, buildMatroskaSimpleTag("ENCODER", "x264")...)
+			body = append(body, buildMatroskaSimpleTag("ENCODER_SETTINGS", "cabac=1")...)
+			encoders, settings, _, _, general, _ := parseMatroskaTags(buildMatroskaElement(mkvIDTag, body), "", "")
+			if uid == 0 && (general["ENCODER"] != "x264" || general["ENCODER_SETTINGS"] != "cabac=1") {
+				t.Fatalf("selector %x lost General values", selector)
+			}
+			if selector != 0 && uid == 0 {
+				if len(encoders) != 0 || len(settings) != 0 {
+					t.Errorf("selector %x leaked encoder fallback: %v %v", selector, encoders, settings)
+				}
+			} else if encoders[uid] != "x264" || settings[uid] != "cabac=1" {
+				t.Errorf("selector %x lost encoder scope %d", selector, uid)
+			}
+		}
+	}
+}
+
 func TestMatroskaDateNormalization(t *testing.T) {
 	for _, tt := range []struct{ in, want string }{
 		{"TBA", "TBA"}, {"DATE TBA", "DATE TBA"}, {"2026", "2026"}, {"2026-11", "2026-11"}, {"2026-11-12", "2026-11-12"},

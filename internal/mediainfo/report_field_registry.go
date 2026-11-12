@@ -142,7 +142,10 @@ func loadReportTables() map[reportTableVersion]*reportVersionTables {
 		row := newTable.Fields[name]
 		table.Fields[name] = row
 		table.Order[name] = anchor + offset
+		serialized := strings.ReplaceAll(name, "/", "_")
+		table.Order[serialized] = table.Order[name]
 		base := strings.Split(name, "/String")[0]
+		table.Aliases[serialized] = base
 		table.Aliases[row.Label] = base
 		old.Labels[base] = row.Label
 	}

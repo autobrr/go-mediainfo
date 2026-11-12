@@ -484,6 +484,20 @@ func FuzzDVDSPUAcceptance(f *testing.F) {
 }
 
 func FuzzMP4Metadata(f *testing.F) {
+	// User metadata walkers receive boxed meta children, unlike parseMP4Meta.
+	bmp := make([]byte, 58)
+	copy(bmp, "BM")
+	binary.LittleEndian.PutUint32(bmp[2:6], 58)
+	binary.LittleEndian.PutUint32(bmp[10:14], 54)
+	binary.LittleEndian.PutUint32(bmp[14:18], 40)
+	binary.LittleEndian.PutUint32(bmp[18:22], 1)
+	binary.LittleEndian.PutUint32(bmp[22:26], 1)
+	binary.LittleEndian.PutUint16(bmp[26:28], 1)
+	binary.LittleEndian.PutUint16(bmp[28:30], 24)
+	items := append(mp4MetaItemForTest("\xa9nam", 1, []byte(" Title ")), mp4MetaItemForTest("covr", 27, bmp)...)
+	var boxed bytes.Buffer
+	writeMP4Box(&boxed, "meta", mp4MetaForTest("mdir", nil, items, true))
+	f.Add(boxed.Bytes())
 	f.Add(mp4MetaForTest("mdta", []string{"com.android.capture.fps"}, mp4MetaItemForTest(mp4MetaIndexForTest(1), 23, []byte{0x41, 0xf0, 0, 0}), false))
 	f.Add([]byte{})
 	f.Fuzz(func(t *testing.T, data []byte) {

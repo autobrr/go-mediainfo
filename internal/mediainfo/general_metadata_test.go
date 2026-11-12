@@ -120,6 +120,18 @@ func TestFLACMetadataProjection(t *testing.T) {
 			}
 		}
 	}
+
+	for _, row := range []struct{ label, value string }{{"Track name/Position", "02"}, {"Track name/Total", "09"}, {"Part/Position", "01"}, {"Part/Total", "03"}} {
+		for _, check := range []struct{ output, want string }{
+			{RenderText(reports), padRight(row.label, textLabelWidth) + ": " + row.value + "\n"},
+			{RenderCSV(reports), row.label + "," + row.value + "\n"},
+			{RenderHTML(reports), "<tr><td>" + row.label + "</td><td>" + row.value + "</td></tr>"},
+		} {
+			if !strings.Contains(check.output, check.want) {
+				t.Errorf("missing exact row %q in %s", check.want, check.output)
+			}
+		}
+	}
 	json := RenderJSON(reports)
 	for _, fact := range []string{`"Title":"Song"`, `"Track":"Song"`, `"Track_Position":"02"`, `"Part_Position":"01"`, `"Part_Position_Total":"03"`, `"CUSTOM_FIELD":"kept"`} {
 		if !strings.Contains(json, fact) {
@@ -128,5 +140,15 @@ func TestFLACMetadataProjection(t *testing.T) {
 	}
 	if strings.Contains(json, `"Part":`) || strings.Contains(json, `"DISCNUMBER":`) {
 		t.Fatal("disc aliases leaked")
+	}
+}
+
+func TestAdoptedOperatingSystemSerializedAlias(t *testing.T) {
+	const alias = "Encoded_OperatingSystem_String"
+	if got := reportFieldIdentity(reportTables23, StreamGeneral, alias, ""); got != "Encoded_OperatingSystem" {
+		t.Errorf("identity = %q", got)
+	}
+	if got, want := reportFieldRank(reportTables23, StreamGeneral, alias), reportFieldRank(reportTables23, StreamGeneral, "Encoded_OperatingSystem/String"); got != want {
+		t.Errorf("rank = %d, want %d", got, want)
 	}
 }
