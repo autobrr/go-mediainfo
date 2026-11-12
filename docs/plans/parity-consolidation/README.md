@@ -2,7 +2,7 @@
 
 This directory coordinates the 24 implementation groups and a separate final review-and-cleanup stage in this parity initiative. It applies to PRs and task briefs that explicitly opt into the initiative. Other contributors and unrelated work have no plan-document requirement.
 
-The owner follows and maintains these files as the active initiative plan while [PR #259](https://github.com/autobrr/go-mediainfo/pull/259) remains open. Keep updates on that PR's branch; this operational use does not mean the documentation is merged or authorize merging it.
+[PR #259](https://github.com/autobrr/go-mediainfo/pull/259) merged this living plan into main. Maintain it through scoped updates based on current main; do not reopen its merged branch. A verified implementation merge authorizes reconciling the affected plan and starting the next eligible stage, subject to existing scope, dependency and validation safeguards. Documentation updates do not authorize merging implementation PRs.
 
 The files own grouping, execution order and acceptance mapping. GitHub issues and their current discussions remain authoritative for scope decisions and live state; native issue dependencies remain the actual blockers. Repository [AGENTS guidance](../../../AGENTS.md), [ADR 0001](../../adr/0001-parity-baseline-and-output-scope.md) and [ADR 0002](../../adr/0002-dvd-parity-reference.md) retain their authority, including the existing deliberate-difference registry. This directory does not create another registry or change output policy.
 
@@ -59,7 +59,7 @@ Implement one plan at a time. A shared contract can be established before a cons
 
 The working sequence preserves the approved contract order:
 
-1. Reuse [Plan 24's existing #252 result](plan-24.md); reuse [Plan 01's merged #256 field/alias/visibility contract](plan-01.md), preserving its documented limits and the open #260 producer-order follow-up in [PR #262](https://github.com/autobrr/go-mediainfo/pull/262). The linked PRs provide current state.
+1. Reuse [Plan 24's existing #252 result](plan-24.md); reuse [Plan 01's merged #256 field/alias/visibility contract](plan-01.md), preserving its documented limits and the merged #260 producer-order follow-up in [PR #262](https://github.com/autobrr/go-mediainfo/pull/262). The linked PRs provide current state.
 2. Work through the foundational families sequentially: [02 metadata](plan-02.md), [03 language](plan-03.md), [04 encoder](plan-04.md), [05 geometry](plan-05.md), [06 colour/HDR](plan-06.md), [18 FLAC](plan-18.md), [21 brands/conformance](plan-21.md).
 3. Establish [10 source/rate/timing](plan-10.md) before [09 Matroska timing](plan-09.md). Complete [08 MPEG state](plan-08.md) and [07 AVC/HEVC facts](plan-07.md) after their geometry/colour/encoder contracts, then [17 AC-3](plan-17.md) and [20 format settings](plan-20.md).
 4. Build [19 relative delay](plan-19.md), [12 DVD identity](plan-12.md), [16 AVI/MPEG audio](plan-16.md) and [22 AVC picture analysis](plan-22.md) on those contracts. Then integrate [13 captions](plan-13.md), [14 Other/timecode/chapters](plan-14.md) and [15 codec sample entries](plan-15.md) using the required timing, addressing and framing interfaces.
@@ -74,7 +74,7 @@ The native #53 → #52 blocker is still recorded even though [the design discuss
 
 For this initiative's PRs and task briefs:
 
-1. Reference the relevant stable plan file and the current issue discussions. Link the exact plan revision followed with a commit-pinned permalink; on this active but unmerged docs branch, identify it as such rather than using a nonexistent main link.
+1. Reference the relevant stable plan file and the current issue discussions. Link the exact plan revision followed with a commit-pinned permalink; identify proposed changes as unmerged until verified in main.
 2. State the full or partial acceptance delivered per issue. Use closing syntax only when the closing owner's complete accepted scope and cross-plan contributions pass. #58 stays partial until Plans 01/03/10 are integrated; shared infrastructure is not closure.
 3. Record the tested candidate/base revisions, sanitized evidence, coverage and limits. Keep earlier tested revisions separate from final-delta checks. A merge outcome is not a release.
 4. Update the affected plan alongside implementation where practical. Record new evidence, justified scope/dependency revisions and the canonical issue decision that supports each consequential change. Raise ambiguous criteria as a decision rather than quietly changing them.
@@ -95,6 +95,29 @@ Write issue-specific regressions first, preserve meaningful public reconstructio
 Public evidence consists of sanitized sample IDs, necessary numeric results, tested identities, checks and limitations linked from the owning issue/PR. Media, filenames, paths, release names, private metadata and the sample map remain private. A plan or issue inventory is not a fresh media reproduction. Subset success is not a full-corpus or complete-native-parity claim. The historical October count is 3,173 and #261 records 403 music files; verify each current manifest rather than treating those counts as proof of execution.
 
 Assess substantive automated and maintainer feedback against source, policy and actual evidence; record justified fixes or dispositions. Revalidate behavior changes before publication. Manual review scheduling follows the current initiative owner instructions; these docs do not request a bot review. Request maintainer review only after the applicable validation, exact-head CI and substantive automated-feedback work, including any authorized manual prompts, are settled.
+
+### Acceptance matrix and PR checklist
+
+Apply [Output-change verification](../../../AGENTS.md#output-change-verification) to each implementation and substantive review batch. Before implementing, map the plan's existing acceptance criteria to concrete checks; extend that map when a review exposes a missing boundary. Keep the full private matrix with the run receipts and publish only a concise sanitized summary in the owning PR.
+
+| Behavior / accepted criterion | Entry point and witness/control | Reference / accepted difference | Formats and exact assertions | Tested candidate and result |
+| --- | --- | --- | --- | --- |
+| One bounded requirement | Actual parser/API path; original ID or explicitly generated fixture | Pinned version/source and reason for any difference | Identity, value, count, order and preservation case | Source/tree/executable; passed, failed, blocked or unrun |
+
+A row is complete only when its reported checks actually ran on the identified content or carry an explicit gap/disposition. Test names, inventory membership and a green aggregate check are not evidence of every assertion. Expand only meaningful affected combinations, not a product of every input. Keep precise row helpers and small sanitized fixtures in existing tests rather than building another harness solely for this checklist.
+
+Before publishing or updating a plan's PR, record:
+
+- [ ] Accepted scope and meaningful negative/preservation cases map to actual parser/finalization/projection paths; public edits and render order are covered where affected.
+- [ ] Applicable formats have exact identity/value/cardinality/order assertions, with legitimate duplicates and independent parser/tag facts preserved.
+- [ ] Targeted final-content comparisons against the pinned reference and prior candidate/baseline are both executed; differences have evidence-backed dispositions.
+- [ ] Original October and music witness coverage, generated/derived evidence, source/reference/executable identities, actual argv/exits and all access/execution gaps are separate and accurate.
+- [ ] Regressions, applicable repository checks and independent review cover the final change; reused evidence and failed/interrupted attempts are clearly identified.
+- [ ] AGENTS/ADR changes or unchanged rationale are explained. No new output convention, scope approval, reference policy or native blocker is inferred from passing tests.
+
+This is a per-PR evidence checklist, not a replacement for the [fresh complete-corpus gate](final-review-and-cleanup.md#fresh-complete-corpus-gate), and not a resolution of #81's pending decisions. A documentation-only update checks its guidance and links; it does not claim a new parser test or corpus run.
+
+The [Plan 02 trial](plan-02.md#testing-guidance-trial) demonstrated why these boundaries matter: unchanged JSON hid a raw-row duplicate; candidate-only equality retained it; constructed seeds missed actual parser staging; and CLI captures did not exercise edited-report lazy XML. Preserve those distinctions for subsequent plans rather than treating the trial's counts as universal thresholds.
 
 ## Coordination outside closing ownership
 
@@ -123,3 +146,5 @@ The separate final follow-up PR owns cleanup after all 24 implementation groups.
 2026-11-12: adopted PR #259 as the active living plan while it remains open. Reconciled Plan 01 with #256's verified merge at `283023f3b755da7adb2632c655f01f2f4d63d1c2`, retained its bounded validation history and the open #260 follow-up, and recorded the delivered partial #58 contribution in Plan 10. No new implementation, corpus run, issue closure or validation-policy decision is implied.
 
 2026-11-12: linked Plan 02's ready PR #263 and Plan 01's separate draft #262 follow-up, preserving closing ownership, open-PR exceptions and snapshot-specific validation limits. Both implementation PRs remain unmerged; the next numbered stage waits for the owner's Plan 02 merge and fresh reconciliation. No validation-policy decision or final full-corpus gate is implied.
+
+2026-11-12: rolled the approved Plan 02 testing trial into durable output-change guidance, a shared acceptance matrix/checklist and remaining-plan validation links. Reconciled the verified merges of #259/#262. This documentation update does not merge #263, start Plan 03, resolve #81 or claim a new corpus run.

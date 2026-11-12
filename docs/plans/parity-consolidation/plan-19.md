@@ -29,6 +29,8 @@ Quantize supported delays once and derive relative delay from applicable inputs.
 
 ## Validation and evidence
 
+- [ ] Complete the [acceptance matrix and PR evidence checklist](README.md#acceptance-matrix-and-pr-checklist) for this plan’s existing criteria and the checks below.
+
 [Shared validation requirements](README.md#validation-and-evidence). Test missing/zero/negative/overflow inputs, rounding boundaries, video absence and real late-start timelines across supported containers and public rebuilding.
 
 ## Implementation and outcome history

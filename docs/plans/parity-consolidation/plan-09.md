@@ -34,6 +34,8 @@ Preserve EBML string/DocType identity, WebM-specific estimates, explicit Matrosk
 
 ## Validation and evidence
 
+- [ ] Complete the [acceptance matrix and PR evidence checklist](README.md#acceptance-matrix-and-pr-checklist) for this plan’s existing criteria and the checks below.
+
 [Shared validation requirements](README.md#validation-and-evidence). Test valid/missing DefaultDuration and tags, unknown EBML strings, WebM estimates, chapter displays and independent per-track durations; use shared-rate controls from Plan 10.
 
 ## Implementation and outcome history

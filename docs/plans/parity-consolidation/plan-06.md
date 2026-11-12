@@ -32,6 +32,8 @@ Unify colour namespaces, explicit presence, HDR component alignment, luminance p
 
 ## Validation and evidence
 
+- [ ] Complete the [acceptance matrix and PR evidence checklist](README.md#acceptance-matrix-and-pr-checklist) for this plan’s existing criteria and the checks below.
+
 [Shared validation requirements](README.md#validation-and-evidence). Require actual Dolby Vision and generic-HDR controls, absent/unspecified fields, partial combined components and fractional luminance; distinguish generated controls from original witnesses.
 
 ## Implementation and outcome history

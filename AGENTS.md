@@ -36,6 +36,19 @@ Never put release names or media-library paths in anything that lands on GitHub:
 - Disk politeness on the media host: `ionice -c3 nice -n10`, `timeout 300`, sample a few files per type, no full-tree scans. UHD and BDAV probes have stalled the host in kernel D state before.
 - MediaInfoLib source is checked out at `~/github/oss/MediaInfoLib`. It is newer than the v23.04 binary. Read it to settle what official does. It is faster than running the binary and works offline.
 
+### Output-change verification
+
+For parser, metadata, projection and public-report changes, keep a compact acceptance matrix in the task evidence. For each changed behavior, record the actual entry point, original witness/control or generated fixture, applicable reference and deliberate difference, output formats, exact assertions, tested source/tree/executable, and result or gap. Keep private media and raw captures outside the repository. This is an evidence record, not a new output policy or test framework.
+
+- Trace the real path from parsing and finalization to each affected projection. A manually assembled seed or helper test does not prove that `AnalyzeFile` stages the same facts. Where public reconstruction, edits or lazy projections are affected, exercise that API path and relevant render orders too; CLI captures alone do not cover it.
+- Assert stream/field identity, value, presence, cardinality and required order, not just a label substring or successful serialization. Keep parser-owned facts separate from dynamic tags. Preserve legitimate repeated labels/values; do not globally deduplicate display rows. Parse structured output with checks that do not silently hide duplicate properties.
+- Use small reusable exact-row/count assertions and sanitized pinned-reference fixtures where they make the contract clear. Generated playable fixtures supplement original witnesses, not replace them. Keep deliberate differences explicit under the ADRs rather than fitting expectations to the candidate.
+- Select witnesses for the changed behavior in every affected format, not only files whose JSON changed. On the final candidate, compare targeted output independently against the applicable pinned reference **and** the prior candidate/baseline. Equality with a prior candidate can preserve an old bug; reference parity alone can miss a new regression or erase an accepted difference.
+- Record actual argv, normalization, source/reference identities, exit status, output hashes and coverage per candidate. Preserve failed and interrupted receipts. An existing output file or reconstructed exit status is not an observed successful execution. Keep inaccessible, missing, changed and unexecuted witnesses explicit; do not reduce the inventory or claim full coverage from a subset.
+- After a substantive correction, rerun the affected boundary and preservation controls on the frozen final content. Reuse only evidence whose inputs and runtime code remain unchanged, stating that boundary; do not combine earlier runs into an invented single-head sweep. Keep the repository's existing tests, vet, fuzz and independent-review requirements.
+
+These checks do not alter reference versions, approved scope, protected behavior or the separate initiative-wide final full-corpus gate. The parity initiative adds its own linked acceptance matrix and PR checklist in its shared validation section.
+
 ## Deliberate differences from official v23.04
 
 Do not change these back to official. Each line is a measured fact, a newer upstream convention, or a safety rule, except the specific maintainer-approved DVD gap convention in ADR 0002. Before you add a line, read `docs/adr/0001-parity-baseline-and-output-scope.md`: it sets when v26.10 behavior wins and which outputs count.

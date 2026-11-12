@@ -32,6 +32,8 @@ Implement MP4 source versus presentation timing as one pipeline: stts classifica
 
 ## Validation and evidence
 
+- [ ] Complete the [acceptance matrix and PR evidence checklist](README.md#acceptance-matrix-and-pr-checklist) for this plan’s existing criteria and the checks below.
+
 [Shared validation requirements](README.md#validation-and-evidence). Test exact stts tuples, terminal samples, zero/absent fields, trimmed/source byte ownership, longest represented stream and all four #58 subcases through public projections.
 
 ## Implementation and outcome history

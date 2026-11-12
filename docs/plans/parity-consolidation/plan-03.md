@@ -33,7 +33,11 @@ Use one primary-language normalizer and versioned name/display policy, with Maci
 
 ## Validation and evidence
 
+- [ ] Complete the [acceptance matrix and PR evidence checklist](README.md#acceptance-matrix-and-pr-checklist) for this plan’s existing criteria and the checks below.
+
 [Shared validation requirements](README.md#validation-and-evidence). Test all imported mappings, whole-tag case, suffixes, undefined/unknown members, Macintosh gaps and elng order/bounds. Compare non-DVD language witnesses with v23.04 and DVD/backup controls with v26.10; keep corrected code-128 evidence distinct from parity.
+
+Before starting this next stage, map language inputs through actual container ingress, normalization, stream/Menu assignment and output projection. Include Macintosh/elng ordering and bounds, whole-tag suffix spelling versus friendly names, positional unknown Menu members, and DVD backup/high-byte controls already required above. Check exact language identity/value and member count/order, not merely whether a language name appears somewhere. Where the changed path supports public Report reconstruction or edits, check JSON/XML and friendly/raw projection after those operations; a normalizer-only fixture cannot establish container or lazy-projection behavior. Keep code-128 correction evidence separate from convention parity. This validation refinement adds no language taxonomy or implementation scope and does not start Plan 03 while Plan 02 remains active.
 
 ## Implementation and outcome history
 

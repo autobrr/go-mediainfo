@@ -28,6 +28,8 @@ Share typed format/brand tables across ftyp identity, valid General-only HEIF it
 
 ## Validation and evidence
 
+- [ ] Complete the [acceptance matrix and PR evidence checklist](README.md#acceptance-matrix-and-pr-checklist) for this plan’s existing criteria and the checks below.
+
 [Shared validation requirements](README.md#validation-and-evidence). Test significant-space/duplicate brands, absent moov, valid/invalid item metadata and extensions; verify General-only counts and schema without claiming image decoding.
 
 ## Implementation and outcome history

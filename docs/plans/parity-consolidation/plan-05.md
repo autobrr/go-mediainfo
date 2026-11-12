@@ -33,6 +33,8 @@ Keep separate geometry evidence for container, coded and visible dimensions. App
 
 ## Validation and evidence
 
+- [ ] Complete the [acceptance matrix and PR evidence checklist](README.md#acceptance-matrix-and-pr-checklist) for this plan’s existing criteria and the checks below.
+
 [Shared validation requirements](README.md#validation-and-evidence). Test square/non-square pasp, rotation, dimension conflicts and absent density prerequisites. Recompare C000232/Theora plus geometry controls without changing selected bitrate to fit text.
 
 ## Implementation and outcome history

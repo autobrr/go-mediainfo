@@ -21,6 +21,8 @@ Review the combined initiative changes and their public API, parser, projection,
 
 Address supported findings minimally, preserve required behavior and obtain independent review. Record each consequential finding's fix or evidence-backed disposition. A cleanup label does not authorize removing necessary tests, parser tables, durable guidance or safeguards, or changing unrelated policy.
 
+The [shared acceptance matrix and PR checklist](README.md#acceptance-matrix-and-pr-checklist) also apply to this cumulative candidate. Include actual entry-point and relevant edited-report/render-order probes alongside whole-file captures; a full CLI sweep does not by itself exercise public API reconstruction. Preserve exact identity/value/cardinality/order checks and legitimate duplicates. These targeted checks supplement, never replace, the fresh inventory-wide gate below.
+
 ## Fresh complete-corpus gate
 
 The gate requires new candidate executions on **all available original media files in both corpora**, with every inventory entry accounted for. Adding the music corpus must not replace or reduce October coverage; unavailable entries remain explicit gaps and cannot count as a complete all-files pass. Selected witnesses, synthetic substitutes, playable derivatives, cached prior outputs and earlier successful sweeps cannot satisfy it.
