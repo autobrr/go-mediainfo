@@ -2,6 +2,8 @@
 
 This directory coordinates the 24 implementation groups and a separate final review-and-cleanup stage in this parity initiative. It applies to PRs and task briefs that explicitly opt into the initiative. Other contributors and unrelated work have no plan-document requirement.
 
+The owner follows and maintains these files as the active initiative plan while [PR #259](https://github.com/autobrr/go-mediainfo/pull/259) remains open. Keep updates on that PR's branch; this operational use does not mean the documentation is merged or authorize merging it.
+
 The files own grouping, execution order and acceptance mapping. GitHub issues and their current discussions remain authoritative for scope decisions and live state; native issue dependencies remain the actual blockers. Repository [AGENTS guidance](../../../AGENTS.md), [ADR 0001](../../adr/0001-parity-baseline-and-output-scope.md) and [ADR 0002](../../adr/0002-dvd-parity-reference.md) retain their authority, including the existing deliberate-difference registry. This directory does not create another registry or change output policy.
 
 The approved grouping has 170 distinct closing targets, allocated once across 24 stable plan IDs. Cross-plan contributions use ordinary references until the closing owner's full requirements pass. The target was 23 new implementation PRs plus existing #252; this documentation PR and the separate final review-and-cleanup PR sit outside that implementation count. Change a grouping only for a documented scope/dependency/review reason.
@@ -57,7 +59,7 @@ Implement one plan at a time. A shared contract can be established before a cons
 
 The working sequence preserves the approved contract order:
 
-1. Reuse [Plan 24's existing #252 result](plan-24.md); establish [Plan 01's field/alias/visibility contract and follow #256](plan-01.md). The linked PRs provide current state.
+1. Reuse [Plan 24's existing #252 result](plan-24.md); reuse [Plan 01's merged #256 field/alias/visibility contract](plan-01.md), preserving its documented limits and the remaining #260 producer-order follow-up. The linked PRs provide current state.
 2. Work through the foundational families sequentially: [02 metadata](plan-02.md), [03 language](plan-03.md), [04 encoder](plan-04.md), [05 geometry](plan-05.md), [06 colour/HDR](plan-06.md), [18 FLAC](plan-18.md), [21 brands/conformance](plan-21.md).
 3. Establish [10 source/rate/timing](plan-10.md) before [09 Matroska timing](plan-09.md). Complete [08 MPEG state](plan-08.md) and [07 AVC/HEVC facts](plan-07.md) after their geometry/colour/encoder contracts, then [17 AC-3](plan-17.md) and [20 format settings](plan-20.md).
 4. Build [19 relative delay](plan-19.md), [12 DVD identity](plan-12.md), [16 AVI/MPEG audio](plan-16.md) and [22 AVC picture analysis](plan-22.md) on those contracts. Then integrate [13 captions](plan-13.md), [14 Other/timecode/chapters](plan-14.md) and [15 codec sample entries](plan-15.md) using the required timing, addressing and framing interfaces.
@@ -72,7 +74,7 @@ The native #53 → #52 blocker is still recorded even though [the design discuss
 
 For this initiative's PRs and task briefs:
 
-1. Reference the relevant stable plan file and the current issue discussions. Link the exact plan revision followed with a commit-pinned permalink; on a proposed docs branch identify it as unmerged rather than using a nonexistent main link.
+1. Reference the relevant stable plan file and the current issue discussions. Link the exact plan revision followed with a commit-pinned permalink; on this active but unmerged docs branch, identify it as such rather than using a nonexistent main link.
 2. State the full or partial acceptance delivered per issue. Use closing syntax only when the closing owner's complete accepted scope and cross-plan contributions pass. #58 stays partial until Plans 01/03/10 are integrated; shared infrastructure is not closure.
 3. Record the tested candidate/base revisions, sanitized evidence, coverage and limits. Keep earlier tested revisions separate from final-delta checks. A merge outcome is not a release.
 4. Update the affected plan alongside implementation where practical. Record new evidence, justified scope/dependency revisions and the canonical issue decision that supports each consequential change. Raise ambiguous criteria as a decision rather than quietly changing them.
@@ -116,3 +118,6 @@ The separate final follow-up PR owns cleanup after all 24 implementation groups.
 2026-11-08: clarified initiative setup and terms, centralized shared rules and cleanup acceptance, and made the issue-required deliberate-difference records explicit. Validation-policy questions remain pending their separate resolution.
 
 2026-11-12: included #261's separate music corpus alongside the October inventory for targeted checks and the final campaign. Existing issue scope, #229's start hold and unresolved #81 gate, reference-recapture and cadence decisions remain unchanged. No new corpus run is claimed by this documentation update.
+
+
+2026-11-12: adopted PR #259 as the active living plan while it remains open. Reconciled Plan 01 with #256's verified merge at `283023f3b755da7adb2632c655f01f2f4d63d1c2`, retained its bounded validation history and the open #260 follow-up, and recorded the delivered partial #58 contribution in Plan 10. No new implementation, corpus run, issue closure or validation-policy decision is implied.

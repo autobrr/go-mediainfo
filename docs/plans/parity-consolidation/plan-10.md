@@ -37,3 +37,5 @@ Implement MP4 source versus presentation timing as one pipeline: stts classifica
 ## Implementation and outcome history
 
 2026-11-02: migrated the approved consolidation grouping; preserved closing ownership and current issue decisions.
+
+2026-11-12: [PR #256](https://github.com/autobrr/go-mediainfo/pull/256) merged at [283023f](https://github.com/autobrr/go-mediainfo/commit/283023f3b755da7adb2632c655f01f2f4d63d1c2), delivering Plan 01's #58 serial/display and near-minute-formatting contribution. This does not complete Ogg language (Plan 03) or MP4 last/source-last-frame timing (this plan); #58 remains open and partial. Revalidate all four subcases at final integration rather than treating the merged contribution as final closure.

@@ -40,6 +40,8 @@ Close #50 with #107 rather than a separate FLAC patch. Include the small produce
 
 ## Acceptance criteria
 
+These checked items record #256's accepted delivery and tested cases, not exhaustive producer coverage. The remaining MP3 producer-order case is tracked below in #260.
+
 - [x] Verify every issue's actual field binding, not only the registry. Preserve canonical numeric facts and explicit dynamic-extra options.
 - [x] Use selected version/kind tables for identity, aliases, order and visibility. Keep producer tag/fill order and allowed duplicate multiplicity.
 - [x] Preserve public Report rebuilding, mutation, round-trip and idempotent behavior. #58 serial/formatting is a partial contribution only.
@@ -54,10 +56,23 @@ Close #50 with #107 rather than a separate FLAC patch. Include the small produce
 
 [Shared validation requirements](README.md#validation-and-evidence). Retain ordering/duplicates/numeric-type and public mutation/rebuild regressions. Revalidate affected issue witnesses and shared projection controls after review changes; distinguish each tested tree and subset.
 
-[PR #256](https://github.com/autobrr/go-mediainfo/pull/256) records the acceptance and validation limits. The [maintainer response](https://github.com/autobrr/go-mediainfo/pull/256#issuecomment-6572958573) covers the 84-witness sweep on its identified earlier tree; the [final follow-up](https://github.com/autobrr/go-mediainfo/pull/256#discussion_r4440686214) covers 32 affected witnesses and shared controls in 12 configurations, all 384 before/after profiles byte-identical. [Exact-head CI](https://github.com/autobrr/go-mediainfo/actions/runs/41419735655) passed. These are separate tested revisions, not a final-head full-corpus run. Retain disclosed WAV/Go-Other/exact-TS-JOC real-witness limits, synthetic-only equal-sampling trigger and existing output-dialect/producer gaps. Raw captures and private mappings are not repository artifacts.
+[PR #256](https://github.com/autobrr/go-mediainfo/pull/256) records the tested revisions, checks and limitations. Keep these historical stages separate:
+
+- The [earlier maintainer response](https://github.com/autobrr/go-mediainfo/pull/256#issuecomment-6572958573) covers an 84-file witness/control sweep on its identified tree. The [55b7a52 follow-up](https://github.com/autobrr/go-mediainfo/pull/256#discussion_r4440686214) covers 32 affected witnesses and shared controls in 12 configurations, with all 384 before/after profiles byte-identical.
+- The later [b30a90c correction](https://github.com/autobrr/go-mediainfo/commit/b30a90c8504e864a8770effc2fe466478152ddcb) records 24 original witnesses/controls in 12 configurations plus two AVI controls in their six available frozen-reference configurations, for 300 captures per Go build. The earlier r2 tree separately covered 84 originals in 12 configurations. Neither is a sweep of the final merged head.
+- The PR's maintainer follow-up for [4caa6fa](https://github.com/autobrr/go-mediainfo/commit/4caa6fa7670074c4037ddf80d59d095d430e7312) through [7f6d5db](https://github.com/autobrr/go-mediainfo/commit/7f6d5db379e2b608e880f906f042e5369111bc95) reports 57 real-file checks for Theora presentation. It does not establish that these files belong to the October corpus.
+- Final-head [CI at 5e61a5a](https://github.com/autobrr/go-mediainfo/actions/runs/43118228064) passed. The final commits preserve compound-format descriptions after unrelated public edits, raw stream-size display without a known total file size, and caller edits/deletion of Format profile. Their regression tests and CI are distinct from the earlier corpus captures; no complete merged-head corpus sweep is claimed.
+
+Retain the earlier sweep's disclosed WAV/Go-Other/exact-TS-JOC real-witness limits, synthetic-only triggers and existing output-dialect/producer gaps. Later checks do not retroactively fill those coverage gaps. Raw captures and private mappings are not repository artifacts.
 
 ## Implementation and outcome history
 
-Delivered in open [PR #256](https://github.com/autobrr/go-mediainfo/pull/256) at [55b7a52](https://github.com/autobrr/go-mediainfo/commit/55b7a523317384d5d8d608f731605dd3c4aff402); not merged or released at this reconciliation. Its 25 closing targets remain issue-tracker state, not automatic closures here. #58 is partial; #81 remains unresolved.
+[PR #256](https://github.com/autobrr/go-mediainfo/pull/256) merged on 2026-11-11 at [283023f](https://github.com/autobrr/go-mediainfo/commit/283023f3b755da7adb2632c655f01f2f4d63d1c2), incorporating final head [5e61a5a](https://github.com/autobrr/go-mediainfo/commit/5e61a5a97f1c49eebab91f4cbd9608c26b3ce60e). Reuse that implementation as the foundation for later plans. Merge is not evidence of release inclusion or complete native parity.
 
-2026-11-02: reconciled delivered-but-unmerged Plan 01, maintainer follow-ups and final affected-subset evidence; retained later-plan producer boundaries.
+[#260](https://github.com/autobrr/go-mediainfo/issues/260) remains an open MP3 ID3 producer-order follow-up to #226's accepted requirement. #256 did not change the map-to-extra producer path. [Retained music-corpus evidence](https://github.com/autobrr/go-mediainfo/issues/260#issuecomment-6811500432) verifies 122 reference repeat sets were stable and 121 Go sets varied at merged commit 283023f; this is verification of existing captures, not a new candidate run or fix. Publisher placement is a separate difference. Keep #260 visible without adding it to the original 25 closing targets, reopening #226 or inferring new implementation authority from this record.
+
+The #58 serial/display and near-minute-formatting contribution is delivered; Ogg language and MP4 last/source-last-frame timing remain with Plans 03 and 10. #58 remains partial and #81 remains unresolved.
+
+2026-11-02: reconciled delivered-but-unmerged Plan 01, maintainer follow-ups and affected-subset evidence; retained later-plan producer boundaries.
+
+2026-11-12: recorded #256's verified merge and later follow-ups, separated historical validation from exact-head CI, and retained the open #260 producer gap and partial #58 scope.
