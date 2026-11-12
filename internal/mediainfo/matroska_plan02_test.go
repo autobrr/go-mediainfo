@@ -310,6 +310,38 @@ func TestMatroskaDynamicTagPreservesParserTextRow(t *testing.T) {
 		if extra == nil || !strings.Contains(structuredNodeText(*extra), `"`+tt.key+`":"tag-value"`) {
 			t.Errorf("%s tag value lost", tt.name)
 		}
+		// Exercise both structured adapters after an unrelated public edit.
+		refreshCanonicalCompatibilitySnapshot(&stream)
+		structuredReport := Report{General: Stream{Kind: StreamGeneral, Fields: []Field{{Name: "Format", Value: "Matroska"}}}}
+		if tt.kind == StreamGeneral {
+			structuredReport.General = stream
+		} else {
+			structuredReport.Streams = []Stream{stream}
+		}
+		attachCanonicalStore(&structuredReport)
+		for _, mutated := range []bool{false, true} {
+			if mutated {
+				structuredReport.General.Fields = append(structuredReport.General.Fields, Field{Name: "Caller field", Value: "changed"})
+				target := &structuredReport.General
+				if tt.kind != StreamGeneral {
+					target = &structuredReport.Streams[0]
+				}
+				target.JSONRaw["extra"] = `{"` + tt.key + `":"tag-value","CALLER":"changed"}`
+			}
+			jsonBefore := RenderJSON([]Report{structuredReport})
+			xmlOutput := RenderXML([]Report{structuredReport})
+			for key, value := range map[string]string{tt.name: tt.value, tt.key: "tag-value"} {
+				if strings.Count(xmlOutput, "<"+key+">") != 1 || strings.Count(xmlOutput, "<"+key+">"+value+"</"+key+">") != 1 {
+					t.Errorf("kind=%v mutated=%v XML identity %s lost or duplicated: %s", tt.kind, mutated, key, xmlOutput)
+				}
+				if strings.Count(jsonBefore, `"`+key+`":"`+value+`"`) != 1 {
+					t.Errorf("kind=%v mutated=%v JSON identity %s lost: %s", tt.kind, mutated, key, jsonBefore)
+				}
+			}
+			if after := RenderJSON([]Report{structuredReport}); after != jsonBefore {
+				t.Errorf("XML projection changed JSON: %s", after)
+			}
+		}
 		if tt.kind == StreamGeneral {
 			refreshCanonicalCompatibilitySnapshot(&stream)
 			r := Report{General: stream}

@@ -328,10 +328,10 @@ func ensureLegacyXMLProjection(store *fieldStore) {
 		if store.legacyGeneral == nil {
 			return
 		}
-		report := Report{Ref: store.ref, General: cloneLegacyStream(*store.legacyGeneral)}
+		report := Report{Ref: store.ref, General: legacyStructuredTagNames(cloneLegacyStream(*store.legacyGeneral))}
 		report.Streams = make([]Stream, len(store.legacyStreams))
 		for index, stream := range store.legacyStreams {
-			report.Streams[index] = cloneLegacyStream(stream)
+			report.Streams[index] = legacyStructuredTagNames(cloneLegacyStream(stream))
 		}
 		if len(store.streams) > 0 && !store.streams[0].DirectCanonical {
 			appendLegacyStructuredFields(store, 0, buildJSONGeneralFields(report), structuredProjectionXML)
