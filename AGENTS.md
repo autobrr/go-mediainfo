@@ -42,6 +42,8 @@ Do not change these back to official. Each line is a measured fact, a newer upst
 
 DVD uses the reference in `docs/adr/0002-dvd-parity-reference.md`. Keep evidence-backed corrections and safety rules even when that reference disagrees.
 
+- Safety and adopted cover recognition: bounded MP4 BMP cover headers are recognized without decoding pixels; valid BMP covers do not produce the unknown-cover fallback. JPEG/PNG handling is unchanged. Issue #24.
+- Newer upstream convention: MP4 Android version metadata uses the v26.10 operating-system fields, and recognized ISO 6709 locations use its hemisphere display convention. Malformed location values remain raw; capture frame rate is separate from measured timing. Issue #233.
 - Safety: hostile input gets the limits, omissions and escaping in the "Embedded metadata safety" section of `README.md`. These protect against denial of service and output injection, and `output_safety_test.go` pins them.
 - Newer upstream convention: all DVD output uses the v26.10 reference, including title-set joining and IFO reports. v26.10 preserves IFO stream languages after VOB merge. Wrong upstream facts are still corrected with evidence and tests; this is a reference decision, not a claim of completed parity. ADR 0002, issue #248.
 - Maintainer-approved convention: for incomplete DVD title sets, continuation retains existing numbered members after a gap. v26.10 sometimes stops before a gap and sometimes selects later members; its sizes are accurate for its selection. Keep go-mediainfo's existing selection rather than reproducing that inconsistent convention. ADR 0002, issue #248.
@@ -59,6 +61,7 @@ DVD uses the reference in `docs/adr/0002-dvd-parity-reference.md`. Keep evidence
 - Measured fact: HDR fields that v23.04 does not fill: `MasteringDisplay_Luminance_Min`, `MasteringDisplay_Luminance_Max`, `HDR_Format_Compression`, and `HDR_Format_Compatibility` on MP4. Issue #67.
 - Measured fact: AC-3 metadata (dialnorm, compr, dynrng and the others) shows in text, and JSON has `cmixlev`, `surmixlev`, `mixlevel`, `roomtyp`, `dmixmod`, the `loro` and `ltrt` mix levels, `dialnorm_Count` and `adconvtyp`. v23.04 hides these values, and v26 shows them. Issue #78.
 - Newer upstream convention: aspect ratio names `2.39:1` (v23.04 shows `2.40:1` for 2.37 to 2.45) and `9:16`. These are the standard names. Issue #68.
+- Newer upstream convention: Vorbis comment DISCNUMBER is `Part_Position`, not `Part`, for standalone FLAC, Ogg FLAC and Ogg Vorbis. Disc totals use `Part_Position_Total`; preserve textual leading zeros. Issue #234.
 - Newer upstream convention: titles are not joined as "X / X" when the two values are equal, and spaces at the start and the end are trimmed. Issue #73.
 - Measured fact: `vp09` in MP4 shows as VP9, and Matroska text shows AV1 film grain. v23.04 shows the raw code and skips the film grain line. Issue #71.
 - Measured fact: `ServiceKind` comes from the Matroska hearing impaired, original and commentary flags. v23.04 does not read the flags, and v26.05 does. Issue #75.

@@ -302,6 +302,7 @@ func reportToFieldStore(report Report, useCanonicalSeeds bool) *fieldStore {
 			store.legacyStreams[index] = cloneLegacyStream(stream)
 		}
 	}
+	finalizeGeneralTitle(store)
 	if useCanonicalSeeds {
 		finalizeFieldStore(store)
 	} else {

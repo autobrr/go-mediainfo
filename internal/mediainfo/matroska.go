@@ -3708,14 +3708,14 @@ func parseMatroskaTags(buf []byte, encodedDate, writingApp string) (map[uint64]s
 			target, tags, fields, tagLanguage := parseMatroskaTag(buf[dataStart:dataEnd])
 			trackUID := target.trackUID
 			scopedTags.set(target, fields)
-			if target.present && !target.nonTrack && target.blockAddID == 0 && trackUID == 0 {
+			if target.present && target.blockAddID == 0 && trackUID == 0 {
 				for name, value := range tags {
 					if value = strings.TrimSpace(value); value != "" {
 						generalTags[name] = value
 					}
 				}
 			}
-			if !target.present || target.nonTrack || target.blockAddID != 0 {
+			if !target.present || target.blockAddID != 0 {
 				pos = dataEnd
 				continue
 			}
@@ -3909,7 +3909,6 @@ func matroskaEncoderScore(value string) int {
 type matroskaTagTarget struct {
 	trackUID   uint64
 	blockAddID uint64
-	nonTrack   bool
 	present    bool
 }
 
@@ -3974,8 +3973,6 @@ func parseMatroskaTagTargets(buf []byte) matroskaTagTarget {
 			if value, ok := readUnsigned(buf[dataStart:dataEnd]); ok {
 				target.blockAddID = value
 			}
-		case mkvIDTagEditionUID, mkvIDTagChapterUID, mkvIDTagAttachmentUID:
-			target.nonTrack = true
 		}
 		pos = dataEnd
 	}

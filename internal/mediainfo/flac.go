@@ -759,7 +759,6 @@ func flacTagsToGeneralFacts(tags map[string]string, tagOrder []string, encoder s
 	}
 	if v := tags["TITLE"]; v != "" {
 		set("Title", v)
-		set("Track", v)
 		mapped["TITLE"] = true
 	}
 	if v := tags["TRACKNUMBER"]; v != "" {
@@ -771,14 +770,9 @@ func flacTagsToGeneralFacts(tags map[string]string, tagOrder []string, encoder s
 		mapped["TOTALTRACKS"] = tags["TOTALTRACKS"] != ""
 		mapped["TRACKTOTAL"] = tags["TRACKTOTAL"] != ""
 	}
-	if v := tags["DISCNUMBER"]; v != "" {
-		set("Part", v)
-		mapped["DISCNUMBER"] = true
-	}
-	if v := firstNonEmpty(tags["TOTALDISCS"], tags["DISCTOTAL"]); v != "" {
-		set("Part_Position_Total", v)
-		mapped["TOTALDISCS"] = tags["TOTALDISCS"] != ""
-		mapped["DISCTOTAL"] = tags["DISCTOTAL"] != ""
+	vorbisDiscMetadata(tags, general)
+	for _, key := range []string{"DISCNUMBER", "TOTALDISCS", "DISCTOTAL"} {
+		mapped[key] = tags[key] != ""
 	}
 	if v := tags["DATE"]; v != "" {
 		// MediaInfo often exposes both date and year for audio tags.

@@ -434,10 +434,10 @@ func mkvProbeMaps(mode uint8) (map[uint64]*matroskaAudioProbe, map[uint64]*matro
 		}, nil
 	default:
 		return map[uint64]*matroskaAudioProbe{
-				track: {format: "E-AC-3", collect: true, targetPackets: 8},
-			}, map[uint64]*matroskaVideoProbe{
-				track: {codec: "HEVC"},
-			}
+			track: {format: "E-AC-3", collect: true, targetPackets: 8},
+		}, map[uint64]*matroskaVideoProbe{
+			track: {codec: "HEVC"},
+		}
 	}
 }
 
@@ -480,5 +480,18 @@ func FuzzDVDSPUAcceptance(f *testing.F) {
 				t.Fatal("SPU reassembly exceeded 16-bit bound")
 			}
 		}
+	})
+}
+
+func FuzzMP4Metadata(f *testing.F) {
+	f.Add(mp4MetaForTest("mdta", []string{"com.android.capture.fps"}, mp4MetaItemForTest(mp4MetaIndexForTest(1), 23, []byte{0x41, 0xf0, 0, 0}), false))
+	f.Add([]byte{})
+	f.Fuzz(func(t *testing.T, data []byte) {
+		data = fuzzLimit(data)
+		budget := embeddedAssetBudget{}
+		_ = parseMP4Meta(data, &budget)
+		_ = parseMP4UserMetadata(data)
+		_ = parseMP4UnknownUserMetadata(data)
+		_ = validMP4BMPCover(data)
 	})
 }

@@ -2,6 +2,7 @@ package mediainfo
 
 import (
 	"encoding/hex"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -59,7 +60,7 @@ func (s matroskaTagSet) sorted() []matroskaTagField {
 // set routes normalized fields to General or TrackUID storage. Tags without a
 // Targets element and block-addition targets are intentionally not projected.
 func (s *matroskaScopedTags) set(target matroskaTagTarget, fields []matroskaTagField) {
-	if !target.present || target.nonTrack || target.blockAddID != 0 {
+	if !target.present || target.blockAddID != 0 {
 		return
 	}
 	if target.trackUID == 0 {
@@ -146,7 +147,7 @@ func normalizeMatroskaTag(path []string, value string) []matroskaTagField {
 		value += " UTC"
 	case "DATE":
 		names[0] = "Recorded_Date"
-		value = strings.Replace(value, "T", " ", 1)
+		value = normalizeMatroskaDate(value)
 	case "DATE_DIGITIZED":
 		names[0] = "Mastered_Date"
 		value += " UTC"
@@ -301,11 +302,11 @@ func mediaInfoJSONName(name string) string {
 	return out
 }
 
-// matroskaDynamicJSONName keeps arbitrary tag names injective after MediaInfo's
+// metadataDynamicJSONName keeps arbitrary metadata names injective after MediaInfo's
 // lossy ASCII key normalization. Common non-colliding names retain their
 // established spelling; fallback and collision keys receive a stable source
 // identity suffix.
-func matroskaDynamicJSONName(name string, used map[string]struct{}) string {
+func metadataDynamicJSONName(name string, used map[string]struct{}) string {
 	base := mediaInfoJSONName(name)
 	candidate := base
 	_, collision := used[candidate]
@@ -349,7 +350,7 @@ func matroskaTagFieldsForJSON(set matroskaTagSet, kind StreamKind, skip map[stri
 			known[name] = field.value
 			continue
 		}
-		name = matroskaDynamicJSONName(fieldName, dynamicNames)
+		name = metadataDynamicJSONName(fieldName, dynamicNames)
 		dynamic = append(dynamic, structuredMember{Key: name, Value: structuredNode{Kind: structuredString, Text: field.value}})
 	}
 	return known, dynamic
@@ -409,6 +410,7 @@ func applyMatroskaTrackTags(info *MatroskaInfo) {
 		tagNames := make(map[string]struct{}, len(dynamic))
 		for _, member := range dynamic {
 			tagNames[member.Key] = struct{}{}
+			tagNames[matroskaDynamicTextLabel(member.Key)] = struct{}{}
 		}
 		before := []string{flacUnencodedMD5Label}
 		foundTag := false
@@ -459,10 +461,10 @@ func applyMatroskaTrackTags(info *MatroskaInfo) {
 			if member.Key == "" || member.Value.Kind != structuredString || member.Value.Text == "" {
 				continue
 			}
-			insertCanonicalSeedTextBefore(stream, member.Key, member.Value.Text, before...)
+			insertCanonicalSeedTextBefore(stream, matroskaDynamicTextLabel(member.Key), member.Value.Text, before...)
 			for index := range stream.canonicalSeed {
 				entry := &stream.canonicalSeed[index]
-				if entry.Options.ShowText && entry.TextLabel == member.Key {
+				if entry.Options.ShowText && entry.TextLabel == matroskaDynamicTextLabel(member.Key) {
 					entry.MatroskaTag = true
 					break
 				}
@@ -491,28 +493,33 @@ func applyMatroskaGeneralTags(general *Stream, set matroskaTagSet) {
 		canonicalTitle, _ := canonicalSeedValue(*general, "Title")
 		title := mergeMatroskaTitle(canonicalTitle, tagTitle)
 		replaceCanonicalSeedFill(general, "Title", title, "", "")
-		replaceCanonicalSeedFill(general, "Movie", title, "", "")
 		delete(known, "Title")
 	}
-	for name, value := range known {
+	names := make([]string, 0, len(known))
+	for name := range known {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		value := known[name]
 		if !streamHasCanonicalStructuredField(*general, name) {
-			replaceCanonicalSeedFill(general, fieldName(name), value, "", "")
+			label := matroskaMetadataLabel(name)
+			display := ""
+			if label != "" {
+				display = value
+			}
+			replaceCanonicalSeedFill(general, fieldName(name), value, label, display)
 		}
-	}
-	title, _ := canonicalSeedValue(*general, "Title")
-	if movie, _ := canonicalSeedValue(*general, "Movie"); title != "" && movie == "" {
-		replaceCanonicalSeedFill(general, "Movie", title, "", "")
-	}
-	titleMore, _ := canonicalSeedValue(*general, "Title_More")
-	if movieMore, _ := canonicalSeedValue(*general, "Movie_More"); titleMore != "" && movieMore == "" {
-		replaceCanonicalSeedFill(general, "Movie_More", titleMore, "", "")
 	}
 	mergeMatroskaDynamicCanonicalExtras(general, dynamic)
 	for _, member := range dynamic {
 		if member.Key == "" || member.Value.Kind != structuredString || member.Value.Text == "" {
 			continue
 		}
-		general.Fields = appendFieldUnique(general.Fields, Field{Name: member.Key, Value: member.Value.Text})
+		general.Fields = appendFieldUnique(general.Fields, Field{Name: matroskaDynamicTextLabel(member.Key), Value: member.Value.Text})
+		if member.Key == "Writing_frontend" {
+			insertCanonicalSeedTextBefore(general, "Writing frontend", member.Value.Text)
+		}
 	}
 }
 
@@ -531,4 +538,54 @@ func mergeMatroskaTitle(containerTitle, tagTitle string) string {
 	default:
 		return containerTitle + " / " + tagTitle
 	}
+}
+
+// matroskaMetadataLabel exposes only the already mapped General tag fields.
+// Title selection is finalized once all reported streams are known.
+func matroskaMetadataLabel(name string) string {
+	switch name {
+	case "Performer", "EncodedBy", "Genre", "ContentType", "Synopsis", "Released_Date", "Recorded_Date", "Copyright", "Comment":
+		return reportFieldLabel(reportTables26, name, name)
+	}
+	return ""
+}
+
+func matroskaDynamicTextLabel(name string) string {
+	if name == "Writing_frontend" {
+		return "Writing frontend"
+	}
+	return name
+}
+
+var matroskaDatePattern = regexp.MustCompile(`^(\d{4}(?:[-:]\d{2}(?:[-:]\d{2})?)?)(?:([T ]|, )(\d{2}:\d{2}:\d{2}(?:\.\d*)?)(Z|[+-]\d{2}(?::?\d{2})?)?)?$`)
+
+// normalizeMatroskaDate adapts recognized ISO-style tag dates without changing
+// arbitrary text or interpreting a nonzero offset as another time zone.
+func normalizeMatroskaDate(value string) string {
+	original := value
+	utc := strings.HasPrefix(value, "UTC ")
+	if utc {
+		value = strings.TrimPrefix(value, "UTC ")
+	}
+	parts := matroskaDatePattern.FindStringSubmatch(value)
+	if parts == nil || parts[2] != "" && len(parts[1]) != 10 {
+		return original
+	}
+	value = strings.ReplaceAll(parts[1], ":", "-")
+	if parts[2] != "" {
+		value += " " + parts[3]
+		zone := parts[4]
+		if zone == "Z" || zone == "+00:00" || zone == "-00:00" || zone == "+0000" || zone == "-0000" {
+			utc = true
+		} else {
+			if len(zone) == 5 {
+				zone = zone[:3] + ":" + zone[3:]
+			}
+			value += zone
+		}
+	}
+	if utc {
+		value += " UTC"
+	}
+	return value
 }

@@ -133,6 +133,10 @@ func newMatroskaVideoCanonicalBuilder(facts matroskaVideoCanonicalFacts) *canoni
 // applyMatroskaVideoCanonicalTail records common identity, timing, geometry,
 // color, language, service, and disposition facts after codec-specific fields.
 func applyMatroskaVideoCanonicalTail(builder *canonicalStreamBuilder, facts matroskaVideoCanonicalFacts) {
+	if facts.video.stereoMode == 13 {
+		builder.Fill("MultiView_Count", "2", "Count of views", "2")
+		builder.Fill("MultiView_Layout", "Both Eyes laced in one block (left eye first)", "MultiView_Layout", "Both Eyes laced in one block (left eye first)")
+	}
 	if facts.trackUID > 0 {
 		builder.Structured("UniqueID", strconv.FormatUint(facts.trackUID, 10))
 	}
@@ -204,10 +208,6 @@ func applyMatroskaAVCCanonicalCodec(builder *canonicalStreamBuilder, facts matro
 	if facts.avc.level != "" && facts.video.stereoMode != 13 {
 		level := strings.TrimPrefix(facts.avc.level, "L")
 		builder.Structured("Format_Level", level)
-	}
-	if facts.video.stereoMode == 13 {
-		builder.Structured("MultiView_Count", "2")
-		builder.Structured("MultiView_Layout", "Both Eyes laced in one block (left eye first)")
 	}
 	applyMatroskaH264CanonicalColorModel(builder, facts.sps)
 	applyMatroskaH264CanonicalScan(builder, facts.sps)

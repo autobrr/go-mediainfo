@@ -19,7 +19,8 @@ type MP4Track struct {
 	// HandlerName is the optional mdia handler name.
 	HandlerName string
 	// HandlerType is the four-character mdia handler code.
-	HandlerType string
+	HandlerType         string
+	handlerManufacturer uint32
 	// LanguageCode is the normalized language code from mdhd metadata.
 	LanguageCode string
 	// CreationTime is the raw MP4 epoch creation timestamp.
@@ -85,6 +86,8 @@ type MP4Track struct {
 	chapterTrackRefs       []uint32
 	menuForTrackID         uint32
 	sampleStartsHead       []uint64
+	metadata               mp4Metadata
+	handlerTitleEligible   bool
 	trackTitle             string
 	editList               []mp4EditEntry
 }
@@ -120,6 +123,7 @@ type MP4Info struct {
 	// Chapters contains decoded chapter starts and titles.
 	Chapters     []mp4Chapter
 	generalExtra []jsonKV
+	metadata     mp4Metadata
 }
 
 // mp4Chapter stores one decoded chapter start and title.
@@ -209,6 +213,7 @@ func readMP4BoxHeader(r io.ReaderAt, offset, fileSize int64) (boxSize int64, box
 func parseMoov(buf []byte) (MP4Info, bool) {
 	var offset int64
 	info := MP4Info{}
+	budget := embeddedAssetBudget{}
 	for offset+8 <= int64(len(buf)) {
 		boxSize, boxType, headerSize := readMP4BoxHeaderFrom(buf, offset)
 		if boxSize <= 0 {
@@ -226,7 +231,15 @@ func parseMoov(buf []byte) (MP4Info, bool) {
 		}
 		if boxType == "udta" {
 			payload := sliceBox(buf, dataOffset, boxSize-headerSize)
-			info.General = append(info.General, parseMP4UserMetadata(payload)...)
+			for _, field := range parseMP4UserMetadata(payload) {
+				info.General = setFieldValue(info.General, field.Name, field.Value)
+			}
+			var metadata mp4Metadata
+			parseMP4MetadataChildren(payload, &metadata, &budget)
+			info.metadata.merge(metadata)
+			for _, field := range metadata.fields {
+				info.General = setFieldValue(info.General, field.Name, field.Value)
+			}
 			if extras := parseMP4UnknownUserMetadata(payload); len(extras) > 0 {
 				info.generalExtra = append(info.generalExtra, extras...)
 				for _, extra := range extras {
@@ -243,9 +256,16 @@ func parseMoov(buf []byte) (MP4Info, bool) {
 				info.Chapters = append(info.Chapters, chapters...)
 			}
 		}
+		if boxType == "meta" {
+			metadata := parseMP4Meta(sliceBox(buf, dataOffset, boxSize-headerSize), &budget)
+			info.metadata.merge(metadata)
+			for _, field := range metadata.fields {
+				info.General = setFieldValue(info.General, field.Name, field.Value)
+			}
+		}
 		if boxType == "trak" {
 			payload := sliceBox(buf, dataOffset, boxSize-headerSize)
-			if track, ok := parseTrak(payload, info.MovieTimescale); ok {
+			if track, ok := parseTrak(payload, info.MovieTimescale, &budget, mp4GeneralHasTitle(info.General)); ok {
 				info.Tracks = append(info.Tracks, track)
 			}
 		}
@@ -306,7 +326,7 @@ func parseMvhd(payload []byte) (float64, uint32, bool) {
 
 // parseTrak combines one track's header, edit-list, media, and sample-table
 // facts and reports whether the track is supported.
-func parseTrak(buf []byte, movieTimescale uint32) (MP4Track, bool) {
+func parseTrak(buf []byte, movieTimescale uint32, budget *embeddedAssetBudget, generalHasTitle bool) (MP4Track, bool) {
 	var offset int64
 	var tkhdInfo tkhdInfo
 	var hasTkhd bool
@@ -315,6 +335,7 @@ func parseTrak(buf []byte, movieTimescale uint32) (MP4Track, bool) {
 	var editList []mp4EditEntry
 	var chapterTrackRefs []uint32
 	var trackTitle string
+	var metadata mp4Metadata
 	var mediaTrack MP4Track
 	var hasMediaTrack bool
 	for offset+8 <= int64(len(buf)) {
@@ -347,6 +368,13 @@ func parseTrak(buf []byte, movieTimescale uint32) (MP4Track, bool) {
 		if boxType == "udta" {
 			payload := sliceBox(buf, dataOffset, boxSize-headerSize)
 			trackTitle = parseMP4TrackName(payload)
+			parseMP4MetadataChildren(payload, &metadata, budget)
+			for _, field := range parseMP4UserMetadata(payload) {
+				metadata.fields = setFieldValue(metadata.fields, field.Name, field.Value)
+			}
+		}
+		if boxType == "meta" {
+			metadata.merge(parseMP4Meta(sliceBox(buf, dataOffset, boxSize-headerSize), budget))
 		}
 		if boxType == "mdia" {
 			payload := sliceBox(buf, dataOffset, boxSize-headerSize)
@@ -377,6 +405,8 @@ func parseTrak(buf []byte, movieTimescale uint32) (MP4Track, bool) {
 		mediaTrack.movieTimescale = movieTimescale
 	}
 	mediaTrack.chapterTrackRefs = append([]uint32(nil), chapterTrackRefs...)
+	mediaTrack.metadata = metadata
+	mediaTrack.handlerTitleEligible = !generalHasTitle && mp4HandlerTitleEligible(mediaTrack.HandlerName)
 	mediaTrack.trackTitle = trackTitle
 	return mediaTrack, true
 }
@@ -387,6 +417,7 @@ func parseMdia(buf []byte) (MP4Track, bool) {
 	var offset int64
 	var handler string
 	var handlerName string
+	var manufacturer uint32
 	var sampleInfo SampleInfo
 	var trackDuration float64
 	var mediaDurationTicks uint64
@@ -402,6 +433,9 @@ func parseMdia(buf []byte) (MP4Track, bool) {
 			payload := sliceBox(buf, dataOffset, boxSize-headerSize)
 			handler = parseHdlr(payload)
 			handlerName = parseHdlrName(payload)
+			if len(payload) >= 16 {
+				manufacturer = binary.BigEndian.Uint32(payload[12:16])
+			}
 		}
 		if boxType == "mdhd" {
 			payload := sliceBox(buf, dataOffset, boxSize-headerSize)
@@ -434,6 +468,7 @@ func parseMdia(buf []byte) (MP4Track, bool) {
 		Kind:                   kind,
 		Format:                 format,
 		HandlerName:            handlerName,
+		handlerManufacturer:    manufacturer,
 		HandlerType:            handler,
 		LanguageCode:           language,
 		Fields:                 sampleInfo.Fields,

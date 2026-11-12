@@ -62,7 +62,7 @@ General	Format	N YTY	Format
 General	Format/String	Y NT	Format
 General	Format/Info	Y NT	Format/Info
 General	Format/Url	N NT	Format/Url
-General	Format/Extensions	N NT	Format/Extensions
+General	Format/Extensions	N NT	Format/Extensions usually used
 General	Format_Commercial	N NT	Commercial name
 General	Format_Commercial_IfAny	Y YTY	Commercial name
 General	Format_Version	Y YTY	Format version
@@ -85,7 +85,7 @@ General	Codec	N NT	Codec
 General	Codec/String	N NT	Codec
 General	Codec/Info	N NT	Codec/Info
 General	Codec/Url	N NT	Codec/Url
-General	Codec/Extensions	N NT	Codec/Extensions
+General	Codec/Extensions	N NT	Codec/Extensions usually used
 General	Codec_Settings	N NT	Codec settings
 General	Codec_Settings_Automatic	N NT	Codec_Settings_Automatic
 General	FileSize	N YTY	File size
@@ -183,47 +183,47 @@ General	Season_Position	Y YIY	Season_Position
 General	Season_Position_Total	Y YIY	Season_Position_Total
 General	Movie	N YTY	Movie name
 General	Movie_More	N YTY	Movie_More
-General	Movie/Country	N YTY	Movie/Country
+General	Movie/Country	N YTY	Movie name/Country
 General	Movie/Url	N YT	Movie name/Url
 General	Album	Y YTY	Album
 General	Album_More	Y YTY	Album_More
-General	Album/Sort	Y YTY	Album/Sort
+General	Album/Sort	Y YTY	Album/Sorted by
 General	Album/Performer	Y YTY	Album/Performer
 General	Album/Performer/Sort	Y YTY	Album/Performer/Sort
 General	Album/Performer/Url	Y YT	Album/Performer/Url
 General	Comic	Y YTY	Comic
 General	Comic_More	Y YTY	Comic_More
-General	Comic/Position_Total	Y YIY	Comic/Position_Total
+General	Comic/Position_Total	Y YIY	Comic/Total
 General	Part	Y YTY	Part
 General	Part/Position	Y YIY	Part/Position
-General	Part/Position_Total	Y YIY	Part/Position_Total
+General	Part/Position_Total	Y YIY	Part/Total
 General	Reel	Y YTY	Reel
 General	Reel/Position	Y YIY	Reel/Position
-General	Reel/Position_Total	Y YIY	Reel/Position_Total
+General	Reel/Position_Total	Y YIY	Reel/Total
 General	Track	N YTY	Track name
 General	Track_More	N YTY	Track_More
 General	Track/Url	N YT	Track name/Url
-General	Track/Sort	Y YTY	Track/Sort
-General	Track/Position	Y YIY	Track/Position
-General	Track/Position_Total	Y YIY	Track/Position_Total
+General	Track/Sort	Y YTY	Track name/Sorted by
+General	Track/Position	Y YIY	Track name/Position
+General	Track/Position_Total	Y YIY	Track name/Total
 General	PackageName	Y YTY	Package name
 General	Grouping	Y YTY	Grouping
 General	Chapter	Y YTY	Chapter
 General	SubTrack	Y YTY	SubTrack
 General	Original/Album	Y YTY	Original/Album
-General	Original/Movie	Y YTY	Original/Movie
+General	Original/Movie	Y YTY	Original/Movie name
 General	Original/Part	Y YTY	Original/Part
-General	Original/Track	Y YTY	Original/Track
+General	Original/Track	Y YTY	Original/Track name
 General	Compilation	N YTY	Compilation
 General	Compilation/String	Y NT	Compilation
 General	Performer	Y YTY	Performer
-General	Performer/Sort	Y YTY	Performer/Sort
+General	Performer/Sort	Y YTY	Performer/Sorted by
 General	Performer/Url	Y YT	Performer/Url
 General	Original/Performer	Y YTY	Original/Performer
 General	Accompaniment	Y YTY	Accompaniment
 General	Composer	Y YTY	Composer
 General	Composer/Nationality	Y YTY	Composer/Nationality
-General	Composer/Sort	Y YTY	Composer/Sort
+General	Composer/Sort	Y YTY	Composer/Sorted by
 General	Arranger	Y YTY	Arranger
 General	Lyricist	Y YTY	Lyricist
 General	Original/Lyricist	Y YTY	Original/Lyricist
@@ -248,7 +248,7 @@ General	CoProducer	Y YTY	Coproducer
 General	ExecutiveProducer	Y YTY	Executive producer
 General	MusicBy	Y YTY	Music by
 General	DistributedBy	Y YTY	Distributed by
-General	OriginalSourceForm/DistributedBy	Y YTY	OriginalSourceForm/DistributedBy
+General	OriginalSourceForm/DistributedBy	Y YTY	Original source form/Distributed by
 General	MasteredBy	Y YTY	Mastered by
 General	EncodedBy	Y YTY	Encoded by
 General	RemixedBy	Y YTY	Remixed by
@@ -271,7 +271,7 @@ General	LawRating	Y YTY	Law rating
 General	LawRating_Reason	Y YTY	LawRating_Reason
 General	ICRA	Y YTY	ICRA
 General	Released_Date	Y YTY	Released date
-General	Original/Released_Date	Y YTY	Original/Released_Date
+General	Original/Released_Date	Y YTY	Original/Released date
 General	Recorded_Date	Y YTY	Recorded date
 General	Encoded_Date	Y YTY	Encoded date
 General	Tagged_Date	Y YTY	Tagged date
@@ -314,10 +314,10 @@ General	DotsPerInch	Y YTY	Dots per inch
 General	Lightness	Y YTY	Lightness
 General	OriginalSourceMedium	Y YTY	Original source medium
 General	OriginalSourceForm	Y YTY	Original source form
-General	OriginalSourceForm/NumColors	Y YTY	OriginalSourceForm/NumColors
-General	OriginalSourceForm/Name	Y YTY	OriginalSourceForm/Name
-General	OriginalSourceForm/Cropped	Y YTY	OriginalSourceForm/Cropped
-General	OriginalSourceForm/Sharpness	Y YTY	OriginalSourceForm/Sharpness
+General	OriginalSourceForm/NumColors	Y YTY	Original source form/Number of colors
+General	OriginalSourceForm/Name	Y YTY	Original source form/Name
+General	OriginalSourceForm/Cropped	Y YTY	Original source form/Crop dimensions
+General	OriginalSourceForm/Sharpness	Y YTY	Original source form/Sharpness
 General	Tagged_Application	Y YTY	Tagging application
 General	BPM	Y YTY	BPM
 General	ISRC	Y YTY	ISRC
@@ -1801,7 +1801,7 @@ Menu	ServiceProvider	Y YTY	Service provider
 Menu	ServiceProvider/Url	Y YTN	Service provider/Url
 Menu	ServiceType	Y YTY	Service type
 Menu	NetworkName	Y YTY	Network name
-Menu	Original/NetworkName	Y YTY	Original/NetworkName
+Menu	Original/NetworkName	Y YTY	Original/Network name
 Menu	Countries	Y YTY	Countries
 Menu	TimeZones	Y YTY	TimeZones
 Menu	LawRating	Y YTY	Law rating

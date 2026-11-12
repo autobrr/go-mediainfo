@@ -1191,7 +1191,7 @@ func rawTextValue(version reportTableVersion, kind StreamKind, label, display st
 			}
 		}
 		return formatRawTextDerivedBitRate(structured[key])
-	case "FrameRate/String", "FrameRate_Original/String", "FrameRate_Minimum/String", "FrameRate_Maximum/String":
+	case "FrameRate/String", "FrameRate_Real/String", "FrameRate_Original/String", "FrameRate_Minimum/String", "FrameRate_Maximum/String":
 		key := strings.TrimSuffix(label, "/String")
 		rate, err := strconv.ParseFloat(structured[key], 64)
 		if err != nil || rate <= 0 || math.IsNaN(rate) || math.IsInf(rate, 0) {

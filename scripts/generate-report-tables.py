@@ -47,10 +47,10 @@ def generate(root, version, revision):
             name = row[0]
             label_key = name.split("/String")[0]
             label = language.get(label_key, label_key)
-            if label == label_key and "/" in label_key:
-                parent, suffix = label_key.rsplit("/", 1)
-                if suffix in ("Info", "Hint", "Url") and parent in language:
-                    label = language[parent] + "/" + suffix
+            if "/" in label_key:
+                # Language_Set translates each side of the first schema slash.
+                parent, suffix = label_key.split("/", 1)
+                label = language.get(parent, parent) + "/" + language.get(suffix, suffix)
             rows.append("\t".join((kind, name, row[3], label)))
     (DEST / f"{version}-fields.tsv").write_text("\n".join(rows) + "\n", encoding="utf-8", newline="\n")
     rows = []
