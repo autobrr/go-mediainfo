@@ -523,10 +523,14 @@ func TestOggFLACGeneralDeliberateDifferences(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for name, want := range map[string]string{"Writing application": "Lavf63.1", "Title": "Mix", "Format/Info": ""} {
+	// Fields hold the text projection, where an audio-only General Title shows as Track name.
+	for name, want := range map[string]string{"Writing application": "Lavf63.1", "Track name": "Mix", "Format/Info": ""} {
 		if got := findField(report.General.Fields, name); got != want {
 			t.Errorf("General %s = %q, want %q", name, got, want)
 		}
+	}
+	if got, _ := canonicalSeedValue(report.General, "Title"); got != "Mix" {
+		t.Errorf("General structured Title = %q, want Mix", got)
 	}
 }
 

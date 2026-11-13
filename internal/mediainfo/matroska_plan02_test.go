@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -506,5 +507,63 @@ func TestMatroskaAnalyzeApplicationTagCollision(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+const mkvTagTargetTypeValueForTest = 0x68CA
+
+func TestMatroskaErrorDetectionPrecedesGeneralTags(t *testing.T) {
+	info := buildMatroskaElement(mkvIDInfo, append(buildMatroskaElement(mkvIDCRC32, []byte{0, 0, 0, 0}), buildMatroskaElement(mkvIDTimecodeScale, []byte{0x0F, 0x42, 0x40})...))
+	tag := buildMatroskaElement(mkvIDTag, append(buildMatroskaElement(mkvIDTagTargets, buildMatroskaElement(mkvTagTargetTypeValueForTest, []byte{50})), buildMatroskaSimpleTag("WRITING_FRONTEND", "front")...))
+	segment := append(info, buildMatroskaTracks()...)
+	segment = append(segment, buildMatroskaElement(mkvIDTags, tag)...)
+	file := append(buildMatroskaElement(mkvIDEBML, buildMatroskaElement(mkvIDDocType, []byte("matroska"))), buildMatroskaElement(mkvIDSegment, segment)...)
+	path := filepath.Join(t.TempDir(), "crc.mkv")
+	if err := os.WriteFile(path, file, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	report, err := AnalyzeFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reports := []Report{report}
+	for name, output := range map[string]string{"text": RenderText(reports), "raw": RenderTextWithOptions(reports, TextRenderOptions{Language: "raw"})} {
+		crc, tagRow := strings.Index(output, "ErrorDetectionType"), strings.Index(output, "WRITING_FRONTEND")
+		if crc < 0 || tagRow < 0 || crc > tagRow || strings.Count(output, "ErrorDetectionType") != 1 {
+			t.Errorf("%s: ErrorDetectionType must precede General tags once:\n%s", name, output)
+		}
+	}
+}
+
+func TestAnalyzedFieldsMatchRenderedText(t *testing.T) {
+	info := buildMatroskaElement(mkvIDTimecodeScale, []byte{0x0F, 0x42, 0x40})
+	info = append(info, buildMatroskaElement(mkvIDDuration, []byte{0x41, 0x20, 0x00, 0x00})...)
+	info = buildMatroskaElement(mkvIDInfo, append(info, buildMatroskaElement(mkvIDTitle, []byte("Feature"))...))
+	tag := buildMatroskaElement(mkvIDTag, append(buildMatroskaElement(mkvIDTagTargets, buildMatroskaElement(mkvTagTargetTypeValueForTest, []byte{50})), buildMatroskaSimpleTag("WRITING_FRONTEND", "front")...))
+	segment := append(info, buildMatroskaTracks()...)
+	segment = append(segment, buildMatroskaElement(mkvIDTags, tag)...)
+	file := append(buildMatroskaElement(mkvIDEBML, buildMatroskaElement(mkvIDDocType, []byte("matroska"))), buildMatroskaElement(mkvIDSegment, segment)...)
+	path := filepath.Join(t.TempDir(), "title.mkv")
+	if err := os.WriteFile(path, file, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	report, err := AnalyzeFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rows []string
+	for _, field := range report.General.Fields {
+		rows = append(rows, field.Name+" : "+field.Value)
+	}
+	if !slices.Contains(rows, "Movie name : Feature") || !slices.Contains(rows, "WRITING_FRONTEND : front") {
+		t.Fatalf("public General Fields lack rendered title or tag rows: %q", rows)
+	}
+	// An unrelated caller edit must keep the parser's title and tag rows.
+	report.General.Fields = append(report.General.Fields, Field{Name: "Note", Value: "edited"})
+	text := RenderText([]Report{report})
+	for _, want := range []string{"Feature", "front", "edited"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("edited render lost %q:\n%s", want, text)
+		}
 	}
 }

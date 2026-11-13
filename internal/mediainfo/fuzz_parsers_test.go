@@ -504,7 +504,7 @@ func FuzzMP4Metadata(f *testing.F) {
 		data = fuzzLimit(data)
 		budget := embeddedAssetBudget{}
 		_ = parseMP4Meta(data, &budget)
-		_ = parseMP4UserMetadata(data)
+		_ = parseMP4UserMetadata(data, &embeddedAssetBudget{})
 		_ = parseMP4UnknownUserMetadata(data)
 		_ = validMP4BMPCover(data)
 	})

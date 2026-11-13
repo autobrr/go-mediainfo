@@ -125,7 +125,8 @@ func decodeMP4MetadataValue(data []byte) (string, bool) {
 		if math.IsNaN(n) || math.IsInf(n, 0) {
 			return "", false
 		}
-		return strconv.FormatFloat(n, 'f', -1, 64), true
+		// ZenLib Ztring::From_Number defaults to three decimals.
+		return strconv.FormatFloat(n, 'f', 3, 64), true
 	}
 	return "", false
 }

@@ -33,6 +33,7 @@ func attachCanonicalStore(report *Report) {
 	}
 	store := reportToFieldStore(*report, true)
 	publishCanonicalCompatibilitySnapshot(report, store)
+	publishCanonicalTextFields(report, store)
 	publishCanonicalProjectionPolicy(&report.General)
 	for index := range report.Streams {
 		publishCanonicalProjectionPolicy(&report.Streams[index])
@@ -82,6 +83,36 @@ func publishCanonicalCompatibilitySnapshot(report *Report, store *fieldStore) {
 			case structuredNumber, structuredBool, structuredNull, structuredObject, structuredArray, structuredRaw:
 				target.JSONRaw[field.Key] = renderStructuredNode(field.Value)
 			}
+		}
+	}
+}
+
+// publishCanonicalTextFields replaces each stream's public Fields with the
+// finalized text projection, so they keep matching the rendered text after
+// report-wide steps such as title selection and source-tag rows.
+func publishCanonicalTextFields(report *Report, store *fieldStore) {
+	projection := projectTextStore(store, "")
+	ordinals := make(map[StreamKind]int)
+	for _, projected := range projection.Streams {
+		var target *Stream
+		if projected.Kind == StreamGeneral {
+			target = &report.General
+		} else {
+			ordinal := ordinals[projected.Kind]
+			ordinals[projected.Kind]++
+			for index := range report.Streams {
+				if report.Streams[index].Kind != projected.Kind {
+					continue
+				}
+				if ordinal == 0 {
+					target = &report.Streams[index]
+					break
+				}
+				ordinal--
+			}
+		}
+		if target != nil {
+			target.Fields = append([]Field(nil), projected.Fields...)
 		}
 	}
 }

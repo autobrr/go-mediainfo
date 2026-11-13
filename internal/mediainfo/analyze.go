@@ -245,11 +245,17 @@ func analyzeFileWithOptions(ctx context.Context, path string, opts AnalyzeOption
 			info.DurationSeconds = mp4Duration
 			generalFacts := &canonicalStructuredFacts{}
 			mp4WritingApplication := ""
+			tagEncodedDate := ""
 			for _, field := range parsed.General {
 				if field.Name == "Recorded_Date" || field.Name == "Encoded_Date" {
 					if field.Value = adaptReferenceDate(field.Value, false); field.Value == "" {
 						continue
 					}
+				}
+				if field.Name == "Encoded_Date" {
+					// Joined with the mvhd creation time below, as one row.
+					tagEncodedDate = field.Value
+					continue
 				}
 				switch field.Name {
 				case "UniversalAdID_Registry", "UniversalAdID_Value", "Encoded_OperatingSystem_CompanyName", "Encoded_OperatingSystem_Name", "Encoded_OperatingSystem_Version":
@@ -290,9 +296,20 @@ func analyzeFileWithOptions(ctx context.Context, path string, opts AnalyzeOption
 			if registry, value := findField(parsed.General, "UniversalAdID_Registry"), findField(parsed.General, "UniversalAdID_Value"); registry != "" && value != "" {
 				general.Fields = appendFieldUnique(general.Fields, Field{Name: "UniversalAdID/String", Value: value + " (" + registry + ")"})
 			}
-			if encoded := formatMP4UTCTime(parsed.MovieCreation); encoded != "" {
+			movieEncoded := formatMP4UTCTime(parsed.MovieCreation)
+			encoded := movieEncoded
+			// v23.04 fills the DATE key after mvhd and joins distinct values.
+			if tagEncodedDate != "" {
+				if encoded == "" || encoded == tagEncodedDate {
+					encoded = tagEncodedDate
+				} else {
+					encoded += " / " + tagEncodedDate
+				}
+				generalFacts.SetSame("Encoded_Date", encoded)
+			}
+			if encoded != "" {
 				general.Fields = appendFieldUnique(general.Fields, Field{Name: "Encoded date", Value: encoded})
-				if tagged := formatMP4UTCTime(parsed.MovieModified); tagged != "" {
+				if tagged := formatMP4UTCTime(parsed.MovieModified); movieEncoded != "" && tagged != "" {
 					general.Fields = appendFieldUnique(general.Fields, Field{Name: "Tagged date", Value: tagged})
 				}
 			}
@@ -1086,6 +1103,8 @@ func analyzeFileWithOptions(ctx context.Context, path string, opts AnalyzeOption
 			generalExtras := []jsonKV{}
 			if value := findField(general.Fields, "ErrorDetectionType"); value != "" {
 				generalExtras = append(generalExtras, jsonKV{Key: "ErrorDetectionType", Val: value})
+				// Official fills it at the first CRC-32, before Streams_Finish adds tags.
+				insertCanonicalSeedTextBefore(&general, "ErrorDetectionType", value)
 			}
 			if len(parsed.attachments) > 0 {
 				generalExtras = append(generalExtras, jsonKV{Key: "Attachments", Val: strings.Join(parsed.attachments, " / ")})

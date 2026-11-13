@@ -52,7 +52,7 @@ func TestMP4MetadataTitleAndCollection(t *testing.T) {
 	items = append(items, mp4MetaItemForTest("\xa9alb", 1, []byte(" Album "))...)
 	var u bytes.Buffer
 	writeMP4Box(&u, "meta", mp4MetaForTest("mdir", nil, items, true))
-	got := parseMP4UserMetadata(u.Bytes())
+	got := parseMP4UserMetadata(u.Bytes(), &embeddedAssetBudget{})
 	want := []Field{{Name: "Title", Value: "Title"}, {Name: "Album", Value: " Album "}, {Name: "Collection", Value: "Series"}}
 	if len(got) != len(want) {
 		t.Fatalf("fields=%v", got)
@@ -594,10 +594,30 @@ func TestMP4VideoMetadataPreservesCodecExtras(t *testing.T) {
 
 func mp4MetadataFileForTest(t *testing.T, keys, values []string, trackKeys, trackValues []string) Report {
 	t.Helper()
-	var movie, file bytes.Buffer
 	var items []byte
 	for i, value := range values {
 		items = append(items, mp4MetaItemForTest(mp4MetaIndexForTest(uint32(i+1)), 1, []byte(value))...)
+	}
+	return mp4MetadataItemsFileForTest(t, keys, items, trackKeys, trackValues)
+}
+
+func mp4MetadataItemsFileForTest(t *testing.T, keys []string, items []byte, trackKeys, trackValues []string) Report {
+	t.Helper()
+	return mp4MetadataMovieFileForTest(t, 0, keys, items, trackKeys, trackValues)
+}
+
+// mp4MetadataMovieFileForTest adds an mvhd with the given creation time
+// (seconds since 1904) when created is nonzero.
+func mp4MetadataMovieFileForTest(t *testing.T, created uint32, keys []string, items []byte, trackKeys, trackValues []string) Report {
+	t.Helper()
+	var movie, file bytes.Buffer
+	if created != 0 {
+		mvhd := make([]byte, 100)
+		binary.BigEndian.PutUint32(mvhd[4:8], created)
+		binary.BigEndian.PutUint32(mvhd[8:12], created)
+		binary.BigEndian.PutUint32(mvhd[12:16], 1000)
+		binary.BigEndian.PutUint32(mvhd[16:20], 1000)
+		writeMP4Box(&movie, "mvhd", mvhd)
 	}
 	writeMP4Box(&movie, "meta", mp4MetaForTest("mdta", keys, items, true))
 	h := make([]byte, 24)
@@ -667,6 +687,58 @@ func TestMP4GeneralDatesUseReferenceAdapter(t *testing.T) {
 			if got, _ := canonicalSeedValue(report.General, key); got != tt.want {
 				t.Errorf("%s %q=%q, want %q", key, tt.value, got, tt.want)
 			}
+		}
+	}
+}
+
+func TestMP4UserMetadataChargesSharedStringBudget(t *testing.T) {
+	large := bytes.Repeat([]byte("t"), 700_000)
+	var u bytes.Buffer
+	writeMP4Box(&u, "meta", mp4MetaForTest("mdir", nil, mp4MetaItemForTest("\xa9nam", 1, large), true))
+	budget := &embeddedAssetBudget{}
+	if got := parseMP4UserMetadata(u.Bytes(), budget); len(got) != 1 || len(got[0].Value) != len(large) {
+		t.Fatalf("first track title not retained: %d fields", len(got))
+	}
+	// A second track's title would exceed the 1 MiB per-file string budget.
+	if got := parseMP4UserMetadata(u.Bytes(), budget); len(got) != 0 {
+		t.Fatalf("second title retained past the shared budget: %d bytes", len(got[0].Value))
+	}
+	if budget.stringBytes != int64(len(large)) {
+		t.Fatalf("budget charged %d bytes, want %d", budget.stringBytes, len(large))
+	}
+}
+
+func TestMP4MetadataFloatUsesReferencePrecision(t *testing.T) {
+	var f32 [4]byte
+	binary.BigEndian.PutUint32(f32[:], math.Float32bits(29.97))
+	var f64 [8]byte
+	binary.BigEndian.PutUint64(f64[:], math.Float64bits(1.0/3))
+	items := append(mp4MetaItemForTest(mp4MetaIndexForTest(1), 23, f32[:]), mp4MetaItemForTest(mp4MetaIndexForTest(2), 24, f64[:])...)
+	report := mp4MetadataItemsFileForTest(t, []string{"com.example.f32", "com.example.f64"}, items, nil, nil)
+	// ZenLib's Ztring::From_Number prints floats with three decimals.
+	json := RenderJSON([]Report{report})
+	if !strings.Contains(json, `"com_example_f32":"29.970"`) || !strings.Contains(json, `"com_example_f64":"0.333"`) {
+		t.Errorf("float metadata precision: %s", json)
+	}
+}
+
+func TestMP4EncodedDateJoinsMovieAndTagValues(t *testing.T) {
+	created := uint32(time.Date(2022, 1, 1, 0, 0, 0, 0, time.UTC).Sub(time.Date(1904, 1, 1, 0, 0, 0, 0, time.UTC)).Seconds())
+	for _, tt := range []struct{ tag, want string }{
+		{"2021-02-03T04:05:06Z", "2022-01-01 00:00:00 UTC / 2021-02-03 04:05:06 UTC"},
+		{"2022-01-01T00:00:00Z", "2022-01-01 00:00:00 UTC"},
+	} {
+		items := mp4MetaItemForTest(mp4MetaIndexForTest(1), 1, []byte(tt.tag))
+		report := mp4MetadataMovieFileForTest(t, created, []string{"DATE"}, items, nil, nil)
+		reports := []Report{report}
+		// v23.04 fills the tag after mvhd and joins distinct values with " / ".
+		if json := RenderJSON(reports); !strings.Contains(json, `"Encoded_Date":"`+tt.want+`"`) {
+			t.Errorf("%s JSON Encoded_Date: %s", tt.tag, json)
+		}
+		general := RenderText(reports)
+		general = general[:strings.Index(general, "\nVideo")]
+		if strings.Count(general, "Encoded date") != 1 || !strings.Contains(general, tt.want) {
+			t.Errorf("%s General text needs one joined Encoded date row:\n%s", tt.tag, general)
 		}
 	}
 }

@@ -49,7 +49,7 @@ func parseMP4Description(udta []byte) string {
 
 // parseMP4UserMetadata decodes common iTunes ilst text atoms into General
 // metadata fields.
-func parseMP4UserMetadata(udta []byte) []Field {
+func parseMP4UserMetadata(udta []byte, budget *embeddedAssetBudget) []Field {
 	meta, ok := findMP4Box(udta, "meta")
 	if !ok || len(meta) <= 4 {
 		return nil
@@ -82,13 +82,13 @@ func parseMP4UserMetadata(udta []byte) []Field {
 		if binary.BigEndian.Uint32(data[:4]) == 0 {
 			value, valid = strings.TrimRight(string(data[8:]), "\x00"), true
 		}
-		if !valid || int64(len(value)) > embeddedAssetMaxStringBytes {
+		if !valid {
 			continue
 		}
 		if tag.atom == "\xa9nam" {
 			value = strings.TrimSpace(value)
 		}
-		if value != "" {
+		if value != "" && budget.reserveString(uint64(len(value)), embeddedAssetMaxStringBytes) == embeddedAssetAccepted {
 			fields = append(fields, Field{Name: tag.label, Value: value})
 		}
 	}

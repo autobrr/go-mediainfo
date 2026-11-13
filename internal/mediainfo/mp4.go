@@ -231,7 +231,7 @@ func parseMoov(buf []byte) (MP4Info, bool) {
 		}
 		if boxType == "udta" {
 			payload := sliceBox(buf, dataOffset, boxSize-headerSize)
-			for _, field := range parseMP4UserMetadata(payload) {
+			for _, field := range parseMP4UserMetadata(payload, &budget) {
 				info.General = setFieldValue(info.General, field.Name, field.Value)
 			}
 			var metadata mp4Metadata
@@ -370,7 +370,7 @@ func parseTrak(buf []byte, movieTimescale uint32, budget *embeddedAssetBudget, g
 			payload := sliceBox(buf, dataOffset, boxSize-headerSize)
 			trackTitle = parseMP4TrackName(payload)
 			parseMP4MetadataChildren(payload, &metadata, budget)
-			for _, field := range parseMP4UserMetadata(payload) {
+			for _, field := range parseMP4UserMetadata(payload, budget) {
 				metadata.fields = setFieldValue(metadata.fields, field.Name, field.Value)
 			}
 		}
