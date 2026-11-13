@@ -378,6 +378,14 @@ func TestLegacyRenderingDoesNotDeriveGeneralTitle(t *testing.T) {
 				report.General.JSON["Title"] = "Caller title"
 				delete(report.General.JSON, "Movie")
 				delete(report.General.JSON, "Track")
+				// Fields carry the text projection, so the selected title row goes too.
+				var fields []Field
+				for _, field := range report.General.Fields {
+					if field.Name != "Movie name" && field.Name != "Track name" {
+						fields = append(fields, field)
+					}
+				}
+				report.General.Fields = fields
 			}
 			before := captureLegacyReportState(report, true)
 			for _, output := range []string{RenderJSON([]Report{report}), RenderXML([]Report{report})} {

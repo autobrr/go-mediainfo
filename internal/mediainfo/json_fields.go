@@ -420,6 +420,15 @@ func mapStreamFieldsToJSON(kind StreamKind, fields []Field) []jsonKV {
 			out = append(out, jsonKV{Key: "Language", Val: field.Value})
 		case "Title":
 			out = append(out, jsonKV{Key: "Title", Val: field.Value})
+		case "Movie name", "Track name":
+			// General text shows the selected title under these labels.
+			if kind != StreamGeneral {
+				break
+			}
+			if findField(fields, "Title") == "" {
+				out = append(out, jsonKV{Key: "Title", Val: field.Value})
+			}
+			out = append(out, jsonKV{Key: map[string]string{"Movie name": "Movie", "Track name": "Track"}[field.Name], Val: field.Value})
 		case "Law rating":
 			out = append(out, jsonKV{Key: "LawRating", Val: field.Value})
 		case "Channel(s)":
