@@ -552,7 +552,7 @@ func TestMP4VideoMetadataPreservesCodecExtras(t *testing.T) {
 				}
 				wantKeys = append(wantKeys, "CodecConfigurationBox")
 				if metadata {
-					wantKeys = append(wantKeys, "com.example.track")
+					wantKeys = append(wantKeys, "com_example_track")
 				}
 				if len(node.Object) != len(wantKeys) {
 					t.Errorf("%s extra count=%d, want %d", codec.sample, len(node.Object), len(wantKeys))
@@ -571,7 +571,7 @@ func TestMP4VideoMetadataPreservesCodecExtras(t *testing.T) {
 							t.Errorf("codec value=%q", member.Value.Text)
 						}
 					}
-					if member.Key == "com.example.track" {
+					if member.Key == "com_example_track" {
 						tagCount++
 					}
 				}
@@ -587,6 +587,85 @@ func TestMP4VideoMetadataPreservesCodecExtras(t *testing.T) {
 						t.Fatal("lost metadata tag")
 					}
 				}
+			}
+		}
+	}
+}
+
+func mp4MetadataFileForTest(t *testing.T, keys, values []string, trackKeys, trackValues []string) Report {
+	t.Helper()
+	var movie, file bytes.Buffer
+	var items []byte
+	for i, value := range values {
+		items = append(items, mp4MetaItemForTest(mp4MetaIndexForTest(uint32(i+1)), 1, []byte(value))...)
+	}
+	writeMP4Box(&movie, "meta", mp4MetaForTest("mdta", keys, items, true))
+	h := make([]byte, 24)
+	copy(h[8:], "vide")
+	h = append(h, 0)
+	var media, track bytes.Buffer
+	writeMP4Box(&media, "hdlr", h)
+	writeMP4Box(&track, "mdia", media.Bytes())
+	var trackItems []byte
+	for i, value := range trackValues {
+		trackItems = append(trackItems, mp4MetaItemForTest(mp4MetaIndexForTest(uint32(i+1)), 1, []byte(value))...)
+	}
+	writeMP4Box(&track, "meta", mp4MetaForTest("mdta", trackKeys, trackItems, true))
+	writeMP4Box(&movie, "trak", track.Bytes())
+	writeMP4Box(&file, "ftyp", []byte("isom"))
+	writeMP4Box(&file, "moov", movie.Bytes())
+	path := filepath.Join(t.TempDir(), "metadata.mp4")
+	if err := os.WriteFile(path, file.Bytes(), 0600); err != nil {
+		t.Fatal(err)
+	}
+	report, err := AnalyzeFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return report
+}
+
+func TestMP4MetadataSourceRowsKeepIdentity(t *testing.T) {
+	report := mp4MetadataFileForTest(t,
+		[]string{"File size", "Format"}, []string{"tag size", "tag format"},
+		[]string{"Format", "com.apple.quicktime.copyright"}, []string{"track format", "track copyright"})
+	reports := []Report{report}
+	for name, output := range map[string]string{"text": RenderText(reports), "html": RenderHTML(reports), "raw": RenderTextWithOptions(reports, TextRenderOptions{Language: "raw"})} {
+		for _, value := range []string{"tag size", "tag format", "track format", "track copyright"} {
+			if got := strings.Count(output, value); got != 1 {
+				t.Errorf("%s shows %q %d times, want 1:\n%s", name, value, got, output)
+			}
+		}
+		if got := strings.Count(output, "MPEG-4"); got != 1 {
+			t.Errorf("%s General format rows=%d:\n%s", name, got, output)
+		}
+		if got := strings.Count(output, ": Video") + strings.Count(output, "<td>Video</td>"); got != 1 {
+			t.Errorf("%s Video format rows=%d:\n%s", name, got, output)
+		}
+	}
+	json := RenderJSON(reports)
+	for _, want := range []string{`"File_size":"tag size"`, `"extra":{"Copyright":"track copyright","Format":"track format"}`, `"FileSize":"`, `"Format":"Video"`} {
+		if !strings.Contains(json, want) {
+			t.Errorf("JSON lacks %s: %s", want, json)
+		}
+	}
+	if strings.Count(json, `"Copyright"`) != 1 {
+		t.Errorf("track metadata outside the Video schema is a top-level field: %s", json)
+	}
+}
+
+func TestMP4GeneralDatesUseReferenceAdapter(t *testing.T) {
+	for _, tt := range []struct{ value, want string }{
+		{"2026-11-12T10:00:00Z", "2026-11-12 10:00:00 UTC"},
+		{"Thu Nov 12 10:00:00 2026", "2026-11-12 10:00:00"},
+		// v23.04 keeps +hhmm offsets; only the Matroska path adopts v26.10.
+		{"2026-11-12T10:00:00+0100", "2026-11-12T10:00:00+0100"},
+		{"unknown", ""},
+	} {
+		report := mp4MetadataFileForTest(t, []string{"DATE", "date_recorded"}, []string{tt.value, tt.value}, nil, nil)
+		for _, key := range []fieldName{"Encoded_Date", "Recorded_Date"} {
+			if got, _ := canonicalSeedValue(report.General, key); got != tt.want {
+				t.Errorf("%s %q=%q, want %q", key, tt.value, got, tt.want)
 			}
 		}
 	}

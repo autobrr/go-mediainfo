@@ -246,6 +246,11 @@ func analyzeFileWithOptions(ctx context.Context, path string, opts AnalyzeOption
 			generalFacts := &canonicalStructuredFacts{}
 			mp4WritingApplication := ""
 			for _, field := range parsed.General {
+				if field.Name == "Recorded_Date" || field.Name == "Encoded_Date" {
+					if field.Value = adaptReferenceDate(field.Value, false); field.Value == "" {
+						continue
+					}
+				}
 				switch field.Name {
 				case "UniversalAdID_Registry", "UniversalAdID_Value", "Encoded_OperatingSystem_CompanyName", "Encoded_OperatingSystem_Name", "Encoded_OperatingSystem_Version":
 					// Components are structured facts; only their composed rows are visible.
@@ -262,9 +267,6 @@ func analyzeFileWithOptions(ctx context.Context, path string, opts AnalyzeOption
 						generalFacts.SetSame("Encoded_Application_Version", version)
 					}
 				}
-			}
-			for _, extra := range parsed.metadata.extras {
-				general.Fields = append(general.Fields, Field{Name: extra.Key, Value: extra.Val})
 			}
 			if name := findField(parsed.General, "Encoded_OperatingSystem_Name"); name != "" {
 				operatingSystem := strings.TrimSpace(findField(parsed.General, "Encoded_OperatingSystem_CompanyName") + " " + name)
@@ -915,13 +917,21 @@ func analyzeFileWithOptions(ctx context.Context, path string, opts AnalyzeOption
 					node := structuredObjectFromKVs(extraFields)
 					mergeStructuredExtraNode(&extraNode, node)
 				}
+				// Track metadata outside the kind's schema stays track-scoped as an extra.
+				trackMetadata := track.metadata
+				trackMetadata.extras = nil
 				for _, field := range track.metadata.fields {
-					if field.Name != "Title" {
+					if field.Name == "Title" {
+						continue
+					}
+					if _, known := reportKindPolicy(reportTables23, track.Kind).Fields[field.Name]; known {
 						builder.Fill(fieldName(field.Name), field.Value, field.Name, field.Value)
+					} else {
+						trackMetadata.extras = setJSONField(trackMetadata.extras, field.Name, field.Value)
 					}
 				}
 				for _, extra := range track.metadata.extras {
-					builder.Text(extra.Key, extra.Val)
+					trackMetadata.extras = setJSONField(trackMetadata.extras, extra.Key, extra.Val)
 				}
 				if track.Kind == StreamVideo {
 					fps := track.metadata.frameRateReal
@@ -948,8 +958,8 @@ func analyzeFileWithOptions(ctx context.Context, path string, opts AnalyzeOption
 				if extraNode != nil {
 					metadataExtraStart = len(extraNode.Object)
 				}
-				if len(track.metadata.extras) > 0 {
-					mergeStructuredExtraNode(&extraNode, structuredObjectFromKVs(track.metadata.extras))
+				if len(trackMetadata.extras) > 0 {
+					mergeStructuredExtraNode(&extraNode, structuredObjectFromKVs(trackMetadata.extras))
 				}
 				trackFacts.Apply(builder)
 				if extraNode != nil {
@@ -962,7 +972,7 @@ func analyzeFileWithOptions(ctx context.Context, path string, opts AnalyzeOption
 					}
 					builder.OverrideStructuredNode("extra", *extraNode)
 				}
-				track.metadata.applyExtraNames(builder, metadataExtraStart)
+				trackMetadata.applyExtraNames(builder, metadataExtraStart)
 				builder.CodecTableKey("Mpeg4")
 				streams = append(streams, builder.Snapshot(canonicalStreamPolicy{}))
 			}

@@ -421,12 +421,15 @@ func mp4VendorName(v uint32) string {
 	return string(b[:])
 }
 
-// applyExtraNames encodes only the appended metadata range. Codec-extra names
-// retain their identities; exact collisions also need distinct raw labels.
+// applyExtraNames encodes only the appended metadata range and gives each
+// member a source-tag text row, so a key that shares a label with a parser
+// field neither hides nor replaces it. Codec-extra names retain their
+// identities; exact collisions also need distinct raw labels.
 func (m mp4Metadata) applyExtraNames(builder *canonicalStreamBuilder, start int) {
 	if len(m.extras) == 0 {
 		return
 	}
+	var rows []fieldEntry
 	stream := builder.store.stream(builder.ref)
 	for i := range stream.Fields {
 		entry := &stream.Fields[i]
@@ -457,8 +460,17 @@ func (m mp4Metadata) applyExtraNames(builder *canonicalStreamBuilder, start int)
 			if _, collision := reserved[name]; collision {
 				raw.Object[index].Key = metadataDynamicJSONName(name, rawNames)
 			}
+			if value := node.Object[index].Value.Text; value != "" {
+				key := node.Object[index].Key
+				rows = append(rows, fieldEntry{Name: fieldName("MatroskaTag/" + key), Value: fieldValue{Text: value}, Dynamic: true,
+					Options: fieldOptions{ShowText: true, ValueType: fieldValueString}, TextLabel: raw.Object[index].Key, MatroskaTag: true, StructuredKey: key})
+			}
 		}
-		entry.Node = &raw
+		// Source spellings travel on the tag rows; the node keeps one key per member.
+		entry.Node = &node
 		entry.StructuredOverride = &node
+	}
+	for _, row := range rows {
+		builder.store.appendEntry(stream, row)
 	}
 }
