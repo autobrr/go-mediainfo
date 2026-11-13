@@ -72,10 +72,34 @@ func TestMatroskaDateNormalization(t *testing.T) {
 		{"2026-11-12T03:04:05+00:00", "2026-11-12 03:04:05 UTC"},
 		{"2026-11-12T03:04:05-04:30", "2026-11-12 03:04:05-04:30"},
 		{"2026-11-12T03:04", "2026-11-12T03:04"}, {"2026-11-12Tbad", "2026-11-12Tbad"},
+		{"2026-11-12, 03:04:05", "2026-11-12 03:04:05"},
+		{"2026-11-12_03:04:05Z", "2026-11-12_03:04:05 UTC"},
+		{"UTC 2026-11-12", "2026-11-12 UTC"},
+		{"2026:11:12", "2026-11-12"},
+		{"Thu Nov 12 03:04:05 2026", "2026-11-12 03:04:05"},
+		{"Thursday November  2 13:04:05 2026", "2026-11-02 13:04:05"},
+		{"Thu, Nov 12, 2026 03:04:05 PM", "2026-11-12 15:04:05"},
+		{"Thu, Nov 12, 2026 12:04:05 AM", "2026-11-12 00:04:05"},
+		{"Thu, Nov 12, 2026", "2026-11-12"},
+		{"Thu Nov 32 03:04:05 2026", "Thu Nov 32 03:04:05 2026"},
+		{"Thu Nov 12 03:04:05 2026 extra", "Thu Nov 12 03:04:05 2026 extra"},
+		{"05/01/2026", "2026-01-05"},
+		{"01/13/2026", "2026-01-13"},
+		// Official reads a second part of 12 as the day and a two-digit year
+		// as 19xx; neither establishes the calendar date, so keep it raw.
+		{"05/12/2026", "05/12/2026"}, {"05/01/26", "05/01/26"},
+		{"5/1/2026/1", "5/1/2026/1"}, {"32/01/2026", "32/01/2026"},
 	} {
-		fields := normalizeMatroskaTag([]string{"DATE"}, tt.in)
-		if len(fields) != 1 || fields[0].value != tt.want {
-			t.Errorf("DATE %q = %#v, want %q", tt.in, fields, tt.want)
+		for _, tag := range []string{"DATE", "DATE_RECORDED"} {
+			fields := normalizeMatroskaTag([]string{tag}, tt.in)
+			if len(fields) != 1 || fields[0].name != "Recorded_Date" || fields[0].value != tt.want {
+				t.Errorf("%s %q = %#v, want %q", tag, tt.in, fields, tt.want)
+			}
+		}
+	}
+	for _, tag := range []string{"DATE", "DATE_RECORDED"} {
+		if fields := normalizeMatroskaTag([]string{tag}, "unknown"); len(fields) != 0 {
+			t.Errorf("%s unknown = %#v, want no field", tag, fields)
 		}
 	}
 }

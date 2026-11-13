@@ -68,6 +68,8 @@ DVD uses the reference in `docs/adr/0002-dvd-parity-reference.md`. Keep evidence
 - Measured fact: the Matroska tag `ENCODER_OPTIONS` shows as `Encoded_Library_Settings`, and `DATE`, `ARTIST`, `GENRE` and `SYNOPSIS` map to `Recorded_Date`, `Performer`, `Genre` and `Synopsis`. v23.04 shows the raw tag names, and v26 maps them. Issue #83.
 - Newer upstream convention: DVD IFO stream IDs use the "189-128" form, which names the private stream and the sub-stream, as v26.05 does. Issue #77.
 - Measured fact: DVD menus. go-mediainfo makes one Menu per title and drops a menu shorter than half of the longest one (v26.05 rule). It reads all program chains where v23.04 has a parse error, and it adds NTSC cell times in exact 90 kHz ticks before it rounds. Raw text subtitle labels follow the newer upstream convention, the v26 short form. Issue #79.
+- Newer upstream convention: Matroska `DATE` and `DATE_RECORDED` both go through the v26.10 General date adapter, which also converts colon dates such as `2026:11:12`. v23.04 keeps that form for `DATE_RECORDED`.
+- Measured fact: a Matroska date that the adapter would turn into a different calendar date keeps its tag text: a slash date with a short year (official reads `05/01/26` as 1926), a slash date with a month part of 12 (official reads `05/12/2026` as 12 May but `05/11/2026` as 5 November), and a text date with trailing text (official drops the text).
 - Measured fact: TS captions show `Duration_End` and `Duration_Start2End` from the caption timestamps, as in v26. Issue #83.
 
 ## Agent skills
