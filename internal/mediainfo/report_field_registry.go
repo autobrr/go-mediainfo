@@ -70,6 +70,8 @@ func loadReportTables() map[reportTableVersion]*reportVersionTables {
 			table.Order[strings.ReplaceAll(name, "/", "_")] = table.Order[name]
 			table.Fields[name] = row
 			base := strings.Split(name, "/String")[0]
+			// Only declared schema slashes gain their serialized underscore alias.
+			table.Aliases[strings.ReplaceAll(name, "/", "_")] = base
 			if _, exists := table.Aliases[row.Label]; !exists || strings.HasPrefix(row.Options, "Y") {
 				table.Aliases[row.Label] = base
 			}
@@ -131,6 +133,24 @@ func loadReportTables() map[reportTableVersion]*reportVersionTables {
 				table.Order[name] = anchor + 1
 			}
 		}
+	}
+	// The approved Android metadata mapping uses the v26 General OS family,
+	// including its text-only summary and hidden structured components.
+	table, newTable := old.Kinds[StreamGeneral], newer.Kinds[StreamGeneral]
+	anchor, anchored := table.Order["Encoded_OperatingSystem"]
+	for offset, name := range []string{"Encoded_OperatingSystem", "Encoded_OperatingSystem/String", "Encoded_OperatingSystem_CompanyName", "Encoded_OperatingSystem_Name", "Encoded_OperatingSystem_Version"} {
+		row, exists := newTable.Fields[name]
+		if !anchored || !exists || row.Label == "" {
+			continue
+		}
+		table.Fields[name] = row
+		table.Order[name] = anchor + offset
+		serialized := strings.ReplaceAll(name, "/", "_")
+		table.Order[serialized] = table.Order[name]
+		base := strings.Split(name, "/String")[0]
+		table.Aliases[serialized] = base
+		table.Aliases[row.Label] = base
+		old.Labels[base] = row.Label
 	}
 	return result
 }

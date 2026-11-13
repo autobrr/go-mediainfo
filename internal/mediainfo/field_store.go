@@ -41,10 +41,24 @@ type fieldEntry struct {
 	StructuredDecimals uint8
 }
 
+// legacyTagRow identifies an unchanged display row across public snapshot copies.
+// Occurrence distinguishes repeated identical rows without treating a label as identity.
+type legacyTagRow struct {
+	Label      string
+	Value      string
+	Occurrence int
+}
+
+// legacyTagIdentity retains the source spelling separately from its normalized key.
+type legacyTagIdentity struct {
+	Key   string
+	Label string
+}
+
 // canonicalStreamPolicy retains legacy rendering exceptions for canonical snapshots.
 type canonicalStreamPolicy struct {
-	// LegacyTagIdentities retains tag ordering when legacy ingestion discards seeds.
-	LegacyTagIdentities map[string]bool
+	// LegacyTagIdentities retains tag ordering and normalized keys when legacy ingestion discards seeds.
+	LegacyTagIdentities map[legacyTagRow]legacyTagIdentity
 	SkipStreamOrder     bool
 	SkipComputed        bool
 	DVDOrder            bool

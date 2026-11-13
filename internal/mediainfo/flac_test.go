@@ -523,10 +523,14 @@ func TestOggFLACGeneralDeliberateDifferences(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for name, want := range map[string]string{"Writing application": "Lavf63.1", "Title": "Mix", "Format/Info": ""} {
+	// Fields hold the text projection, where an audio-only General Title shows as Track name.
+	for name, want := range map[string]string{"Writing application": "Lavf63.1", "Track name": "Mix", "Format/Info": ""} {
 		if got := findField(report.General.Fields, name); got != want {
 			t.Errorf("General %s = %q, want %q", name, got, want)
 		}
+	}
+	if got, _ := canonicalSeedValue(report.General, "Title"); got != "Mix" {
+		t.Errorf("General structured Title = %q, want Mix", got)
 	}
 }
 
@@ -756,5 +760,39 @@ func TestMP4FLACReadsDfLaAtChildBoxBoundaries(t *testing.T) {
 				t.Errorf("Compression mode = %q, want Lossless", got)
 			}
 		})
+	}
+}
+
+func TestEditedReportKeepsSelectedGeneralTitle(t *testing.T) {
+	streamInfo, err := hex.DecodeString("1000100000001000210c0bb802f00e5b6540864d55f003143d8bad47d3b997fae64c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	private := append([]byte("fLaC\x80\x00\x00\x22"), streamInfo...)
+	path := filepath.Join(t.TempDir(), "flac.oga")
+	if err := os.WriteFile(path, buildOggFLACForTest(private, "Lavf63.1", "ENCODER=Lavf63.1", "TITLE=Mix"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	report, err := AnalyzeFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// An unrelated public edit makes rendering rebuild from the text projection.
+	for i := range report.General.Fields {
+		if report.General.Fields[i].Name == "Writing application" {
+			report.General.Fields[i].Value = "Edited"
+		}
+	}
+	reports := []Report{report}
+	json, xml := RenderJSON(reports), RenderXML(reports)
+	for _, want := range []string{`"Title":"Mix"`, `"Track":"Mix"`, `"Encoded_Application":"Edited"`} {
+		if strings.Count(json, want) != 1 {
+			t.Errorf("edited JSON needs %s once: %s", want, json)
+		}
+	}
+	for _, want := range []string{"<Title>Mix</Title>", "<Track>Mix</Track>"} {
+		if strings.Count(xml, want) != 1 {
+			t.Errorf("edited XML needs %s once: %s", want, xml)
+		}
 	}
 }

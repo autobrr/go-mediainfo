@@ -19,6 +19,7 @@ type rawTextFieldProjection struct {
 	Order     int
 	Sequence  uint32
 	Extension bool
+	TagKey    string
 }
 
 // rawTextStreamProjection is one raw-language stream section.
@@ -108,8 +109,18 @@ func projectRawTextReport(report Report) rawTextReportProjection {
 		fields := make([]rawTextFieldProjection, 0, len(stream.Fields))
 		seen := make(map[string]struct{}, len(stream.Fields))
 		tagLabels := make(map[string]bool)
+		representedExtras := make(map[string]bool)
 		for _, entry := range stream.Fields {
 			if !entry.Options.ShowText {
+				continue
+			}
+			if entry.MatroskaTag && entry.StructuredKey != "" {
+				if representedExtras[entry.StructuredKey] {
+					continue
+				}
+				fields = append(fields, rawTextFieldProjection{Label: entry.TextLabel, Value: entry.Value.Text, Sequence: entry.Sequence, Extension: true, TagKey: entry.StructuredKey})
+				representedExtras[entry.StructuredKey] = true
+				tagLabels[entry.TextLabel] = true
 				continue
 			}
 			identity := reportFieldIdentity(version, stream.Kind, string(entry.Name), entry.TextLabel)
@@ -170,6 +181,9 @@ func projectRawTextReport(report Report) rawTextReportProjection {
 		}
 		if extra, ok := rawTextExtraNode(stream); ok && stream.Kind != StreamMenu {
 			for memberIndex, member := range extra.Object {
+				if representedExtras[member.Key] {
+					continue
+				}
 				if member.Key == "ConformanceErrors" {
 					for _, derived := range rawTextConformanceFields(member.Value) {
 						if _, exists := seen[derived.Label]; exists {
@@ -236,6 +250,11 @@ func projectRawTextReport(report Report) rawTextReportProjection {
 		}
 		filtered := fields[:0]
 		for _, field := range fields {
+			if field.TagKey != "" {
+				field.Order = reportFieldRank(version, stream.Kind, field.TagKey)
+				filtered = append(filtered, field)
+				continue
+			}
 			identity := reportFieldIdentity(version, stream.Kind, field.Label, field.Label)
 			if !reportTextVisible(version, stream.Kind, identity) {
 				continue
@@ -1191,7 +1210,7 @@ func rawTextValue(version reportTableVersion, kind StreamKind, label, display st
 			}
 		}
 		return formatRawTextDerivedBitRate(structured[key])
-	case "FrameRate/String", "FrameRate_Original/String", "FrameRate_Minimum/String", "FrameRate_Maximum/String":
+	case "FrameRate/String", "FrameRate_Real/String", "FrameRate_Original/String", "FrameRate_Minimum/String", "FrameRate_Maximum/String":
 		key := strings.TrimSuffix(label, "/String")
 		rate, err := strconv.ParseFloat(structured[key], 64)
 		if err != nil || rate <= 0 || math.IsNaN(rate) || math.IsInf(rate, 0) {

@@ -54,6 +54,12 @@ func projectTextStore(store *fieldStore, fallbackRef string) textReportProjectio
 			if !entry.Options.ShowText {
 				continue
 			}
+			if entry.MatroskaTag && entry.StructuredKey != "" {
+				entry.Name = fieldName(entry.StructuredKey)
+				entry.TextLabel = reportFieldLabel(version, entry.StructuredKey, entry.TextLabel)
+				entries = append(entries, entry)
+				continue
+			}
 			identity := reportFieldIdentity(version, stream.Kind, string(entry.Name), entry.TextLabel)
 			if !friendlyExistingFieldVisible(version, stream.Kind, identity) {
 				continue

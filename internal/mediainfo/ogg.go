@@ -563,9 +563,9 @@ func oggGeneralMetadata(logical map[uint32]*oggLogicalStream, order []uint32) ([
 	fields := []Field{}
 	if title := tags["TITLE"]; title != "" {
 		facts.SetSame("Title", title)
-		facts.SetSame("Movie", title)
 		fields = append(fields, Field{Name: "Title", Value: title})
 	}
+	vorbisDiscMetadata(tags, facts)
 	if encoder := tags["ENCODER"]; encoder != "" {
 		facts.SetSame("Encoded_Application", encoder)
 		fields = append(fields, Field{Name: "Writing application", Value: encoder})

@@ -218,7 +218,7 @@ func TestMatroskaGeneralTagAliasesUseMediaInfoJSONNames(t *testing.T) {
 	}
 }
 
-func TestApplyMatroskaGeneralTagsKeepsTitleAndMovieAligned(t *testing.T) {
+func TestApplyMatroskaGeneralTagsLeavesTitleSelectionToFinalization(t *testing.T) {
 	body := buildMatroskaElement(mkvIDTagTargets, nil)
 	body = append(body, buildMatroskaSimpleTag("TITLE", "Tag title")...)
 	_, _, _, _, _, scoped := parseMatroskaTags(buildMatroskaElement(mkvIDTag, body), "", "")
@@ -228,8 +228,14 @@ func TestApplyMatroskaGeneralTagsKeepsTitleAndMovieAligned(t *testing.T) {
 	applyMatroskaGeneralTags(&general, scoped.general)
 	refreshCanonicalCompatibilitySnapshot(&general)
 	want := "Container title / Tag title"
-	if general.JSON["Title"] != want || general.JSON["Movie"] != want {
-		t.Fatalf("Title/Movie = %q/%q, want %q", general.JSON["Title"], general.JSON["Movie"], want)
+	if general.JSON["Title"] != want || general.JSON["Movie"] != "" {
+		t.Fatalf("Title/Movie = %q/%q, want merged Title without a derived Movie", general.JSON["Title"], general.JSON["Movie"])
+	}
+	scoped.general.set(matroskaTagField{rawName: "Movie", name: "Movie", value: "Explicit movie"})
+	applyMatroskaGeneralTags(&general, scoped.general)
+	refreshCanonicalCompatibilitySnapshot(&general)
+	if general.JSON["Movie"] != "Explicit movie" {
+		t.Fatal("explicit Movie tag was lost")
 	}
 }
 

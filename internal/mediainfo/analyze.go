@@ -245,16 +245,27 @@ func analyzeFileWithOptions(ctx context.Context, path string, opts AnalyzeOption
 			info.DurationSeconds = mp4Duration
 			generalFacts := &canonicalStructuredFacts{}
 			mp4WritingApplication := ""
+			tagEncodedDate := ""
 			for _, field := range parsed.General {
-				general.Fields = appendFieldUnique(general.Fields, field)
+				if field.Name == "Recorded_Date" || field.Name == "Encoded_Date" {
+					if field.Value = adaptReferenceDate(field.Value, false); field.Value == "" {
+						continue
+					}
+				}
+				if field.Name == "Encoded_Date" {
+					// Joined with the mvhd creation time below, as one row.
+					tagEncodedDate = field.Value
+					continue
+				}
 				switch field.Name {
-				case "Title":
-					generalFacts.SetSame("Title", field.Value)
-					generalFacts.SetSame("Movie", field.Value)
-				case "Album":
-					generalFacts.SetSame("Album", field.Value)
-				case "Comment":
-					generalFacts.SetSame("Comment", field.Value)
+				case "UniversalAdID_Registry", "UniversalAdID_Value", "Encoded_OperatingSystem_CompanyName", "Encoded_OperatingSystem_Name", "Encoded_OperatingSystem_Version":
+					// Components are structured facts; only their composed rows are visible.
+				default:
+					general.Fields = appendFieldUnique(general.Fields, field)
+				}
+				switch field.Name {
+				case "Title", "Album", "Comment", "Collection", "Copyright", "Performer", "Publisher", "Description", "ContentRating", "Recorded_Date", "Encoded_Date", "Recorded_Location", "Encoded_OperatingSystem_CompanyName", "Encoded_OperatingSystem_Name", "Encoded_OperatingSystem_Version", "UniversalAdID_Registry", "UniversalAdID_Value":
+					generalFacts.SetSame(fieldName(field.Name), field.Value)
 				case "Writing application":
 					mp4WritingApplication = field.Value
 					if name, version, _ := splitWritingApplication(field.Value); (name == "DVDFab" && version != "") || exposeWritingApplicationComponents(name, version) {
@@ -263,9 +274,42 @@ func analyzeFileWithOptions(ctx context.Context, path string, opts AnalyzeOption
 					}
 				}
 			}
-			if encoded := formatMP4UTCTime(parsed.MovieCreation); encoded != "" {
+			if name := findField(parsed.General, "Encoded_OperatingSystem_Name"); name != "" {
+				operatingSystem := strings.TrimSpace(findField(parsed.General, "Encoded_OperatingSystem_CompanyName") + " " + name)
+				if version := findField(parsed.General, "Encoded_OperatingSystem_Version"); version != "" {
+					operatingSystem += " " + version
+				}
+				general.Fields = appendFieldUnique(general.Fields, Field{Name: "Encoded_OperatingSystem/String", Value: operatingSystem})
+			}
+			vendor := parsed.handlerManufacturer
+			if vendor != 0 && vendor != ^uint32(0) {
+				name := mp4VendorName(vendor)
+				library := name
+				if parsed.metadata.vendorVersion != "" {
+					library += " " + parsed.metadata.vendorVersion
+				}
+				general.Fields = appendFieldUnique(general.Fields, Field{Name: "Writing library", Value: library})
+				generalFacts.SetSame("Encoded_Library", library)
+				generalFacts.SetSame("Encoded_Library_Name", name)
+				generalFacts.SetSame("Encoded_Library_Version", parsed.metadata.vendorVersion)
+			}
+			if registry, value := findField(parsed.General, "UniversalAdID_Registry"), findField(parsed.General, "UniversalAdID_Value"); registry != "" && value != "" {
+				general.Fields = appendFieldUnique(general.Fields, Field{Name: "UniversalAdID/String", Value: value + " (" + registry + ")"})
+			}
+			movieEncoded := formatMP4UTCTime(parsed.MovieCreation)
+			encoded := movieEncoded
+			// v23.04 fills the DATE key after mvhd and joins distinct values.
+			if tagEncodedDate != "" {
+				if encoded == "" || encoded == tagEncodedDate {
+					encoded = tagEncodedDate
+				} else {
+					encoded += " / " + tagEncodedDate
+				}
+				generalFacts.SetSame("Encoded_Date", encoded)
+			}
+			if encoded != "" {
 				general.Fields = appendFieldUnique(general.Fields, Field{Name: "Encoded date", Value: encoded})
-				if tagged := formatMP4UTCTime(parsed.MovieModified); tagged != "" {
+				if tagged := formatMP4UTCTime(parsed.MovieModified); movieEncoded != "" && tagged != "" {
 					general.Fields = appendFieldUnique(general.Fields, Field{Name: "Tagged date", Value: tagged})
 				}
 			}
@@ -336,10 +380,12 @@ func analyzeFileWithOptions(ctx context.Context, path string, opts AnalyzeOption
 					builder.Fill("Format", formatValue, "Format", track.Format)
 					builder.Structured("Format_AdditionalFeatures", additionalFeatures)
 				}
-				// Generic handler names carry no user-facing information; retain all other
-				// handler names as track titles regardless of stream kind.
-				name := strings.TrimSpace(firstNonEmpty(track.trackTitle, track.HandlerName))
-				if name != "" && name != "SoundHandler" && name != "VideoHandler" && name != "MetaHandler" && name != "SubtitleHandler" {
+				// Handler eligibility is captured at parse time, before later General titles.
+				name := strings.TrimSpace(firstNonEmpty(track.trackTitle, findField(track.metadata.fields, "Title")))
+				if name == "" && track.handlerTitleEligible {
+					name = strings.TrimSpace(track.HandlerName)
+				}
+				if name != "" {
 					fields = appendFieldUnique(fields, Field{Name: "Title", Value: name})
 					builder.Fill("Title", name, "Title", name)
 				}
@@ -883,19 +929,55 @@ func analyzeFileWithOptions(ctx context.Context, path string, opts AnalyzeOption
 					if len(track.chapterTrackRefs) > 0 {
 						extraFields = append(extraFields, jsonKV{Key: "Menus", Val: strconv.FormatUint(uint64(track.chapterTrackRefs[0]), 10)})
 					}
-					if len(extraFields) > 0 {
-						configuration := findField(fields, "Codec configuration box")
-						if configuration != "" {
-							if track.hasDolbyVision {
-								configuration = "hvcC+dvvC"
-							}
-							extraFields = append(extraFields, jsonKV{Key: "CodecConfigurationBox", Val: configuration})
-						}
-					}
 				}
 				if len(extraFields) > 0 {
 					node := structuredObjectFromKVs(extraFields)
 					mergeStructuredExtraNode(&extraNode, node)
+				}
+				// Track metadata outside the kind's schema stays track-scoped as an extra.
+				trackMetadata := track.metadata
+				trackMetadata.extras = nil
+				for _, field := range track.metadata.fields {
+					if field.Name == "Title" {
+						continue
+					}
+					if _, known := reportKindPolicy(reportTables23, track.Kind).Fields[field.Name]; !known {
+						trackMetadata.extras = setJSONField(trackMetadata.extras, field.Name, field.Value)
+					} else if !builder.HasStructured(fieldName(field.Name)) {
+						// A parser fact such as the tkhd Encoded_Date outranks a tag.
+						builder.Fill(fieldName(field.Name), field.Value, field.Name, field.Value)
+					}
+				}
+				for _, extra := range track.metadata.extras {
+					trackMetadata.extras = setJSONField(trackMetadata.extras, extra.Key, extra.Val)
+				}
+				if track.Kind == StreamVideo {
+					fps := track.metadata.frameRateReal
+					if fps == 0 {
+						fps = parsed.metadata.frameRateReal
+					}
+					if fps > 0 {
+						value := strconv.FormatFloat(fps, 'f', 3, 64)
+						builder.Fill("FrameRate_Real", value, "Real frame rate", value+" FPS")
+					}
+					if ratio := firstNonEmpty(track.metadata.displayAspectRatio, parsed.metadata.displayAspectRatio); ratio != "" && trackFacts.Canonical("DisplayAspectRatio") == "" && !builder.HasStructured("DisplayAspectRatio") {
+						builder.Fill("DisplayAspectRatio", ratio, "Display aspect ratio", ratio)
+					}
+				}
+				if track.Kind == StreamVideo {
+					// Preserve sample and probe facts after container extras, before tags.
+					// The current builder includes Dolby Vision probe enrichment.
+					current := Stream{canonicalSeed: builder.store.stream(builder.ref).Fields}
+					if seed := canonicalSeedStructuredNode(&current, "extra"); seed != nil {
+						mergeStructuredExtraNode(&extraNode, *seed)
+					}
+				}
+				metadataExtraStart := 0
+				if extraNode != nil {
+					metadataExtraStart = len(extraNode.Object)
+				}
+				if len(trackMetadata.extras) > 0 {
+					mergeStructuredExtraNode(&extraNode, structuredObjectFromKVs(trackMetadata.extras))
 				}
 				trackFacts.Apply(builder)
 				if extraNode != nil {
@@ -908,6 +990,7 @@ func analyzeFileWithOptions(ctx context.Context, path string, opts AnalyzeOption
 					}
 					builder.OverrideStructuredNode("extra", *extraNode)
 				}
+				trackMetadata.applyExtraNames(builder, metadataExtraStart)
 				builder.CodecTableKey("Mpeg4")
 				streams = append(streams, builder.Snapshot(canonicalStreamPolicy{}))
 			}
@@ -940,11 +1023,14 @@ func analyzeFileWithOptions(ctx context.Context, path string, opts AnalyzeOption
 				generalFacts.SetSame("StreamSize", streamSize)
 			}
 			generalFacts.ApplyToStream(&general)
+			metadataExtraStart := len(parsed.generalExtra)
+			parsed.generalExtra = append(parsed.generalExtra, parsed.metadata.extras...)
 			if len(parsed.generalExtra) > 0 {
 				builder := newCanonicalStreamBuilder(StreamGeneral)
 				builder.ImportCanonicalSeed(general.canonicalSeed)
 				node := structuredObjectFromKVs(parsed.generalExtra)
 				builder.StructuredNode("extra", node)
+				parsed.metadata.applyExtraNames(builder, metadataExtraStart)
 				augmented := builder.Snapshot(canonicalStreamPolicy{})
 				general.canonicalSeed = augmented.canonicalSeed
 			}
@@ -972,7 +1058,7 @@ func analyzeFileWithOptions(ctx context.Context, path string, opts AnalyzeOption
 					rawWritingLibrary = field.Value
 				}
 				if field.Name == "Title" {
-					// MediaInfo displays the resolved title as "Movie name" after tag merge.
+					// Keep the merged title until final stream-aware title selection.
 					replaceCanonicalSeedFill(&general, "Title", field.Value, "", "")
 					continue
 				}
@@ -1018,10 +1104,13 @@ func analyzeFileWithOptions(ctx context.Context, path string, opts AnalyzeOption
 			generalExtras := []jsonKV{}
 			if value := findField(general.Fields, "ErrorDetectionType"); value != "" {
 				generalExtras = append(generalExtras, jsonKV{Key: "ErrorDetectionType", Val: value})
+				// Official fills it at the first CRC-32, before Streams_Finish adds tags.
+				insertCanonicalSeedTextBefore(&general, "ErrorDetectionType", value)
 			}
 			if len(parsed.attachments) > 0 {
 				generalExtras = append(generalExtras, jsonKV{Key: "Attachments", Val: strings.Join(parsed.attachments, " / ")})
 				general.Fields = appendFieldUnique(general.Fields, Field{Name: "Attachments", Value: strings.Join(parsed.attachments, " / ")})
+				insertCanonicalSeedTextBefore(&general, "Attachments", strings.Join(parsed.attachments, " / "))
 			}
 			if len(generalExtras) > 0 {
 				node := structuredObjectFromKVs(generalExtras)
@@ -1035,7 +1124,7 @@ func analyzeFileWithOptions(ctx context.Context, path string, opts AnalyzeOption
 				replaceCanonicalSeedFill(&general, "Encoded_Date", creationTime, "", "")
 			}
 			if rawWritingApp != "" {
-				replaceCanonicalSeedFill(&general, "Encoded_Application", rawWritingApp, "", "")
+				replaceCanonicalSeedFill(&general, "Encoded_Application", rawWritingApp, "Writing application", normalizeWritingApplication(rawWritingApp))
 				if name, version, _ := splitWritingApplication(rawWritingApp); exposeWritingApplicationComponents(name, version) {
 					replaceCanonicalSeedFill(&general, "Encoded_Application_Name", name, "", "")
 					if version != "" {
@@ -1048,20 +1137,13 @@ func analyzeFileWithOptions(ctx context.Context, path string, opts AnalyzeOption
 					rawWritingLibrary += " / " + encoder
 					general.Fields = setFieldValue(general.Fields, "Writing library", rawWritingLibrary)
 				}
-				replaceCanonicalSeedFill(&general, "Encoded_Library", rawWritingLibrary, "", "")
+				replaceCanonicalSeedFill(&general, "Encoded_Library", rawWritingLibrary, "Writing library", rawWritingLibrary)
 				if name, version, _ := splitWritingApplication(rawWritingLibrary); exposeWritingApplicationComponents(name, version) {
 					replaceCanonicalSeedFill(&general, "Encoded_Library_Name", name, "", "")
 					replaceCanonicalSeedFill(&general, "Encoded_Library_Version", version, "", "")
 				}
 			}
 			applyMatroskaGeneralTags(&general, parsed.scopedTags.general)
-			// MediaInfo emits the resolved Matroska title as both Title and Movie.
-			canonicalTitle, _ := canonicalSeedValue(general, "Title")
-			if title := canonicalTitle; title != "" {
-				replaceCanonicalSeedFill(&general, "Title", title, "", "")
-				replaceCanonicalSeedFill(&general, "Movie", title, "", "")
-				general.Fields = appendFieldUnique(general.Fields, Field{Name: "Movie name", Value: title})
-			}
 			generalValues := map[string]string{"IsStreamable": "Yes"}
 			if info.DurationSeconds > 0 {
 				projectedDuration := formatJSONFloat(info.DurationSeconds + 1e-9)
@@ -1215,10 +1297,9 @@ func analyzeFileWithOptions(ctx context.Context, path string, opts AnalyzeOption
 			for _, field := range generalFields {
 				general.Fields = appendFieldUnique(general.Fields, field)
 			}
-			// MediaInfoLib surfaces XDS Program Name as both Title and Movie in JSON for TS.
+			// Preserve XDS title facts; final stream-aware selection fills Movie or Track.
 			if title := findField(general.Fields, "Title"); title != "" {
 				generalFacts.SetSame("Title", title)
-				generalFacts.SetSame("Movie", title)
 			}
 			if movie := findField(general.Fields, "Movie"); movie != "" {
 				generalFacts.SetSame("Movie", movie)
@@ -1973,6 +2054,7 @@ func analyzeFileWithOptions(ctx context.Context, path string, opts AnalyzeOption
 				appendCanonicalSeedObjectMembers(&general, "extra", generalExtra.Object)
 			}
 			generalFacts.ApplyToStream(&general)
+			exposeGeneralMetadata(&general, "Album", "Album_Performer", "Performer", "Genre", "Composer", "Copyright", "ISRC", "Label", "Track_Position", "Track_Position_Total", "Part_Position", "Part_Position_Total", "Recorded_Date")
 		}
 	case "Wave":
 		if parsedInfo, parsedStreams, generalFields, generalFacts, ok := parseWAV(file, stat.Size()); ok {
@@ -2027,6 +2109,7 @@ func analyzeFileWithOptions(ctx context.Context, path string, opts AnalyzeOption
 				appendCanonicalSeedObjectMembers(&general, "extra", generalExtra.Object)
 			}
 			generalFacts.ApplyToStream(&general)
+			exposeGeneralMetadata(&general, "Part_Position", "Part_Position_Total")
 		}
 	case "MPEG Video":
 		if parsedInfo, parsedStreams, ok := ParseMPEGVideo(file, stat.Size()); ok {
