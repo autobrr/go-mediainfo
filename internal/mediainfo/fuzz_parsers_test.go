@@ -500,6 +500,8 @@ func FuzzMP4Metadata(f *testing.F) {
 	f.Add(boxed.Bytes())
 	f.Add(mp4MetaForTest("mdta", []string{"com.android.capture.fps"}, mp4MetaItemForTest(mp4MetaIndexForTest(1), 23, []byte{0x41, 0xf0, 0, 0}), false))
 	f.Add([]byte{})
+	f.Add([]byte("Thu, Nov 12, 2026 03:04:05 PM"))
+	f.Add([]byte("UTC 2026:11:12T03:04:05.1+0000"))
 	f.Fuzz(func(t *testing.T, data []byte) {
 		data = fuzzLimit(data)
 		budget := embeddedAssetBudget{}
@@ -507,5 +509,9 @@ func FuzzMP4Metadata(f *testing.F) {
 		_ = parseMP4UserMetadata(data, &embeddedAssetBudget{})
 		_ = parseMP4UnknownUserMetadata(data)
 		_ = validMP4BMPCover(data)
+		var metadata mp4Metadata
+		parseMP4MetadataChildren(data, &metadata, &budget)
+		_ = adaptReferenceDate(string(data), false)
+		_ = adaptReferenceDate(string(data), true)
 	})
 }

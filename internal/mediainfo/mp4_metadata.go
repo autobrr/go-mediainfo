@@ -229,7 +229,8 @@ func mp4RecordedLocation(value string) string {
 		}
 		minute := strings.IndexByte(padded[degree:end], '\'')
 		if minute < 0 {
-			break
+			start = end
+			continue
 		}
 		minute += degree
 		dot := strings.IndexByte(padded[degree:minute], '.')

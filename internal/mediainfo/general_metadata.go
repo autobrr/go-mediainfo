@@ -43,7 +43,7 @@ func finalizeGeneralTitle(store *fieldStore) {
 
 // exposeGeneralMetadata adds the text sibling for already mapped metadata only.
 // It preserves canonical keys and takes labels from the v23.04 table, because
-// its callers (Matroska, FLAC, Ogg) never produce DVD reports.
+// its callers (FLAC, Ogg) never produce DVD reports.
 func exposeGeneralMetadata(stream *Stream, names ...fieldName) {
 	for _, name := range names {
 		if value, ok := canonicalSeedValue(*stream, name); ok && value != "" {

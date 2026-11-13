@@ -101,7 +101,9 @@ func TestMP4MetadataTypedValues(t *testing.T) {
 	}
 }
 func TestMP4MetadataLocation(t *testing.T) {
-	for _, tt := range []struct{ in, want string }{{"+12.500-003.250+004.0/", "12.500°N 3.250°W 4.0m"}, {"-00.00+000.00/", ""}, {"unparsed", "unparsed"}, {"+12/", "+12/"}, {"/bad", "/bad"}, {"12°3'4\"N 34°5'6\"E", "12°03'04\"N 34°05'06\"E"}, {"+12.0+034.0-002.0/", "12.0°N 34.0°E -002.0m"}} {
+	for _, tt := range []struct{ in, want string }{{"+12.500-003.250+004.0/", "12.500°N 3.250°W 4.0m"}, {"-00.00+000.00/", ""}, {"unparsed", "unparsed"}, {"+12/", "+12/"}, {"/bad", "/bad"}, {"12°3'4\"N 34°5'6\"E", "12°03'04\"N 34°05'06\"E"}, {"+12.0+034.0-002.0/", "12.0°N 34.0°E -002.0m"},
+		// v26.10 Location_Adapt pads each coordinate on its own.
+		{"40° N 5°3'0\" W", "40° N 5°03'00\" W"}} {
 		if got := mp4RecordedLocation(tt.in); got != tt.want {
 			t.Fatalf("%q -> %q, want %q", tt.in, got, tt.want)
 		}
@@ -624,6 +626,13 @@ func mp4MetadataMovieFileForTest(t *testing.T, created uint32, keys []string, it
 	copy(h[8:], "vide")
 	h = append(h, 0)
 	var media, track bytes.Buffer
+	if created != 0 {
+		tkhd := make([]byte, 84)
+		binary.BigEndian.PutUint32(tkhd[4:8], created)
+		binary.BigEndian.PutUint32(tkhd[8:12], created)
+		binary.BigEndian.PutUint32(tkhd[12:16], 1)
+		writeMP4Box(&track, "tkhd", tkhd)
+	}
 	writeMP4Box(&media, "hdlr", h)
 	writeMP4Box(&track, "mdia", media.Bytes())
 	var trackItems []byte
@@ -739,6 +748,32 @@ func TestMP4EncodedDateJoinsMovieAndTagValues(t *testing.T) {
 		general = general[:strings.Index(general, "\nVideo")]
 		if strings.Count(general, "Encoded date") != 1 || !strings.Contains(general, tt.want) {
 			t.Errorf("%s General text needs one joined Encoded date row:\n%s", tt.tag, general)
+		}
+	}
+}
+
+func TestMP4TrackMetadataKeepsParserFacts(t *testing.T) {
+	created := uint32(time.Date(2022, 1, 1, 0, 0, 0, 0, time.UTC).Sub(time.Date(1904, 1, 1, 0, 0, 0, 0, time.UTC)).Seconds())
+	report := mp4MetadataMovieFileForTest(t, created, nil, nil, []string{"DATE"}, []string{"tag text"})
+	var video Stream
+	for _, stream := range report.Streams {
+		if stream.Kind == StreamVideo {
+			video = stream
+		}
+	}
+	if got, _ := canonicalSeedValue(video, "Encoded_Date"); got != "2022-01-01 00:00:00 UTC" {
+		t.Errorf("track tag replaced the tkhd Encoded_Date: %q", got)
+	}
+	text := RenderText([]Report{report})
+	videoText := text[strings.Index(text, "\nVideo"):]
+	if strings.Count(videoText, "Encoded date") != 1 || strings.Contains(videoText, "tag text") {
+		t.Errorf("Video text needs only the tkhd Encoded date:\n%s", videoText)
+	}
+	// Without a parser value, the in-schema tag fills the field.
+	report = mp4MetadataMovieFileForTest(t, 0, nil, nil, []string{"DATE"}, []string{"tag text"})
+	for _, stream := range report.Streams {
+		if got, _ := canonicalSeedValue(stream, "Encoded_Date"); stream.Kind == StreamVideo && got != "tag text" {
+			t.Errorf("track tag without a parser value: %q", got)
 		}
 	}
 }

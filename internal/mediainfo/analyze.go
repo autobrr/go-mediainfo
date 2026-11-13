@@ -941,10 +941,11 @@ func analyzeFileWithOptions(ctx context.Context, path string, opts AnalyzeOption
 					if field.Name == "Title" {
 						continue
 					}
-					if _, known := reportKindPolicy(reportTables23, track.Kind).Fields[field.Name]; known {
-						builder.Fill(fieldName(field.Name), field.Value, field.Name, field.Value)
-					} else {
+					if _, known := reportKindPolicy(reportTables23, track.Kind).Fields[field.Name]; !known {
 						trackMetadata.extras = setJSONField(trackMetadata.extras, field.Name, field.Value)
+					} else if !builder.HasStructured(fieldName(field.Name)) {
+						// A parser fact such as the tkhd Encoded_Date outranks a tag.
+						builder.Fill(fieldName(field.Name), field.Value, field.Name, field.Value)
 					}
 				}
 				for _, extra := range track.metadata.extras {
