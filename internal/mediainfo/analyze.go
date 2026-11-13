@@ -263,6 +263,9 @@ func analyzeFileWithOptions(ctx context.Context, path string, opts AnalyzeOption
 					}
 				}
 			}
+			for _, extra := range parsed.metadata.extras {
+				general.Fields = append(general.Fields, Field{Name: extra.Key, Value: extra.Val})
+			}
 			if name := findField(parsed.General, "Encoded_OperatingSystem_Name"); name != "" {
 				operatingSystem := strings.TrimSpace(findField(parsed.General, "Encoded_OperatingSystem_CompanyName") + " " + name)
 				if version := findField(parsed.General, "Encoded_OperatingSystem_Version"); version != "" {
@@ -916,6 +919,9 @@ func analyzeFileWithOptions(ctx context.Context, path string, opts AnalyzeOption
 					if field.Name != "Title" {
 						builder.Fill(fieldName(field.Name), field.Value, field.Name, field.Value)
 					}
+				}
+				for _, extra := range track.metadata.extras {
+					builder.Text(extra.Key, extra.Val)
 				}
 				if track.Kind == StreamVideo {
 					fps := track.metadata.frameRateReal

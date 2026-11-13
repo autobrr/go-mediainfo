@@ -301,6 +301,17 @@ func TestMP4MetadataAnalysisOutput(t *testing.T) {
 	if raw := RenderTextWithOptions(reports, TextRenderOptions{Language: "raw"}); !strings.Contains(raw, "com.example.metadata") || strings.Contains(raw, "com_example_metadata") {
 		t.Errorf("metadata normalization changed raw name: %s", raw)
 	}
+	for _, output := range []string{RenderText(reports), RenderHTML(reports)} {
+		if !strings.Contains(output, "com.example.metadata") || !strings.Contains(output, "Synthetic extra") || strings.Count(output, "Synthetic extra") != 1 {
+			t.Errorf("unknown General metadata lacks one friendly row: %s", output)
+		}
+		if strings.Count(output, "Track extra") != 2 {
+			t.Errorf("unknown track metadata lacks one friendly row per track: %s", output)
+		}
+	}
+	if raw := RenderTextWithOptions(reports, TextRenderOptions{Language: "raw"}); strings.Count(raw, "Synthetic extra") != 1 || strings.Count(raw, "Track extra") != 2 {
+		t.Errorf("unknown metadata raw rows are not unique: %s", raw)
+	}
 	if len(report.Streams) != 2 {
 		t.Fatalf("streams=%d", len(report.Streams))
 	}
