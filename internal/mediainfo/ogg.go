@@ -217,6 +217,12 @@ func parseOgg(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, []Field,
 				omitDerivedLayout: hasMask && mask == 0,
 			}))
 		}
+		// Language belongs to this logical stream, not the merged General tags.
+		if code := normalizeLanguageCode(stream.tags["LANGUAGE"]); code != "" {
+			target := &streams[len(streams)-1]
+			replaceCanonicalSeedFill(target, "Language", code, "Language", formatLanguage(code))
+			refreshCanonicalCompatibilitySnapshot(target)
+		}
 	}
 	if len(streams) == 0 {
 		return ContainerInfo{}, nil, nil, nil, nil, false
@@ -353,10 +359,19 @@ func parseOggHeaderPacket(stream *oggLogicalStream, packet []byte) {
 func parseOggComments(data []byte) (string, map[string]string) {
 	vendor, pairs := parseFLACVorbisComment(data)
 	tags := make(map[string]string, len(pairs))
+	var languages []string
 	for _, pair := range pairs {
+		// Language positions are significant; other tags keep their first nonempty value.
+		if pair.Key == "LANGUAGE" {
+			languages = append(languages, pair.Val)
+			continue
+		}
 		if pair.Key != "" && pair.Val != "" && tags[pair.Key] == "" {
 			tags[pair.Key] = pair.Val
 		}
+	}
+	if len(languages) > 0 {
+		tags["LANGUAGE"] = strings.Join(languages, " / ")
 	}
 	return vendor, tags
 }

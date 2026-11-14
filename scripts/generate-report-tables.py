@@ -9,6 +9,7 @@ v26.10 supplies DVD field, format, and language policy.
 """
 
 import hashlib
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -26,20 +27,30 @@ def generate(root, version, revision):
     if Path(checkout).resolve() != root.resolve() or actual != revision:
         raise SystemExit(f"MediaInfoLib v{version} requires checkout revision {revision}")
     state = subprocess.run(
-        ["git", "-C", str(root), "diff", "--quiet", revision, "--", "Source/Resource/Text", "License.html"]
+        ["git", "-C", str(root), "diff", "--quiet", revision, "--", "Source/Resource/Text", "Source/MediaInfo/MediaInfo_Config_Automatic.cpp", "License.html"]
     )
     if state.returncode == 1:
         raise SystemExit(f"MediaInfoLib v{version} extraction inputs differ from {revision}")
     state.check_returncode()
     manifest = [f"MediaInfoLib v{version}: {revision}"]
 
-    def read(relative):
+    def source_bytes(relative):
         data = (root / relative).read_bytes()
         manifest.append(f"{hashlib.sha256(data).hexdigest()}  {relative}")
+        return data
+
+    def read(relative):
+        data = source_bytes(relative)
         return [line.split(";") for line in data.decode("utf-8-sig").splitlines() if line]
 
     base = "Source/Resource/Text/"
     language = dict((row[0], row[1]) for row in read(base + "Language/DefaultLanguage.csv") if len(row) > 1)
+    names = sorted((key.removeprefix("Language_"), value) for key, value in language.items() if key.startswith("Language_"))
+    (DEST / f"{version}-languages.tsv").write_text("".join(code + "\t" + name + "\n" for code, name in names), encoding="utf-8", newline="\n")
+    automatic = source_bytes("Source/MediaInfo/MediaInfo_Config_Automatic.cpp").decode("utf-8-sig")
+    aliases = automatic.split("void MediaInfo_Config_Iso639_1 (", 1)[1].split("\n}", 1)[0]
+    aliases = sorted(dict(re.findall(r'"([^";\\]+);([^"\\]+)\\n"', aliases)).items())
+    (DEST / f"{version}-language-aliases.tsv").write_text("".join(code + "\t" + primary + "\n" for code, primary in aliases), encoding="utf-8", newline="\n")
     (DEST / f"{version}-values.tsv").write_text("".join(key + "\t" + value + "\n" for key, value in language.items() if key.startswith(("StoreMethod_", "Interlaced_", "MuxingMode_"))), encoding="utf-8", newline="\n")
     rows = []
     for kind in KINDS:

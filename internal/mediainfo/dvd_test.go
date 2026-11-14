@@ -46,6 +46,35 @@ func TestDVDHasConstantVideoBitRateUsesFirstVideoStream(t *testing.T) {
 	}
 }
 
+func TestDVDLanguageBytes(t *testing.T) {
+	for _, tc := range []struct{ raw, want string }{
+		{"en", "en"}, {"iw", "iw"}, {"e\x00", "e"}, {"  ", ""}, {"", ""}, {"?x", "?x"},
+		{"\xff\xff", ""}, {"e\x80", ""}, {"\x80n", ""},
+	} {
+		if got := dvdTrimLang([]byte(tc.raw)); got != tc.want {
+			t.Errorf("%q: %q, want %q", tc.raw, got, tc.want)
+		}
+	}
+	for _, code := range []string{"en", "iw", "\xff\xff", "e\x80", "\x80n"} {
+		for languageType := byte(0); languageType < 4; languageType++ {
+			data := make([]byte, 12)
+			data[1] = 1
+			data[2] = languageType << 2
+			copy(data[4:6], code)
+			data[7] = 3
+			audio := parseDVDAudioAttrs(data, 0, 2)
+			subpic := parseDVDSubpicAttrs(data, 0, 2)
+			want := map[string]string{"en": "en", "iw": "he"}[code]
+			if len(audio) != 1 || len(subpic) != 1 || audio[0].LanguageCode != want || subpic[0].LanguageCode != want {
+				t.Fatalf("code %q type %d: %v %v", code, languageType, audio, subpic)
+			}
+			if audio[0].LanguageMore == "" || subpic[0].LanguageMore == "" {
+				t.Fatal("language more was lost")
+			}
+		}
+	}
+}
+
 func TestDVDIFOAndBUPDurationPresentation(t *testing.T) {
 	for _, extension := range []string{".IFO", ".BUP"} {
 		for _, tc := range []struct {
@@ -615,6 +644,7 @@ func TestAnalyzeVTSIFOUsesBUPOnlyForMissingLanguage(t *testing.T) {
 		wantLanguage    string
 	}{
 		{name: "fallback", wantLanguage: "French"},
+		{name: "invalid primary falls back", primaryLanguage: "\xff\xff", wantLanguage: "French"},
 		{name: "primary wins", primaryLanguage: "en", wantLanguage: "English"},
 	}
 	for _, tt := range tests {
@@ -810,6 +840,27 @@ func TestOverlayDVDDeclaredLanguagesMatchesPayloadIdentity(t *testing.T) {
 				t.Fatalf("Language = %q, found %v; want en", got, found)
 			}
 		})
+	}
+}
+
+func TestOverlayDVDLanguageMoreWithoutLanguageCode(t *testing.T) {
+	for _, tc := range []struct {
+		kind StreamKind
+		id   string
+	}{{StreamAudio, "189-128"}, {StreamText, "189-32"}} {
+		stream := Stream{Kind: tc.kind}
+		replaceCanonicalSeedFill(&stream, "ID", tc.id, "ID", tc.id)
+		replaceCanonicalSeedFill(&stream, "Language", "en", "Language", "English")
+		streams := []Stream{stream}
+		audio := []dvdAudioAttrs{{Format: "AC-3", StreamID: 0, LanguageMore: "Director's comments"}}
+		subpic := []dvdSubpicAttrs{{StreamID: 0, LanguageMore: "Director's comments"}}
+		overlayDVDDeclaredLanguages(streams, audio, subpic)
+		if got, _ := canonicalSeedValue(streams[0], "Language"); got != "en" {
+			t.Fatalf("payload language erased: %q", got)
+		}
+		if got, _ := canonicalSeedValue(streams[0], "Language_More"); got != "Director's comments" {
+			t.Fatalf("Language_More missing: %q", got)
+		}
 	}
 }
 

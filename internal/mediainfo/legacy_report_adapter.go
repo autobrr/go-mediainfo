@@ -190,12 +190,13 @@ func publicReportMutationDelta(report Report, snapshot legacyReportState) Report
 	return report
 }
 
-// parserFormatFactRows maps each structured fact that reportFormatPresentation
-// reads to the friendly row that displays it.
-var parserFormatFactRows = map[string]string{
+// parserPresentationFactRows maps facts whose friendly display cannot recover
+// the original canonical value to the row that displays them.
+var parserPresentationFactRows = map[string]string{
 	"Format":                    "Format",
 	"Format_AdditionalFeatures": "Format",
 	"Format_Profile":            "Format profile",
+	"Language":                  "Language",
 }
 
 // stripUnchangedSnapshotMaps keeps explicit compatibility-map changes and
@@ -221,11 +222,11 @@ func stripUnchangedSnapshotMaps(stream *Stream, snapshot legacyStreamState) {
 			stream.legacyJSONRawDeleted[key] = struct{}{}
 		}
 	}
-	// A friendly row such as "DTS XLL" cannot be parsed back into the parser's
-	// format facts, so keep each fact unless the caller edited its row.
+	// Friendly format and language rows cannot recover their canonical facts
+	// (including language suffix case), so keep a fact unless its row was edited.
 	for key, value := range stream.JSON {
 		if snapshot.JSON[key] == value {
-			if row, ok := parserFormatFactRows[key]; ok && findField(stream.Fields, row) == findField(snapshot.Fields, row) {
+			if row, ok := parserPresentationFactRows[key]; ok && findField(stream.Fields, row) == findField(snapshot.Fields, row) {
 				continue
 			}
 			delete(stream.JSON, key)
@@ -383,7 +384,8 @@ func ensureLegacyXMLProjection(store *fieldStore) {
 			if stored == nil || stored.DirectCanonical {
 				continue
 			}
-			fields := buildJSONStreamFields(report.Streams[originalIndex], order, 0, containerFormat)
+			fields := buildJSONStreamFields(report.Streams[originalIndex], order, 0, containerFormat, reportVersion(store))
+			fields = filterDeletedLegacyJSONFields(fields, report.Streams[originalIndex])
 			appendLegacyStructuredFields(store, ref, fields, structuredProjectionXML)
 			clearAudioSampleFrequencyFrameRate(store, ref)
 		}

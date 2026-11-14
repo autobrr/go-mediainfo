@@ -45,7 +45,7 @@ func TestHEVCVideoJSONFieldOrder(t *testing.T) {
 			"colour_range":  "Limited",
 		},
 	}
-	kvs := buildJSONStreamFields(s, 0, 0, "MPEG-4")
+	kvs := buildJSONStreamFields(s, 0, 0, "MPEG-4", reportTables23)
 
 	idx := func(k string) int { return indexOfKey(kvs, k) }
 	mustBefore := func(a, b string) {

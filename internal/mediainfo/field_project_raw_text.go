@@ -1275,7 +1275,7 @@ func rawTextValue(version reportTableVersion, kind StreamKind, label, display st
 		if structured["Language"] == "lvs" {
 			return "lvs"
 		}
-		return formatRawTextLanguage(structured["Language"], display)
+		return formatRawTextLanguage(normalizeLanguage(firstNonEmpty(structured["Language"], display), version), "")
 	case "ServiceKind/String":
 		if value := formatRawTextServiceKind(structured["ServiceKind"]); value != "" {
 			return value
@@ -1536,6 +1536,9 @@ func formatRawTextLanguage(code, display string) string {
 		return display
 	}
 	if len(parts) == 2 {
+		if suffix := parts[1]; len(suffix) == 2 && suffix[0] >= 'a' && suffix[0] <= 'z' && suffix[1] >= 'a' && suffix[1] <= 'z' {
+			parts[1] = strings.ToUpper(suffix)
+		}
 		return fmt.Sprintf("%s (%s)", parts[0], parts[1])
 	}
 	return normalized

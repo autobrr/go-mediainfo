@@ -1040,7 +1040,7 @@ func canonicalMP4AudioSampleSeed(fields []Field, structuredFacts *mp4StructuredF
 // structured schema representation.
 func appendMP4TextOnlyFields(builder *canonicalStreamBuilder, kind StreamKind, fields []Field) {
 	for _, field := range fields {
-		if len(mapStreamFieldsToJSON(kind, []Field{field})) == 0 {
+		if len(mapStreamFieldsToJSON(kind, []Field{field}, reportTables23)) == 0 {
 			builder.Text(field.Name, field.Value)
 		}
 	}

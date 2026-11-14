@@ -8,6 +8,15 @@ import (
 
 const fuzzParserMaxBytes = 1 << 20 // 1 MiB
 
+func FuzzMP4ExtendedLanguage(f *testing.F) {
+	f.Add([]byte{0, 0, 0, 0, 'e', 'n', 0})
+	f.Add([]byte{0, 0, 0})
+	f.Add([]byte{1, 0, 0, 0, 255})
+	f.Fuzz(func(_ *testing.T, payload []byte) {
+		_ = parseMP4ExtendedLanguage(fuzzLimit(payload), &embeddedAssetBudget{})
+	})
+}
+
 func fuzzLimit(data []byte) []byte {
 	if len(data) > fuzzParserMaxBytes {
 		return data[:fuzzParserMaxBytes]

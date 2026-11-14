@@ -12,6 +12,8 @@ import (
 func friendlyReportValue(kind StreamKind, identity, display string, values map[string]string, totalSize int64, version reportTableVersion) string {
 	value := values[identity]
 	switch identity {
+	case "Language":
+		return formatLanguageVersion(firstNonEmpty(value, display), version)
 	case "FrameRate", "FrameRate_Minimum", "FrameRate_Maximum":
 		rate, err := strconv.ParseFloat(value, 64)
 		if err != nil || rate <= 0 || math.IsNaN(rate) || math.IsInf(rate, 0) {

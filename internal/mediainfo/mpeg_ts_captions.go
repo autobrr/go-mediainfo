@@ -219,9 +219,9 @@ func buildTSCaptionStream(videoPID uint16, programNumber uint16, delaySeconds fl
 	if format == "EIA-608" && startCommand > 0 {
 		streamFacts.Set("Duration_Start_Command", formatJSONSeconds6(startCommand))
 	}
-	if descriptor.Language != "" {
-		fields = append(fields, Field{Name: "Language", Value: descriptor.Language})
-		streamFacts.Set("Language", descriptor.Language)
+	if code := normalizeLanguageCode(descriptor.Language); code != "" {
+		fields = append(fields, Field{Name: "Language", Value: formatLanguage(code)})
+		streamFacts.Set("Language", code)
 	}
 	descriptorValue := "No"
 	if descriptorPresent {

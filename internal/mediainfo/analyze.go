@@ -2310,7 +2310,7 @@ func finalizeCanonicalGeneralFields(general *Stream) {
 	if general == nil {
 		return
 	}
-	for _, field := range mapStreamFieldsToJSON(StreamGeneral, general.Fields) {
+	for _, field := range mapStreamFieldsToJSON(StreamGeneral, general.Fields, legacyReportTableVersion(Report{General: *general})) {
 		name := fieldName(field.Key)
 		if canonicalSeedHasStructured(*general, name) {
 			continue
