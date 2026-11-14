@@ -85,7 +85,7 @@ func sniffMP4Format(header []byte) string {
 		}
 		switch kind {
 		case "ftyp":
-			if offset+headerSize+4 > reader.Size() {
+			if size < headerSize+4 || offset+headerSize+4 > reader.Size() {
 				return ""
 			}
 			if string(header[offset+headerSize:offset+headerSize+4]) == "qt  " {

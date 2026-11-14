@@ -39,15 +39,24 @@ func normalizeLanguageCode(code string) string {
 func normalizeLanguage(code string, version reportTableVersion) string {
 	if strings.Contains(code, " / ") {
 		members := strings.Split(code, " / ")
+		hasValue := false
 		for i, member := range members {
 			members[i] = normalizeLanguage(member, version)
+			hasValue = hasValue || members[i] != ""
+		}
+		if !hasValue {
+			return ""
 		}
 		return strings.Join(members, " / ")
 	}
 	code = strings.TrimSpace(code)
+	policy := languagePolicies[version]
+	// Exact names can themselves contain hyphens, such as Luba-Katanga.
+	if found := policy.reverse[strings.ToLower(code)]; found != "" {
+		code = found
+	}
 	primary, suffix, hasSuffix := strings.Cut(code, "-")
 	lower := strings.ToLower(primary)
-	policy := languagePolicies[version]
 	if len(primary) == 3 && policy.aliases[lower] != "" {
 		primary = policy.aliases[lower]
 	} else if len(primary) > 3 {
@@ -81,16 +90,16 @@ func formatLanguage(code string) string {
 }
 
 func formatLanguageVersion(code string, version reportTableVersion) string {
+	code = normalizeLanguage(code, version)
+	if code == "" {
+		return ""
+	}
 	if strings.Contains(code, " / ") {
 		members := strings.Split(code, " / ")
 		for i, member := range members {
 			members[i] = formatLanguageVersion(member, version)
 		}
 		return strings.Join(members, " / ")
-	}
-	code = normalizeLanguage(code, version)
-	if code == "" {
-		return ""
 	}
 	policy := languagePolicies[version]
 	if name := policy.names[code]; name != "" {

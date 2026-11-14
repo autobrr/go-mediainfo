@@ -31,7 +31,7 @@ func TestAnalyzeDVDPublicLanguageNamesUseDVDPolicy(t *testing.T) {
 	data[dvdAudioAttrVTSOffset+1] = 1
 	copy(data[dvdAudioAttrVTSOffset+2:], "en")
 	report := analyzeLanguageFixture(t, "VTS_01_0.IFO", data)
-	for _, tc := range []struct{ input, code, display string }{{"Filipino", "fil", "Filipino"}, {"No linguistic content or not applicable", "zxx", "No linguistic content or not applicable"}, {"Undetermined", "", ""}, {"Uncoded languages", "", ""}} {
+	for _, tc := range []struct{ input, code, display string }{{"Filipino", "fil", "Filipino"}, {"No linguistic content or not applicable", "zxx", "No linguistic content or not applicable"}, {"Undetermined", "", ""}, {"Uncoded languages", "", ""}, {"Luba-Katanga", "lu", "Luba-Katanga"}, {"und / mis / ???", "", ""}, {"und / French / mis", " / fr / ", " / French / "}} {
 		t.Run(tc.input, func(t *testing.T) {
 			edited := report
 			edited.Streams = append([]Stream(nil), report.Streams...)
@@ -47,14 +47,14 @@ func TestAnalyzeDVDPublicLanguageNamesUseDVDPolicy(t *testing.T) {
 				t.Fatal("missing audio")
 			}
 			assertLanguageProjection(t, edited, tc.code, tc.display, tc.code)
-			if tc.input == "Filipino" {
+			if tc.input == "Filipino" || tc.input == "und / mis / ???" {
 				rebuilt := Report{General: Stream{Fields: report.General.Fields}}
 				for _, stream := range edited.Streams {
 					if stream.Kind == StreamAudio {
 						rebuilt.Streams = append(rebuilt.Streams, Stream{Kind: StreamAudio, Fields: stream.Fields})
 					}
 				}
-				assertLanguageProjection(t, rebuilt, "fil", "Filipino", "fil")
+				assertLanguageProjection(t, rebuilt, tc.code, tc.display, tc.code)
 			}
 		})
 	}
@@ -242,21 +242,35 @@ func TestAnalyzeTSLanguagePositionsAndCaptions(t *testing.T) {
 }
 
 func TestAnalyzeOggLanguageComments(t *testing.T) {
-	for _, tc := range []struct{ format, input, code, display, raw string }{
-		{"Vorbis", "scc-Latn-rs", "sr-Latn-rs", "Serbian-Latn-rs", "sr-Latn-rs"},
-		{"Opus", "en-us", "en-us", "English (United States)", "en (US)"},
-		{"Theora", "fil", "fil", "fil", "fil"},
-		{"FLAC", "French", "fr", "French", "fr"},
-		{"Vorbis", "und", "", "", ""},
-		{"Opus", "", "", "", ""},
-		{"Vorbis", "en / en", "en / en", "English / English", "en / en"},
+	for _, tc := range []struct {
+		format             string
+		inputs             []string
+		code, display, raw string
+	}{
+		{"Vorbis", []string{"scc-Latn-rs"}, "sr-Latn-rs", "Serbian-Latn-rs", "sr-Latn-rs"},
+		{"Opus", []string{"en-us"}, "en-us", "English (United States)", "en (US)"},
+		{"Theora", []string{"fil"}, "fil", "fil", "fil"},
+		{"FLAC", []string{"French"}, "fr", "French", "fr"},
+		{"Vorbis", []string{"und"}, "", "", ""},
+		{"Opus", []string{""}, "", "", ""},
+		{"Vorbis", []string{"en / en"}, "en / en", "English / English", "en / en"},
+		{"Vorbis", []string{"Luba-Katanga"}, "lu", "Luba-Katanga", "lu"},
+		{"Vorbis", []string{"en", "fr", "en"}, "en / fr / en", "English / French / English", "en / fr / en"},
+		{"Opus", []string{"", "und", "fr", ""}, " /  / fr / ", " /  / French / ", " /  / fr / "},
+		{"Theora", []string{"fr", "fr"}, "fr / fr", "French / French", "fr / fr"},
+		{"FLAC", []string{"en", "fr", "en"}, "en / fr / en", "English / French / English", "en / fr / en"},
+		{"FLAC", []string{"und", "mis"}, "", "", ""},
 	} {
-		t.Run(tc.format+"/"+tc.input, func(t *testing.T) {
+		t.Run(tc.format+"/"+fmt.Sprint(tc.inputs), func(t *testing.T) {
 			comment := binary.LittleEndian.AppendUint32(nil, 0)
-			comment = binary.LittleEndian.AppendUint32(comment, 1)
-			tag := "LANGUAGE=" + tc.input
-			comment = binary.LittleEndian.AppendUint32(comment, uint32(len(tag)))
-			comment = append(comment, tag...)
+			comment = binary.LittleEndian.AppendUint32(comment, uint32(len(tc.inputs)))
+			var tags []string
+			for _, input := range tc.inputs {
+				tag := "LANGUAGE=" + input
+				comment = binary.LittleEndian.AppendUint32(comment, uint32(len(tag)))
+				comment = append(comment, tag...)
+				tags = append(tags, tag)
+			}
 			var data []byte
 			switch tc.format {
 			case "Vorbis":
@@ -279,7 +293,7 @@ func TestAnalyzeOggLanguageComments(t *testing.T) {
 			case "FLAC":
 				streamInfo := make([]byte, 34)
 				binary.BigEndian.PutUint64(streamInfo[10:], uint64(48000)<<44|uint64(1)<<41|uint64(15)<<36|4096)
-				data = buildOggFLACForTest(append([]byte("fLaC\x80\x00\x00\x22"), streamInfo...), "", tag)
+				data = buildOggFLACForTest(append([]byte("fLaC\x80\x00\x00\x22"), streamInfo...), "", tags...)
 			}
 			if tc.format != "FLAC" {
 				data = append(data, buildOggPageForTest(7, 4, 4096, []byte{0})...)
