@@ -1,10 +1,12 @@
 package mediainfo
 
 import (
+	"bytes"
 	"encoding/binary"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 const mp4EpochDelta = 2082844800 // seconds between 1904-01-01 and 1970-01-01
@@ -85,7 +87,30 @@ func parseMdhdMeta(payload []byte) (float64, uint64, uint32, string, bool) {
 	}
 }
 
+// macintoshLanguages uses explicit QuickTime numeric codes, including the gap
+// before Welsh (128): https://developer.apple.com/documentation/quicktime-file-format/language_code_values
+// Reserved entries are absent. A compact-table offset would misdecode code 128.
+var macintoshLanguages = map[uint16]string{
+	0: "en", 1: "fr", 2: "de", 3: "it", 4: "nl", 5: "sv", 6: "es", 7: "da", 8: "pt", 9: "no",
+	10: "he", 11: "ja", 12: "ar", 13: "fi", 14: "el", 15: "is", 16: "mt", 17: "tr", 18: "hr", 19: "zh-tw",
+	20: "ur", 21: "hi", 22: "th", 23: "ko", 24: "lt", 25: "pl", 26: "hu", 27: "et", 28: "lv", 29: "smi",
+	30: "fo", 31: "fa", 32: "ru", 33: "zh-cn", 34: "nl-be", 35: "ga", 36: "sq", 37: "ro", 38: "cs", 39: "sk",
+	40: "sl", 41: "yi", 42: "sr", 43: "mk", 44: "bg", 45: "uk", 46: "be", 47: "uz", 48: "kk", 49: "az",
+	50: "az", 51: "hy", 52: "ka", 53: "mo", 54: "ky", 55: "tg", 56: "tk", 57: "mn-cn", 58: "mn", 59: "ps",
+	60: "ku", 61: "ks", 62: "sd", 63: "bo", 64: "ne", 65: "sa", 66: "mr", 67: "bn", 68: "as", 69: "gu",
+	70: "pa", 71: "or", 72: "ml", 73: "kn", 74: "ta", 75: "te", 76: "si", 77: "my", 78: "km", 79: "lo",
+	80: "vi", 81: "id", 82: "tl", 83: "ms", 84: "ms-bn", 85: "am", 87: "om", 88: "so", 89: "sw",
+	90: "rw", 91: "rn", 92: "ny", 93: "mg", 94: "eo",
+	128: "cy", 129: "eu", 130: "ca", 131: "la", 132: "qu", 133: "gn", 134: "ay", 135: "tt", 136: "ug", 137: "dz", 138: "jv",
+}
+
 func decodeMP4Language(code uint16) string {
+	if code < 0x400 {
+		return macintoshLanguages[code]
+	}
+	if code == 0x7fff || code&0x8000 != 0 {
+		return ""
+	}
 	// ISO 639-2/T packed: 1 bit pad + 3x5-bit values, each plus 0x60.
 	a := byte(((code >> 10) & 0x1F) + 0x60)
 	b := byte(((code >> 5) & 0x1F) + 0x60)
@@ -94,6 +119,30 @@ func decodeMP4Language(code uint16) string {
 		return ""
 	}
 	return string([]byte{a, b, c})
+}
+
+// parseMP4ExtendedLanguage accepts bounded version-0 UTF-8 strings. A malformed
+// box contributes no value, leaving the track's mdhd or prior valid elng intact.
+func parseMP4ExtendedLanguage(payload []byte, budget *embeddedAssetBudget) string {
+	if len(payload) < 5 || payload[0] != 0 || int64(len(payload)-4) > embeddedAssetMaxNameBytes {
+		return ""
+	}
+	value := payload[4:]
+	if pos := bytes.IndexByte(value, 0); pos >= 0 {
+		for _, b := range value[pos:] {
+			if b != 0 {
+				return ""
+			}
+		}
+		value = value[:pos]
+	}
+	if len(value) == 0 || !utf8.Valid(value) {
+		return ""
+	}
+	if budget.reserveString(uint64(len(value)), embeddedAssetMaxNameBytes) != embeddedAssetAccepted {
+		return ""
+	}
+	return strings.TrimSpace(string(value))
 }
 
 func parseHdlrName(payload []byte) string {

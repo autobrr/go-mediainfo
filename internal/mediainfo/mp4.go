@@ -20,7 +20,8 @@ type MP4Track struct {
 	HandlerName string
 	// HandlerType is the four-character mdia handler code.
 	HandlerType string
-	// LanguageCode is the normalized language code from mdhd metadata.
+	// LanguageCode retains the selected elng tag or decoded mdhd code.
+	// Shared normalization is applied when constructing the report stream.
 	LanguageCode string
 	// CreationTime is the raw MP4 epoch creation timestamp.
 	CreationTime uint64
@@ -379,7 +380,7 @@ func parseTrak(buf []byte, movieTimescale uint32, budget *embeddedAssetBudget, g
 		}
 		if boxType == "mdia" {
 			payload := sliceBox(buf, dataOffset, boxSize-headerSize)
-			if track, ok := parseMdia(payload, manufacturer); ok {
+			if track, ok := parseMdia(payload, manufacturer, budget); ok {
 				mediaTrack = track
 				hasMediaTrack = true
 			}
@@ -415,7 +416,7 @@ func parseTrak(buf []byte, movieTimescale uint32, budget *embeddedAssetBudget, g
 // parseMdia parses one mdia box into track handler, timing, language, and
 // sample-table metadata and reports whether a supported handler was found.
 // Both media and data handlers contribute to movie-wide manufacturer consensus.
-func parseMdia(buf []byte, manufacturer *uint32) (MP4Track, bool) {
+func parseMdia(buf []byte, manufacturer *uint32, budget *embeddedAssetBudget) (MP4Track, bool) {
 	var offset int64
 	var handler string
 	var handlerName string
@@ -424,12 +425,19 @@ func parseMdia(buf []byte, manufacturer *uint32) (MP4Track, bool) {
 	var mediaDurationTicks uint64
 	var trackTimescale uint32
 	var language string
+	var extendedLanguage string
 	for offset+8 <= int64(len(buf)) {
 		boxSize, boxType, headerSize := readMP4BoxHeaderFrom(buf, offset)
 		if boxSize <= 0 {
 			break
 		}
 		dataOffset := offset + headerSize
+		if boxType == "elng" {
+			if value := parseMP4ExtendedLanguage(sliceBox(buf, dataOffset, boxSize-headerSize), budget); value != "" {
+				// Like the pinned parser's replacement fill, the last valid elng wins.
+				extendedLanguage = value
+			}
+		}
 		if boxType == "hdlr" {
 			payload := sliceBox(buf, dataOffset, boxSize-headerSize)
 			handler = parseHdlr(payload)
@@ -478,7 +486,7 @@ func parseMdia(buf []byte, manufacturer *uint32) (MP4Track, bool) {
 		Format:                 format,
 		HandlerName:            handlerName,
 		HandlerType:            handler,
-		LanguageCode:           language,
+		LanguageCode:           firstNonEmpty(extendedLanguage, language),
 		Fields:                 sampleInfo.Fields,
 		SampleCount:            sampleInfo.SampleCount,
 		SampleBytes:            sampleInfo.SampleBytes,

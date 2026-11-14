@@ -2,6 +2,7 @@ package mediainfo
 
 import (
 	"bytes"
+	"math"
 	"path/filepath"
 	"strings"
 )
@@ -27,14 +28,8 @@ func DetectFormat(header []byte, filename string) string {
 	if bytes.HasPrefix(header, []byte{0x1A, 0x45, 0xDF, 0xA3}) {
 		return "Matroska"
 	}
-	if len(header) >= 12 {
-		if string(header[4:8]) == "ftyp" {
-			brand := string(header[8:12])
-			if brand == "qt  " {
-				return "QuickTime"
-			}
-			return "MPEG-4"
-		}
+	if format := sniffMP4Format(header); format != "" {
+		return format
 	}
 	if len(header) >= 12 {
 		sig := string(header[0:4])
@@ -77,6 +72,38 @@ func DetectFormat(header []byte, filename string) string {
 	}
 
 	return "Unknown"
+}
+
+// sniffMP4Format reuses the atom-header parser without requiring the atom body
+// to fit in the sniff window. Only complete padding atoms are skipped.
+func sniffMP4Format(header []byte) string {
+	reader := bytes.NewReader(header)
+	for offset := int64(0); offset+8 <= reader.Size(); {
+		size, kind, headerSize, ok := readMP4BoxHeader(reader, offset, math.MaxInt64)
+		if !ok {
+			return ""
+		}
+		switch kind {
+		case "ftyp":
+			if offset+headerSize+4 > reader.Size() {
+				return ""
+			}
+			if string(header[offset+headerSize:offset+headerSize+4]) == "qt  " {
+				return "QuickTime"
+			}
+			return "MPEG-4"
+		case "moov", "mdat":
+			return "QuickTime"
+		case "free", "skip", "wide":
+			if size > reader.Size()-offset {
+				return ""
+			}
+			offset += size
+		default:
+			return ""
+		}
+	}
+	return ""
 }
 
 func isMP3Frame(header []byte) bool {

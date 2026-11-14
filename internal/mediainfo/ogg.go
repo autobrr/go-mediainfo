@@ -217,6 +217,12 @@ func parseOgg(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, []Field,
 				omitDerivedLayout: hasMask && mask == 0,
 			}))
 		}
+		// Language belongs to this logical stream, not the merged General tags.
+		if code := normalizeLanguageCode(stream.tags["LANGUAGE"]); code != "" {
+			target := &streams[len(streams)-1]
+			replaceCanonicalSeedFill(target, "Language", code, "Language", formatLanguage(code))
+			refreshCanonicalCompatibilitySnapshot(target)
+		}
 	}
 	if len(streams) == 0 {
 		return ContainerInfo{}, nil, nil, nil, nil, false
