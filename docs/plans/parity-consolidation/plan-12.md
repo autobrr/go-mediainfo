@@ -32,6 +32,8 @@ Correct PS/DVD stream identity and order, PGC-specific Menu membership, DTS priv
 
 ## Validation and evidence
 
+- [ ] Complete the [acceptance matrix and PR evidence checklist](README.md#acceptance-matrix-and-pr-checklist) for this plan’s existing criteria and the checks below.
+
 [Shared validation requirements](README.md#validation-and-evidence). Use declaration-only IFO/BUP, actual aggregates and standalone VOB controls; reordered audio, enabled wide/letterbox mappings, conflicts, missing companions, DTS IDs, captions/RLE and absent header entries. Verify v26.10 plus independent mapping evidence for any factual difference.
 
 ## Implementation and outcome history

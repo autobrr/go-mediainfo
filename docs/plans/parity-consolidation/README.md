@@ -2,7 +2,7 @@
 
 This directory coordinates the 24 implementation groups and a separate final review-and-cleanup stage in this parity initiative. It applies to PRs and task briefs that explicitly opt into the initiative. Other contributors and unrelated work have no plan-document requirement.
 
-The owner follows and maintains these files as the active initiative plan while [PR #259](https://github.com/autobrr/go-mediainfo/pull/259) remains open. Keep updates on that PR's branch; this operational use does not mean the documentation is merged or authorize merging it.
+[PR #259](https://github.com/autobrr/go-mediainfo/pull/259) merged this living plan into main. Maintain it through scoped updates based on current main; do not reopen its merged branch. After a verified implementation merge, reconcile the affected plan. Start another stage only within the owner's explicit authorization and existing scope, dependency, validation and hold requirements. Documentation updates do not authorize starting or merging implementation PRs.
 
 The files own grouping, execution order and acceptance mapping. GitHub issues and their current discussions remain authoritative for scope decisions and live state; native issue dependencies remain the actual blockers. Repository [AGENTS guidance](../../../AGENTS.md), [ADR 0001](../../adr/0001-parity-baseline-and-output-scope.md) and [ADR 0002](../../adr/0002-dvd-parity-reference.md) retain their authority, including the existing deliberate-difference registry. This directory does not create another registry or change output policy.
 
@@ -59,12 +59,12 @@ Implement one plan at a time. A shared contract can be established before a cons
 
 The working sequence preserves the approved contract order:
 
-1. Reuse [Plan 24's existing #252 result](plan-24.md); reuse [Plan 01's merged #256 field/alias/visibility contract](plan-01.md), preserving its documented limits and the open #260 producer-order follow-up in [PR #262](https://github.com/autobrr/go-mediainfo/pull/262). The linked PRs provide current state.
+1. Reuse [Plan 24's existing #252 result](plan-24.md); reuse [Plan 01's merged #256 field/alias/visibility contract](plan-01.md), preserving its documented limits and the merged #260 producer-order follow-up in [PR #262](https://github.com/autobrr/go-mediainfo/pull/262). The linked PRs provide current state.
 2. Work through the foundational families sequentially: [02 metadata](plan-02.md), [03 language](plan-03.md), [04 encoder](plan-04.md), [05 geometry](plan-05.md), [06 colour/HDR](plan-06.md), [18 FLAC](plan-18.md), [21 brands/conformance](plan-21.md).
 3. Establish [10 source/rate/timing](plan-10.md) before [09 Matroska timing](plan-09.md). Complete [08 MPEG state](plan-08.md) and [07 AVC/HEVC facts](plan-07.md) after their geometry/colour/encoder contracts, then [17 AC-3](plan-17.md) and [20 format settings](plan-20.md).
 4. Build [19 relative delay](plan-19.md), [12 DVD identity](plan-12.md), [16 AVI/MPEG audio](plan-16.md) and [22 AVC picture analysis](plan-22.md) on those contracts. Then integrate [13 captions](plan-13.md), [14 Other/timecode/chapters](plan-14.md) and [15 codec sample entries](plan-15.md) using the required timing, addressing and framing interfaces.
 5. Finish [11 PS counts/reset duration](plan-11.md) and [23 Type-1 DV](plan-23.md). Verify cross-plan closure, especially #58, #60 and #141, and retain the completed plan records.
-6. Once all existing plans are implemented, prepare the separate [final follow-up review-and-cleanup PR](final-review-and-cleanup.md). Perform cumulative review and a completely fresh run on every original corpus file before accepting its cleanup gate.
+6. Once all existing plans are implemented, prepare the separate [final follow-up review-and-cleanup PR](final-review-and-cleanup.md). Perform cumulative review and fresh Go base/candidate runs on every available original in both corpora before accepting its cleanup gate.
 
 The initiative retains the maximum of two open Audionut PRs, including drafts. Recheck capacity before publication; preserve already-open work and prepare locally when full. A slot becoming available does not authorize unrelated implementation. Finish the active plan's implementation, required validation and substantive review batch before starting another plan. Publication does not authorize merge, automatic merge or release.
 
@@ -74,7 +74,7 @@ The native #53 → #52 blocker is still recorded even though [the design discuss
 
 For this initiative's PRs and task briefs:
 
-1. Reference the relevant stable plan file and the current issue discussions. Link the exact plan revision followed with a commit-pinned permalink; on this active but unmerged docs branch, identify it as such rather than using a nonexistent main link.
+1. Reference the relevant stable plan file and the current issue discussions. Link the exact plan revision followed with a commit-pinned permalink; identify proposed changes as unmerged until verified in main.
 2. State the full or partial acceptance delivered per issue. Use closing syntax only when the closing owner's complete accepted scope and cross-plan contributions pass. #58 stays partial until Plans 01/03/10 are integrated; shared infrastructure is not closure.
 3. Record the tested candidate/base revisions, sanitized evidence, coverage and limits. Keep earlier tested revisions separate from final-delta checks. A merge outcome is not a release.
 4. Update the affected plan alongside implementation where practical. Record new evidence, justified scope/dependency revisions and the canonical issue decision that supports each consequential change. Raise ambiguous criteria as a decision rather than quietly changing them.
@@ -86,21 +86,55 @@ Use stable filenames and IDs. Update the existing file and its concise history r
 
 Follow the current [AGENTS guidance](../../../AGENTS.md#parity-harness), [ADR 0001](../../adr/0001-parity-baseline-and-output-scope.md), [ADR 0002](../../adr/0002-dvd-parity-reference.md) and accepted issue-specific criteria. These own reference selection, correct measured facts, compatible output and protected differences. Explain any AGENTS/ADR change or why the active diff needs none.
 
-For authorized implementation and review-driven behavior changes, use relevant issue witnesses and shared-behavior controls from both the original October corpus and the separate music corpus authorized in [#261](https://github.com/autobrr/go-mediainfo/issues/261), where available. The music corpus supplements October coverage; it does not replace or reduce it. Keep the inventories, frozen evidence and results distinct, and record tested revisions, binary/reference identities, coverage and limitations separately for each corpus. This initiative uses its owner's authorized desktop for builds and real-file comparisons. Other contributors can use the repository's supported verified-local-reference or media-host workflow. Preserve original source metadata, exact source/tree/executable and reference identities, the options and normalization policy, and frozen official results; save fresh results separately. Recheck the affected subset after substantive review fixes. Full-corpus runs are not automatic for every implementation plan. The separate final follow-up PR requires a completely fresh candidate run on every available original media file in both corpora, accounting for unavailable entries as gaps rather than reducing either inventory; selected subsets, cached captures and earlier successful sweeps cannot satisfy that final gate.
+For corpus work in this initiative, follow the owner-approved [#81 corpus-validation policy](https://github.com/autobrr/go-mediainfo/issues/81#issuecomment-6909285169). It governs the checks below, replacing the historical #65 pattern-count gate without requiring a pattern-report rebuild. Apply evidence checks to the PR's accepted changes and affected behavior; this section creates no requirement for unrelated contributor work.
 
-The 12-configuration comparison used by Plan 01 covers TEXT, JSON, XML, OLDXML, HTML and CSV in normal/raw modes with `--ParseSpeed=0.5 --File_TestContinuousFileNames=0`. That is evidence about its tested revisions, not a new repository-wide CLI gate. Identify actual argv and applicable reference dialects for later runs; format names alone do not prove equivalence.
+- While an implementation PR is open, compare its issue witnesses and shared-behavior controls from both the October and [#261 music corpus](https://github.com/autobrr/go-mediainfo/issues/261) against saved official outputs. Recheck affected files after review fixes that change output.
+- At the merge-ready head, freshly run both the Go base and candidate on every available original in both corpora. List each changed file outside the witnesses with a one-line reason; an unexplained change blocks acceptance. Keep inventories and results separate without reducing their counts.
+- Reuse frozen official outputs with verified reference identity and compatible options. Recapture affected files only when the reference binary, version or command options change. If saved DVD witness captures used `--File_TestContinuousFileNames=0`, recapture those witnesses once with v26.10 and the current options. Unknown capture options remain an explicit evidence gap until verified.
+- Every selected file gets text, raw text, raw JSON and raw XML, including the base/candidate corpus captures. Check HTML, CSV or OLDXML when the PR changes the corresponding rendering behavior. Keep actual argv and normalization explicit; output names alone do not establish equivalent modes.
+
+**For every new run, use the current applicable [AGENTS command options](../../../AGENTS.md#parity-harness), including `--ParseSpeed=0.5` for official captures. Do not pass `--File_TestContinuousFileNames=0`; retain the normal DVD title-set joining behavior.** Record these options for base, candidate and any official recapture.
+
+The 12-configuration Plan 01 comparison used TEXT, JSON, XML, OLDXML, HTML and CSV in normal/raw modes with `--ParseSpeed=0.5 --File_TestContinuousFileNames=0`. Keep that and later Plan 02/03 evidence tied to their actual argv and tested revisions. Historical runs with different options do not establish compliance with the newly adopted gate; record new compliant executions separately.
+
+Account for every inventory entry. An absent original remains a reported gap and does not fail the final gate; a present file that cannot be opened blocks it until access is fixed. An available but unexecuted file also blocks acceptance. Preserve source metadata, original inventories, frozen official outputs and unsuccessful receipts; write new candidate results separately. Generated fixtures supplement witnesses, never substitute for unavailable originals.
 
 Write issue-specific regressions first, preserve meaningful public reconstruction/mutation/round-trip checks, bound malformed input and fuzz newly exposed parsers. Distinguish original corpus witnesses, playable derivatives, synthetic fixtures and source-only inspection. Missing required evidence or inaccessible witnesses must be reported as unvalidated; do not substitute guessed values. Preserve #248/#249 selection, gap, identity/language, caption-discovery and invalid-RLE protections.
 
 Public evidence consists of sanitized sample IDs, necessary numeric results, tested identities, checks and limitations linked from the owning issue/PR. Media, filenames, paths, release names, private metadata and the sample map remain private. A plan or issue inventory is not a fresh media reproduction. Subset success is not a full-corpus or complete-native-parity claim. The historical October count is 3,173 and #261 records 403 music files; verify each current manifest rather than treating those counts as proof of execution.
 
-Assess substantive automated and maintainer feedback against source, policy and actual evidence; record justified fixes or dispositions. Revalidate behavior changes before publication. Manual review scheduling follows the current initiative owner instructions; these docs do not request a bot review. Request maintainer review only after the applicable validation, exact-head CI and substantive automated-feedback work, including any authorized manual prompts, are settled.
+Assess substantive automated and maintainer feedback against source, policy and actual evidence; record justified fixes or dispositions. Revalidate affected behavior changes before publication and complete the corpus comparison at the merge-ready head. Manual review scheduling follows current owner instructions; this documentation does not request a bot review or authorize manual review commands.
+
+### Acceptance matrix and PR checklist
+
+For corpus work under this initiative, map the PR's accepted changed behavior to meaningful checks before implementing; extend the map when a review exposes a missing boundary. Trace affected parsing, finalization and projection paths, using `AnalyzeFile` and public reconstruction, edits or lazy render order where those paths change. Helper seeds alone do not establish those boundaries. Assert exact identity, value, presence, count and required order while preserving legitimate duplicates and independent parser/tag facts. Keep the full private matrix with the run receipts.
+
+| Behavior / accepted criterion | Entry point and witness/control | Reference / accepted difference | Formats and exact assertions | Tested candidate and result |
+| --- | --- | --- | --- | --- |
+| One bounded requirement | Actual parser/API path; original ID or explicitly generated fixture | Pinned version/source and reason for any difference | Identity, value, count, order and preservation case | Source/tree/executable; passed, failed, blocked or unrun |
+
+A row is complete only when its reported checks actually ran on the identified content or carry an explicit gap/disposition. Test names, inventory membership and a green aggregate check are not evidence of every assertion. Expand only meaningful affected combinations, not a product of every input. Keep precise row helpers and small sanitized fixtures in existing tests rather than building another harness solely for this checklist.
+
+Before publishing or updating a plan's PR, record:
+
+- [ ] Accepted scope and meaningful negative/preservation cases map to actual parser/finalization/projection paths; public edits and render order are covered where affected.
+- [ ] Selected files have the four required outputs, plus affected renderer formats, with exact identity/value/cardinality/order assertions.
+- [ ] Targeted witness/control comparisons use the pinned official results; affected review fixes are rechecked. Merge-ready base/candidate Go captures cover both available corpora and explain every non-witness change.
+- [ ] Original October and music witness coverage, generated/derived evidence, source/reference/executable identities, actual argv/exits and all access/execution gaps are separate and accurate.
+- [ ] Regressions, applicable repository checks and independent review cover the final change; reused evidence and failed/interrupted attempts are clearly identified.
+- [ ] AGENTS/ADR changes or unchanged rationale are explained. No new output convention, scope approval, reference policy or native blocker is inferred from passing tests.
+
+Publish one concise PR block with base/candidate commits, executable SHA-256 hashes, reference versions/options, witness/control/full-run counts, explained non-witness changes and missing files. Keep longer sanitized matrices and receipt details in a collapsed section; list inaccessible or unexecuted files as blockers. This implements the accepted corpus policy without automatically closing #81 or changing issue scope.
+
+The separate final follow-up uses the same policy for its [fresh complete-corpus gate](final-review-and-cleanup.md#fresh-complete-corpus-gate). A documentation-only update checks its guidance and links; it does not claim a new parser test or corpus run.
+
+The [Plan 02 trial](plan-02.md#testing-guidance-trial) demonstrated why these boundaries matter: unchanged JSON hid a raw-row duplicate; candidate-only equality retained it; constructed seeds missed actual parser staging; and CLI captures did not exercise edited-report lazy XML. Preserve those distinctions for subsequent plans rather than treating the trial's counts as universal thresholds.
 
 ## Coordination outside closing ownership
 
 - [#65](https://github.com/autobrr/go-mediainfo/issues/65), [#81](https://github.com/autobrr/go-mediainfo/issues/81), [#82](https://github.com/autobrr/go-mediainfo/issues/82) and [#229](https://github.com/autobrr/go-mediainfo/issues/229) are context/coordination, not extra closing targets. Preserve the #229 start hold and any later owner instructions.
 - [#261](https://github.com/autobrr/go-mediainfo/issues/261) adds the separate music corpus to targeted validation and the final campaign, without adding a closing target, authorizing unrelated fixes or activating #229. Corpus differences remain observations until individually triaged.
-- [#81's witness-selection proposal](https://github.com/autobrr/go-mediainfo/issues/81#issuecomment-6525360213) remains an unresolved alternative to the historical proposed full-capture gate. Actual targeted validation does not establish maintainer agreement or close #81.
+- [#81's accepted corpus-validation policy](https://github.com/autobrr/go-mediainfo/issues/81#issuecomment-6909285169) governs targeted checks, base/candidate corpus comparisons and frozen-reference reuse. Recording its adoption does not close #81, activate #229 or authorize unrelated implementation.
 - [#253](https://github.com/autobrr/go-mediainfo/issues/253) owns changing-SPS Matroska HRD-selection research split from #244. It does not hold settled Plan 07 projection open.
 - [#254](https://github.com/autobrr/go-mediainfo/issues/254) owns route-specific DVD stream/caption merge-order research split from #206; coordinate with #134/#204. It must not silently block retained #206 heuristic removal or authorize universal sorting, caption relabeling or new identity scope.
 - [#255](https://github.com/autobrr/go-mediainfo/issues/255) remains separate from the 24 groups. Its [bounded finding](https://github.com/autobrr/go-mediainfo/issues/255#issuecomment-6537180728) did not establish an IFO-only accounting fix or an affected original witness. No implementation/closure is implied.
@@ -123,3 +157,9 @@ The separate final follow-up PR owns cleanup after all 24 implementation groups.
 2026-11-12: adopted PR #259 as the active living plan while it remains open. Reconciled Plan 01 with #256's verified merge at `283023f3b755da7adb2632c655f01f2f4d63d1c2`, retained its bounded validation history and the open #260 follow-up, and recorded the delivered partial #58 contribution in Plan 10. No new implementation, corpus run, issue closure or validation-policy decision is implied.
 
 2026-11-12: linked Plan 02's ready PR #263 and Plan 01's separate draft #262 follow-up, preserving closing ownership, open-PR exceptions and snapshot-specific validation limits. Both implementation PRs remain unmerged; the next numbered stage waits for the owner's Plan 02 merge and fresh reconciliation. No validation-policy decision or final full-corpus gate is implied.
+
+2026-11-12: rolled the approved Plan 02 testing trial into durable output-change guidance, a shared acceptance matrix/checklist and remaining-plan validation links. Reconciled the verified merges of #259/#262. This guidance update did not merge #263, start Plan 03, resolve #81 or run the corpus; subsequent implementation state is recorded below.
+
+2026-11-16: reconciled [Plan 02's #263 merge](plan-02.md#implementation-and-outcome-history) and [Plan 03's open #266](plan-03.md#implementation-and-outcome-history), keeping earlier trial evidence and status entries dated. Removed the inferred standing permission to start another stage; explicit owner authorization and existing holds remain required.
+
+2026-11-16: adopted the owner-approved [#81 corpus-validation policy](https://github.com/autobrr/go-mediainfo/issues/81#issuecomment-6909285169). Removed this PR's broad AGENTS addition and kept evidence guidance within the initiative's affected corpus work. New runs use the current AGENTS options and the accepted checks; historical receipts retain their actual options and limits. No runtime/corpus execution, issue closure or #229 start is claimed.

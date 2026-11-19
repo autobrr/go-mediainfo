@@ -28,6 +28,8 @@ Compose format-settings summaries from facts for the relevant codec. Use those f
 
 ## Validation and evidence
 
+- [ ] Complete the [acceptance matrix and PR evidence checklist](README.md#acceptance-matrix-and-pr-checklist) for this plan’s existing criteria and the checks below.
+
 [Shared validation requirements](README.md#validation-and-evidence). Require Floor0/Floor1 controls, bounded malformed setup/fuzz cases and analysis-to-render checks; preserve non-Vorbis format summaries and numeric GMC.
 
 ## Implementation and outcome history

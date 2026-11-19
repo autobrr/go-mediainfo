@@ -31,6 +31,8 @@ Build a coherent MP4 track graph: physical trak order, Other tracks, bounded tmc
 
 ## Validation and evidence
 
+- [ ] Complete the [acceptance matrix and PR evidence checklist](README.md#acceptance-matrix-and-pr-checklist) for this plan’s existing criteria and the checks below.
+
 [Shared validation requirements](README.md#validation-and-evidence). Test multiple Other/chapter tracks, empty names, references, zero positions, sample-description changes and tmcd edit/sample bounds through analysis and public renderers.
 
 ## Implementation and outcome history

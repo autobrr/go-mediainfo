@@ -39,6 +39,8 @@ Coordinate MPEG sequence, picture and report state. Select pulldown/scan, GOP pa
 
 ## Validation and evidence
 
+- [ ] Complete the [acceptance matrix and PR evidence checklist](README.md#acceptance-matrix-and-pr-checklist) for this plan’s existing criteria and the checks below.
+
 [Shared validation requirements](README.md#validation-and-evidence). Test changing sequence/picture state, pulldown, clock trust, GOP completion, matrix/VBV updates and every DVD downstream survival route; preserve malformed-input and invalid-RLE controls.
 
 ## Implementation and outcome history

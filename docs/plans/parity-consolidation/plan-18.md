@@ -30,6 +30,8 @@ Use one FLAC evidence pipeline to distinguish absent masks, explicit zero/nonzer
 
 ## Validation and evidence
 
+- [ ] Complete the [acceptance matrix and PR evidence checklist](README.md#acceptance-matrix-and-pr-checklist) for this plan’s existing criteria and the checks below.
+
 [Shared validation requirements](README.md#validation-and-evidence). Reuse playable October-derived controls for eight-channel absent-mask and explicit masks, labeling derivatives separately from originals. Test malformed/partial/conflicting masks, all four FLAC containers, original evidence after copying/mutation, encoded frame sizes and complete fixed-block inventories.
 
 ## Implementation and outcome history
