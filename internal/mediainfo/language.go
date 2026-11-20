@@ -3,7 +3,7 @@ package mediainfo
 import "strings"
 
 type languagePolicy struct {
-	names, reverse, aliases map[string]string
+	names, reverse, fieldReverse, aliases map[string]string
 }
 
 var languagePolicies = loadLanguagePolicies()
@@ -11,7 +11,7 @@ var languagePolicies = loadLanguagePolicies()
 func loadLanguagePolicies() map[reportTableVersion]languagePolicy {
 	policies := make(map[reportTableVersion]languagePolicy)
 	for _, version := range []reportTableVersion{reportTables23, reportTables26} {
-		policy := languagePolicy{names: map[string]string{}, reverse: map[string]string{}, aliases: map[string]string{}}
+		policy := languagePolicy{names: map[string]string{}, reverse: map[string]string{}, fieldReverse: map[string]string{}, aliases: map[string]string{}}
 		// The extract is sorted by the reference Translation map's key order.
 		for line := range strings.SplitSeq(strings.TrimSuffix(string(readReportTable(version, "languages")), "\n"), "\n") {
 			code, name, _ := strings.Cut(line, "\t")
@@ -19,6 +19,9 @@ func loadLanguagePolicies() map[reportTableVersion]languagePolicy {
 			key := strings.ToLower(name)
 			if _, exists := policy.reverse[key]; !exists {
 				policy.reverse[key] = code
+				policy.fieldReverse[key] = code
+			} else if policy.reverse[key] != code {
+				delete(policy.fieldReverse, key)
 			}
 		}
 		for line := range strings.SplitSeq(strings.TrimSuffix(string(readReportTable(version, "language-aliases")), "\n"), "\n") {
@@ -37,11 +40,23 @@ func normalizeLanguageCode(code string) string {
 // normalizeLanguage maps only the primary component. Serialized suffix spelling
 // and positional list members are metadata, independent of friendly display.
 func normalizeLanguage(code string, version reportTableVersion) string {
+	return normalizeLanguageWithPolicy(code, languagePolicies[version])
+}
+
+// normalizeLanguageForFields preserves ambiguous display names: Fields alone
+// cannot recover which of several structured language tags produced a name.
+func normalizeLanguageForFields(code string, version reportTableVersion) string {
+	policy := languagePolicies[version]
+	policy.reverse = policy.fieldReverse
+	return normalizeLanguageWithPolicy(code, policy)
+}
+
+func normalizeLanguageWithPolicy(code string, policy languagePolicy) string {
 	if strings.Contains(code, " / ") {
 		members := strings.Split(code, " / ")
 		hasValue := false
 		for i, member := range members {
-			members[i] = normalizeLanguage(member, version)
+			members[i] = normalizeLanguageWithPolicy(member, policy)
 			hasValue = hasValue || members[i] != ""
 		}
 		if !hasValue {
@@ -50,9 +65,8 @@ func normalizeLanguage(code string, version reportTableVersion) string {
 		return strings.Join(members, " / ")
 	}
 	code = strings.TrimSpace(code)
-	policy := languagePolicies[version]
 	// Exact names can themselves contain hyphens, such as Luba-Katanga.
-	if found := policy.reverse[strings.ToLower(code)]; found != "" {
+	if found := policy.reverse[strings.ToLower(code)]; found != "" && len(found) <= 3 {
 		code = found
 	}
 	primary, suffix, hasSuffix := strings.Cut(code, "-")
@@ -60,7 +74,7 @@ func normalizeLanguage(code string, version reportTableVersion) string {
 	if len(primary) == 3 && policy.aliases[lower] != "" {
 		primary = policy.aliases[lower]
 	} else if len(primary) > 3 {
-		if found := policy.reverse[lower]; found != "" {
+		if found := policy.reverse[lower]; found != "" && len(found) <= 3 {
 			primary = found
 		}
 	} else if isAlphaNum(primary) {
@@ -118,13 +132,19 @@ func formatLanguageVersion(code string, version reportTableVersion) string {
 	if !hasSuffix {
 		return name
 	}
+	return formatLanguageSuffix(name, suffix)
+}
+
+// formatLanguageSuffix formats one suffix for display without changing the
+// canonical tag or interpreting multiple serialized subtags.
+func formatLanguageSuffix(primary, suffix string) string {
 	if strings.Contains(suffix, "-") {
-		return name + "-" + suffix
+		return primary + "-" + suffix
 	}
 	if len(suffix) == 2 && suffix[0] >= 'a' && suffix[0] <= 'z' && suffix[1] >= 'a' && suffix[1] <= 'z' {
 		suffix = strings.ToUpper(suffix)
 	}
-	return name + " (" + suffix + ")"
+	return primary + " (" + suffix + ")"
 }
 
 func isAlphaNum(s string) bool {

@@ -418,7 +418,7 @@ func mapStreamFieldsToJSON(kind StreamKind, fields []Field, version reportTableV
 		case "Encoding settings":
 			out = append(out, jsonKV{Key: "Encoded_Library_Settings", Val: field.Value})
 		case "Language":
-			if code := normalizeLanguage(field.Value, version); code != "" {
+			if code := normalizeLanguageForFields(field.Value, version); code != "" {
 				out = append(out, jsonKV{Key: "Language", Val: code})
 			}
 		case "Title":

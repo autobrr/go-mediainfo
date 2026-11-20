@@ -33,6 +33,8 @@ Use one primary-language normalizer and versioned name/display policy, with Maci
 
 ## Validation and evidence
 
+The checked implementation criteria record delivered behavior; the merge-ready evidence checklist remains incomplete.
+
 - [ ] Complete the [acceptance matrix and PR evidence checklist](README.md#acceptance-matrix-and-pr-checklist) for this plan’s existing criteria and the checks below.
 
 [Shared validation requirements](README.md#validation-and-evidence). Test all imported mappings, whole-tag case, suffixes, undefined/unknown members, Macintosh gaps and elng order/bounds. Compare non-DVD language witnesses with v23.04 and DVD/backup controls with v26.10; keep corrected code-128 evidence distinct from parity.
@@ -50,3 +52,28 @@ The local continuation passed full Go tests, vet, four generator tests, all 21 t
 2026-11-14 review follow-up: constrained `ftyp` brand reads to the declared box, resolved complete hyphenated language names before suffix parsing, and preserved repeated Ogg LANGUAGE comments in producer order. All-undefined lists now omit Language consistently after public edits and reconstruction. Focused/full tests, vet, dependency/format checks and all 21 native Go fuzz smoke targets pass on the new runtime, using three seconds per target with no tolerated failures. A controlled replay reproduces the regressions on the prior production code. Fresh scoped comparisons ran 160 successful invocations over seven originals and one retained derivative, five formats and four binaries: the new candidate, applicable pinned reference, prior candidate and current-main baseline. All 40 normalized prior-candidate comparisons match; all 40 non-language preservation checks against main pass. Reference language/identity vectors match seven of eight cases per format, with the approved Welsh correction kept separate. These checks do not relabel the earlier 555 captures as validation of new runtime bytes. Generator/table inputs and policy files are unchanged in this review follow-up; matching earlier generator/table results are reused. Acceptance uses the owner's explicit five-gap disposition, without claiming recovered originals or full-corpus parity. The separate full-corpus gate, Plan 10's final #58 closure and #229 hold remain unchanged.
 
 2026-11-16: [PR #266](https://github.com/autobrr/go-mediainfo/pull/266) is open and unmerged at [`66d919782a3368d637dbf367c24396e81262dd20`](https://github.com/autobrr/go-mediainfo/commit/66d919782a3368d637dbf367c24396e81262dd20). This records existing Plan 03 work; no new runtime or corpus validation is claimed.
+
+The separate November 16 corpus receipt compares base `10fabcc6f1b30ad2414df24d0326bca9b845266c` with candidate `66d919782a3368d637dbf367c24396e81262dd20`, covering 3,558 readable originals out of 3,576 across both corpora. Its strict result remains blocked by pre-existing malformed XML/OLDXML on 24 inputs and duplicate JSON chapter-timestamp keys on one. The invalid outputs were byte-identical between the tested base and candidate; equality does not establish structured-output validity. Those defects remain outside Plan 03 scope. This historical receipt does not satisfy the merged corpus policy for a later runtime or waive its fresh Go base/candidate gate over both available corpora.
+
+2026-11-17 review preparation: a new local candidate preserves the selected DVD
+language policy through public edits, keeps ambiguous Fields-only names as text,
+and restores the pinned original-text fallback for names whose reverse lookup
+exceeds three characters. Ogg ingress handles Director details and bracketed
+codes; raw suffix formatting shares the friendly display rule without selecting
+a second reference version. RIFF/FORM signatures take precedence over MP4 atom
+sniffing. Exact-code regressions and 13 decoded authored AAC controls document
+the existing Apple mappings for code 50 and codes 128–138, with 139 omitted, in
+`AGENTS.md`. These controls are additional evidence, not recovered originals.
+Both ADRs remain unchanged: their correctness, reference and output rules already
+cover this work.
+
+The owner's separate November 16 corpus run tested published head `66d9197`,
+not this new runtime. It completed 49,812 full-corpus Go captures, 28 derivative
+Go captures and 259 targeted official captures, but strict acceptance remained
+blocked by malformed XML/OLDXML on 24 originals and duplicate JSON timestamp keys
+on one. The earlier five original-evidence limits remain recorded. The new local
+candidate still needs its own applicable [corpus gate](https://github.com/autobrr/go-mediainfo/blob/29cb6281a0cee35adc024e3743e6a826c4ab68e8/docs/plans/parity-consolidation/README.md#validation-and-evidence);
+targeted controls do not establish full-corpus acceptance. Plan 10 retains final
+#58 closure and #229 remains held.
+
+2026-11-20 local integration: merged main `ce28ad9` and retained its corpus policy alongside both dated Plan 03 histories. Imported the review candidate without changing its runtime/test/table/script/module bytes. The November 19 checks and authored-control captures remain evidence for that exact runtime, not a new full-corpus result. Integrated checks and review are recorded separately; the merge-ready base/candidate corpus gate remains pending. No new corpus run, native-blocker waiver or issue closure is implied.

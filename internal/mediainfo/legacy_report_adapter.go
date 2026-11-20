@@ -164,7 +164,13 @@ func canonicalStoreForReport(report Report) *fieldStore {
 			return report.General.reportStore
 		}
 		version := report.General.reportStore.tableVersion
+		if reportVersion(report.General.reportStore) == reportTables26 {
+			version = reportTables26
+		}
 		report = publicReportMutationDelta(report, *report.General.reportSnapshot)
+		// Retain parser policy before adapting edited friendly names, not only
+		// after the new store has already interpreted them.
+		report.General.canonicalPolicy.DVDOrder = version == reportTables26
 		store := reportToFieldStore(report, false)
 		if store.tableVersion == "" {
 			store.tableVersion = version

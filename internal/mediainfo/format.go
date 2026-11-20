@@ -28,9 +28,6 @@ func DetectFormat(header []byte, filename string) string {
 	if bytes.HasPrefix(header, []byte{0x1A, 0x45, 0xDF, 0xA3}) {
 		return "Matroska"
 	}
-	if format := sniffMP4Format(header); format != "" {
-		return format
-	}
 	if len(header) >= 12 {
 		sig := string(header[0:4])
 		if sig == "RIFF" {
@@ -45,6 +42,9 @@ func DetectFormat(header []byte, filename string) string {
 		if sig == "FORM" && string(header[8:12]) == "AIFF" {
 			return "AIFF"
 		}
+	}
+	if format := sniffMP4Format(header); format != "" {
+		return format
 	}
 	if bytes.HasPrefix(header, []byte("fLaC")) {
 		return "FLAC"

@@ -17,7 +17,9 @@ func TestMP4LanguageDecode(t *testing.T) {
 		code uint16
 		want string
 	}{
-		{0, "en"}, {1, "fr"}, {86, ""}, {94, "eo"}, {95, ""}, {127, ""}, {128, "cy"}, {138, "jv"},
+		{0, "en"}, {1, "fr"}, {50, "az"}, {86, ""}, {94, "eo"}, {95, ""}, {127, ""},
+		{128, "cy"}, {129, "eu"}, {130, "ca"}, {131, "la"}, {132, "qu"}, {133, "gn"},
+		{134, "ay"}, {135, "tt"}, {136, "ug"}, {137, "dz"}, {138, "jv"}, {139, ""},
 		{0x7fff, ""}, {0xffff, ""}, {0x8001, ""}, {0x0400, ""}, {0x15c7, "eng"},
 	} {
 		if got := decodeMP4Language(tc.code); got != tc.want {

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"html"
 	"os"
 	"path/filepath"
 	"strings"
@@ -47,6 +48,12 @@ func TestAnalyzeDVDPublicLanguageNamesUseDVDPolicy(t *testing.T) {
 				t.Fatal("missing audio")
 			}
 			assertLanguageProjection(t, edited, tc.code, tc.display, tc.code)
+			if tc.input == "Filipino" {
+				changedFormat := edited
+				changedFormat.General.Fields = append([]Field(nil), edited.General.Fields...)
+				changedFormat.General.Fields = setFieldValue(changedFormat.General.Fields, "Format", "MPEG-4")
+				assertLanguageProjection(t, changedFormat, tc.code, tc.display, tc.code)
+			}
 			if tc.input == "Filipino" || tc.input == "und / mis / ???" {
 				rebuilt := Report{General: Stream{Fields: report.General.Fields}}
 				for _, stream := range edited.Streams {
@@ -56,6 +63,19 @@ func TestAnalyzeDVDPublicLanguageNamesUseDVDPolicy(t *testing.T) {
 				}
 				assertLanguageProjection(t, rebuilt, tc.code, tc.display, tc.code)
 			}
+		})
+	}
+}
+
+func TestFieldsOnlyLanguageNamesDoNotInventAmbiguousCodes(t *testing.T) {
+	for _, language := range []string{"Ndebele", "Cantonese", "Mandarin", "English (United States)", "Flemish", "Language info", "Language, more info", "Ndebele / English / Cantonese"} {
+		t.Run(language, func(t *testing.T) {
+			report := Report{General: Stream{Kind: StreamGeneral, Fields: []Field{{Name: "Format", Value: "Ogg"}}}, Streams: []Stream{{Kind: StreamAudio, Fields: []Field{{Name: "Format", Value: "Vorbis"}, {Name: "Language", Value: language}}}}}
+			code, raw := language, language
+			if language == "Ndebele / English / Cantonese" {
+				code, raw = "Ndebele / en / Cantonese", "Ndebele / en / Cantonese"
+			}
+			assertLanguageProjection(t, report, code, language, raw)
 		})
 	}
 }
@@ -246,20 +266,31 @@ func TestAnalyzeOggLanguageComments(t *testing.T) {
 		format             string
 		inputs             []string
 		code, display, raw string
+		more               string
 	}{
-		{"Vorbis", []string{"scc-Latn-rs"}, "sr-Latn-rs", "Serbian-Latn-rs", "sr-Latn-rs"},
-		{"Opus", []string{"en-us"}, "en-us", "English (United States)", "en (US)"},
-		{"Theora", []string{"fil"}, "fil", "fil", "fil"},
-		{"FLAC", []string{"French"}, "fr", "French", "fr"},
-		{"Vorbis", []string{"und"}, "", "", ""},
-		{"Opus", []string{""}, "", "", ""},
-		{"Vorbis", []string{"en / en"}, "en / en", "English / English", "en / en"},
-		{"Vorbis", []string{"Luba-Katanga"}, "lu", "Luba-Katanga", "lu"},
-		{"Vorbis", []string{"en", "fr", "en"}, "en / fr / en", "English / French / English", "en / fr / en"},
-		{"Opus", []string{"", "und", "fr", ""}, " /  / fr / ", " /  / French / ", " /  / fr / "},
-		{"Theora", []string{"fr", "fr"}, "fr / fr", "French / French", "fr / fr"},
-		{"FLAC", []string{"en", "fr", "en"}, "en / fr / en", "English / French / English", "en / fr / en"},
-		{"FLAC", []string{"und", "mis"}, "", "", ""},
+		{"Vorbis", []string{"scc-Latn-rs"}, "sr-Latn-rs", "Serbian-Latn-rs", "sr-Latn-rs", ""},
+		{"Opus", []string{"en-us"}, "en-us", "English (United States)", "en (US)", ""},
+		{"Theora", []string{"fil"}, "fil", "fil", "fil", ""},
+		{"FLAC", []string{"French"}, "fr", "French", "fr", ""},
+		{"Vorbis", []string{"und"}, "", "", "", ""},
+		{"Opus", []string{""}, "", "", "", ""},
+		{"Vorbis", []string{"en / en"}, "en / en", "English / English", "en / en", ""},
+		{"Vorbis", []string{"Luba-Katanga"}, "lu", "Luba-Katanga", "lu", ""},
+		{"Vorbis", []string{"en", "fr", "en"}, "en / fr / en", "English / French / English", "en / fr / en", ""},
+		{"Opus", []string{"", "und", "fr", ""}, " /  / fr / ", " /  / French / ", " /  / fr / ", ""},
+		{"Theora", []string{"fr", "fr"}, "fr / fr", "French / French", "fr / fr", ""},
+		{"FLAC", []string{"en", "fr", "en"}, "en / fr / en", "English / French / English", "en / fr / en", ""},
+		{"FLAC", []string{"und", "mis"}, "", "", "", ""},
+		{"Vorbis", []string{"English [en]"}, "en", "English", "en", ""},
+		{"Opus", []string{"Director's commentary"}, "", "", "", "Director's commentary"},
+		{"Theora", []string{"French [fr]", "Director commentary", "English [en]"}, "fr / en", "French / English", "fr / en", "Director commentary"},
+		{"FLAC", []string{"Director commentary", "[fr]", "Director commentary"}, "fr", "French", "fr", "Director commentary / Director commentary"},
+		{"Vorbis", []string{"English []"}, "English []", "English []", "English []", ""},
+		{"Opus", []string{"director commentary"}, "director commentary", "director commentary", "director commentary", ""},
+		{"Vorbis", []string{"nr"}, "nr", "Ndebele", "nr", ""},
+		{"Opus", []string{"zh-yue"}, "zh-yue", "Cantonese", "zh (yue)", ""},
+		{"FLAC", []string{"zh-cmn"}, "zh-cmn", "Mandarin", "zh (cmn)", ""},
+		{"Vorbis", []string{"Ndebele"}, "nd", "Ndebele", "nd", ""},
 	} {
 		t.Run(tc.format+"/"+fmt.Sprint(tc.inputs), func(t *testing.T) {
 			comment := binary.LittleEndian.AppendUint32(nil, 0)
@@ -303,6 +334,48 @@ func TestAnalyzeOggLanguageComments(t *testing.T) {
 				t.Fatalf("stream identity: %v", report.Streams)
 			}
 			assertLanguageProjection(t, report, tc.code, tc.display, tc.raw)
+			if tc.format == "Theora" && tc.code == "fil" {
+				changed := report
+				changed.General.Fields = append([]Field(nil), report.General.Fields...)
+				changed.General.Fields = setFieldValue(changed.General.Fields, "Format", "DVD Video")
+				changed.Streams = append([]Stream(nil), report.Streams...)
+				changed.Streams[0].Fields = append([]Field(nil), report.Streams[0].Fields...)
+				changed.Streams[0].Fields = setFieldValue(changed.Streams[0].Fields, "Language", "Filipino")
+				assertLanguageProjection(t, changed, "fil", "Filipino", "fil")
+			}
+			if tc.code == "nr" || tc.code == "zh-yue" || tc.code == "zh-cmn" {
+				changed := report
+				changed.Streams = append([]Stream(nil), report.Streams...)
+				changed.Streams[0].Fields = append([]Field(nil), report.Streams[0].Fields...)
+				changed.Streams[0].Fields = setFieldValue(changed.Streams[0].Fields, "Title", "caller edit")
+				assertLanguageProjection(t, changed, tc.code, tc.display, tc.raw)
+				if !strings.Contains(RenderJSON([]Report{changed}), `"Title":"caller edit"`) {
+					t.Fatal("caller edit was not applied")
+				}
+			}
+			if got := report.Streams[0].JSON["Language_More"]; got != tc.more {
+				t.Fatalf("Language_More = %q, want %q", got, tc.more)
+			}
+			if report.General.JSON["Language_More"] != "" {
+				t.Fatal("logical-stream language detail leaked into General")
+			}
+			if tc.more != "" {
+				if got := findField(report.Streams[0].Fields, "Language, more info"); got != tc.more {
+					t.Fatalf("friendly Language_More = %q, want %q", got, tc.more)
+				}
+				for _, output := range []struct{ text, row string }{
+					{RenderJSON([]Report{report}), `"Language_More":"` + tc.more + `"`},
+					{RenderXML([]Report{report}), "<Language_More>" + strings.ReplaceAll(tc.more, "'", "&apos;") + "</Language_More>"},
+					{RenderText([]Report{report}), padRight("Language, more info", textLabelWidth) + ": " + tc.more},
+					{RenderTextWithOptions([]Report{report}, TextRenderOptions{Language: "raw"}), padRawTextLabel("Language_More", 33) + ": " + tc.more},
+					{RenderHTML([]Report{report}), "<tr><td>Language, more info</td><td>" + html.EscapeString(tc.more) + "</td></tr>"},
+				} {
+					if strings.Count(output.text, output.row) != 1 {
+						t.Fatalf("language detail row %q: %s", output.row, output.text)
+					}
+				}
+			}
+
 		})
 	}
 }

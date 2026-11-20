@@ -763,7 +763,7 @@ func rawTextStructuredDerivations(version reportTableVersion, kind StreamKind, s
 
 	appendField("Type/String", structured["Type"])
 	if language := structured["Language"]; language != "" {
-		appendField("Language/String", formatRawTextLanguage(language, formatLanguage(language)))
+		appendField("Language/String", formatRawTextLanguage(language))
 	}
 	for _, key := range []string{"Title", "Cover", "Cover_Description", "Cover_Type", "Cover_Mime", "Description", "Released_Date", "Recorded_Date", "EncodedBy", "Genre", "Performer", "ContentType", "Copyright", "OriginalSourceForm", "Synopsis", "Comment"} {
 		appendField(key, structured[key])
@@ -1272,10 +1272,11 @@ func rawTextValue(version reportTableVersion, kind StreamKind, label, display st
 			return name + " " + version
 		}
 	case "Language/String":
-		if structured["Language"] == "lvs" {
-			return "lvs"
+		language := structured["Language"]
+		if language == "" {
+			language = normalizeLanguageForFields(display, version)
 		}
-		return formatRawTextLanguage(normalizeLanguage(firstNonEmpty(structured["Language"], display), version), "")
+		return formatRawTextLanguage(language)
 	case "ServiceKind/String":
 		if value := formatRawTextServiceKind(structured["ServiceKind"]); value != "" {
 			return value
@@ -1513,35 +1514,23 @@ func rawTextDolbyVisionCommercialProfile(value string) string {
 	return "Profile " + profile
 }
 
-// formatRawTextBitRate renders ungrouped raw rates using MediaInfo's bps/Kbps
-// boundary and precision.
-// formatRawTextLanguage emits raw registry language codes and formats a single
-// region or script subtag as MediaInfo's parenthesized suffix.
-func formatRawTextLanguage(code, display string) string {
+// formatRawTextLanguage displays an already canonical language tag. Reference
+// selection and name-to-code interpretation belong to the ingress/adapter.
+func formatRawTextLanguage(code string) string {
 	if strings.Contains(code, " / ") {
 		parts := strings.Split(code, " / ")
 		for index, part := range parts {
 			if part != "" {
-				parts[index] = formatRawTextLanguage(part, part)
+				parts[index] = formatRawTextLanguage(part)
 			}
 		}
 		return strings.Join(parts, " / ")
 	}
-	normalized := normalizeLanguageCode(code)
-	parts := strings.Split(normalized, "-")
-	if len(parts) < 2 {
-		if normalized != "" {
-			return normalized
-		}
-		return display
+	primary, suffix, hasSuffix := strings.Cut(code, "-")
+	if !hasSuffix {
+		return code
 	}
-	if len(parts) == 2 {
-		if suffix := parts[1]; len(suffix) == 2 && suffix[0] >= 'a' && suffix[0] <= 'z' && suffix[1] >= 'a' && suffix[1] <= 'z' {
-			parts[1] = strings.ToUpper(suffix)
-		}
-		return fmt.Sprintf("%s (%s)", parts[0], parts[1])
-	}
-	return normalized
+	return formatLanguageSuffix(primary, suffix)
 }
 
 // formatRawTextEncodedLibrary normalizes canonical encoder identifiers and
