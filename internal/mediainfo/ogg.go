@@ -364,14 +364,15 @@ func parseOggHeaderPacket(stream *oggLogicalStream, packet []byte) {
 }
 
 func parseOggComments(data []byte) (string, map[string]string, string) {
-	vendor, pairs := parseFLACVorbisComment(data)
+	vendor, pairs := parseVorbisCommentPairs(data)
 	tags := make(map[string]string, len(pairs))
 	var languages, languageMore []string
 	for _, pair := range pairs {
 		// Language positions are significant; other tags keep their first nonempty value.
 		if pair.Key == "LANGUAGE" {
-			if strings.HasPrefix(pair.Val, "Director") {
-				languageMore = append(languageMore, pair.Val)
+			trimmed := strings.TrimSpace(pair.Val)
+			if strings.HasPrefix(trimmed, "Director") {
+				languageMore = append(languageMore, trimmed)
 				continue
 			}
 			value := pair.Val
@@ -383,6 +384,7 @@ func parseOggComments(data []byte) (string, map[string]string, string) {
 			languages = append(languages, value)
 			continue
 		}
+		pair.Val = strings.TrimSpace(pair.Val)
 		if pair.Key != "" && pair.Val != "" && tags[pair.Key] == "" {
 			tags[pair.Key] = pair.Val
 		}

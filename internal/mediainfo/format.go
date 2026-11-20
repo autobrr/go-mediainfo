@@ -43,6 +43,9 @@ func DetectFormat(header []byte, filename string) string {
 			return "AIFF"
 		}
 	}
+	if isMPEGTS(header) {
+		return "MPEG-TS"
+	}
 	if format := sniffMP4Format(header); format != "" {
 		return format
 	}
@@ -57,9 +60,6 @@ func DetectFormat(header []byte, filename string) string {
 	}
 	if isMP3Frame(header) {
 		return "MPEG Audio"
-	}
-	if isMPEGTS(header) {
-		return "MPEG-TS"
 	}
 	if isBDAV(header) {
 		return "BDAV"

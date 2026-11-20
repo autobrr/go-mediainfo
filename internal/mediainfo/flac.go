@@ -540,6 +540,16 @@ func parseFLACChannelMask(value string) (uint32, bool) {
 }
 
 func parseFLACVorbisComment(buf []byte) (string, []flacTagKV) {
+	vendor, pairs := parseVorbisCommentPairs(buf)
+	for i := range pairs {
+		pairs[i].Val = strings.TrimSpace(pairs[i].Val)
+	}
+	return vendor, pairs
+}
+
+// parseVorbisCommentPairs preserves value whitespace so Ogg can retain empty
+// members of a LANGUAGE list before normalizing its individual members.
+func parseVorbisCommentPairs(buf []byte) (string, []flacTagKV) {
 	out := []flacTagKV{}
 	if len(buf) < 8 {
 		return "", out
@@ -570,7 +580,7 @@ func parseFLACVorbisComment(buf []byte) (string, []flacTagKV) {
 		rd = rd[l:]
 		if eq := strings.IndexByte(s, '='); eq > 0 {
 			k := strings.ToUpper(strings.TrimSpace(s[:eq]))
-			v := strings.TrimSpace(s[eq+1:])
+			v := s[eq+1:]
 			if k != "" {
 				out = append(out, flacTagKV{Key: k, Val: v})
 			}

@@ -421,6 +421,8 @@ func mapStreamFieldsToJSON(kind StreamKind, fields []Field, version reportTableV
 			if code := normalizeLanguageForFields(field.Value, version); code != "" {
 				out = append(out, jsonKV{Key: "Language", Val: code})
 			}
+		case "Language, more info":
+			out = append(out, jsonKV{Key: "Language_More", Val: field.Value})
 		case "Title":
 			out = append(out, jsonKV{Key: "Title", Val: field.Value})
 		case "Movie name", "Track name":

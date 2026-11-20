@@ -139,10 +139,14 @@ func parseMP4ExtendedLanguage(payload []byte, budget *embeddedAssetBudget) strin
 	if len(value) == 0 || !utf8.Valid(value) {
 		return ""
 	}
+	language := strings.TrimSpace(string(value))
+	if language == "" {
+		return ""
+	}
 	if budget.reserveString(uint64(len(value)), embeddedAssetMaxNameBytes) != embeddedAssetAccepted {
 		return ""
 	}
-	return strings.TrimSpace(string(value))
+	return language
 }
 
 func parseHdlrName(payload []byte) string {

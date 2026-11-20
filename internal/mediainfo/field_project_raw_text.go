@@ -1526,6 +1526,9 @@ func formatRawTextLanguage(code string) string {
 		}
 		return strings.Join(parts, " / ")
 	}
+	if !isAlphaNum(strings.ReplaceAll(code, "-", "")) {
+		return code
+	}
 	primary, suffix, hasSuffix := strings.Cut(code, "-")
 	if !hasSuffix {
 		return code

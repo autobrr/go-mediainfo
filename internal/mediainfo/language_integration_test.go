@@ -5,8 +5,10 @@ import (
 	"encoding/binary"
 	"fmt"
 	"html"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -53,6 +55,10 @@ func TestAnalyzeDVDPublicLanguageNamesUseDVDPolicy(t *testing.T) {
 				changedFormat.General.Fields = append([]Field(nil), edited.General.Fields...)
 				changedFormat.General.Fields = setFieldValue(changedFormat.General.Fields, "Format", "MPEG-4")
 				assertLanguageProjection(t, changedFormat, tc.code, tc.display, tc.code)
+				generalOnly := changedFormat
+				generalOnly.Streams = nil
+				generalOnly.General.Fields = setFieldValue(generalOnly.General.Fields, "Language", tc.input)
+				assertLanguageProjection(t, generalOnly, tc.code, tc.display, tc.code)
 			}
 			if tc.input == "Filipino" || tc.input == "und / mis / ???" {
 				rebuilt := Report{General: Stream{Fields: report.General.Fields}}
@@ -68,12 +74,16 @@ func TestAnalyzeDVDPublicLanguageNamesUseDVDPolicy(t *testing.T) {
 }
 
 func TestFieldsOnlyLanguageNamesDoNotInventAmbiguousCodes(t *testing.T) {
-	for _, language := range []string{"Ndebele", "Cantonese", "Mandarin", "English (United States)", "Flemish", "Language info", "Language, more info", "Ndebele / English / Cantonese"} {
+	for _, language := range []string{"Ndebele", "Cantonese", "Mandarin", "English (United States)", "Flemish", "Language info", "Language, more info", "Ndebele / English / Cantonese", "Made-up language", " / Made-up language / en-us / "} {
 		t.Run(language, func(t *testing.T) {
 			report := Report{General: Stream{Kind: StreamGeneral, Fields: []Field{{Name: "Format", Value: "Ogg"}}}, Streams: []Stream{{Kind: StreamAudio, Fields: []Field{{Name: "Format", Value: "Vorbis"}, {Name: "Language", Value: language}}}}}
 			code, raw := language, language
 			if language == "Ndebele / English / Cantonese" {
 				code, raw = "Ndebele / en / Cantonese", "Ndebele / en / Cantonese"
+			}
+			if language == " / Made-up language / en-us / " {
+				language = " / Made-up language / English (United States) / "
+				raw = " / Made-up language / en (US) / "
 			}
 			assertLanguageProjection(t, report, code, language, raw)
 		})
@@ -291,13 +301,20 @@ func TestAnalyzeOggLanguageComments(t *testing.T) {
 		{"Opus", []string{"zh-yue"}, "zh-yue", "Cantonese", "zh (yue)", ""},
 		{"FLAC", []string{"zh-cmn"}, "zh-cmn", "Mandarin", "zh (cmn)", ""},
 		{"Vorbis", []string{"Ndebele"}, "nd", "Ndebele", "nd", ""},
+		{"Vorbis", []string{" / en / "}, " / en / ", " / English / ", " / en / ", ""},
+		{"Opus", []string{"Made-up language"}, "Made-up language", "Made-up language", "Made-up language", ""},
 	} {
 		t.Run(tc.format+"/"+fmt.Sprint(tc.inputs), func(t *testing.T) {
 			comment := binary.LittleEndian.AppendUint32(nil, 0)
-			comment = binary.LittleEndian.AppendUint32(comment, uint32(len(tc.inputs)))
+			comment = binary.LittleEndian.AppendUint32(comment, uint32(len(tc.inputs)+2))
 			var tags []string
 			for _, input := range tc.inputs {
 				tag := "LANGUAGE=" + input
+				comment = binary.LittleEndian.AppendUint32(comment, uint32(len(tag)))
+				comment = append(comment, tag...)
+				tags = append(tags, tag)
+			}
+			for _, tag := range []string{"TITLE=  ", "TITLE= Fixture "} {
 				comment = binary.LittleEndian.AppendUint32(comment, uint32(len(tag)))
 				comment = append(comment, tag...)
 				tags = append(tags, tag)
@@ -334,6 +351,9 @@ func TestAnalyzeOggLanguageComments(t *testing.T) {
 				t.Fatalf("stream identity: %v", report.Streams)
 			}
 			assertLanguageProjection(t, report, tc.code, tc.display, tc.raw)
+			if report.General.JSON["Title"] != "Fixture" {
+				t.Fatalf("non-LANGUAGE comment trimming changed: %v", report.General.JSON)
+			}
 			if tc.format == "Theora" && tc.code == "fil" {
 				changed := report
 				changed.General.Fields = append([]Field(nil), report.General.Fields...)
@@ -342,6 +362,17 @@ func TestAnalyzeOggLanguageComments(t *testing.T) {
 				changed.Streams[0].Fields = append([]Field(nil), report.Streams[0].Fields...)
 				changed.Streams[0].Fields = setFieldValue(changed.Streams[0].Fields, "Language", "Filipino")
 				assertLanguageProjection(t, changed, "fil", "Filipino", "fil")
+				for _, parent := range []Report{report, changed} {
+					generalOnly := parent
+					generalOnly.Streams = nil
+					generalOnly.General.Fields = append([]Field(nil), parent.General.Fields...)
+					generalOnly.General.Fields = setFieldValue(generalOnly.General.Fields, "Language", "Filipino")
+					code := "Filipino"
+					if findField(parent.General.Fields, "Format") == "DVD Video" {
+						code = "fil"
+					}
+					assertLanguageProjection(t, generalOnly, code, "Filipino", code)
+				}
 			}
 			if tc.code == "nr" || tc.code == "zh-yue" || tc.code == "zh-cmn" {
 				changed := report
@@ -359,23 +390,64 @@ func TestAnalyzeOggLanguageComments(t *testing.T) {
 			if report.General.JSON["Language_More"] != "" {
 				t.Fatal("logical-stream language detail leaked into General")
 			}
-			if tc.more != "" {
-				if got := findField(report.Streams[0].Fields, "Language, more info"); got != tc.more {
-					t.Fatalf("friendly Language_More = %q, want %q", got, tc.more)
-				}
-				for _, output := range []struct{ text, row string }{
-					{RenderJSON([]Report{report}), `"Language_More":"` + tc.more + `"`},
-					{RenderXML([]Report{report}), "<Language_More>" + strings.ReplaceAll(tc.more, "'", "&apos;") + "</Language_More>"},
-					{RenderText([]Report{report}), padRight("Language, more info", textLabelWidth) + ": " + tc.more},
-					{RenderTextWithOptions([]Report{report}, TextRenderOptions{Language: "raw"}), padRawTextLabel("Language_More", 33) + ": " + tc.more},
-					{RenderHTML([]Report{report}), "<tr><td>Language, more info</td><td>" + html.EscapeString(tc.more) + "</td></tr>"},
-				} {
-					if strings.Count(output.text, output.row) != 1 {
-						t.Fatalf("language detail row %q: %s", output.row, output.text)
-					}
+			assertLanguageMoreProjection(t, report, tc.more, tc.more)
+			if tc.more == "Director's commentary" {
+				for _, edit := range []string{"ref", "title", "detail", "delete row", "delete JSON", "Fields only"} {
+					t.Run(edit, func(t *testing.T) {
+						edited := report
+						edited.Streams = append([]Stream(nil), report.Streams...)
+						stream := &edited.Streams[0]
+						stream.Fields = append([]Field(nil), stream.Fields...)
+						stream.JSON = maps.Clone(stream.JSON)
+						structured, friendly := tc.more, tc.more
+						switch edit {
+						case "ref":
+							edited.Ref = "caller ref"
+						case "title":
+							stream.Fields = setFieldValue(stream.Fields, "Title", "caller title")
+						case "detail":
+							structured, friendly = "caller detail", "caller detail"
+							stream.Fields = setFieldValue(stream.Fields, "Language, more info", friendly)
+						case "delete row":
+							structured, friendly = "", ""
+							stream.Fields = slices.DeleteFunc(stream.Fields, func(field Field) bool { return field.Name == "Language, more info" })
+						case "delete JSON":
+							structured = ""
+							delete(stream.JSON, "Language_More")
+						case "Fields only":
+							edited = Report{General: Stream{Kind: StreamGeneral, Fields: report.General.Fields}, Streams: []Stream{{Kind: stream.Kind, Fields: stream.Fields}}}
+						}
+						assertLanguageMoreProjection(t, edited, structured, friendly)
+						assertLanguageMoreProjection(t, report, tc.more, tc.more)
+					})
 				}
 			}
 
 		})
+	}
+}
+
+func assertLanguageMoreProjection(t *testing.T, report Report, structured, friendly string) {
+	t.Helper()
+	reports := []Report{report}
+	xml, json := RenderXML(reports), RenderJSON(reports)
+	text, raw, markup := RenderText(reports), RenderTextWithOptions(reports, TextRenderOptions{Language: "raw"}), RenderHTML(reports)
+	if xml != RenderXML(reports) || json != RenderJSON(reports) || text != RenderText(reports) || raw != RenderTextWithOptions(reports, TextRenderOptions{Language: "raw"}) || markup != RenderHTML(reports) {
+		t.Fatal("render order changed language detail")
+	}
+	for _, output := range []struct{ text, prefix, row, want string }{
+		{json, `"Language_More":`, `"Language_More":"` + structured + `"`, structured},
+		{xml, "<Language_More>", "<Language_More>" + strings.ReplaceAll(structured, "'", "&apos;") + "</Language_More>", structured},
+		{text, fmt.Sprintf("%-40s : ", "Language, more info"), fmt.Sprintf("%-40s : %s\n", "Language, more info", friendly), friendly},
+		{raw, padRawTextLabel("Language_More", 33) + ": ", padRawTextLabel("Language_More", 33) + ": " + friendly + "\n", friendly},
+		{markup, "<td>Language, more info</td>", "<tr><td>Language, more info</td><td>" + html.EscapeString(friendly) + "</td></tr>", friendly},
+	} {
+		count := 0
+		if output.want != "" {
+			count = 1
+		}
+		if strings.Count(output.text, output.prefix) != count || count != 0 && strings.Count(strings.ReplaceAll(output.text, "\r\n", "\n"), output.row) != count {
+			t.Fatalf("language detail %q = %q: %s", output.prefix, output.want, output.text)
+		}
 	}
 }

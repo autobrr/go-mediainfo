@@ -3,6 +3,12 @@ package mediainfo
 import "testing"
 
 func TestDetectFormat(t *testing.T) {
+	tsAtom := func(atom string) []byte {
+		header := makeTSHeader()
+		copy(header[1:4], []byte{1, 0, 0x10})
+		copy(header[4:], atom)
+		return header
+	}
 	cases := []struct {
 		name     string
 		header   []byte
@@ -25,6 +31,10 @@ func TestDetectFormat(t *testing.T) {
 		{name: "ogg", header: []byte{'O', 'g', 'g', 'S'}, filename: "sound.ogg", want: "Ogg"},
 		{name: "mp3", header: []byte{'I', 'D', '3'}, filename: "sound.mp3", want: "MPEG Audio"},
 		{name: "mp2ts", header: makeTSHeader(), filename: "stream.ts", want: "MPEG-TS"},
+		{name: "TS payload starts moov", header: tsAtom("moov"), filename: "stream.ts", want: "MPEG-TS"},
+		{name: "TS payload starts mdat", header: tsAtom("mdat"), filename: "stream.ts", want: "MPEG-TS"},
+		{name: "MP4 moov without TS sync", header: []byte("\x00\x00\x00\x08moov"), filename: "movie.mov", want: "QuickTime"},
+		{name: "MP4 mdat without TS sync", header: []byte("\x00\x00\x00\x08mdat"), filename: "movie.mov", want: "QuickTime"},
 		{name: "mpegps", header: []byte{0x00, 0x00, 0x01, 0xBA}, filename: "movie.vob", want: "MPEG-PS"},
 		{name: "ifo", header: []byte{0x00, 0x00, 0x00, 0x00}, filename: "VIDEO_TS.IFO", want: "DVD Video"},
 	}

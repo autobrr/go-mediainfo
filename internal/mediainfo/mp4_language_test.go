@@ -183,11 +183,21 @@ func TestAnalyzeMP4ExtendedLanguageBounds(t *testing.T) {
 		})
 	}
 	budget := &embeddedAssetBudget{stringBytes: embeddedAssetMaxStringBytes - 2}
+	if got := parseMP4ExtendedLanguage(full("  "), budget); got != "" {
+		t.Fatalf("blank extended language = %q", got)
+	}
 	if got := parseMP4ExtendedLanguage(full("fr"), budget); got != "fr" {
 		t.Fatalf("exact aggregate remainder: %q", got)
 	}
 	if got := parseMP4ExtendedLanguage(full("en"), budget); got != "" {
 		t.Fatalf("exhausted aggregate accepted %q", got)
+	}
+	padded := &embeddedAssetBudget{stringBytes: embeddedAssetMaxStringBytes - 2}
+	if got := parseMP4ExtendedLanguage(full(" fr "), padded); got != "" {
+		t.Fatalf("nonblank padding must count toward the budget: %q", got)
+	}
+	if got := parseMP4ExtendedLanguage(full("fr"), padded); got != "fr" {
+		t.Fatalf("rejected padding consumed the remaining budget: %q", got)
 	}
 }
 
@@ -210,7 +220,7 @@ func assertLanguageProjection(t *testing.T, report Report, code, display, rawWan
 	if strings.Count(json, `"Language":"`+code+`"`) != 1 || strings.Count(json, `"Language":`) != 1 || strings.Count(xml, "<Language>"+code+"</Language>") != 1 || strings.Count(xml, "<Language>") != 1 {
 		t.Fatalf("structured language: %s\n%s", json, xml)
 	}
-	if strings.Count(friendly, fmt.Sprintf("%-40s : %s", "Language", display)) != 1 || strings.Count(htmlOutput, "<tr><td>Language</td><td>"+html.EscapeString(display)+"</td></tr>") != 1 {
+	if strings.Count(strings.ReplaceAll(friendly, "\r\n", "\n"), fmt.Sprintf("%-40s : %s\n", "Language", display)) != 1 || strings.Count(friendly, fmt.Sprintf("%-40s : ", "Language")) != 1 || strings.Count(htmlOutput, "<tr><td>Language</td><td>"+html.EscapeString(display)+"</td></tr>") != 1 {
 		t.Fatalf("friendly language: %s\n%s", friendly, htmlOutput)
 	}
 	if strings.Count(strings.ReplaceAll(raw, "\r\n", "\n"), padRawTextLabel("Language/String", 33)+": "+rawWant+"\n") != 1 {

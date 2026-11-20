@@ -229,6 +229,7 @@ func TestAnalyzeVTSIFOFallsBackToProgramMetadataForInvalidVOB(t *testing.T) {
 	if got := findField(audio.Fields, "Language"); got != "English" {
 		t.Fatalf("audio language = %q, want English", got)
 	}
+	assertLanguageProjection(t, report, "en", "English", "en")
 
 	for _, stream := range report.Streams {
 		if got := findField(stream.Fields, "Source"); got != "" {

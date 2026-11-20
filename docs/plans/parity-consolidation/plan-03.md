@@ -77,3 +77,21 @@ targeted controls do not establish full-corpus acceptance. Plan 10 retains final
 #58 closure and #229 remains held.
 
 2026-11-20 local integration: merged main `ce28ad9` and retained its corpus policy alongside both dated Plan 03 histories. Imported the review candidate without changing its runtime/test/table/script/module bytes. The November 19 checks and authored-control captures remain evidence for that exact runtime, not a new full-corpus result. Integrated checks and review are recorded separately; the merge-ready base/candidate corpus gate remains pending. No new corpus run, native-blocker waiver or issue closure is implied.
+
+2026-11-20 CodeRabbit review follow-up: the local candidate fixes TS/MP4 signature
+precedence, blank `elng` budget consumption, Ogg language-detail retention after
+public edits, retained DVD policy for lazy General XML, opaque raw-language text,
+and empty positions within a single Ogg comment. Friendly-text checks now require
+the complete Language row. The existing IFO-only fixture confirms canonical `en`
+and friendly `English`; ordinary known-code paths already seed the code, so the
+DVD fallback and intentional aggregate suppression are unchanged. Full Go tests,
+vet, module checks and all 21 native three-second fuzz targets pass on this new
+runtime. Ten newly authored controls produced 150 successful five-format captures
+against the candidate, published `590fcc4` and verified v23.04. These are scoped
+comparisons, not whole-report reference equality. `AGENTS.md` records the two
+observed corrections: retaining the trailing empty Ogg member and recognizing the
+valid TS controls that v23.04 misdetects. Both ADRs remain unchanged because their
+reference, measured-fact and output-shape rules already govern these corrections.
+Authored controls do not replace original witnesses. The full corpus remains
+paused, and this new runtime still requires its own merge-ready corpus gate;
+the prior strict-output defects and original-evidence limits remain unresolved.

@@ -119,10 +119,8 @@ func formatLanguageVersion(code string, version reportTableVersion) string {
 	if name := policy.names[code]; name != "" {
 		return name
 	}
-	for _, char := range code {
-		if char != '-' && !(char >= 'a' && char <= 'z' || char >= 'A' && char <= 'Z' || char >= '0' && char <= '9') {
-			return code
-		}
+	if !isAlphaNum(strings.ReplaceAll(code, "-", "")) {
+		return code
 	}
 	primary, suffix, hasSuffix := strings.Cut(code, "-")
 	name := policy.names[primary]

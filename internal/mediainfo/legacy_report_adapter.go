@@ -203,6 +203,7 @@ var parserPresentationFactRows = map[string]string{
 	"Format_AdditionalFeatures": "Format",
 	"Format_Profile":            "Format profile",
 	"Language":                  "Language",
+	"Language_More":             "Language, more info",
 }
 
 // stripUnchangedSnapshotMaps keeps explicit compatibility-map changes and
@@ -367,6 +368,7 @@ func ensureLegacyXMLProjection(store *fieldStore) {
 			return
 		}
 		report := Report{Ref: store.ref, General: legacyStructuredTagNames(cloneLegacyStream(*store.legacyGeneral))}
+		report.General.canonicalPolicy.DVDOrder = reportVersion(store) == reportTables26
 		report.Streams = make([]Stream, len(store.legacyStreams))
 		for index, stream := range store.legacyStreams {
 			report.Streams[index] = legacyStructuredTagNames(cloneLegacyStream(stream))
