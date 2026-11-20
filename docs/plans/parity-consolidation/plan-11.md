@@ -28,6 +28,8 @@ Separate complete frame counts from bounded metadata sampling, establish support
 
 ## Validation and evidence
 
+- [ ] Complete the [acceptance matrix and PR evidence checklist](README.md#acceptance-matrix-and-pr-checklist) for this plan’s existing criteria and the checks below.
+
 [Shared validation requirements](README.md#validation-and-evidence). Use complete inventories and real reset/wrap/cadence witnesses, sampled versus full reads, short audio tracks and invalid-RLE preservation controls. Reject unsupported totals rather than fit expected captures.
 
 ## Implementation and outcome history

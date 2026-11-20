@@ -34,6 +34,8 @@ Consolidate existing HEVC facts and projections alongside validated SPS profile/
 
 ## Validation and evidence
 
+- [ ] Complete the [acceptance matrix and PR evidence checklist](README.md#acceptance-matrix-and-pr-checklist) for this plan’s existing criteria and the checks below.
+
 [Shared validation requirements](README.md#validation-and-evidence). Use conflicting hvcC/SPS, legacy configuration, malformed/later NAL, configuration/in-band SEI and separated-field controls; test canonical/direct/Analyze/rebuild routes and dual/absent HRD visibility.
 
 ## Implementation and outcome history

@@ -32,6 +32,8 @@ Implement bounded caption discovery and parent association across PS/DVD and MP4
 
 ## Validation and evidence
 
+- [ ] Complete the [acceptance matrix and PR evidence checklist](README.md#acceptance-matrix-and-pr-checklist) for this plan’s existing criteria and the checks below.
+
 [Shared validation requirements](README.md#validation-and-evidence). Require actual caption evidence with composition/edit timing, service transitions, malformed SEI/708, independent parent association and bounded window extension; fuzz newly exposed parsers.
 
 ## Implementation and outcome history

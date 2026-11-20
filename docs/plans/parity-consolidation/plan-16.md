@@ -28,6 +28,8 @@ Unify RIFF codec/header precedence with bounded AVC/MPEG/AAC probing, correct sh
 
 ## Validation and evidence
 
+- [ ] Complete the [acceptance matrix and PR evidence checklist](README.md#acceptance-matrix-and-pr-checklist) for this plan’s existing criteria and the checks below.
+
 [Shared validation requirements](README.md#validation-and-evidence). Test low-rate Layer II and changing mode-extension headers, RIFF priority, bounded probes and AVI delay eligibility with actual integration controls.
 
 ## Implementation and outcome history

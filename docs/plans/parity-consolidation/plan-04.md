@@ -39,6 +39,8 @@ Build one source-aware encoder pipeline from actual strings and tags to Name/Ver
 
 ## Validation and evidence
 
+- [ ] Complete the [acceptance matrix and PR evidence checklist](README.md#acceptance-matrix-and-pr-checklist) for this plan’s existing criteria and the checks below.
+
 [Shared validation requirements](README.md#validation-and-evidence). Test repeated vendors, unknown names, date splits, source/track conflicts and no-encoder controls through every reachable producer and public rebuilding.
 
 ## Implementation and outcome history
