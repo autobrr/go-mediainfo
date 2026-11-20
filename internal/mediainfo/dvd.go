@@ -1055,8 +1055,13 @@ func dvdAttrCount(data []byte, offset int) int {
 	return int(binary.BigEndian.Uint16(data[offset : offset+2]))
 }
 
-// dvdTrimLang trims NUL and space padding from a DVD language code.
+// dvdTrimLang rejects non-ASCII attribute bytes before trimming NUL/space padding.
 func dvdTrimLang(raw []byte) string {
+	for _, b := range raw {
+		if b >= 0x80 {
+			return ""
+		}
+	}
 	return strings.TrimSpace(strings.TrimRight(string(raw), "\x00"))
 }
 
@@ -2796,8 +2801,10 @@ func overlayDVDDeclaredLanguages(streams []Stream, audio []dvdAudioAttrs, subpic
 		switch streams[i].Kind {
 		case StreamAudio:
 			index := dvdDeclaredAudioIndex(id, audio)
-			if index >= 0 && index < len(audio) && audio[index].LanguageCode != "" {
-				replaceCanonicalSeedFill(&streams[i], "Language", audio[index].LanguageCode, "Language", audio[index].Language)
+			if index >= 0 && index < len(audio) {
+				if audio[index].LanguageCode != "" {
+					replaceCanonicalSeedFill(&streams[i], "Language", audio[index].LanguageCode, "Language", audio[index].Language)
+				}
 				if audio[index].LanguageMore != "" {
 					replaceCanonicalSeedFill(&streams[i], "Language_More", audio[index].LanguageMore, "Language, more info", audio[index].LanguageMore)
 				}
@@ -2819,8 +2826,10 @@ func overlayDVDDeclaredLanguages(streams []Stream, audio []dvdAudioAttrs, subpic
 				}
 				index = candidate
 			}
-			if index >= 0 && subpics[index].LanguageCode != "" {
-				replaceCanonicalSeedFill(&streams[i], "Language", subpics[index].LanguageCode, "Language", subpics[index].Language)
+			if index >= 0 {
+				if subpics[index].LanguageCode != "" {
+					replaceCanonicalSeedFill(&streams[i], "Language", subpics[index].LanguageCode, "Language", subpics[index].Language)
+				}
 				if subpics[index].LanguageMore != "" {
 					replaceCanonicalSeedFill(&streams[i], "Language_More", subpics[index].LanguageMore, "Language, more info", subpics[index].LanguageMore)
 				}

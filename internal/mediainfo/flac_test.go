@@ -17,7 +17,7 @@ func TestFLACExtraCommentsPreserveEncounterOrder(t *testing.T) {
 	}
 	data := append([]byte("fLaC\x00\x00\x00\x22"), streamInfo...)
 	blocks := [][]string{
-		{"X_ZULU=first", "TITLE=Fixture", "X_ALPHA=alpha", "X_ZULU=second", "EMPTY=", "VALID_BITS=16", "X_BRAVO=bravo", "X_YANKEE=yankee", "X_DELTA=delta", "X_XRAY=xray"},
+		{"X_ZULU= first ", "TITLE= Fixture ", "X_ALPHA=alpha", "X_ZULU=second", "EMPTY= \t ", "VALID_BITS=16", "X_BRAVO=bravo", "X_YANKEE=yankee", "X_DELTA=delta", "X_XRAY=xray"},
 		{"x_zulu=first", "X_ALPHA=alpha", "X_CHARLIE=charlie", "X_WHISKEY=whiskey", "X_ECHO=echo", "X_VICTOR=victor", "X_FOXTROT=foxtrot", "X_UNIFORM=uniform"},
 	}
 	for index, tags := range blocks {
@@ -60,6 +60,9 @@ func TestFLACExtraCommentsPreserveEncounterOrder(t *testing.T) {
 			t.Fatal("comment merge or omission changed")
 		}
 		_ = RenderText(reports)
+		if report.General.JSON["Title"] != "Fixture" {
+			t.Fatalf("standalone FLAC comment whitespace changed: %v", report.General.JSON)
+		}
 		if RenderJSON(reports) != structured || RenderTextWithOptions(reports, TextRenderOptions{Language: "raw"}) != raw {
 			t.Fatal("rendering changed comment order or values")
 		}

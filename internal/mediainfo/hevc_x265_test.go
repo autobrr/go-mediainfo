@@ -126,7 +126,7 @@ func TestMapStreamFieldsToJSONX265EncodedLibrary(t *testing.T) {
 		{Name: "Writing library", Value: x265WantLibrary},
 		{Name: "Encoding settings", Value: x265WantSettings},
 	}
-	got := mapStreamFieldsToJSON(StreamVideo, fields)
+	got := mapStreamFieldsToJSON(StreamVideo, fields, reportTables23)
 
 	if v := jsonFieldValue(got, "Encoded_Library"); v != "x265 - 4.2+1-e444744:[Mac OS X][clang 21.0.0][64 bit] 8bit+10bit+12bit" {
 		t.Fatalf("Encoded_Library = %q", v)

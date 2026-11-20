@@ -91,6 +91,20 @@ Default output: text.
 Footer is separated from media details by a blank line and uses the projection's
 aligned label column: `ReportBy ... : go-mediainfo - vX.Y.Z`.
 
+JSON and XML language values use normalized primary codes and retain the source's
+script/region spelling: `en-us` stays `en-us`. Normal text and HTML use the
+applicable reference's language names; raw text uses codes with display suffixes
+such as `en (US)`. DVD uses the v26.10 names and other containers use v23.04.
+Menu language lists retain empty positions and repeated members. MP4 track-backed
+chapter menus use their own track's language; an independent `chpl` list does not
+inherit a language.
+
+Ogg `LANGUAGE` comments retain producer order and duplicates. A value starting
+with `Director` supplies the stream's language detail; otherwise a nonempty
+bracketed code supplies its language. Fields-only library reports preserve an
+ambiguous friendly name such as `Ndebele` as text, because it cannot identify
+which original code produced that name. Parsed reports retain their code.
+
 ## Options
 
 - `--Output=...` (TEXT/JSON/XML/OLDXML/HTML/CSV/EBUCore/EBUCore_JSON/PBCore/PBCore2/Graph_Svg/Graph_Dot)

@@ -178,6 +178,23 @@ func reportVersion(store *fieldStore) reportTableVersion {
 	return reportTables23
 }
 
+// legacyReportTableVersion retains parser policy while adapting public edits;
+// reconstructed reports can select DVD policy through their General/Menu format.
+func legacyReportTableVersion(report Report) reportTableVersion {
+	if report.General.reportStore != nil {
+		return reportVersion(report.General.reportStore)
+	}
+	if report.General.canonicalPolicy.DVDOrder || dvdReferenceFormat(StreamGeneral, firstNonEmpty(report.General.JSON["Format"], findField(report.General.Fields, "Format"))) {
+		return reportTables26
+	}
+	for _, stream := range report.Streams {
+		if stream.canonicalPolicy.DVDOrder || dvdReferenceFormat(stream.Kind, firstNonEmpty(stream.JSON["Format"], findField(stream.Fields, "Format"))) {
+			return reportTables26
+		}
+	}
+	return reportTables23
+}
+
 // dvdReferenceFormat reports whether a General or Menu format selects the
 // DVD v26.10 reference (ADR 0002).
 func dvdReferenceFormat(kind StreamKind, format string) bool {

@@ -164,7 +164,13 @@ func canonicalStoreForReport(report Report) *fieldStore {
 			return report.General.reportStore
 		}
 		version := report.General.reportStore.tableVersion
+		if reportVersion(report.General.reportStore) == reportTables26 {
+			version = reportTables26
+		}
 		report = publicReportMutationDelta(report, *report.General.reportSnapshot)
+		// Retain parser policy before adapting edited friendly names, not only
+		// after the new store has already interpreted them.
+		report.General.canonicalPolicy.DVDOrder = version == reportTables26
 		store := reportToFieldStore(report, false)
 		if store.tableVersion == "" {
 			store.tableVersion = version
@@ -190,12 +196,14 @@ func publicReportMutationDelta(report Report, snapshot legacyReportState) Report
 	return report
 }
 
-// parserFormatFactRows maps each structured fact that reportFormatPresentation
-// reads to the friendly row that displays it.
-var parserFormatFactRows = map[string]string{
+// parserPresentationFactRows maps facts whose friendly display cannot recover
+// the original canonical value to the row that displays them.
+var parserPresentationFactRows = map[string]string{
 	"Format":                    "Format",
 	"Format_AdditionalFeatures": "Format",
 	"Format_Profile":            "Format profile",
+	"Language":                  "Language",
+	"Language_More":             "Language, more info",
 }
 
 // stripUnchangedSnapshotMaps keeps explicit compatibility-map changes and
@@ -221,11 +229,11 @@ func stripUnchangedSnapshotMaps(stream *Stream, snapshot legacyStreamState) {
 			stream.legacyJSONRawDeleted[key] = struct{}{}
 		}
 	}
-	// A friendly row such as "DTS XLL" cannot be parsed back into the parser's
-	// format facts, so keep each fact unless the caller edited its row.
+	// Friendly format and language rows cannot recover their canonical facts
+	// (including language suffix case), so keep a fact unless its row was edited.
 	for key, value := range stream.JSON {
 		if snapshot.JSON[key] == value {
-			if row, ok := parserFormatFactRows[key]; ok && findField(stream.Fields, row) == findField(snapshot.Fields, row) {
+			if row, ok := parserPresentationFactRows[key]; ok && findField(stream.Fields, row) == findField(snapshot.Fields, row) {
 				continue
 			}
 			delete(stream.JSON, key)
@@ -360,6 +368,7 @@ func ensureLegacyXMLProjection(store *fieldStore) {
 			return
 		}
 		report := Report{Ref: store.ref, General: legacyStructuredTagNames(cloneLegacyStream(*store.legacyGeneral))}
+		report.General.canonicalPolicy.DVDOrder = reportVersion(store) == reportTables26
 		report.Streams = make([]Stream, len(store.legacyStreams))
 		for index, stream := range store.legacyStreams {
 			report.Streams[index] = legacyStructuredTagNames(cloneLegacyStream(stream))
@@ -383,7 +392,8 @@ func ensureLegacyXMLProjection(store *fieldStore) {
 			if stored == nil || stored.DirectCanonical {
 				continue
 			}
-			fields := buildJSONStreamFields(report.Streams[originalIndex], order, 0, containerFormat)
+			fields := buildJSONStreamFields(report.Streams[originalIndex], order, 0, containerFormat, reportVersion(store))
+			fields = filterDeletedLegacyJSONFields(fields, report.Streams[originalIndex])
 			appendLegacyStructuredFields(store, ref, fields, structuredProjectionXML)
 			clearAudioSampleFrequencyFrameRate(store, ref)
 		}

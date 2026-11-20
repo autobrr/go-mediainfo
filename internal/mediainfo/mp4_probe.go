@@ -322,6 +322,9 @@ func buildMP4ChapterMenu(reader io.ReaderAt, track MP4Track) Stream {
 	}
 	builder.Fill("Format", "Timed Text", "Format", "Timed Text")
 	builder.Fill("CodecID", track.sampleEntryType, "Codec ID", track.sampleEntryType)
+	if code := normalizeLanguageCode(track.LanguageCode); code != "" {
+		builder.Fill("Language", code, "Language", formatLanguage(code))
+	}
 	if track.DurationSeconds > 0 {
 		builder.Fill("Duration", strconv.FormatFloat(track.DurationSeconds*1000, 'f', -1, 64), "Duration", formatDuration(track.DurationSeconds))
 		builder.OverrideStructured("Duration", formatJSONSeconds(track.DurationSeconds))

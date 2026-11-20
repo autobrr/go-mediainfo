@@ -199,16 +199,16 @@ func TestRawTextCanonicalValueFormatting(t *testing.T) {
 			t.Errorf("formatRawTextBitRate(%s) = %q, want %q", value, got, want)
 		}
 	}
-	if got := formatRawTextLanguage("es-419", "Spanish"); got != "es (419)" {
+	if got := formatRawTextLanguage("es-419"); got != "es (419)" {
 		t.Fatalf("formatRawTextLanguage = %q", got)
 	}
-	if got := formatRawTextLanguage("en", "English"); got != "en" {
+	if got := formatRawTextLanguage("en"); got != "en" {
 		t.Fatalf("formatRawTextLanguage(en) = %q", got)
 	}
-	if got := formatRawTextLanguage("yue-Hant-HK", "Cantonese (Traditional, Hong Kong)"); got != "yue-Hant-HK" {
+	if got := formatRawTextLanguage("yue-Hant-HK"); got != "yue-Hant-HK" {
 		t.Fatalf("formatRawTextLanguage(yue-Hant-HK) = %q", got)
 	}
-	if got := formatRawTextLanguage(" / en", " / English"); got != " / en" {
+	if got := formatRawTextLanguage(" / en"); got != " / en" {
 		t.Fatalf("formatRawTextLanguage(empty/en list) = %q", got)
 	}
 	if got := formatRawTextServiceKind("CM / O / C"); got != "Complete Main / Original / Commentary" {
