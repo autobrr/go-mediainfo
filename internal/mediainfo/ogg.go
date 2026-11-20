@@ -377,7 +377,8 @@ func parseOggComments(data []byte) (string, map[string]string, string) {
 			}
 			for value := range strings.SplitSeq(pair.Val, " / ") {
 				if _, bracketed, found := strings.Cut(value, "["); found {
-					if code, _, closed := strings.Cut(bracketed, "]"); closed && code != "" {
+					// Preserve nonblank spacing until normalization splits the joined members.
+					if code, _, closed := strings.Cut(bracketed, "]"); closed && strings.TrimSpace(code) != "" {
 						value = code
 					}
 				}
