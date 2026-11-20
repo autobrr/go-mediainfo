@@ -186,7 +186,7 @@ func analyzeFileWithOptions(ctx context.Context, path string, opts AnalyzeOption
 	n, _ := io.ReadFull(file, header)
 	header = header[:n]
 
-	format := DetectFormat(header, path)
+	format := detectFormat(header, path, file, fileSize)
 
 	// MediaInfo CLI continuous file names behavior (File_TestContinuousFileNames=1) applies to both
 	// MPEG-TS and BDAV (M2TS) streams.

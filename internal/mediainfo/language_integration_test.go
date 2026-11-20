@@ -292,6 +292,8 @@ func TestAnalyzeOggLanguageComments(t *testing.T) {
 		{"FLAC", []string{"en", "fr", "en"}, "en / fr / en", "English / French / English", "en / fr / en", ""},
 		{"FLAC", []string{"und", "mis"}, "", "", "", ""},
 		{"Vorbis", []string{"English [en]"}, "en", "English", "en", ""},
+		{"Vorbis", []string{" / English [en] / French [fr] / "}, " / en / fr / ", " / English / French / ", " / en / fr / ", ""},
+		{"Opus", []string{"English [en] / Made-up language / French [fr]", "English []", "en"}, "en / Made-up language / fr / English [] / en", "English / Made-up language / French / English [] / English", "en / Made-up language / fr / English [] / en", ""},
 		{"Opus", []string{"Director's commentary"}, "", "", "", "Director's commentary"},
 		{"Theora", []string{"French [fr]", "Director commentary", "English [en]"}, "fr / en", "French / English", "fr / en", "Director commentary"},
 		{"FLAC", []string{"Director commentary", "[fr]", "Director commentary"}, "fr", "French", "fr", "Director commentary / Director commentary"},

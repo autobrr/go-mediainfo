@@ -375,13 +375,14 @@ func parseOggComments(data []byte) (string, map[string]string, string) {
 				languageMore = append(languageMore, trimmed)
 				continue
 			}
-			value := pair.Val
-			if _, bracketed, found := strings.Cut(value, "["); found {
-				if code, _, closed := strings.Cut(bracketed, "]"); closed && code != "" {
-					value = code
+			for value := range strings.SplitSeq(pair.Val, " / ") {
+				if _, bracketed, found := strings.Cut(value, "["); found {
+					if code, _, closed := strings.Cut(bracketed, "]"); closed && code != "" {
+						value = code
+					}
 				}
+				languages = append(languages, value)
 			}
-			languages = append(languages, value)
 			continue
 		}
 		pair.Val = strings.TrimSpace(pair.Val)

@@ -2,6 +2,7 @@ package mediainfo
 
 import (
 	"bytes"
+	"io"
 	"math"
 	"path/filepath"
 	"strings"
@@ -9,7 +10,13 @@ import (
 
 const maxSniffBytes = 4096
 
+// DetectFormat identifies media from a bounded header and filename. AnalyzeFile
+// also checks file atom boundaries when MPEG and MP4 signatures overlap.
 func DetectFormat(header []byte, filename string) string {
+	return detectFormat(header, filename, nil, 0)
+}
+
+func detectFormat(header []byte, filename string, reader io.ReaderAt, size int64) string {
 	if len(header) == 0 {
 		return "Unknown"
 	}
@@ -47,6 +54,13 @@ func DetectFormat(header []byte, filename string) string {
 		return "MPEG-TS"
 	}
 	if format := sniffMP4Format(header); format != "" {
+		// A complete padding chain or an explicit brand is stronger than a
+		// coincidental MPEG signature in the first atom's size or payload.
+		if kind := string(header[4:8]); kind == "moov" || kind == "mdat" {
+			if mpeg := sniffMPEGFormat(header); mpeg != "" && !preferMP4AtomChain(reader, size) {
+				return mpeg
+			}
+		}
 		return format
 	}
 	if bytes.HasPrefix(header, []byte("fLaC")) {
@@ -72,6 +86,57 @@ func DetectFormat(header []byte, filename string) string {
 	}
 
 	return "Unknown"
+}
+
+// preferMP4AtomChain skips payloads at their declared boundaries. The header-read
+// and movie limits retain the existing MP4 choice when more proof needs more IO.
+func preferMP4AtomChain(reader io.ReaderAt, size int64) bool {
+	if reader == nil {
+		return false
+	}
+	var offset int64
+	for atoms := 0; atoms < maxSniffBytes/16 && offset+8 <= size; atoms++ {
+		length, kind, header, ok := readMP4BoxHeader(reader, offset, size)
+		if !ok {
+			return false
+		}
+		if kind == "moov" {
+			if offset > 0 || length-header > maxMoovSize {
+				return true
+			}
+		}
+		offset += length
+	}
+	return offset+8 <= size
+}
+
+// sniffMPEGFormat distinguishes a real MPEG packet/frame sequence from an MP4
+// atom size that happens to contain the same leading signature bytes.
+func sniffMPEGFormat(header []byte) string {
+	if len(header) >= 18 && bytes.HasPrefix(header, []byte{0, 0, 1, 0xBA}) &&
+		header[4]&0xC4 == 0x44 && header[6]&4 == 4 && header[8]&4 == 4 &&
+		header[9]&1 == 1 && header[12]&3 == 3 && header[13]&0xF8 == 0xF8 {
+		end := 14 + int(header[13]&7)
+		if end+4 <= len(header) && bytes.HasPrefix(header[end:], []byte{0, 0, 1}) && isPESStreamID(header[end+3]) {
+			return "MPEG-PS"
+		}
+	}
+	if first, ok := parseMPEGAudioHeader(header); ok {
+		length := mpegAudioFrameLengthBytes(first)
+		if first.layerID == 0x02 {
+			// Layer II has 1152 samples in every MPEG version.
+			length = 144000 * first.bitrateKbps / first.sampleRate
+			if first.padding {
+				length++
+			}
+		}
+		if length > 0 && length+4 <= len(header) {
+			if next, ok := parseMPEGAudioHeader(header[length:]); ok && next.versionID == first.versionID && next.layerID == first.layerID && next.sampleRate == first.sampleRate {
+				return "MPEG Audio"
+			}
+		}
+	}
+	return ""
 }
 
 // sniffMP4Format reuses the atom-header parser without requiring the atom body
