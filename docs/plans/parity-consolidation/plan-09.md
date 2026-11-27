@@ -4,7 +4,7 @@
 
 ## Goal and scope
 
-Preserve EBML string/DocType identity, WebM-specific estimates, explicit Matroska service flags, independent track timing, rate selection, SOURCE_ID eligibility and chapter display.
+Preserve EBML string/DocType identity, WebM-specific estimates, explicit Matroska service flags, independent track timing, rate selection, SOURCE_ID eligibility and chapter display. Match the reference for Matroska subtitle stream-size percentages.
 
 ## Issue ownership and canonical decisions
 
@@ -19,12 +19,14 @@ Preserve EBML string/DocType identity, WebM-specific estimates, explicit Matrosk
 | [#223](https://github.com/autobrr/go-mediainfo/issues/223) | build chapter names with the official display rule | [Discussion](https://github.com/autobrr/go-mediainfo/issues/223#issuecomment-6517559792) |
 | [#228](https://github.com/autobrr/go-mediainfo/issues/228) | write a track duration from the Segment Duration with millisecond precision | [Discussion](https://github.com/autobrr/go-mediainfo/issues/228#issuecomment-6517393213) |
 | [#245](https://github.com/autobrr/go-mediainfo/issues/245) | take the audio duration from the track, not the Segment | [Discussion](https://github.com/autobrr/go-mediainfo/issues/245#issuecomment-6511890015) |
+| [#272](https://github.com/autobrr/go-mediainfo/issues/272) | Match the v23.04 Matroska subtitle stream-size percentage convention | [Issue body](https://github.com/autobrr/go-mediainfo/issues/272) |
 
 ## Acceptance criteria
 
 - [ ] Preserve EBML/DocType identity and stable dispatch when display Format becomes WebM.
 - [ ] Separate measured sizes from WebM estimates, track timing from Segment fallback, and explicit service flags from display.
 - [ ] Verify valid DURATION tags, distinct-source commentary, SOURCE_ID eligibility and chapter display without erasing unknown metadata.
+- [ ] Match the v23.04 subtitle stream-size percentage convention while preserving stream byte counts and unrelated size formatting.
 
 ## Dependencies and non-goals
 
@@ -36,7 +38,7 @@ Preserve EBML string/DocType identity, WebM-specific estimates, explicit Matrosk
 
 - [ ] Complete the [acceptance matrix and PR evidence checklist](README.md#acceptance-matrix-and-pr-checklist) for this plan’s existing criteria and the checks below.
 
-[Shared validation requirements](README.md#validation-and-evidence). Test valid/missing DefaultDuration and tags, unknown EBML strings, WebM estimates, chapter displays and independent per-track durations; use shared-rate controls from Plan 10.
+[Shared validation requirements](README.md#validation-and-evidence). Test valid/missing DefaultDuration and tags, unknown EBML strings, WebM estimates, chapter displays and independent per-track durations; use shared-rate controls from Plan 10. For #272, verify the four subtitle tracks on AV1-001 in friendly and raw text and use controls on either side of the applicable percentage boundary.
 
 ## Implementation and outcome history
 

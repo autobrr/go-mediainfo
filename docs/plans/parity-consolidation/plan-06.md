@@ -4,7 +4,7 @@
 
 ## Goal and scope
 
-Unify colour namespaces, explicit presence, HDR component alignment, luminance precision and friendly/raw projections. Remove guessed Dolby Vision/profile colour facts and duplicate Original transfer rows.
+Unify colour namespaces, explicit presence, HDR component alignment, luminance precision and friendly/raw projections. Remove guessed Dolby Vision/profile colour facts and duplicate Original transfer rows. Report evidence-backed AV1 static HDR10, Dolby Vision Profile 10 and HDR10+, and preserve the AV1 chroma sample position.
 
 ## Issue ownership and canonical decisions
 
@@ -17,12 +17,16 @@ Unify colour namespaces, explicit presence, HDR component alignment, luminance p
 | [#99](https://github.com/autobrr/go-mediainfo/issues/99) | Mastering display luminance: use the official number of decimals | [Discussion](https://github.com/autobrr/go-mediainfo/issues/99#issuecomment-6521816556) |
 | [#100](https://github.com/autobrr/go-mediainfo/issues/100) | read the Dolby Vision colour from the file | [Discussion 1](https://github.com/autobrr/go-mediainfo/issues/100#issuecomment-6253495459), [Discussion 2](https://github.com/autobrr/go-mediainfo/issues/100#issuecomment-6521780146) |
 | [#101](https://github.com/autobrr/go-mediainfo/issues/101) | print `transfer_characteristics_Original` once | [Discussion](https://github.com/autobrr/go-mediainfo/issues/101#issuecomment-6521743895) |
+| [#267](https://github.com/autobrr/go-mediainfo/issues/267) | Read HDR10, Dolby Vision Profile 10 and HDR10+ for Matroska AV1 | [Issue body](https://github.com/autobrr/go-mediainfo/issues/267) |
+| [#268](https://github.com/autobrr/go-mediainfo/issues/268) | Retain supported AV1 chroma sample positions | [Issue body](https://github.com/autobrr/go-mediainfo/issues/268) |
 
 ## Acceptance criteria
 
 - [ ] Share explicit colour namespaces/presence and aligned HDR components across supported producers and displays.
 - [ ] Remove Dolby Vision/profile or BT.2020 guesses; preserve unknown codes without invented names.
 - [ ] Use supported luminance precision and preserve adopted HDR conventions; keep first-sequence MPEG selection in Plan 08.
+- [ ] Project Matroska and AV1 bitstream HDR facts with supported provenance. Align static HDR10, Dolby Vision and HDR10+ components across outputs and preserve valid coexistence.
+- [ ] Report the signaled AV1 chroma position and leave unspecified, reserved and inapplicable positions absent.
 
 ## Dependencies and non-goals
 
@@ -34,7 +38,7 @@ Unify colour namespaces, explicit presence, HDR component alignment, luminance p
 
 - [ ] Complete the [acceptance matrix and PR evidence checklist](README.md#acceptance-matrix-and-pr-checklist) for this plan’s existing criteria and the checks below.
 
-[Shared validation requirements](README.md#validation-and-evidence). Require actual Dolby Vision and generic-HDR controls, absent/unspecified fields, partial combined components and fractional luminance; distinguish generated controls from original witnesses.
+[Shared validation requirements](README.md#validation-and-evidence). Require actual Dolby Vision and generic-HDR controls, absent/unspecified fields, partial combined components and fractional luminance; distinguish generated controls from original witnesses. Use AV1-001 for HDR10 plus Dolby Vision, AV1-002 for combined HDR10, Dolby Vision and HDR10+, and AV1-003 for static HDR10 without either dynamic format. Check Type 2 chroma on all three and add absent-metadata or unspecified-position controls. Preserve AVC/HEVC and VP9 behavior.
 
 ## Implementation and outcome history
 
