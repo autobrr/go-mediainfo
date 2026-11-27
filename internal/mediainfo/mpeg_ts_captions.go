@@ -220,7 +220,7 @@ func buildTSCaptionStream(videoPID uint16, programNumber uint16, delaySeconds fl
 		streamFacts.Set("Duration_Start_Command", formatJSONSeconds6(startCommand))
 	}
 	if code := normalizeLanguageCode(descriptor.Language); code != "" {
-		fields = append(fields, Field{Name: "Language", Value: formatLanguage(code)})
+		fields = append(fields, Field{Name: "Language", Value: formatCanonicalLanguage(code, reportTables23)})
 		streamFacts.Set("Language", code)
 	}
 	descriptorValue := "No"

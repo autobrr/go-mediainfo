@@ -186,6 +186,24 @@ func TestAnalyzeMP4ChapterLanguages(t *testing.T) {
 			t.Fatalf("chapter facts changed: %v", s.JSON)
 		}
 	}
+	for i, stream := range report.Streams {
+		if stream.Kind == StreamMenu && stream.JSON["ID"] == "3" {
+			report.Streams[i].Fields = setFieldValue(stream.Fields, "Language", "German")
+			break
+		}
+	}
+	reports := []Report{report}
+	structured, xml := RenderJSON(reports), RenderXML(reports)
+	for _, want := range []string{`"Language":"de"`, `"Menu_For":"1"`, `"_00_00_00_000":"A"`} {
+		if !strings.Contains(structured, want) {
+			t.Errorf("edited chapter JSON missing %s", want)
+		}
+	}
+	for _, want := range []string{"<Language>de</Language>", "<Menu_For>1</Menu_For>", "<_00_00_00_000>A</_00_00_00_000>"} {
+		if !strings.Contains(xml, want) {
+			t.Errorf("edited chapter XML missing %s", want)
+		}
+	}
 }
 
 func TestAnalyzeTSLanguagePositionsAndCaptions(t *testing.T) {
@@ -267,6 +285,22 @@ func TestAnalyzeTSLanguagePositionsAndCaptions(t *testing.T) {
 			if menuCount != 1 || captionCount != 1 {
 				t.Fatalf("Menu/caption counts %d/%d; streams %s", menuCount, captionCount, fmt.Sprint(report.Streams))
 			}
+			if tc.name == "positions" {
+				for i, stream := range report.Streams {
+					if stream.Kind != StreamMenu {
+						continue
+					}
+					report.Streams[i].Fields = setFieldValue(stream.Fields, "Language", " / German /  / English / ")
+					reports := []Report{report}
+					structured, xml := RenderJSON(reports), RenderXML(reports)
+					for key, want := range map[string]string{"List_StreamKind": stream.JSON["List_StreamKind"], "List_StreamPos": stream.JSON["List_StreamPos"], "Language": " / de /  / en / "} {
+						if want == "" || !strings.Contains(structured, fmt.Sprintf(`"%s":%q`, key, want)) ||
+							!strings.Contains(xml, "<"+key+">"+want+"</"+key+">") {
+							t.Errorf("edited TS Menu must contain %s=%q in both projections", key, want)
+						}
+					}
+				}
+			}
 		})
 	}
 }
@@ -282,6 +316,12 @@ func TestAnalyzeOggLanguageComments(t *testing.T) {
 		{"Opus", []string{"en-us"}, "en-us", "English (United States)", "en (US)", ""},
 		{"Theora", []string{"fil"}, "fil", "fil", "fil", ""},
 		{"FLAC", []string{"French"}, "fr", "French", "fr", ""},
+		{"FLAC", []string{"en-us-"}, "en-us", "English (United States)", "en (US)", ""},
+		{"FLAC", []string{"en-"}, "en", "English", "en", ""},
+		{"FLAC", []string{"-Latn"}, "-Latn", " (Latn)", " (Latn)", ""},
+		{"FLAC", []string{"en--us"}, "en--us", "English--us", "en--us", ""},
+		{"Vorbis", []string{"und -"}, "und ", "und ", "und ", ""},
+		{"Vorbis", []string{"ENG -"}, "ENG ", "ENG ", "ENG ", ""},
 		{"Vorbis", []string{"und"}, "", "", "", ""},
 		{"Opus", []string{""}, "", "", "", ""},
 		{"Vorbis", []string{"en / en"}, "en / en", "English / English", "en / en", ""},

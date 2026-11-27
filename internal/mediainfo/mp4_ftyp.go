@@ -2,6 +2,9 @@ package mediainfo
 
 import "strings"
 
+// The major brand and minor version precede at most 256 retained compatible brands.
+const maxFtypPayloadSize = 8 + 256*4
+
 func parseFtyp(payload []byte) []Field {
 	if len(payload) < 8 {
 		return nil

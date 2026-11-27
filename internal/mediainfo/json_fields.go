@@ -5,6 +5,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -109,7 +110,8 @@ func buildJSONGeneralFields(report Report) []jsonKV {
 			fields = append(fields, jsonKV{Key: "File_Modified_Date_Local", Val: modifiedLocal})
 		}
 	}
-	fields = append(fields, mapStreamFieldsToJSON(StreamGeneral, report.General.Fields, legacyReportTableVersion(report))...)
+	rows, sourceExtras := legacyStructuredTagFields(report.General)
+	fields = append(fields, mapStreamFieldsToJSON(StreamGeneral, rows, legacyReportTableVersion(report), sourceExtras...)...)
 	containerFormat := firstNonEmpty(report.General.JSON["Format"], findField(report.General.Fields, "Format"))
 	rawExtras := report.General.JSONRaw
 	switch containerFormat {
@@ -130,7 +132,8 @@ func buildJSONStreamFields(stream Stream, order int, typeOrder int, containerFor
 	if !stream.JSONSkipStreamOrder {
 		fields = append(fields, jsonKV{Key: "StreamOrder", Val: strconv.Itoa(order)})
 	}
-	fields = append(fields, mapStreamFieldsToJSON(stream.Kind, stream.Fields, version)...)
+	rows, sourceExtras := legacyStructuredTagFields(stream)
+	fields = append(fields, mapStreamFieldsToJSON(stream.Kind, rows, version, sourceExtras...)...)
 	rawExtras := stream.JSONRaw
 	switch containerFormat {
 	case "AVI":
@@ -200,9 +203,8 @@ func normalizeContainerComputedJSON(kind StreamKind, fields []jsonKV, containerF
 	return fields
 }
 
-func mapStreamFieldsToJSON(kind StreamKind, fields []Field, version reportTableVersion) []jsonKV {
+func mapStreamFieldsToJSON(kind StreamKind, fields []Field, version reportTableVersion, extras ...jsonKV) []jsonKV {
 	out := make([]jsonKV, 0, len(fields))
-	var extras []jsonKV
 	for _, field := range fields {
 		switch field.Name {
 		case "CompleteName_Last":
@@ -463,7 +465,9 @@ func mapStreamFieldsToJSON(kind StreamKind, fields []Field, version reportTableV
 		case "Alternate group":
 			out = append(out, jsonKV{Key: "AlternateGroup", Val: field.Value})
 		case "ErrorDetectionType":
-			extras = append(extras, jsonKV{Key: "ErrorDetectionType", Val: field.Value})
+			if jsonFieldValue(extras, field.Name) == "" {
+				extras = slices.Insert(extras, 0, jsonKV{Key: field.Name, Val: field.Value})
+			}
 		case "Service kind":
 			out = append(out, jsonKV{Key: "ServiceKind", Val: field.Value})
 		case "Service name":

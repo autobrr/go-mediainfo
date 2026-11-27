@@ -3,6 +3,7 @@ package mediainfo
 import (
 	"maps"
 	"reflect"
+	"slices"
 	"sort"
 	"strconv"
 )
@@ -184,13 +185,14 @@ func canonicalStoreForReport(report Report) *fieldStore {
 // left unchanged. Legacy rebuilds then apply only explicit map mutations over
 // the caller's current Fields projection.
 func publicReportMutationDelta(report Report, snapshot legacyReportState) Report {
+	containerFormat := firstNonEmpty(snapshot.General.JSON["Format"], findField(snapshot.General.Fields, "Format"))
 	report.General = cloneLegacyStream(report.General)
-	stripUnchangedSnapshotMaps(&report.General, snapshot.General)
+	stripUnchangedSnapshotMaps(&report.General, snapshot.General, containerFormat)
 	report.Streams = append([]Stream(nil), report.Streams...)
 	for index := range report.Streams {
 		report.Streams[index] = cloneLegacyStream(report.Streams[index])
 		if index < len(snapshot.Streams) {
-			stripUnchangedSnapshotMaps(&report.Streams[index], snapshot.Streams[index])
+			stripUnchangedSnapshotMaps(&report.Streams[index], snapshot.Streams[index], containerFormat)
 		}
 	}
 	return report
@@ -208,7 +210,15 @@ var parserPresentationFactRows = map[string]string{
 
 // stripUnchangedSnapshotMaps keeps explicit compatibility-map changes and
 // invalidates parser lookup identity when the caller changes its codec ID.
-func stripUnchangedSnapshotMaps(stream *Stream, snapshot legacyStreamState) {
+func stripUnchangedSnapshotMaps(stream *Stream, snapshot legacyStreamState, containerFormat string) {
+	menuLanguageEdited := stream.Kind == StreamMenu &&
+		(stream.JSON["Language"] != snapshot.JSON["Language"] || findField(stream.Fields, "Language") != findField(snapshot.Fields, "Language"))
+	keepChapterExtra := menuLanguageEdited && (containerFormat == "MPEG-4" || containerFormat == "QuickTime")
+	keepTSMenuPositions := menuLanguageEdited && (containerFormat == "MPEG-TS" || containerFormat == "BDAV")
+	// The source extra object is in producer order. The public fields are in
+	// display order and cannot recover that order on an unrelated edit.
+	keepSourceExtra := len(stream.canonicalPolicy.LegacyTagIdentities) > 0 &&
+		slices.Equal(stream.Fields, snapshot.Fields) && stream.JSON["CodecID"] == snapshot.JSON["CodecID"]
 	if firstNonEmpty(findField(stream.Fields, "Codec ID"), findField(stream.Fields, "CodecID")) !=
 		firstNonEmpty(findField(snapshot.Fields, "Codec ID"), findField(snapshot.Fields, "CodecID")) {
 		stream.codecIdentity = codecTableIdentity{}
@@ -233,6 +243,9 @@ func stripUnchangedSnapshotMaps(stream *Stream, snapshot legacyStreamState) {
 	// (including language suffix case), so keep a fact unless its row was edited.
 	for key, value := range stream.JSON {
 		if snapshot.JSON[key] == value {
+			if keepTSMenuPositions && (key == "List_StreamKind" || key == "List_StreamPos") {
+				continue
+			}
 			if row, ok := parserPresentationFactRows[key]; ok && findField(stream.Fields, row) == findField(snapshot.Fields, row) {
 				continue
 			}
@@ -243,6 +256,9 @@ func stripUnchangedSnapshotMaps(stream *Stream, snapshot legacyStreamState) {
 	}
 	for key, value := range stream.JSONRaw {
 		if snapshot.JSONRaw[key] == value {
+			if key == "extra" && (keepChapterExtra || keepSourceExtra) {
+				continue
+			}
 			delete(stream.JSONRaw, key)
 		} else if key == "CodecID" {
 			stream.codecIdentity = codecTableIdentity{}
@@ -263,13 +279,7 @@ func reportToFieldStore(report Report, useCanonicalSeeds bool) *fieldStore {
 	}
 	var legacyMedia jsonMediaOut
 	if needsLegacyInput {
-		structured := report
-		structured.General = legacyStructuredTagNames(report.General)
-		structured.Streams = append([]Stream(nil), report.Streams...)
-		for index := range structured.Streams {
-			structured.Streams[index] = legacyStructuredTagNames(structured.Streams[index])
-		}
-		legacyMedia = buildJSONMedia(structured)
+		legacyMedia = buildJSONMedia(report)
 	}
 	store := &fieldStore{ref: report.Ref}
 	generalRef := store.Prepare(StreamGeneral)
@@ -367,14 +377,15 @@ func ensureLegacyXMLProjection(store *fieldStore) {
 		if store.legacyGeneral == nil {
 			return
 		}
-		report := Report{Ref: store.ref, General: legacyStructuredTagNames(cloneLegacyStream(*store.legacyGeneral))}
+		report := Report{Ref: store.ref, General: cloneLegacyStream(*store.legacyGeneral)}
 		report.General.canonicalPolicy.DVDOrder = reportVersion(store) == reportTables26
 		report.Streams = make([]Stream, len(store.legacyStreams))
 		for index, stream := range store.legacyStreams {
-			report.Streams[index] = legacyStructuredTagNames(cloneLegacyStream(stream))
+			report.Streams[index] = cloneLegacyStream(stream)
 		}
 		if len(store.streams) > 0 && !store.streams[0].DirectCanonical {
-			appendLegacyStructuredFields(store, 0, buildJSONGeneralFields(report), structuredProjectionXML)
+			fields := filterDeletedLegacyJSONFields(buildJSONGeneralFields(report), report.General)
+			appendLegacyStructuredFields(store, 0, fields, structuredProjectionXML)
 			mergeStoredStructuredObjectProjection(&store.streams[0], "extra", structuredProjectionXML)
 			mergeStoredCanonicalScalarProjections(&store.streams[0], structuredProjectionXML)
 		}
@@ -705,6 +716,9 @@ func captureLegacyStreamState(stream Stream, clone bool) legacyStreamState {
 // matroskaTagIdentities retains original keys only for unchanged display rows.
 // Caller changes to a row's label or value do not authorize guessing its old identity.
 func matroskaTagIdentities(stream Stream) map[legacyTagRow]legacyTagIdentity {
+	if len(stream.canonicalSeed) == 0 && len(stream.canonicalPolicy.LegacyTagIdentities) == 0 {
+		return legacyPublicLanguageTagIdentity(stream)
+	}
 	tags := maps.Clone(stream.canonicalPolicy.LegacyTagIdentities)
 	occurrences := make(map[Field]int)
 	for _, entry := range stream.canonicalSeed {
@@ -729,23 +743,59 @@ func matroskaTagIdentities(stream Stream) map[legacyTagRow]legacyTagIdentity {
 	return tags
 }
 
-// legacyStructuredTagNames supplies producer-owned extra keys to the legacy
-// structured adapter, so translated display labels cannot become parser facts.
-func legacyStructuredTagNames(stream Stream) Stream {
+// legacyPublicLanguageTagIdentity recovers the source row of an exported-only
+// snapshot. When both displayed values are equal, the source follows the track row.
+func legacyPublicLanguageTagIdentity(stream Stream) map[legacyTagRow]legacyTagIdentity {
+	if stream.JSONRaw["extra"] == "" || findField(stream.Fields, "Language") == "" {
+		return nil
+	}
+	node, err := parseStructuredNode(stream.JSONRaw["extra"])
+	if err != nil || node.Kind != structuredObject {
+		return nil
+	}
+	for _, member := range node.Object {
+		if member.Key != "Language" || member.Value.Kind != structuredString || member.Value.Text == "" {
+			continue
+		}
+		value := member.Value.Text
+		matches, languageRows := 0, 0
+		for _, field := range stream.Fields {
+			if field.Name == "Language" {
+				languageRows++
+				if field.Value == value {
+					matches++
+				}
+			}
+		}
+		if matches == 0 || languageRows == 1 && stream.JSON["Language"] != "" {
+			return nil
+		}
+		row := legacyTagRow{Label: "Language", Value: value, Occurrence: matches - 1}
+		return map[legacyTagRow]legacyTagIdentity{row: {Key: "Language", Label: "Language"}}
+	}
+	return nil
+}
+
+// legacyStructuredTagFields keeps unchanged source-tag rows in extra even
+// when their display labels match fields in the structured schema.
+func legacyStructuredTagFields(stream Stream) ([]Field, []jsonKV) {
 	tags := matroskaTagIdentities(stream)
 	if len(tags) == 0 {
-		return stream
+		return stream.Fields, nil
 	}
-	stream.Fields = append([]Field(nil), stream.Fields...)
+	fields := make([]Field, 0, len(stream.Fields))
+	var extras []jsonKV
 	occurrences := make(map[Field]int)
-	for index, field := range stream.Fields {
+	for _, field := range stream.Fields {
 		row := legacyTagRow{Label: field.Name, Value: field.Value, Occurrence: occurrences[field]}
 		occurrences[field]++
 		if tag, exists := tags[row]; exists && tag.Key != "" {
-			stream.Fields[index].Name = tag.Key
+			extras = append(extras, jsonKV{Key: tag.Key, Val: field.Value})
+			continue
 		}
+		fields = append(fields, field)
 	}
-	return stream
+	return fields, extras
 }
 
 // restoreMatroskaTagIdentities restores metadata only on unchanged original rows.

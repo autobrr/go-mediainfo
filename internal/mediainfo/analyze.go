@@ -391,7 +391,7 @@ func analyzeFileWithOptions(ctx context.Context, path string, opts AnalyzeOption
 				}
 				if track.LanguageCode != "" {
 					code := normalizeLanguageCode(track.LanguageCode)
-					if lang := formatLanguage(code); lang != "" {
+					if lang := formatCanonicalLanguage(code, reportTables23); lang != "" {
 						fields = appendFieldUnique(fields, Field{Name: "Language", Value: lang})
 						builder.Fill("Language", code, "Language", lang)
 					}

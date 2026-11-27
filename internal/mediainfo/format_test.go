@@ -1,10 +1,47 @@
 package mediainfo
 
 import (
+	"bytes"
 	"encoding/binary"
 	"io"
 	"testing"
 )
+
+func TestAnalyzeMPEGVideoWithMP4AtomName(t *testing.T) {
+	for _, tc := range []struct{ atom, header, height string }{
+		{"mdat", "\x00\x00\x01\xb3mdat\xff\xff\xe0\x18", "1121"},
+		{"moov", "\x00\x00\x01\xb3moov\xff\xff\xe0\x18", "3951"},
+	} {
+		t.Run(tc.atom, func(t *testing.T) {
+			// Sequence, GOP, picture, and slice headers from decoded MPEG-1 controls.
+			data := []byte(tc.header + "\x00\x00\x01\xb8\x00\x08\x00\x40\x00\x00\x01\x00\x00\x0f\xff\xf8\x00\x00\x01\x01")
+			if got := DetectFormat(data, "video.m1v"); got != "MPEG Video" {
+				t.Errorf("DetectFormat = %q, want MPEG Video", got)
+			}
+			report := analyzeLanguageFixture(t, "video.m1v", data)
+			if len(report.Streams) != 1 || report.Streams[0].Kind != StreamVideo {
+				t.Fatalf("expected one video stream, got %v", report.Streams)
+			}
+			video := report.Streams[0].JSON
+			if video["Format"] != "MPEG Video" || video["Width"] != "1750" || video["Height"] != tc.height {
+				t.Errorf("expected MPEG Video with dimensions 1750x%s, got %v", tc.height, video)
+			}
+		})
+	}
+}
+
+func TestAnalyzeQuickTimeWithMPEGVideoShapedMdat(t *testing.T) {
+	var movie, file bytes.Buffer
+	data := make([]byte, 435-8)
+	copy(data, "\xff\xff\xe0\x18\x00\x00\x01\xb8")
+	writeMP4Box(&file, "mdat", data)
+	writeMP4Box(&movie, "trak", buildTrackWithStsd("vide", "avc1"))
+	writeMP4Box(&file, "moov", movie.Bytes())
+	report := analyzeLanguageFixture(t, "video.mov", file.Bytes())
+	if len(report.Streams) != 1 || report.Streams[0].JSON["Format"] != "AVC" {
+		t.Fatalf("expected QuickTime AVC track, got %v", report.Streams)
+	}
+}
 
 func TestFileFormatChecksMovieBeyondMPEGShapedMdat(t *testing.T) {
 	header := make([]byte, 580)
@@ -97,6 +134,7 @@ func TestDetectFormat(t *testing.T) {
 		{name: "MP4 moov without TS sync", header: []byte("\x00\x00\x00\x08moov"), filename: "movie.mov", want: "QuickTime"},
 		{name: "MP4 mdat without TS sync", header: []byte("\x00\x00\x00\x08mdat"), filename: "movie.mov", want: "QuickTime"},
 		{name: "QuickTime mdat size matches PS signature", header: quickTimeMdat, filename: "movie.mov", want: "QuickTime"},
+		{name: "QuickTime mdat size matches video signature without next start code", header: []byte("\x00\x00\x01\xb3mdat\xff\xff\xe0\x18"), filename: "movie.mov", want: "QuickTime"},
 		{name: "QuickTime free contains PS-like bytes", header: quickTimeFree, filename: "movie.mov", want: "QuickTime"},
 		{name: "mpegps", header: []byte{0x00, 0x00, 0x01, 0xBA}, filename: "movie.vob", want: "MPEG-PS"},
 		{name: "MPEG-PS pack starts moov", header: []byte("\x00\x00\x01\xbamoov\x04\x01\x86\x66\xcf\xf8\x00\x00\x01\xbb"), filename: "movie.mpg", want: "MPEG-PS"},

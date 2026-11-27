@@ -64,7 +64,7 @@ func normalizeLanguageWithPolicy(code string, policy languagePolicy) string {
 		}
 		return strings.Join(members, " / ")
 	}
-	code = strings.TrimSpace(code)
+	code = strings.TrimRight(strings.TrimSpace(code), "-")
 	// Exact names can themselves contain hyphens, such as Luba-Katanga.
 	if found := policy.reverse[strings.ToLower(code)]; found != "" && len(found) <= 3 {
 		code = found
@@ -90,7 +90,7 @@ func normalizeLanguageWithPolicy(code string, policy languagePolicy) string {
 		primary = "yi"
 	}
 	switch primary {
-	case "", "und", "mis", "???":
+	case "und", "mis", "???":
 		return ""
 	}
 	if hasSuffix {
@@ -104,14 +104,19 @@ func formatLanguage(code string) string {
 }
 
 func formatLanguageVersion(code string, version reportTableVersion) string {
-	code = normalizeLanguage(code, version)
+	return formatCanonicalLanguage(normalizeLanguage(code, version), version)
+}
+
+// formatCanonicalLanguage projects a language value that has already passed
+// ingress normalization, including opaque values and empty list positions.
+func formatCanonicalLanguage(code string, version reportTableVersion) string {
 	if code == "" {
 		return ""
 	}
 	if strings.Contains(code, " / ") {
 		members := strings.Split(code, " / ")
 		for i, member := range members {
-			members[i] = formatLanguageVersion(member, version)
+			members[i] = formatCanonicalLanguage(member, version)
 		}
 		return strings.Join(members, " / ")
 	}

@@ -222,7 +222,7 @@ func parseOgg(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, []Field,
 		target := &streams[len(streams)-1]
 		code := normalizeLanguageCode(stream.tags["LANGUAGE"])
 		if code != "" {
-			replaceCanonicalSeedFill(target, "Language", code, "Language", formatLanguage(code))
+			replaceCanonicalSeedFill(target, "Language", code, "Language", formatCanonicalLanguage(code, reportTables23))
 		}
 		if stream.languageMore != "" {
 			replaceCanonicalSeedFill(target, "Language_More", stream.languageMore, "Language, more info", stream.languageMore)

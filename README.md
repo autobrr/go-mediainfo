@@ -131,6 +131,8 @@ attachment names to 4 KiB each, MIME values to 1 KiB each, and retained metadata
 strings to 1 MiB total. Matroska image inspection retains at most 4 MiB per image
 and 32 MiB total; ID3 image probes retain at most 64 KiB each; ICC decompression
 is capped at 4 MiB. FLAC picture payloads are skipped after their bounded headers.
+MP4 reads the major brand and up to 256 compatible brands from the first
+complete `ftyp` header and skips the remainder of the box.
 
 Malformed, truncated, unknown-sized, or over-limit embedded metadata is omitted
 while valid audio/video tracks continue parsing. This intentionally differs from

@@ -137,6 +137,7 @@ type mp4Chapter struct {
 // metadata for a valid file.
 func ParseMP4(r io.ReaderAt, size int64) (MP4Info, bool) {
 	info := MP4Info{}
+	var seenFileType bool
 	var offset int64
 	for offset+8 <= size {
 		boxSize, boxType, headerSize, ok := readMP4BoxHeader(r, offset, size)
@@ -144,12 +145,11 @@ func ParseMP4(r io.ReaderAt, size int64) (MP4Info, bool) {
 			break
 		}
 		dataOffset := offset + headerSize
-		if boxType == "ftyp" {
-			payload := make([]byte, boxSize-headerSize)
-			if _, err := r.ReadAt(payload, dataOffset); err == nil || err == io.EOF {
-				if fields := parseFtyp(payload); len(fields) > 0 {
-					info.General = append(info.General, fields...)
-				}
+		if boxType == "ftyp" && !seenFileType && boxSize-headerSize >= 8 {
+			payload := make([]byte, min(boxSize-headerSize, maxFtypPayloadSize))
+			if n, err := r.ReadAt(payload, dataOffset); n >= 8 && (err == nil || err == io.EOF) {
+				seenFileType = true
+				info.General = append(info.General, parseFtyp(payload[:n])...)
 			}
 		}
 		if boxType == "moov" {
