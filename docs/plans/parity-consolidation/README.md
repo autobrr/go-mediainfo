@@ -131,7 +131,7 @@ Before publishing or updating a plan's PR, record:
 
 - [ ] Accepted scope and meaningful negative/preservation cases map to actual parser/finalization/projection paths; public edits and render order are covered where affected.
 - [ ] Selected files have the four required outputs, plus affected renderer formats, with exact identity/value/cardinality/order assertions.
-- [ ] Targeted witness/control comparisons use the pinned official results; affected review fixes are rechecked. Merge-ready base/candidate Go captures cover both available corpora and explain every non-witness change.
+- [ ] Targeted witness/control comparisons use the pinned official results; affected review fixes are rechecked. Merge-ready base/candidate Go captures cover all three available corpora and explain every non-witness change.
 - [ ] Original October, music and Matroska AV1 witness coverage, generated/derived evidence, source/reference/executable identities, actual argv/exits and all access/execution gaps are separate and accurate.
 - [ ] Regressions, applicable repository checks and independent review cover the final change; reused evidence and failed/interrupted attempts are clearly identified.
 - [ ] AGENTS/ADR changes or unchanged rationale are explained. No new output convention, scope approval, reference policy or native blocker is inferred from passing tests.
