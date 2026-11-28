@@ -4,7 +4,7 @@
 
 ## Goal and scope
 
-Build one source-aware encoder pipeline from actual strings and tags to Name/Version/Date and Writing library. Route Matroska General and track tags correctly and preserve repeated values. Read Vorbis/Theora vendors, AVC/HEVC/MPEG user data and MP4 manufacturer metadata; exclude visual compressor labels. Handle #49 with #190.
+Build one source-aware encoder pipeline from actual strings and tags to Name/Version/Date and Writing library. Route Matroska General and track tags correctly and preserve repeated values. Read Vorbis/Theora vendors, AVC/HEVC/MPEG user data and MP4 manufacturer metadata; exclude visual compressor labels. Handle #49 with #190. Preserve the raw Matroska Writing application spelling under #273.
 
 ## Issue ownership and canonical decisions
 
@@ -24,12 +24,14 @@ Build one source-aware encoder pipeline from actual strings and tags to Name/Ver
 | [#192](https://github.com/autobrr/go-mediainfo/issues/192) | fill the General library from the handler manufacturer | [Discussion](https://github.com/autobrr/go-mediainfo/issues/192#issuecomment-6518706707) |
 | [#193](https://github.com/autobrr/go-mediainfo/issues/193) | read the vendor string from CodecPrivate | [Discussion](https://github.com/autobrr/go-mediainfo/issues/193#issuecomment-6518678699) |
 | [#230](https://github.com/autobrr/go-mediainfo/issues/230) | leave Encoded_Library empty for the visual compressor name | [Discussion](https://github.com/autobrr/go-mediainfo/issues/230#issuecomment-6517371937) |
+| [#273](https://github.com/autobrr/go-mediainfo/issues/273) | Preserve the version prefix in Matroska raw Writing application | [Issue body](https://github.com/autobrr/go-mediainfo/issues/273) |
 
 ## Acceptance criteria
 
 - [ ] Use actual source strings/tags for one Name/Version/Date and Writing library pipeline.
 - [ ] Preserve ordered repeated/unknown vendor strings and distinct General/track ownership.
 - [ ] Exclude CodecName/visual-compressor inference and compose numeric dates once; keep codec-specific parsing rules.
+- [ ] Preserve the v23.04 raw Writing application spelling while retaining the approved structured name/version split and matching friendly behavior.
 
 ## Dependencies and non-goals
 
@@ -41,7 +43,7 @@ Build one source-aware encoder pipeline from actual strings and tags to Name/Ver
 
 - [ ] Complete the [acceptance matrix and PR evidence checklist](README.md#acceptance-matrix-and-pr-checklist) for this plan’s existing criteria and the checks below.
 
-[Shared validation requirements](README.md#validation-and-evidence). Test repeated vendors, unknown names, date splits, source/track conflicts and no-encoder controls through every reachable producer and public rebuilding.
+[Shared validation requirements](README.md#validation-and-evidence). Test repeated vendors, unknown names, date splits, source/track conflicts and no-encoder controls through every reachable producer and public rebuilding. For #273, compare raw and friendly Writing application plus structured split fields on AV1-001, the two HandBrake controls AV1-002/003, and an unsplit application control.
 
 ## Implementation and outcome history
 
