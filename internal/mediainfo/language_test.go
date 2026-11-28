@@ -49,6 +49,7 @@ func TestNormalizeLanguageCode(t *testing.T) {
 		{"bod", "bod"},
 		{"eNgLiSh", "en"},
 		{"Luba-Katanga", "lu"},
+		{"Raeto-Romance", "rm"},
 		{" LUBA-KATANGA ", "lu"},
 		{"English (United States)", "English (United States)"},
 		{"Flemish", "Flemish"},

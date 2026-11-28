@@ -370,9 +370,8 @@ func parseOggComments(data []byte) (string, map[string]string, string) {
 	for _, pair := range pairs {
 		// Language positions are significant; other tags keep their first nonempty value.
 		if pair.Key == "LANGUAGE" {
-			trimmed := strings.TrimSpace(pair.Val)
-			if strings.HasPrefix(trimmed, "Director") {
-				languageMore = append(languageMore, trimmed)
+			if strings.HasPrefix(pair.Val, "Director") {
+				languageMore = append(languageMore, strings.TrimSpace(pair.Val))
 				continue
 			}
 			for value := range strings.SplitSeq(pair.Val, " / ") {
