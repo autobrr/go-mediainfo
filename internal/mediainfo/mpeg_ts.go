@@ -3148,7 +3148,7 @@ func parseMPEGTSWithPacketSize(file io.ReadSeeker, size int64, packetSize int64,
 			menuFields = append(menuFields, Field{Name: "Title", Value: xdsTitle})
 		}
 		if hasLanguage {
-			menuFields = append(menuFields, Field{Name: "Language", Value: strings.Join(languages, " / ")})
+			menuFields = append(menuFields, Field{Name: "Language", Value: formatCanonicalLanguage(strings.Join(languages, " / "), reportTables23)})
 		}
 		if xdsLawRating != "" {
 			menuFields = append(menuFields, Field{Name: "Law rating", Value: xdsLawRating})

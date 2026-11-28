@@ -37,6 +37,7 @@ type oggLogicalStream struct {
 	packet         []byte
 	vendor         string
 	tags           map[string]string
+	languageMore   string
 	firstPage      int
 	lastPage       int
 	hasPage        bool
@@ -217,6 +218,18 @@ func parseOgg(file io.ReadSeeker, size int64) (ContainerInfo, []Stream, []Field,
 				omitDerivedLayout: hasMask && mask == 0,
 			}))
 		}
+		// Language belongs to this logical stream, not the merged General tags.
+		target := &streams[len(streams)-1]
+		code := normalizeLanguageCode(stream.tags["LANGUAGE"])
+		if code != "" {
+			replaceCanonicalSeedFill(target, "Language", code, "Language", formatCanonicalLanguage(code, reportTables23))
+		}
+		if stream.languageMore != "" {
+			replaceCanonicalSeedFill(target, "Language_More", stream.languageMore, "Language, more info", stream.languageMore)
+		}
+		if code != "" || stream.languageMore != "" {
+			refreshCanonicalCompatibilitySnapshot(target)
+		}
 	}
 	if len(streams) == 0 {
 		return ContainerInfo{}, nil, nil, nil, nil, false
@@ -308,7 +321,7 @@ func consumeOggHeaderSegments(stream *oggLogicalStream, segments, body []byte, c
 func parseOggHeaderPacket(stream *oggLogicalStream, packet []byte) {
 	switch {
 	case stream.format == "FLAC" && len(packet) >= 4 && packet[0]&0x7F == 4:
-		stream.vendor, stream.tags = parseOggComments(packet[4:])
+		stream.vendor, stream.tags, stream.languageMore = parseOggComments(packet[4:])
 	case len(packet) >= 51 && packet[0] == 0x7F && bytes.Equal(packet[1:5], []byte("FLAC")) && bytes.Equal(packet[9:13], []byte("fLaC")) && packet[13]&0x7F == 0:
 		// https://xiph.org/flac/ogg_mapping.html: the first packet holds a
 		// 9-byte mapping header, the fLaC marker, and the STREAMINFO block.
@@ -342,23 +355,45 @@ func parseOggHeaderPacket(stream *oggLogicalStream, packet []byte) {
 		stream.channels = packet[9]
 		stream.sampleRate = 48000
 	case len(packet) >= 11 && packet[0] == 0x03 && bytes.Equal(packet[1:7], []byte("vorbis")):
-		stream.vendor, stream.tags = parseOggComments(packet[7:])
+		stream.vendor, stream.tags, stream.languageMore = parseOggComments(packet[7:])
 	case len(packet) >= 11 && packet[0] == 0x81 && bytes.Equal(packet[1:7], []byte("theora")):
-		stream.vendor, stream.tags = parseOggComments(packet[7:])
+		stream.vendor, stream.tags, stream.languageMore = parseOggComments(packet[7:])
 	case bytes.HasPrefix(packet, []byte("OpusTags")):
-		stream.vendor, stream.tags = parseOggComments(packet[8:])
+		stream.vendor, stream.tags, stream.languageMore = parseOggComments(packet[8:])
 	}
 }
 
-func parseOggComments(data []byte) (string, map[string]string) {
-	vendor, pairs := parseFLACVorbisComment(data)
+func parseOggComments(data []byte) (string, map[string]string, string) {
+	vendor, pairs := parseVorbisCommentPairs(data)
 	tags := make(map[string]string, len(pairs))
+	var languages, languageMore []string
 	for _, pair := range pairs {
+		// Language positions are significant; other tags keep their first nonempty value.
+		if pair.Key == "LANGUAGE" {
+			if strings.HasPrefix(pair.Val, "Director") {
+				languageMore = append(languageMore, strings.TrimSpace(pair.Val))
+				continue
+			}
+			for value := range strings.SplitSeq(pair.Val, " / ") {
+				if _, bracketed, found := strings.Cut(value, "["); found {
+					// Preserve nonblank spacing until normalization splits the joined members.
+					if code, _, closed := strings.Cut(bracketed, "]"); closed && strings.TrimSpace(code) != "" {
+						value = code
+					}
+				}
+				languages = append(languages, value)
+			}
+			continue
+		}
+		pair.Val = strings.TrimSpace(pair.Val)
 		if pair.Key != "" && pair.Val != "" && tags[pair.Key] == "" {
 			tags[pair.Key] = pair.Val
 		}
 	}
-	return vendor, tags
+	if len(languages) > 0 {
+		tags["LANGUAGE"] = strings.Join(languages, " / ")
+	}
+	return vendor, tags, strings.Join(languageMore, " / ")
 }
 
 func readUint24BE(data []byte) uint32 {

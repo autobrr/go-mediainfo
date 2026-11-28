@@ -8,6 +8,30 @@ import (
 
 const fuzzParserMaxBytes = 1 << 20 // 1 MiB
 
+func FuzzDetectFormat(f *testing.F) {
+	f.Add([]byte("\x00\x00\x01\xbamoov\x04\x01\x86\x66\xcf\xf8\x00\x00\x01\xbb"))
+	f.Add([]byte("\x00\x00\x01\xbamdat"))
+	audio := make([]byte, 1156)
+	copy(audio, "\xff\xfd\xe4\xc0mdat")
+	copy(audio[1152:], "\xff\xfd\xe4\xc0")
+	f.Add(audio)
+	f.Fuzz(func(_ *testing.T, data []byte) {
+		data = fuzzLimit(data)
+		header := data[:min(len(data), maxSniffBytes)]
+		_ = DetectFormat(header, "fixture.bin")
+		_ = detectFormat(header, "fixture.bin", bytes.NewReader(data), int64(len(data)))
+	})
+}
+
+func FuzzMP4ExtendedLanguage(f *testing.F) {
+	f.Add([]byte{0, 0, 0, 0, 'e', 'n', 0})
+	f.Add([]byte{0, 0, 0})
+	f.Add([]byte{1, 0, 0, 0, 255})
+	f.Fuzz(func(_ *testing.T, payload []byte) {
+		_ = parseMP4ExtendedLanguage(fuzzLimit(payload), &embeddedAssetBudget{})
+	})
+}
+
 func fuzzLimit(data []byte) []byte {
 	if len(data) > fuzzParserMaxBytes {
 		return data[:fuzzParserMaxBytes]

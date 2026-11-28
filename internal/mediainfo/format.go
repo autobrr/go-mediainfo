@@ -2,13 +2,21 @@ package mediainfo
 
 import (
 	"bytes"
+	"io"
+	"math"
 	"path/filepath"
 	"strings"
 )
 
 const maxSniffBytes = 4096
 
+// DetectFormat identifies media from a bounded header and filename. AnalyzeFile
+// also checks file atom boundaries when MPEG and MP4 signatures overlap.
 func DetectFormat(header []byte, filename string) string {
+	return detectFormat(header, filename, nil, 0)
+}
+
+func detectFormat(header []byte, filename string, reader io.ReaderAt, size int64) string {
 	if len(header) == 0 {
 		return "Unknown"
 	}
@@ -28,15 +36,6 @@ func DetectFormat(header []byte, filename string) string {
 		return "Matroska"
 	}
 	if len(header) >= 12 {
-		if string(header[4:8]) == "ftyp" {
-			brand := string(header[8:12])
-			if brand == "qt  " {
-				return "QuickTime"
-			}
-			return "MPEG-4"
-		}
-	}
-	if len(header) >= 12 {
 		sig := string(header[0:4])
 		if sig == "RIFF" {
 			form := string(header[8:12])
@@ -51,6 +50,19 @@ func DetectFormat(header []byte, filename string) string {
 			return "AIFF"
 		}
 	}
+	if isMPEGTS(header) {
+		return "MPEG-TS"
+	}
+	if format := sniffMP4Format(header); format != "" {
+		// A complete padding chain or an explicit brand is stronger than a
+		// coincidental MPEG signature in the first atom's size or payload.
+		if kind := string(header[4:8]); kind == "moov" || kind == "mdat" {
+			if mpeg := sniffMPEGFormat(header); mpeg != "" && !preferMP4AtomChain(reader, size) {
+				return mpeg
+			}
+		}
+		return format
+	}
 	if bytes.HasPrefix(header, []byte("fLaC")) {
 		return "FLAC"
 	}
@@ -63,9 +75,6 @@ func DetectFormat(header []byte, filename string) string {
 	if isMP3Frame(header) {
 		return "MPEG Audio"
 	}
-	if isMPEGTS(header) {
-		return "MPEG-TS"
-	}
 	if isBDAV(header) {
 		return "BDAV"
 	}
@@ -77,6 +86,126 @@ func DetectFormat(header []byte, filename string) string {
 	}
 
 	return "Unknown"
+}
+
+// preferMP4AtomChain skips payloads at their declared boundaries. The header-read
+// and movie limits retain the existing MP4 choice when more proof needs more IO.
+func preferMP4AtomChain(reader io.ReaderAt, size int64) bool {
+	if reader == nil {
+		return false
+	}
+	var offset int64
+	for atoms := 0; atoms < maxSniffBytes/16 && offset+8 <= size; atoms++ {
+		length, kind, header, ok := readMP4BoxHeader(reader, offset, size)
+		if !ok {
+			return false
+		}
+		if kind == "moov" {
+			if offset > 0 || length-header > maxMoovSize {
+				return true
+			}
+		}
+		offset += length
+	}
+	return offset+8 <= size
+}
+
+// sniffMPEGFormat distinguishes a real MPEG packet/frame sequence from an MP4
+// atom size that happens to contain the same leading signature bytes.
+func sniffMPEGFormat(header []byte) string {
+	if bytes.HasPrefix(header, []byte{0, 0, 1, 0xB3}) && hasMPEGVideoSequence(header[4:]) {
+		return "MPEG Video"
+	}
+	if len(header) >= 18 && bytes.HasPrefix(header, []byte{0, 0, 1, 0xBA}) &&
+		header[4]&0xC4 == 0x44 && header[6]&4 == 4 && header[8]&4 == 4 &&
+		header[9]&1 == 1 && header[12]&3 == 3 && header[13]&0xF8 == 0xF8 {
+		end := 14 + int(header[13]&7)
+		if end+4 <= len(header) && bytes.HasPrefix(header[end:], []byte{0, 0, 1}) && isPESStreamID(header[end+3]) {
+			return "MPEG-PS"
+		}
+	}
+	if first, ok := parseMPEGAudioHeader(header); ok {
+		length := mpegAudioFrameLengthBytes(first)
+		if first.layerID == 0x02 {
+			// Layer II has 1152 samples in every MPEG version.
+			length = 144000 * first.bitrateKbps / first.sampleRate
+			if first.padding {
+				length++
+			}
+		}
+		if length > 0 && length+4 <= len(header) {
+			if next, ok := parseMPEGAudioHeader(header[length:]); ok && next.versionID == first.versionID && next.layerID == first.layerID && next.sampleRate == first.sampleRate {
+				return "MPEG Audio"
+			}
+		}
+	}
+	return ""
+}
+
+// hasMPEGVideoSequence checks the sequence header and the next video start code
+// at its expected boundary. An atom name alone can encode valid dimensions.
+func hasMPEGVideoSequence(data []byte) bool {
+	if len(data) < 8 {
+		return false
+	}
+	width := int(data[0])<<4 | int(data[1]>>4)
+	height := int(data[1]&0x0F)<<8 | int(data[2])
+	aspect := data[3] >> 4
+	rate, _, _ := mapMPEG2FrameRate(uint64(data[3] & 0x0F))
+	if width == 0 || height == 0 || aspect == 0 || aspect == 15 || rate == 0 || data[6]&0x20 == 0 {
+		return false
+	}
+	// Both optional matrices occupy 64 bytes. The non-intra matrix flag
+	// occupies the low bit of the last byte before that matrix.
+	end := 8 + 64*int((data[7]>>1)&1)
+	if len(data) < end {
+		return false
+	}
+	end += 64 * int(data[end-1]&1)
+	if len(data) < end {
+		return false
+	}
+	next := bytes.TrimLeft(data[end:], "\x00")
+	if len(data)-end-len(next) < 2 || len(next) < 2 || next[0] != 1 {
+		return false
+	}
+	switch next[1] {
+	case 0x00, 0xB2, 0xB5, 0xB8: // Picture, user data, extension, group of pictures.
+		return true
+	}
+	return false
+}
+
+// sniffMP4Format reuses the atom-header parser without requiring the atom body
+// to fit in the sniff window. Only complete padding atoms are skipped.
+func sniffMP4Format(header []byte) string {
+	reader := bytes.NewReader(header)
+	for offset := int64(0); offset+8 <= reader.Size(); {
+		size, kind, headerSize, ok := readMP4BoxHeader(reader, offset, math.MaxInt64)
+		if !ok {
+			return ""
+		}
+		switch kind {
+		case "ftyp":
+			if size < headerSize+4 || offset+headerSize+4 > reader.Size() {
+				return ""
+			}
+			if string(header[offset+headerSize:offset+headerSize+4]) == "qt  " {
+				return "QuickTime"
+			}
+			return "MPEG-4"
+		case "moov", "mdat":
+			return "QuickTime"
+		case "free", "skip", "wide":
+			if size > reader.Size()-offset {
+				return ""
+			}
+			offset += size
+		default:
+			return ""
+		}
+	}
+	return ""
 }
 
 func isMP3Frame(header []byte) bool {

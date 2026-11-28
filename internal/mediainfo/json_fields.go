@@ -5,6 +5,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -56,6 +57,7 @@ func sortJSONFieldsWithOrder(fields []jsonKV, order map[string]int) []jsonKV {
 // buildJSONMedia adapts one public Report snapshot into ordered legacy JSON
 // fields; canonical renderers use it only at the compatibility boundary.
 func buildJSONMedia(report Report) jsonMediaOut {
+	version := legacyReportTableVersion(report)
 	tracks := make([]jsonTrackOut, 0, len(report.Streams)+1)
 	tracks = append(tracks, jsonTrackOut{Fields: buildJSONGeneralFields(report)})
 	containerFormat := firstNonEmpty(report.General.JSON["Format"], findField(report.General.Fields, "Format"))
@@ -65,7 +67,7 @@ func buildJSONMedia(report Report) jsonMediaOut {
 		if total > 1 {
 			typeOrder = index
 		}
-		tracks = append(tracks, jsonTrackOut{Fields: buildJSONStreamFields(stream, order, typeOrder, containerFormat)})
+		tracks = append(tracks, jsonTrackOut{Fields: buildJSONStreamFields(stream, order, typeOrder, containerFormat, version)})
 	})
 	return jsonMediaOut{Ref: report.Ref, Tracks: tracks}
 }
@@ -108,7 +110,8 @@ func buildJSONGeneralFields(report Report) []jsonKV {
 			fields = append(fields, jsonKV{Key: "File_Modified_Date_Local", Val: modifiedLocal})
 		}
 	}
-	fields = append(fields, mapStreamFieldsToJSON(StreamGeneral, report.General.Fields)...)
+	rows, sourceExtras := legacyStructuredTagFields(report.General)
+	fields = append(fields, mapStreamFieldsToJSON(StreamGeneral, rows, legacyReportTableVersion(report), sourceExtras...)...)
 	containerFormat := firstNonEmpty(report.General.JSON["Format"], findField(report.General.Fields, "Format"))
 	rawExtras := report.General.JSONRaw
 	switch containerFormat {
@@ -121,7 +124,7 @@ func buildJSONGeneralFields(report Report) []jsonKV {
 
 // buildJSONStreamFields assembles one non-General stream, merges dynamic extras,
 // derives allowed computed fields, and applies the container-specific key order.
-func buildJSONStreamFields(stream Stream, order int, typeOrder int, containerFormat string) []jsonKV {
+func buildJSONStreamFields(stream Stream, order int, typeOrder int, containerFormat string, version reportTableVersion) []jsonKV {
 	fields := []jsonKV{{Key: "@type", Val: string(stream.Kind)}}
 	if typeOrder > 0 {
 		fields = append(fields, jsonKV{Key: "@typeorder", Val: strconv.Itoa(typeOrder)})
@@ -129,7 +132,8 @@ func buildJSONStreamFields(stream Stream, order int, typeOrder int, containerFor
 	if !stream.JSONSkipStreamOrder {
 		fields = append(fields, jsonKV{Key: "StreamOrder", Val: strconv.Itoa(order)})
 	}
-	fields = append(fields, mapStreamFieldsToJSON(stream.Kind, stream.Fields)...)
+	rows, sourceExtras := legacyStructuredTagFields(stream)
+	fields = append(fields, mapStreamFieldsToJSON(stream.Kind, rows, version, sourceExtras...)...)
 	rawExtras := stream.JSONRaw
 	switch containerFormat {
 	case "AVI":
@@ -199,9 +203,8 @@ func normalizeContainerComputedJSON(kind StreamKind, fields []jsonKV, containerF
 	return fields
 }
 
-func mapStreamFieldsToJSON(kind StreamKind, fields []Field) []jsonKV {
+func mapStreamFieldsToJSON(kind StreamKind, fields []Field, version reportTableVersion, extras ...jsonKV) []jsonKV {
 	out := make([]jsonKV, 0, len(fields))
-	var extras []jsonKV
 	for _, field := range fields {
 		switch field.Name {
 		case "CompleteName_Last":
@@ -417,7 +420,11 @@ func mapStreamFieldsToJSON(kind StreamKind, fields []Field) []jsonKV {
 		case "Encoding settings":
 			out = append(out, jsonKV{Key: "Encoded_Library_Settings", Val: field.Value})
 		case "Language":
-			out = append(out, jsonKV{Key: "Language", Val: field.Value})
+			if code := normalizeLanguageForFields(field.Value, version); code != "" {
+				out = append(out, jsonKV{Key: "Language", Val: code})
+			}
+		case "Language, more info":
+			out = append(out, jsonKV{Key: "Language_More", Val: field.Value})
 		case "Title":
 			out = append(out, jsonKV{Key: "Title", Val: field.Value})
 		case "Movie name", "Track name":
@@ -458,7 +465,9 @@ func mapStreamFieldsToJSON(kind StreamKind, fields []Field) []jsonKV {
 		case "Alternate group":
 			out = append(out, jsonKV{Key: "AlternateGroup", Val: field.Value})
 		case "ErrorDetectionType":
-			extras = append(extras, jsonKV{Key: "ErrorDetectionType", Val: field.Value})
+			if jsonFieldValue(extras, field.Name) == "" {
+				extras = slices.Insert(extras, 0, jsonKV{Key: field.Name, Val: field.Value})
+			}
 		case "Service kind":
 			out = append(out, jsonKV{Key: "ServiceKind", Val: field.Value})
 		case "Service name":

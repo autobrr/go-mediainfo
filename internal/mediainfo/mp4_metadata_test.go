@@ -3,6 +3,7 @@ package mediainfo
 import (
 	"bytes"
 	"encoding/binary"
+	"maps"
 	"math"
 	"os"
 	"path/filepath"
@@ -680,6 +681,71 @@ func TestMP4MetadataSourceRowsKeepIdentity(t *testing.T) {
 	}
 	if strings.Count(json, `"Copyright"`) != 1 {
 		t.Errorf("track metadata outside the Video schema is a top-level field: %s", json)
+	}
+}
+
+func TestMP4LanguageTagKeepsIdentityThroughPublicReport(t *testing.T) {
+	var track, movie, file bytes.Buffer
+	track.Write(buildTrackWithStsd("vide", "avc1")) // mdhd code 0 is English.
+	items := mp4MetaItemForTest(mp4MetaIndexForTest(1), 1, []byte("recorded"))
+	items = append(items, mp4MetaItemForTest(mp4MetaIndexForTest(2), 1, []byte("French"))...)
+	writeMP4Box(&track, "meta", mp4MetaForTest("mdta", []string{"ExampleTag", "Language"}, items, true))
+	writeMP4Box(&movie, "trak", track.Bytes())
+	writeMP4Box(&file, "ftyp", []byte("isom"))
+	writeMP4Box(&file, "moov", movie.Bytes())
+	report := analyzeLanguageFixture(t, "language-extra.mp4", file.Bytes())
+	tagOnly := mp4MetadataFileForTest(t, nil, nil, []string{"Language"}, []string{"French"})
+	publicStream := func(s Stream) Stream {
+		return Stream{Kind: s.Kind, Fields: s.Fields, JSON: maps.Clone(s.JSON), JSONRaw: maps.Clone(s.JSONRaw)}
+	}
+	publicReport := func(r Report) Report {
+		return Report{Ref: r.Ref, General: publicStream(r.General), Streams: []Stream{publicStream(r.Streams[0])}}
+	}
+	edited := report
+	edited.Ref = "edited.mp4"
+	for _, tc := range []struct {
+		name              string
+		report            Report
+		withTrackLanguage bool
+	}{
+		{"analyzed", report, true},
+		{"reference edit", edited, true},
+		{"exported track language and tag", publicReport(report), true},
+		{"exported tag only", publicReport(tagOnly), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reports := []Report{tc.report}
+			xml, json, friendly := RenderXML(reports), RenderJSON(reports), RenderText(reports)
+			wantCount := 1
+			if tc.withTrackLanguage {
+				wantCount++
+				if !strings.Contains(json, `"Language":"en"`) || !strings.Contains(xml, "<Language>en</Language>") || !strings.Contains(friendly, ": English\n") {
+					t.Error("missing canonical track language")
+				}
+				if !strings.Contains(json, `"extra":{"ExampleTag":"recorded","Language":"French"}`) ||
+					!strings.Contains(xml, "<extra>\n<ExampleTag>recorded</ExampleTag>\n<Language>French</Language>") {
+					t.Errorf("source tag order or values changed:\n%s\n%s", json, xml)
+				}
+			}
+			if strings.Count(json, `"Language":`) != wantCount || strings.Count(xml, "<Language>") != wantCount ||
+				strings.Count(json, `"Language":"French"`) != 1 || strings.Count(xml, "<Language>French</Language>") != 1 ||
+				strings.Count(friendly, ": French\n") != 1 {
+				t.Errorf("source tag or track language lost or duplicated:\n%s\n%s\n%s", json, xml, friendly)
+			}
+		})
+	}
+}
+
+func TestMP4GeneralExtraDeletionSurvivesLazyXML(t *testing.T) {
+	report := mp4MetadataFileForTest(t, []string{"ExampleTag"}, []string{"recorded"}, nil, nil)
+	if !strings.Contains(report.General.JSONRaw["extra"], `"ExampleTag":"recorded"`) {
+		t.Fatal("missing source tag in the analyzed report")
+	}
+	delete(report.General.JSONRaw, "extra")
+	reports := []Report{report}
+	if strings.Contains(RenderXML(reports), "ExampleTag") || strings.Contains(RenderJSON(reports), "ExampleTag") ||
+		!strings.Contains(RenderText(reports), "ExampleTag") {
+		t.Fatal("deleting General extra must affect both structured formats and preserve the text row")
 	}
 }
 

@@ -186,7 +186,7 @@ func analyzeFileWithOptions(ctx context.Context, path string, opts AnalyzeOption
 	n, _ := io.ReadFull(file, header)
 	header = header[:n]
 
-	format := DetectFormat(header, path)
+	format := detectFormat(header, path, file, fileSize)
 
 	// MediaInfo CLI continuous file names behavior (File_TestContinuousFileNames=1) applies to both
 	// MPEG-TS and BDAV (M2TS) streams.
@@ -391,7 +391,7 @@ func analyzeFileWithOptions(ctx context.Context, path string, opts AnalyzeOption
 				}
 				if track.LanguageCode != "" {
 					code := normalizeLanguageCode(track.LanguageCode)
-					if lang := formatLanguage(code); lang != "" {
+					if lang := formatCanonicalLanguage(code, reportTables23); lang != "" {
 						fields = appendFieldUnique(fields, Field{Name: "Language", Value: lang})
 						builder.Fill("Language", code, "Language", lang)
 					}
@@ -2310,7 +2310,7 @@ func finalizeCanonicalGeneralFields(general *Stream) {
 	if general == nil {
 		return
 	}
-	for _, field := range mapStreamFieldsToJSON(StreamGeneral, general.Fields) {
+	for _, field := range mapStreamFieldsToJSON(StreamGeneral, general.Fields, legacyReportTableVersion(Report{General: *general})) {
 		name := fieldName(field.Key)
 		if canonicalSeedHasStructured(*general, name) {
 			continue
